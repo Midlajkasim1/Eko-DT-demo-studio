@@ -1,6 +1,4 @@
-/* ═══════════════════════════════════════════════
-   Dashboard UI — Sidebar, Header, Theme
-   ═══════════════════════════════════════════════ */
+
 (function () {
   'use strict';
 
@@ -62,7 +60,7 @@
     'Live Systems': 'الأنظمة المباشرة',
     'History Charts': 'الرسوم التاريخية',
     'Alarms': 'التنبيهات',
-    'Water': 'المياه',
+    'Utilities': 'المرافق',
     'Waste Prevention': 'منع الهدر',
     'Portfolio Benchmarking': 'مقارنة المحفظة',
     'Location Based Metering': 'القياس حسب الموقع',
@@ -186,9 +184,25 @@
     'WATER': 'المياه',
     'GAS': 'الغاز',
     'water channels': 'قنوات مياه',
-    'gas meter': 'عداد غاز',
+    'gas channels': 'قنوات غاز',
     'live total': 'الإجمالي المباشر',
-    '1 gas meter · 3 kitchen channels': 'عداد غاز واحد · 3 قنوات مطبخ',
+    'one meter · 3 kitchen channels': 'عداد واحد · 3 قنوات مطبخ',
+    'stale': 'قديمة',
+    'stale channel': 'قناة قديمة',
+    'stale channels': 'قنوات قديمة',
+    'last reading': 'آخر قراءة',
+    'last seen': 'آخر ظهور',
+    'daily consumption': 'الاستهلاك اليومي',
+    'per day': 'لكل يوم',
+    'd': 'ي',
+    'register': 'قراءة العداد',
+    'partial': 'جزئي',
+    'hover a bar for the register reading': 'مرّر فوق العمود لقراءة العداد',
+    'per-interval readings': 'قراءات لكل فترة',
+    'Water and gas metering · interval and register reads': 'قياس المياه والغاز · قراءات الفترات والعدادات',
+    'Jan': 'يناير', 'Feb': 'فبراير', 'Mar': 'مارس', 'Apr': 'أبريل',
+    'May': 'مايو', 'Jun': 'يونيو', 'Jul': 'يوليو', 'Aug': 'أغسطس',
+    'Sep': 'سبتمبر', 'Oct': 'أكتوبر', 'Nov': 'نوفمبر', 'Dec': 'ديسمبر',
     'meter reading': 'قراءة العداد',
     'per-interval': 'لكل فترة',
     'Basement · cold water': 'القبو · مياه باردة',
@@ -306,6 +320,10 @@
   };
 
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  // Up here, not beside channelState: the first render reads it via glanceValue.
+  // Provisional until EKO-045 agrees per-point-type thresholds with Zubair.
+  const STALE_H = 24;
 
   function fmt(v, digits = 0) {
     return v == null || !isFinite(v) ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: digits });
@@ -576,10 +594,15 @@
         const n = cfg + fin;
         return n ? `${n} ${t('series')}` : '—';
       }
+      // A channel count answers nothing; the worst live condition does.
       if (item.id === 'water') {
         const hist = live.power && live.power.power_history ? live.power.power_history : null;
-        const n = hist ? WATER_CHANNELS.filter((c) => hist[c.key]).length : 0;
-        return n ? `${n} ${t('channels')}` : '—';
+        const present = hist ? WATER_CHANNELS.filter((c) => hist[c.key]) : [];
+        if (!present.length) return '—';
+        const stale = present.filter((c) => channelState(historySeries(c.key)).state === 'stale').length;
+        return stale
+          ? { v: `${stale} ${t(stale === 1 ? 'stale channel' : 'stale channels')}`, warn: true }
+          : `${present.length} ${t('live')}`;
       }
       return '—';
     }
@@ -604,7 +627,8 @@
         { id: 'livesys', name: 'Live Systems' },
         { id: 'histch', name: 'History Charts' },
         { id: 'alarms', name: 'Alarms' },
-        { id: 'water', name: 'Water' }
+        // id stays 'water': it keys SUB_RENDERERS and the data-sub attributes.
+        { id: 'water', name: 'Utilities' }
       ]
     },
     energy: {
@@ -685,6 +709,8 @@
   let rpRenderQueued = false;
 
   // Labels come from the raw points behind each FIN aggregate (WM_L1_KTCHN_*, GM_GF_KITCH1-3).
+  // No `unit`: these FIN points are kind:"Number" with the unit tag empty, so values
+  // render bare rather than guessing m³. Pending confirmation with Zubair.
   const WATER_CHANNELS = [
     { key: 'WM_BF_Cold_Wtr_his', label: 'Basement · cold water', kind: 'water' },
     { key: 'WM_FF_Sup_Cold_Wtr_his', label: 'L1 kitchen · supply cold', kind: 'water' },
@@ -936,10 +962,13 @@
     data.l2.forEach(item => {
       const isActive = item.id === activeSubId;
       const activeClass = isActive ? 'active' : '';
+      // A glance value may carry a tone: warning tint marks a live condition.
+      const g = glanceValue(modId, item);
+      const gv = typeof g === 'string' ? { v: g, warn: false } : g;
       glanceHtml += `
           <button class="glance-item ${activeClass}">
             <span class="glance-name">${t(item.name)}</span>
-            <span class="glance-val font-mono">${glanceValue(modId, item)}</span>
+            <span class="glance-val font-mono"${gv.warn ? ' style="color:var(--warnTx)"' : ''}>${gv.v}</span>
             <svg class="glance-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg>
           </button>
       `;
@@ -1059,7 +1088,7 @@
     anom: 'Hourly load vs typical profile',
     livesys: 'Equipment liveness and point detail',
     histch: 'Chart picker over historized points',
-    water: 'Water and gas meters · consumption and health',
+    water: 'Water and gas metering · interval and register reads',
     cons: 'Total and per-service consumption over time',
     evstats: 'Counts by severity and day',
     alarms: 'Active alarm list',
@@ -1150,6 +1179,63 @@
     return rising
       ? { value: pts[pts.length - 1].val - pts[0].val, mode: 'totalizer' }
       : { value: pts.reduce((a, p) => a + p.val, 0), mode: 'interval' };
+  }
+
+  /* ── The four data states ─────────────────────────────────────────────────
+     Exactly one applies to any channel, and each renders differently:
+       live    — the value is current; show it at full strength
+       stale   — we have a last reading but it is old; show it muted, with its
+                 age, and dash anything derived from it
+       absent  — no historian rows at all; nothing to show
+       zero    — not a state but a value: a measured 0 is live data and must
+                 look identical to any other live reading, never like a gap */
+  function channelState(series) {
+    const last = lastReading(series);
+    if (!last) return { state: 'absent', last: null };
+    return { state: last.ageH > STALE_H ? 'stale' : 'live', last };
+  }
+
+  // A period total is only knowable from a channel that is still reporting.
+  function derivedTotal(series, hours, state) {
+    return state === 'live' ? periodConsumption(series, hours) : null;
+  }
+
+  const sameDay = (a, b) => a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+  function lastBefore(series, day) {
+    let best = null;
+    for (const p of series) { if (p.ts < day) best = p; else break; }
+    return best ? best.val : null;
+  }
+
+  // EKO-012: bars are the daily delta whichever way the meter historizes, and the
+  // register reading rides along for the tooltip rather than being plotted.
+  function dailyMeterBars(series, days) {
+    const now = new Date();
+    const window = periodConsumption(series, days * 24);
+    const totalizer = !!window && window.mode === 'totalizer';
+    const bars = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      const pts = series.filter((p) => sameDay(p.ts, d));
+      bars.push({
+        date: d,
+        register: pts.length ? pts[pts.length - 1].val : null,
+        partial: i === 0,
+        value: null,
+      });
+    }
+    if (totalizer) {
+      let prev = bars.length ? lastBefore(series, bars[0].date) : null;
+      bars.forEach((b) => {
+        if (b.register != null && prev != null) b.value = b.register - prev;
+        if (b.register != null) prev = b.register;
+      });
+    } else {
+      bars.forEach((b) => { const s = sumDay(series, b.date); b.value = s ? s.sum : null; });
+    }
+    return { bars, totalizer };
   }
 
   function statTile(value, label, color) {
@@ -1397,7 +1483,39 @@
       ${pending$.hisPoints ? `<div style="font-size:10px;color:var(--t3)">${t('Loading FIN point list…')}</div>` : ''}`;
   }
 
-  /* ── Water: water + gas meters, consumption and health ── */
+  /* ── Utilities: water + gas metering, and the reference for the four states ── */
+  const TH = (label, end) => `<th style="padding:5px 6px;text-align:${end ? 'right' : 'start'};font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:500;color:var(--t3)">${label}</th>`;
+  const numCell = (text, color) => `<td style="padding:4px 6px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:${color}">${text}</td>`;
+
+  const staleChip = () => `<span style="flex:none;padding:1px 6px;border-radius:4px;background:var(--warnT);border:1px solid var(--warnB);color:var(--warnTx);font-size:9.5px;font-weight:600">${t('stale')}</span>`;
+
+  // A measured 0 is live data: it must render like any other reading, not like a gap.
+  const meterVal = (n, unit) => `${shortNum(n, 1)}${unit ? ' ' + unit : ''}`;
+
+  function utilityRowHtml(r, selected) {
+    const { state, last } = channelState(r.series);
+    const d1 = derivedTotal(r.series, 24, state);
+    const d7 = derivedTotal(r.series, 168, state);
+    const stale = state === 'stale';
+    const nameColor = state === 'live' ? 'var(--t1)' : 'var(--t2)';
+    const readColor = state === 'live' ? 'var(--t1)' : 'var(--t3)';
+    const derivedCell = (d) => stale || state === 'absent' || !d
+      ? numCell('—', 'var(--t3)')
+      : numCell(meterVal(d.value, r.unit), 'var(--t1)');
+    return `
+      <tr data-wm="${esc(r.key)}" style="border-top:1px solid var(--bd1);cursor:pointer;${selected ? 'background:var(--acc8);' : ''}">
+        <td style="padding:4px 6px;font-size:10.5px;color:${nameColor};font-weight:500;max-width:150px">
+          <span style="display:flex;align-items:center;gap:6px;min-width:0">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t(r.label)}</span>${stale ? staleChip() : ''}
+          </span>
+        </td>
+        ${numCell(last ? meterVal(last.val, r.unit) : '—', readColor)}
+        ${derivedCell(d1)}
+        ${derivedCell(d7)}
+        ${numCell(last ? ageLabel(last.ageH) : '—', stale ? 'var(--warnTx)' : 'var(--t3)')}
+      </tr>`;
+  }
+
   function waterPanelHtml() {
     const hist = live.power && live.power.power_history ? live.power.power_history : null;
     if (!hist) return emptyBox('—');
@@ -1406,57 +1524,95 @@
     if (waterSelected && !rows.some((r) => r.key === waterSelected)) waterSelected = null;
     if (!waterSelected) waterSelected = rows[0].key;
 
-    const liveWater = live.power ? live.power.total_water : null;
     const waterRows = rows.filter((r) => r.kind === 'water');
     const gasRows = rows.filter((r) => r.kind === 'gas');
+    const staleCount = rows.filter((r) => channelState(r.series).state === 'stale').length;
 
-    const table = (list, title, note) => !list.length ? '' : `
-      <div style="font-family:var(--fH),sans-serif;font-size:10px;font-weight:600;letter-spacing:0.8px;color:var(--t2);margin-block-start:2px">${title}</div>
-      ${note ? `<div style="font-size:10px;color:var(--t3);margin-block-end:-4px">${note}</div>` : ''}
+    const sectionRow = (title, note) => `
+      <tr><td colspan="5" style="padding:6px 6px 2px;border-top:1px solid var(--bd1);font-family:var(--fH),sans-serif;font-size:9.5px;font-weight:600;letter-spacing:0.8px;color:var(--t3)">
+        ${title}${note ? `<span style="font-weight:400;letter-spacing:0;text-transform:none"> · ${note}</span>` : ''}
+      </td></tr>`;
+
+    const section = (list, title, note) => !list.length ? '' :
+      sectionRow(title, note) + list.map((r) => utilityRowHtml(r, r.key === waterSelected)).join('');
+
+    const table = `
       <div style="background:var(--s2);border:1px solid var(--bd1);border-radius:8px;overflow:hidden">
         <table style="width:100%;border-collapse:collapse">
           <thead><tr>
-            <th style="padding:5px 6px;text-align:start;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:500;color:var(--t3)">${t('Channel')}</th>
-            <th style="padding:5px 6px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:500;color:var(--t3)">24h</th>
-            <th style="padding:5px 6px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:500;color:var(--t3)">7d</th>
-            <th style="padding:5px 6px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:500;color:var(--t3)">${t('last')}</th>
+            ${TH(t('Channel'))}${TH(t('last reading'), 1)}${TH('24 h', 1)}${TH('7 d', 1)}${TH(t('last seen'), 1)}
           </tr></thead>
-          <tbody>${list.map((r) => {
-            const d1 = periodConsumption(r.series, 24);
-            const d7 = periodConsumption(r.series, 168);
-            const last = lastReading(r.series);
-            const stale = last && last.ageH > 24;
-            return `
-            <tr data-wm="${esc(r.key)}" style="border-top:1px solid var(--bd1);cursor:pointer;${r.key === waterSelected ? 'background:var(--acc8);' : ''}">
-              <td style="padding:4px 6px;font-size:10.5px;color:var(--t1);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t(r.label)}</td>
-              <td style="padding:4px 6px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--t2)">${d1 ? shortNum(d1.value, 1) : '—'}</td>
-              <td style="padding:4px 6px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--t2)">${d7 ? shortNum(d7.value, 1) : '—'}</td>
-              <td style="padding:4px 6px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:${stale ? 'var(--warnTx)' : 'var(--t3)'}">${last ? ageLabel(last.ageH) : '—'}</td>
-            </tr>`;
-          }).join('')}</tbody>
+          <tbody>
+            ${section(waterRows, t('WATER'), '')}
+            ${section(gasRows, t('GAS'), t('one meter · 3 kitchen channels'))}
+          </tbody>
         </table>
       </div>`;
 
     const sel = rows.find((r) => r.key === waterSelected);
-    const mode = sel ? periodConsumption(sel.series, 168) : null;
-    const chart = sel ? `
-      <div style="background:var(--s2);border:1px solid var(--bd1);border-radius:8px;padding:13px">
-        <div style="display:flex;align-items:baseline;gap:8px;margin-block-end:10px">
-          <span style="font-family:var(--fH),sans-serif;font-size:12px;font-weight:600;color:var(--t1)">${t(sel.label)}</span>
-          <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--t3)">${mode ? t(mode.mode === 'totalizer' ? 'meter reading' : 'per-interval') : ''}</span>
-        </div>
-        ${seriesLineChartHtml(sel.series, null, '')}
-      </div>` : '';
 
     return `
       <div style="display:flex;gap:8px">
         ${statTile(waterRows.length ? String(waterRows.length) : '—', t('water channels'))}
-        ${statTile(gasRows.length ? '1' : '—', t('gas meter'))}
-        ${statTile(liveWater != null ? shortNum(liveWater, 1) : '—', t('live total'))}
+        ${statTile(gasRows.length ? String(gasRows.length) : '—', t('gas channels'))}
+        ${statTile(staleCount ? String(staleCount) : '0', t('stale'), staleCount ? 'var(--warnTx)' : null)}
       </div>
-      ${table(waterRows, t('WATER'), '')}
-      ${table(gasRows, t('GAS'), t('1 gas meter · 3 kitchen channels'))}
-      ${chart}`;
+      ${table}
+      ${sel ? meterChartHtml(sel) : ''}`;
+  }
+
+  // EKO-012: daily deltas, real dates, today drawn as partial, register in the tooltip.
+  function meterChartHtml(r) {
+    const days = 7;
+    const { bars, totalizer } = dailyMeterBars(r.series, days);
+    const known = bars.filter((b) => b.value != null);
+    const head = (body, cap) => `
+      <div style="background:var(--s2);border:1px solid var(--bd1);border-radius:8px;padding:13px">
+        <div style="display:flex;align-items:baseline;gap:8px;margin-block-end:10px">
+          <span style="font-family:var(--fH),sans-serif;font-size:12px;font-weight:600;color:var(--t1)">${t(r.label)} · ${t('daily consumption')}</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--t3)">${r.unit ? `${r.unit} / ${t('d')}` : t('per day')}</span>
+        </div>
+        ${body}
+        ${cap ? `<div style="font-size:10.5px;color:var(--t3);margin-block-start:8px">${cap}</div>` : ''}
+      </div>`;
+    if (!known.length) return head(emptyBox(t('No history in this range')), '');
+
+    const sc = signedScale(bars.map((b) => b.value));
+    const ax = signedAxis(sc);
+    const w = 288 / days, bw = Math.max(1, w * 0.6);
+    const monthOf = (d) => ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
+    // Name the month only when it changes, as the design does: "30 Jul · 31 · 1 Aug"
+    const axisLabel = (b, i) => (i === 0 || b.date.getDate() === 1)
+      ? `${b.date.getDate()} ${t(monthOf(b.date))}` : String(b.date.getDate());
+
+    const rects = bars.map((b, i) => {
+      if (b.value == null) return '';
+      const yv = sc.y(b.value);
+      const x = 30 + i * w + (w - bw) / 2;
+      return `<rect x="${x.toFixed(1)}" y="${Math.min(ax.zero, yv).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0.6, Math.abs(yv - ax.zero)).toFixed(1)}" fill="${b.value < 0 ? 'var(--warn)' : 'var(--btnP)'}"${b.partial ? ' opacity="0.55"' : ''}/>`;
+    }).join('');
+
+    const tips = bars.map((b) => {
+      const when = `${b.date.getDate()} ${t(monthOf(b.date))}${b.partial ? ` (${t('partial')})` : ''}`;
+      const val = b.value == null ? t('no data') : meterVal(b.value, r.unit);
+      const reg = b.register == null ? '' : `\n${t('register')} ${meterVal(b.register, r.unit)}`;
+      return `${when} · ${val}${reg}`;
+    });
+
+    const first = bars[0].date, lastDay = bars[bars.length - 1].date;
+    const range = `${first.getDate()} ${t(monthOf(first))} – ${lastDay.getDate()} ${t(monthOf(lastDay))}`;
+    const cap = `${range} · ${totalizer ? t('hover a bar for the register reading') : t('per-interval readings')} · ${lastDay.getDate()} ${t(monthOf(lastDay))} ${t('partial')}`;
+
+    return head(`
+      <svg viewBox="0 0 330 122" style="width:100%;height:auto;display:block;direction:ltr" role="img" aria-label="daily meter consumption">
+        ${ax.grid}
+        <g font-family="'JetBrains Mono',monospace" font-size="8" fill="var(--t3)">
+          ${ax.labels}
+          ${bars.map((b, i) => `<text x="${(30 + i * w + w / 2).toFixed(1)}" y="114" text-anchor="middle">${axisLabel(b, i)}</text>`).join('')}
+        </g>
+        ${rects}
+        ${hoverColumns(tips, 30, w)}
+      </svg>`, cap);
   }
 
   /* ── Consumption: total and per-service over time (xlsx row 13) ── */
