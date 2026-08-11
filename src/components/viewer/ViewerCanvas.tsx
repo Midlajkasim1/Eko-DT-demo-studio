@@ -1,6 +1,8 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import * as THREE from 'three'
 import * as OBF from '@thatopen/components-front'
+import { pickRenderSettings } from '@/constants/renderSettings'
 import { useFragmentsEngine } from '@/hooks/useFragmentsEngine'
 import { useModelLoader } from '@/hooks/useModelLoader'
 import { useMaterialOverrides } from '@/hooks/useMaterialOverrides'
@@ -53,39 +55,7 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
 
   const models = useModelStore(s => s.models)
   const step = useAppStore(s => s.step)
-  const realisticMode = useAppStore(s => s.realisticMode)
-  const exposure = useAppStore(s => s.exposure)
-  const lightIntensity = useAppStore(s => s.lightIntensity)
-  const ambientIntensity = useAppStore(s => s.ambientIntensity)
-  const timeOfDay = useAppStore(s => s.timeOfDay)
-  const bloomStrength = useAppStore(s => s.bloomStrength)
-  const bloomThreshold = useAppStore(s => s.bloomThreshold)
-  const bloomEnabled = useAppStore(s => s.bloomEnabled)
-  const fogDensity = useAppStore(s => s.fogDensity)
-  const cloudDensity = useAppStore(s => s.cloudDensity)
-  const cloudShadowsEnabled = useAppStore(s => s.cloudShadowsEnabled)
-  const cloudSpeed = useAppStore(s => s.cloudSpeed)
-  const dofEnabled = useAppStore(s => s.dofEnabled)
-  const dofFocus = useAppStore(s => s.dofFocus)
-  const dofAperture = useAppStore(s => s.dofAperture)
-  const dofMaxBlur = useAppStore(s => s.dofMaxBlur)
-  const visualSaturation = useAppStore(s => s.visualSaturation)
-  const visualTemperature = useAppStore(s => s.visualTemperature)
-  const visualContrast = useAppStore(s => s.visualContrast)
-  const visualVignette = useAppStore(s => s.visualVignette)
-  const godRaysEnabled = useAppStore(s => s.godRaysEnabled)
-  const godRayStrength = useAppStore(s => s.godRayStrength)
-  const chromaticAberration = useAppStore(s => s.chromaticAberration)
-  const autoFocus = useAppStore(s => s.autoFocus)
-  const ambientOcclusion = useAppStore(s => s.ambientOcclusion)
-  const outlineEdges = useAppStore(s => s.outlineEdges)
-  const pbrMaterials = useAppStore(s => s.pbrMaterials)
-  const iblEnabled = useAppStore(s => s.iblEnabled)
-  const syncIblWithSun = useAppStore(s => s.syncIblWithSun)
-  const envIntensity = useAppStore(s => s.envIntensity)
-  const envRotation = useAppStore(s => s.envRotation)
-  const aoRadius = useAppStore(s => s.aoRadius)
-  const aoIntensity = useAppStore(s => s.aoIntensity)
+  const renderSettings = useAppStore(useShallow(pickRenderSettings))
   // Subscribed (not getState) so project switches actually re-run the effects below
   const currentProjectId = useProjectStore(s => s.currentProject?.projectId)
 
@@ -113,9 +83,9 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
 
   useEffect(() => {
     if (isReady && engineRef.current) {
-      engineRef.current.setLightingParams({ realisticMode, exposure, lightIntensity, ambientIntensity, timeOfDay, bloomStrength, bloomThreshold, bloomEnabled, fogDensity, cloudDensity, cloudShadowsEnabled, cloudSpeed, dofEnabled, dofFocus, dofAperture, dofMaxBlur, visualSaturation, visualTemperature, visualContrast, visualVignette, godRaysEnabled, godRayStrength, chromaticAberration, autoFocus, ambientOcclusion, outlineEdges, pbrMaterials, iblEnabled, syncIblWithSun, envIntensity, envRotation, aoRadius, aoIntensity })
+      engineRef.current.setLightingParams(renderSettings)
     }
-  }, [realisticMode, exposure, lightIntensity, ambientIntensity, timeOfDay, bloomStrength, bloomThreshold, bloomEnabled, fogDensity, cloudDensity, cloudShadowsEnabled, cloudSpeed, dofEnabled, dofFocus, dofAperture, dofMaxBlur, visualSaturation, visualTemperature, visualContrast, visualVignette, godRaysEnabled, godRayStrength, chromaticAberration, autoFocus, ambientOcclusion, outlineEdges, pbrMaterials, iblEnabled, syncIblWithSun, envIntensity, envRotation, aoRadius, aoIntensity, isReady])
+  }, [renderSettings, isReady])
 
   const loadedIdsRef = useRef<Set<string>>(new Set())
   const isLoadingRef = useRef(false)

@@ -1,4 +1,12 @@
 import { useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
+import {
+  pickRenderSettings,
+  SHADOW_MAP_SIZES,
+  TONE_MAPPING_OPTIONS,
+  type RenderSettings,
+  type ToneMappingId,
+} from '@/constants/renderSettings'
 import { useAppStore } from '@/store/useAppStore'
 
 // ─── Sky Presets ────────────────────────────────────────────────────────────
@@ -9,10 +17,12 @@ const DEFAULT_PRESET = {
     visualTemperature: 6500, bloomStrength: 0.15, bloomThreshold: 1.5,
     lightIntensity: 1.2, ambientIntensity: 0.3, visualSaturation: 1.0,
     visualContrast: 1.0, visualVignette: 0.4, cloudSpeed: 1.0,
+    skyTurbidity: 5.0, skyRayleigh: 2.0, skyMieCoefficient: 0.005,
+    skyMieDirectionalG: 0.98, cloudColor: '#ffffff', fogColor: '#88aacc',
   },
 }
 
-const SKY_PRESETS = [
+const SKY_PRESETS: { label: string; params: Partial<RenderSettings> }[] = [
   DEFAULT_PRESET,
   {
     label: '☀️ Clear',
@@ -21,6 +31,7 @@ const SKY_PRESETS = [
       visualTemperature: 7200, bloomStrength: 0.12, bloomThreshold: 1.2,
       lightIntensity: 2.0, ambientIntensity: 0.35, visualSaturation: 1.1,
       visualContrast: 1.05, visualVignette: 0.3,
+      skyTurbidity: 2.5, skyRayleigh: 1.2, cloudColor: '#ffffff', fogColor: '#9dc4e8',
     },
   },
   {
@@ -30,6 +41,7 @@ const SKY_PRESETS = [
       visualTemperature: 4000, bloomStrength: 0.45, bloomThreshold: 0.85,
       lightIntensity: 1.1, ambientIntensity: 0.18, visualSaturation: 1.3,
       visualContrast: 1.1, visualVignette: 0.45,
+      skyTurbidity: 8.0, skyRayleigh: 3.2, cloudColor: '#ffd9b0', fogColor: '#c99a63',
     },
   },
   {
@@ -39,6 +51,7 @@ const SKY_PRESETS = [
       visualTemperature: 8000, bloomStrength: 0.03, bloomThreshold: 2.0,
       lightIntensity: 0.25, ambientIntensity: 0.85, visualSaturation: 0.9,
       visualContrast: 0.95, visualVignette: 0.2,
+      skyTurbidity: 12.0, skyRayleigh: 0.6, cloudColor: '#c9cfd6', fogColor: '#9aa5b1',
     },
   },
   {
@@ -48,6 +61,7 @@ const SKY_PRESETS = [
       visualTemperature: 9500, bloomStrength: 0.18, bloomThreshold: 1.0,
       lightIntensity: 0.3, ambientIntensity: 0.15, visualSaturation: 1.45,
       visualContrast: 1.15, visualVignette: 0.5,
+      skyTurbidity: 4.0, skyRayleigh: 4.0, cloudColor: '#8fa3c8', fogColor: '#3a4a6b',
     },
   },
   {
@@ -57,9 +71,10 @@ const SKY_PRESETS = [
       visualTemperature: 5600, bloomStrength: 0.22, bloomThreshold: 1.3,
       lightIntensity: 0.9, ambientIntensity: 0.55, visualSaturation: 0.85,
       visualContrast: 0.9, visualVignette: 0.35,
+      skyTurbidity: 14.0, skyRayleigh: 2.5, cloudColor: '#e2ded2', fogColor: '#c3c0b4',
     },
   },
-] as const
+]
 
 // ─── Helper Components ───────────────────────────────────────────────────────
 function Slider({
@@ -85,16 +100,58 @@ function Slider({
 }
 
 function Toggle({
-  label, checked, onChange,
-}: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  label, checked, title, onChange,
+}: { label: string; checked: boolean; title?: string; onChange: (v: boolean) => void }) {
   return (
-    <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '8px', fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
+    <label title={title} style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '8px', fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
       <input
         type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}
         style={{ accentColor: 'var(--accent)', width: '14px', height: '14px', cursor: 'pointer' }}
       />
       {label}
     </label>
+  )
+}
+
+function Select({
+  label, value, options, onChange,
+}: {
+  label: string; value: string
+  options: { value: string; label: string }[]
+  onChange: (v: string) => void
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{label}</span>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        style={{
+          fontSize: '10px', padding: '4px 6px', borderRadius: '5px',
+          border: '1px solid var(--border)', background: 'var(--bg-surface)',
+          color: 'var(--text-primary)', cursor: 'pointer', width: '100%',
+        }}
+      >
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  )
+}
+
+function ColorField({
+  label, value, onChange,
+}: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', fontSize: '10px', color: 'var(--text-secondary)' }}>
+      <span>{label}</span>
+      <input
+        type="color" value={value} onChange={e => onChange(e.target.value)}
+        style={{
+          width: '36px', height: '20px', padding: 0, cursor: 'pointer',
+          border: '1px solid var(--border)', borderRadius: '4px', background: 'none',
+        }}
+      />
+    </div>
   )
 }
 
@@ -110,41 +167,9 @@ function SectionDivider({ label }: { label: string }) {
 
 // ─── RenderPanel ─────────────────────────────────────────────────────────────
 export function RenderPanel() {
-  const realisticMode       = useAppStore(s => s.realisticMode)
-  const exposure            = useAppStore(s => s.exposure)
-  const lightIntensity      = useAppStore(s => s.lightIntensity)
-  const ambientIntensity    = useAppStore(s => s.ambientIntensity)
-  const timeOfDay           = useAppStore(s => s.timeOfDay)
-  const bloomStrength       = useAppStore(s => s.bloomStrength)
-  const bloomThreshold      = useAppStore(s => s.bloomThreshold)
-  const fogDensity          = useAppStore(s => s.fogDensity)
-  const cloudDensity        = useAppStore(s => s.cloudDensity)
-  const cloudShadowsEnabled = useAppStore(s => s.cloudShadowsEnabled)
-  const cloudSpeed          = useAppStore(s => s.cloudSpeed)
-  const dofEnabled          = useAppStore(s => s.dofEnabled)
-  const dofFocus            = useAppStore(s => s.dofFocus)
-  const dofAperture         = useAppStore(s => s.dofAperture)
-  const visualSaturation    = useAppStore(s => s.visualSaturation)
-  const visualTemperature   = useAppStore(s => s.visualTemperature)
-  const visualContrast      = useAppStore(s => s.visualContrast)
-  const visualVignette      = useAppStore(s => s.visualVignette)
-  const godRaysEnabled      = useAppStore(s => s.godRaysEnabled)
-  const godRayStrength      = useAppStore(s => s.godRayStrength)
-  const chromaticAberration = useAppStore(s => s.chromaticAberration)
-  const autoFocus           = useAppStore(s => s.autoFocus)
-  const bloomEnabled        = useAppStore(s => s.bloomEnabled)
-  const ambientOcclusion    = useAppStore(s => s.ambientOcclusion)
-  const outlineEdges        = useAppStore(s => s.outlineEdges)
-  const pbrMaterials        = useAppStore(s => s.pbrMaterials)
-  const iblEnabled          = useAppStore(s => s.iblEnabled)
-  const syncIblWithSun      = useAppStore(s => s.syncIblWithSun)
-  const envIntensity        = useAppStore(s => s.envIntensity)
-  const envRotation         = useAppStore(s => s.envRotation)
-  const aoRadius            = useAppStore(s => s.aoRadius)
-  const aoIntensity         = useAppStore(s => s.aoIntensity)
-
-  const setRealisticMode  = useAppStore(s => s.setRealisticMode)
-  const setLightingParams = useAppStore(s => s.setLightingParams)
+  const s = useAppStore(useShallow(pickRenderSettings))
+  const setRealisticMode  = useAppStore(st => st.setRealisticMode)
+  const setLightingParams = useAppStore(st => st.setLightingParams)
 
   const [open, setOpen] = useState(false)
   // Tracks which preset button is currently active (null = no preset / custom)
@@ -181,10 +206,12 @@ export function RenderPanel() {
           <span>Rendering Engine</span>
         </div>
 
-        <div className="position-field-group" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
-          <Toggle label="Advanced Rendering" checked={realisticMode} onChange={setRealisticMode} />
+        <div className="position-field-group" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '10px' }}>
+          <Toggle label="Advanced Rendering" checked={s.realisticMode} onChange={setRealisticMode} />
+          <Toggle label="Ground Grid" checked={s.gridVisible}
+            onChange={v => setLightingParams({ gridVisible: v })} />
 
-          {realisticMode && (
+          {s.realisticMode && (
             <div style={{
               display: 'flex', flexDirection: 'column', gap: '12px',
               width: '100%', marginTop: '12px', paddingLeft: '22px',
@@ -225,53 +252,101 @@ export function RenderPanel() {
 
               {/* ── Lighting ─────────────────────────────────────────── */}
               <SectionDivider label="Lighting" />
-              <Slider label="Time of Day" value={timeOfDay} min={0} max={24} step={0.1}
+              <Slider label="Time of Day" value={s.timeOfDay} min={0} max={24} step={0.1}
                 format={formatTime} onChange={v => setLightingParams({ timeOfDay: v })} />
-              <Slider label="Exposure" value={exposure} min={0.1} max={3} step={0.05}
+              <Slider label="Exposure" value={s.exposure} min={0.1} max={3} step={0.05}
                 onChange={v => setLightingParams({ exposure: v })} />
-              <Slider label="Sun Intensity" value={lightIntensity} min={0} max={5} step={0.1}
+              <Select label="Tone Mapping" value={s.toneMapping} options={TONE_MAPPING_OPTIONS}
+                onChange={v => setLightingParams({ toneMapping: v as ToneMappingId })} />
+              <Slider label="Sun Intensity" value={s.lightIntensity} min={0} max={5} step={0.1}
                 onChange={v => setLightingParams({ lightIntensity: v })} />
-              <Slider label="Ambient Light" value={ambientIntensity} min={0} max={3} step={0.1}
+              <Slider label="Ambient Light" value={s.ambientIntensity} min={0} max={3} step={0.1}
                 onChange={v => setLightingParams({ ambientIntensity: v })} />
-              
+
               <SectionDivider label="HDRI Environment" />
               <Toggle label="Enable HDRI"
-                checked={iblEnabled}
+                checked={s.iblEnabled}
                 onChange={v => setLightingParams({ iblEnabled: v })} />
-              {iblEnabled && (
+              {s.iblEnabled && (
                 <>
                   <Toggle label="Sync Rotation with Sun"
-                    checked={syncIblWithSun}
+                    checked={s.syncIblWithSun}
                     onChange={v => setLightingParams({ syncIblWithSun: v })} />
-                  <Slider label="HDRI Intensity" value={envIntensity} min={0} max={3} step={0.05}
+                  <Slider label="HDRI Intensity" value={s.envIntensity} min={0} max={3} step={0.05}
                     onChange={v => setLightingParams({ envIntensity: v })} />
-                  {!syncIblWithSun && (
-                    <Slider label="HDRI Rotation" value={envRotation} min={0} max={6.28} step={0.01}
+                  {!s.syncIblWithSun && (
+                    <Slider label="HDRI Rotation" value={s.envRotation} min={0} max={6.28} step={0.01}
                       onChange={v => setLightingParams({ envRotation: v })} />
                   )}
                 </>
               )}
 
+              {/* ── Skybox ───────────────────────────────────────────── */}
+              <SectionDivider label="Skybox" />
+              <Toggle label="Show Skybox"
+                checked={s.skyboxEnabled}
+                onChange={v => setLightingParams({ skyboxEnabled: v })} />
+              {s.skyboxEnabled && (
+                <>
+                  <Slider label="Turbidity (Haze)" value={s.skyTurbidity} min={0} max={20} step={0.1}
+                    onChange={v => setLightingParams({ skyTurbidity: v })} />
+                  <Slider label="Rayleigh (Blue Scatter)" value={s.skyRayleigh} min={0} max={5} step={0.05}
+                    onChange={v => setLightingParams({ skyRayleigh: v })} />
+                  <Slider label="Mie Coefficient" value={s.skyMieCoefficient} min={0} max={0.1} step={0.001}
+                    format={v => v.toFixed(3)} onChange={v => setLightingParams({ skyMieCoefficient: v })} />
+                  <Slider label="Sun Glow Spread" value={s.skyMieDirectionalG} min={0} max={0.999} step={0.001}
+                    format={v => v.toFixed(3)} onChange={v => setLightingParams({ skyMieDirectionalG: v })} />
+                </>
+              )}
+
               {/* ── Clouds ───────────────────────────────────────────── */}
               <SectionDivider label="Clouds" />
-              <Slider label="Cloud Density" value={cloudDensity} min={0} max={1} step={0.01}
-                onChange={v => setLightingParams({ cloudDensity: v })} />
-              <Slider label="Cloud Speed" value={cloudSpeed} min={0} max={5} step={0.1}
-                onChange={v => setLightingParams({ cloudSpeed: v })} />
-              <Toggle label="Cloud Shadows"
-                checked={cloudShadowsEnabled}
-                onChange={v => setLightingParams({ cloudShadowsEnabled: v })} />
+              <Toggle label="Show Clouds"
+                checked={s.cloudsEnabled}
+                onChange={v => setLightingParams({ cloudsEnabled: v })} />
+              {s.cloudsEnabled && (
+                <>
+                  <Slider label="Cloud Density" value={s.cloudDensity} min={0} max={1} step={0.01}
+                    onChange={v => setLightingParams({ cloudDensity: v })} />
+                  <Slider label="Cloud Speed" value={s.cloudSpeed} min={0} max={5} step={0.1}
+                    onChange={v => setLightingParams({ cloudSpeed: v })} />
+                  <ColorField label="Cloud Tint" value={s.cloudColor}
+                    onChange={v => setLightingParams({ cloudColor: v })} />
+                  <Toggle label="Cloud Shadows"
+                    checked={s.cloudShadowsEnabled}
+                    onChange={v => setLightingParams({ cloudShadowsEnabled: v })} />
+                </>
+              )}
+
+              {/* ── Shadows ──────────────────────────────────────────── */}
+              <SectionDivider label="Shadows" />
+              <Toggle label="Cast Shadows"
+                checked={s.shadowsEnabled}
+                onChange={v => setLightingParams({ shadowsEnabled: v })} />
+              {s.shadowsEnabled && (
+                <>
+                  <Toggle label="Soft Shadows"
+                    title="PCF soft filtering — smoother edges, slightly slower"
+                    checked={s.softShadows}
+                    onChange={v => setLightingParams({ softShadows: v })} />
+                  <Select label="Shadow Resolution" value={String(s.shadowMapSize)}
+                    options={SHADOW_MAP_SIZES.map(size => ({ value: String(size), label: `${size} × ${size}` }))}
+                    onChange={v => setLightingParams({ shadowMapSize: Number(v) })} />
+                </>
+              )}
 
               {/* ── Bloom ────────────────────────────────────────────── */}
               <SectionDivider label="Bloom" />
               <Toggle label="Enable Bloom"
-                checked={bloomEnabled}
+                checked={s.bloomEnabled}
                 onChange={v => setLightingParams({ bloomEnabled: v })} />
-              {bloomEnabled && (
+              {s.bloomEnabled && (
                 <>
-                  <Slider label="Bloom Strength" value={bloomStrength} min={0} max={2} step={0.01}
+                  <Slider label="Bloom Strength" value={s.bloomStrength} min={0} max={2} step={0.01}
                     onChange={v => setLightingParams({ bloomStrength: v })} />
-                  <Slider label="Bloom Threshold" value={bloomThreshold} min={0} max={3} step={0.01}
+                  <Slider label="Bloom Radius" value={s.bloomRadius} min={0} max={1} step={0.01}
+                    onChange={v => setLightingParams({ bloomRadius: v })} />
+                  <Slider label="Bloom Threshold" value={s.bloomThreshold} min={0} max={3} step={0.01}
                     onChange={v => setLightingParams({ bloomThreshold: v })} />
                 </>
               )}
@@ -279,71 +354,89 @@ export function RenderPanel() {
               {/* ── God Rays ─────────────────────────────────────────── */}
               <SectionDivider label="God Rays" />
               <Toggle label="Volumetric God Rays"
-                checked={godRaysEnabled}
+                checked={s.godRaysEnabled}
                 onChange={v => setLightingParams({ godRaysEnabled: v })} />
-              {godRaysEnabled && (
-                <Slider label="Ray Strength" value={godRayStrength} min={0} max={1.5} step={0.05}
+              {s.godRaysEnabled && (
+                <Slider label="Ray Strength" value={s.godRayStrength} min={0} max={1.5} step={0.05}
                   onChange={v => setLightingParams({ godRayStrength: v })} />
               )}
 
               {/* ── Atmosphere ───────────────────────────────────────── */}
               <SectionDivider label="Atmosphere" />
-              <Slider label="Fog Density" value={fogDensity} min={0} max={0.005} step={0.00001}
-                format={v => v.toFixed(5)} onChange={v => setLightingParams({ fogDensity: v })} />
+              <Toggle label="Enable Fog"
+                checked={s.fogEnabled}
+                onChange={v => setLightingParams({ fogEnabled: v })} />
+              {s.fogEnabled && (
+                <>
+                  <Slider label="Fog Density" value={s.fogDensity} min={0} max={0.005} step={0.00001}
+                    format={v => v.toFixed(5)} onChange={v => setLightingParams({ fogDensity: v })} />
+                  <ColorField label="Fog Color" value={s.fogColor}
+                    onChange={v => setLightingParams({ fogColor: v })} />
+                </>
+              )}
 
               {/* ── Camera ───────────────────────────────────────────── */}
               <SectionDivider label="Camera" />
               <Toggle label="Depth of Field (Blur)"
-                checked={dofEnabled}
+                checked={s.dofEnabled}
                 onChange={v => setLightingParams({ dofEnabled: v })} />
-              {dofEnabled && (
+              {s.dofEnabled && (
                 <>
                   <Toggle label="Auto-Focus (orbit target)"
-                    checked={autoFocus}
+                    checked={s.autoFocus}
                     onChange={v => setLightingParams({ autoFocus: v })} />
-                  {!autoFocus && (
-                    <Slider label="Focus Distance" value={dofFocus} min={100} max={20000} step={100}
+                  {!s.autoFocus && (
+                    <Slider label="Focus Distance" value={s.dofFocus} min={100} max={20000} step={100}
                       format={v => v.toFixed(0)} onChange={v => setLightingParams({ dofFocus: v })} />
                   )}
-                  <Slider label="Aperture" value={dofAperture} min={0.00001} max={0.0005} step={0.00001}
+                  <Slider label="Aperture" value={s.dofAperture} min={0.00001} max={0.0005} step={0.00001}
                     format={v => v.toFixed(5)} onChange={v => setLightingParams({ dofAperture: v })} />
+                  <Slider label="Max Blur" value={s.dofMaxBlur} min={0} max={0.05} step={0.001}
+                    format={v => v.toFixed(3)} onChange={v => setLightingParams({ dofMaxBlur: v })} />
                 </>
               )}
 
               {/* ── Color Grading ────────────────────────────────────── */}
               <SectionDivider label="Color Grading" />
-              <Slider label="Saturation" value={visualSaturation} min={0} max={2} step={0.05}
+              <Slider label="Saturation" value={s.visualSaturation} min={0} max={2} step={0.05}
                 onChange={v => setLightingParams({ visualSaturation: v })} />
-              <Slider label="Temperature (K)" value={visualTemperature} min={4000} max={10000} step={100}
+              <Slider label="Temperature (K)" value={s.visualTemperature} min={4000} max={10000} step={100}
                 format={v => v.toFixed(0)} onChange={v => setLightingParams({ visualTemperature: v })} />
-              <Slider label="Contrast" value={visualContrast} min={0.5} max={2} step={0.05}
+              <Slider label="Contrast" value={s.visualContrast} min={0.5} max={2} step={0.05}
                 onChange={v => setLightingParams({ visualContrast: v })} />
-              <Slider label="Vignette" value={visualVignette} min={0} max={1} step={0.05}
+              <Slider label="Vignette" value={s.visualVignette} min={0} max={1} step={0.05}
                 onChange={v => setLightingParams({ visualVignette: v })} />
-              <Slider label="Chromatic Aberration" value={chromaticAberration} min={0} max={1} step={0.05}
+              <Slider label="Chromatic Aberration" value={s.chromaticAberration} min={0} max={1} step={0.05}
                 onChange={v => setLightingParams({ chromaticAberration: v })} />
 
               {/* ── Post-Processing ──────────────────────────────────── */}
               <SectionDivider label="Post-Processing" />
+              <Toggle label="Anti-Aliasing (SMAA)"
+                checked={s.antialiasing}
+                onChange={v => setLightingParams({ antialiasing: v })} />
               <Toggle label="Ambient Occlusion"
-                checked={ambientOcclusion}
+                checked={s.ambientOcclusion}
                 onChange={v => setLightingParams({ ambientOcclusion: v })} />
-              {ambientOcclusion && (
+              {s.ambientOcclusion && (
                 <>
-                  <Slider label="AO Radius" value={aoRadius} min={1.0} max={200.0} step={1.0}
+                  <Slider label="AO Radius" value={s.aoRadius} min={1.0} max={200.0} step={1.0}
                     onChange={v => setLightingParams({ aoRadius: v })} />
-                  <Slider label="AO Intensity" value={aoIntensity} min={0.0} max={20.0} step={0.1}
+                  <Slider label="AO Intensity" value={s.aoIntensity} min={0.0} max={20.0} step={0.1}
                     onChange={v => setLightingParams({ aoIntensity: v })} />
                 </>
               )}
               <Toggle label="Fine Outlines"
-                checked={outlineEdges}
+                checked={s.outlineEdges}
                 onChange={v => setLightingParams({ outlineEdges: v })} />
+              <Toggle label="Screen-Space Reflections"
+                title="Experimental — reflects every mesh, so flat ground turns mirror-like, and it redraws the scene over the ambient occlusion and bloom result"
+                checked={s.ssrEnabled}
+                onChange={v => setLightingParams({ ssrEnabled: v })} />
 
               {/* ── Materials ────────────────────────────────────────── */}
               <SectionDivider label="Materials" />
               <Toggle label="Enable PBR Materials"
-                checked={pbrMaterials}
+                checked={s.pbrMaterials}
                 onChange={v => setLightingParams({ pbrMaterials: v })} />
 
             </div>

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { pickRenderSettings } from '@/constants/renderSettings'
 import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
 import { useProjectStore } from '@/store/useProjectStore'
@@ -109,46 +110,9 @@ export function Sidebar({ onFiles, engineRef }: SidebarProps) {
     engine.world.camera.controls.getPosition(cameraPos)
     engine.world.camera.controls.getTarget(cameraTarget)
     
-    const state = useAppStore.getState()
-    const renderSettings = {
-      realisticMode: state.realisticMode,
-      exposure: state.exposure,
-      lightIntensity: state.lightIntensity,
-      ambientIntensity: state.ambientIntensity,
-      timeOfDay: state.timeOfDay,
-      bloomStrength: state.bloomStrength,
-      bloomThreshold: state.bloomThreshold,
-      bloomEnabled: state.bloomEnabled,
-      fogDensity: state.fogDensity,
-      cloudDensity: state.cloudDensity,
-      cloudShadowsEnabled: state.cloudShadowsEnabled,
-      cloudSpeed: state.cloudSpeed,
-      dofEnabled: state.dofEnabled,
-      dofFocus: state.dofFocus,
-      dofAperture: state.dofAperture,
-      dofMaxBlur: state.dofMaxBlur,
-      visualSaturation: state.visualSaturation,
-      visualTemperature: state.visualTemperature,
-      visualContrast: state.visualContrast,
-      visualVignette: state.visualVignette,
-      godRaysEnabled: state.godRaysEnabled,
-      godRayStrength: state.godRayStrength,
-      chromaticAberration: state.chromaticAberration,
-      autoFocus: state.autoFocus,
-      ambientOcclusion: state.ambientOcclusion,
-      outlineEdges: state.outlineEdges,
-      pbrMaterials: state.pbrMaterials,
-      iblEnabled: state.iblEnabled,
-      syncIblWithSun: state.syncIblWithSun,
-      envIntensity: state.envIntensity,
-      envRotation: state.envRotation,
-      aoRadius: state.aoRadius,
-      aoIntensity: state.aoIntensity
-    }
-
     await saveViewAndSettings(
       { position: [cameraPos.x, cameraPos.y, cameraPos.z], target: [cameraTarget.x, cameraTarget.y, cameraTarget.z] },
-      renderSettings
+      pickRenderSettings(useAppStore.getState())
     )
     
     const btn = document.getElementById('save-camera-btn')

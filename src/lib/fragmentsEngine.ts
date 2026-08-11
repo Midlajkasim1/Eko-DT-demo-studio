@@ -20,14 +20,25 @@ import { GodRayShader } from './GodRayShader'
 import { CustomEdgeShader } from './CustomEdgeShader'
 import * as SunCalc from 'suncalc'
 import { PBR_MATERIAL_MAPPINGS } from '../constants/pbrMaterials'
+import { RENDER_DEFAULTS, type RenderSettings, type ToneMappingId } from '../constants/renderSettings'
 import { N8AOPass } from 'n8ao'
+
+const TONE_MAPPINGS: Record<ToneMappingId, THREE.ToneMapping> = {
+  none: THREE.NoToneMapping,
+  linear: THREE.LinearToneMapping,
+  reinhard: THREE.ReinhardToneMapping,
+  cineon: THREE.CineonToneMapping,
+  aces: THREE.ACESFilmicToneMapping,
+  agx: THREE.AgXToneMapping,
+  neutral: THREE.NeutralToneMapping,
+}
 
 export interface FragmentsEngine {
   fragments: FRAGS.FragmentsModels
   world: any
   components: OBC.Components
   dispose: () => Promise<void>
-  setLightingParams: (params: { realisticMode: boolean, exposure: number, lightIntensity: number, ambientIntensity: number, timeOfDay: number, bloomStrength: number, bloomThreshold: number, bloomEnabled?: boolean, fogDensity: number, cloudDensity: number, cloudShadowsEnabled?: boolean, cloudSpeed: number, dofEnabled: boolean, dofFocus: number, dofAperture: number, dofMaxBlur: number, visualSaturation?: number, visualTemperature?: number, visualContrast?: number, visualVignette?: number, godRaysEnabled?: boolean, godRayStrength?: number, chromaticAberration?: number, autoFocus?: boolean, ambientOcclusion?: boolean, outlineEdges?: boolean, pbrMaterials?: boolean, iblEnabled?: boolean, syncIblWithSun?: boolean, envIntensity?: number, envRotation?: number, aoRadius?: number, aoIntensity?: number }) => void
+  setLightingParams: (params: RenderSettings) => void
 }
 
 export async function initFragmentsEngine(
@@ -115,6 +126,8 @@ export async function initFragmentsEngine(
   const cloudsDome = new THREE.Mesh(cloudGeo, cloudMat)
   cloudsDome.name = 'CloudsDome'
 
+  const fog = new THREE.FogExp2(RENDER_DEFAULTS.fogColor, RENDER_DEFAULTS.fogDensity)
+
   realisticGroup.add(sky, rAmbient, rDir, cloudsDome)
   world.scene.three.add(realisticGroup)
 
@@ -129,22 +142,29 @@ export async function initFragmentsEngine(
   let cloudShadowPass: any
   let godRayPass: any
   let edgePass: any
+  let smaaPass: SMAAPass
+  let grid: any
   let sceneDepthRT: THREE.WebGLRenderTarget
   let autoFocusEnabled = false
   let isPbrEnabled = true
 
-  const setLightingParams = (params: { realisticMode: boolean, exposure: number, lightIntensity: number, ambientIntensity: number, timeOfDay: number, bloomStrength: number, bloomThreshold: number, bloomEnabled?: boolean, fogDensity: number, cloudDensity: number, cloudShadowsEnabled?: boolean, cloudSpeed: number, dofEnabled: boolean, dofFocus: number, dofAperture: number, dofMaxBlur: number, visualSaturation?: number, visualTemperature?: number, visualContrast?: number, visualVignette?: number, godRaysEnabled?: boolean, godRayStrength?: number, chromaticAberration?: number, autoFocus?: boolean, ambientOcclusion?: boolean, outlineEdges?: boolean, pbrMaterials?: boolean, iblEnabled?: boolean, syncIblWithSun?: boolean, envIntensity?: number, envRotation?: number, aoRadius?: number, aoIntensity?: number }) => {
+  const setLightingParams = (params: RenderSettings) => {
     isRealistic = params.realisticMode
     isPbrEnabled = params.pbrMaterials !== false
     cloudMat.uniforms.cloudDensity.value = params.cloudDensity
+    cloudMat.uniforms.cloudColor.value.set(params.cloudColor)
     currentCloudSpeed = params.cloudSpeed
-    cloudsDome.visible = params.cloudDensity > 0
-    
+    const cloudsVisible = params.cloudsEnabled !== false && params.cloudDensity > 0
+    cloudsDome.visible = cloudsVisible
+
+    if (grid) grid.visible = params.gridVisible === true
+    if (smaaPass) smaaPass.enabled = params.antialiasing !== false
+
     if (cloudShadowPass) {
-      cloudShadowPass.enabled = params.realisticMode && params.cloudDensity > 0 && params.cloudShadowsEnabled !== false
+      cloudShadowPass.enabled = params.realisticMode && cloudsVisible && params.cloudShadowsEnabled !== false
       cloudShadowPass.uniforms.cloudDensity.value = params.cloudDensity
     }
-    
+
     if (bokehPass) {
       bokehPass.enabled = params.dofEnabled
       if (!autoFocusEnabled && params.dofFocus !== undefined) bokehPass.uniforms['focus'].value = params.dofFocus
@@ -169,7 +189,7 @@ export async function initFragmentsEngine(
     }
     
     if (ssrPass) {
-      ssrPass.enabled = false // Disabled for now as it turns all ground into a mirror without selective meshes
+      ssrPass.enabled = params.realisticMode && params.ssrEnabled === true
     }
     
     if (godRayPass) {
@@ -299,6 +319,11 @@ export async function initFragmentsEngine(
       if (sky) {
         sky.receiveShadow = false
         sky.castShadow = false
+        sky.visible = params.skyboxEnabled !== false
+        skyUniforms['turbidity'].value = params.skyTurbidity
+        skyUniforms['rayleigh'].value = params.skyRayleigh
+        skyUniforms['mieCoefficient'].value = params.skyMieCoefficient
+        skyUniforms['mieDirectionalG'].value = params.skyMieDirectionalG
       }
       if (cloudsDome) {
         cloudsDome.receiveShadow = false
@@ -339,10 +364,18 @@ export async function initFragmentsEngine(
       
       cloudMat.uniforms.sunPosition.value.copy(sunPosition)
 
-      world.renderer.three.shadowMap.enabled = true
-      world.renderer.three.shadowMap.type = THREE.PCFShadowMap
+      const shadowsOn = params.shadowsEnabled !== false
+      world.renderer.three.shadowMap.enabled = shadowsOn
+      world.renderer.three.shadowMap.type = params.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap
       world.renderer.three.shadowMap.autoUpdate = true
-      world.renderer.three.toneMapping = THREE.ACESFilmicToneMapping
+      rDir.castShadow = shadowsOn
+      if (rDir.shadow.mapSize.width !== params.shadowMapSize) {
+        rDir.shadow.mapSize.setScalar(params.shadowMapSize)
+        // The map is allocated at the old size, so it has to go before the new one takes
+        rDir.shadow.map?.dispose()
+        rDir.shadow.map = null as any
+      }
+      world.renderer.three.toneMapping = TONE_MAPPINGS[params.toneMapping] ?? THREE.ACESFilmicToneMapping
       world.renderer.three.toneMappingExposure = params.exposure
       
       if (params.iblEnabled !== false) {
@@ -373,11 +406,18 @@ export async function initFragmentsEngine(
       rDir.shadow.camera.updateProjectionMatrix()
       
       // Add Atmospheric Fog (matches the hazy horizon)
-      world.scene.three.fog = new THREE.FogExp2(0x88aacc, params.fogDensity)
+      if (params.fogEnabled === false) {
+        world.scene.three.fog = null
+      } else {
+        fog.color.set(params.fogColor)
+        fog.density = params.fogDensity
+        world.scene.three.fog = fog
+      }
 
       if (bloomPass) {
         bloomPass.enabled = params.bloomEnabled !== false
         bloomPass.strength = params.bloomStrength
+        bloomPass.radius = params.bloomRadius
         bloomPass.threshold = params.bloomThreshold
       }
       
@@ -422,7 +462,7 @@ export async function initFragmentsEngine(
     })
   }
 
-  setLightingParams({ realisticMode: false, exposure: 0.85, lightIntensity: 1.2, ambientIntensity: 0.3, timeOfDay: 14.5, bloomStrength: 0.15, bloomThreshold: 1.5, fogDensity: 0.00015, cloudDensity: 0.5, cloudSpeed: 1.0, dofEnabled: false, dofFocus: 2000.0, dofAperture: 0.0001, dofMaxBlur: 0.01, ambientOcclusion: false, outlineEdges: false, pbrMaterials: true, iblEnabled: true, syncIblWithSun: true, envIntensity: 1.0, envRotation: 0.0, aoRadius: 50.0, aoIntensity: 5.0 })
+  setLightingParams(RENDER_DEFAULTS)
 
   world.camera = new OBC.SimpleCamera(components)
 
@@ -527,7 +567,7 @@ export async function initFragmentsEngine(
   composer.addPass(edgePass)
 
   // SMAA Pass
-  const smaaPass = new SMAAPass()
+  smaaPass = new SMAAPass()
   smaaPass.setSize(window.innerWidth * window.devicePixelRatio, window.innerHeight * window.devicePixelRatio)
   composer.addPass(smaaPass)
 
@@ -670,8 +710,8 @@ export async function initFragmentsEngine(
 
 
   const grids = components.get(OBC.Grids)
-  const grid = grids.create(world)
-  grid.visible = false
+  grid = grids.create(world)
+  grid.visible = RENDER_DEFAULTS.gridVisible
 
   // No workerURL: the library resolves the worker bundled with the package
   const fragments = new FRAGS.FragmentsModels()

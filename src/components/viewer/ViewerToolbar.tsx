@@ -1,5 +1,4 @@
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
-import * as OBC from '@thatopen/components'
 import * as THREE from 'three'
 import { useProjectStore } from '@/store/useProjectStore'
 
@@ -15,26 +14,13 @@ interface ViewerToolbarProps {
   onToggleMaterialPicker?: () => void
 }
 
-import { useState, useEffect } from 'react'
+import { useEffect } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 
 export function ViewerToolbar({ engineRef, onToggleStats, statsVisible, pickerActive, onTogglePicker, dashboardVisible, onToggleDashboard, materialPickerActive, onToggleMaterialPicker }: ViewerToolbarProps) {
   const engine = engineRef.current
-  const [gridActive, setGridActive] = useState(false)
-
-  // Initialize grid state on mount
-  useEffect(() => {
-    if (!engine) return
-    const grids = engine.components.get(OBC.Grids)
-    if (grids) {
-      let isVisible = false
-      for (const grid of grids.list.values()) {
-        if (typeof grid.visible === 'boolean') isVisible = grid.visible
-        else if (grid.three) isVisible = grid.three.visible
-      }
-      setGridActive(isVisible)
-    }
-  }, [engine])
+  const gridActive = useAppStore(s => s.gridVisible)
+  const setLightingParams = useAppStore(s => s.setLightingParams)
 
   const fitView = async () => {
     if (!engine) return
@@ -49,19 +35,7 @@ export function ViewerToolbar({ engineRef, onToggleStats, statsVisible, pickerAc
     } catch (e) { console.warn('fitView error', e) }
   }
 
-  const toggleGrid = () => {
-    if (!engine) return
-    const grids = engine.components.get(OBC.Grids)
-    let newState = !gridActive
-    for (const grid of grids.list.values()) {
-      if (typeof grid.visible === 'boolean') {
-        grid.visible = newState
-      } else if (grid.three) {
-        grid.three.visible = newState
-      }
-    }
-    setGridActive(newState)
-  }
+  const toggleGrid = () => setLightingParams({ gridVisible: !gridActive })
   const resetCamera = () => {
     if (!engine) return
     const camera = useProjectStore.getState().currentProject?.camera

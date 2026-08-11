@@ -1200,6 +1200,32 @@
     return state === 'live' ? periodConsumption(series, hours) : null;
   }
 
+  /* ── Shared rendering for the four states (EKO-020) ──
+     Every widget that shows metered values uses these, so "stale" looks the same
+     in Utilities, Consumption and the equipment detail. */
+  const TH = (label, end) => `<th style="padding:5px 6px;text-align:${end ? 'right' : 'start'};font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:500;color:var(--t3)">${label}</th>`;
+  const numCell = (text, color) => `<td style="padding:4px 6px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:${color}">${text}</td>`;
+
+  const stateChip = (label) => `<span style="flex:none;padding:1px 6px;border-radius:4px;background:var(--warnT);border:1px solid var(--warnB);color:var(--warnTx);font-size:9.5px;font-weight:600">${label}</span>`;
+  const staleChip = () => stateChip(t('stale'));
+
+  // A measured 0 is live data: it must render like any other reading, not a gap.
+  const meterVal = (n, unit) => `${shortNum(n, 1)}${unit ? ' ' + unit : ''}`;
+
+  const nameTone = (state) => state === 'live' ? 'var(--t1)' : 'var(--t2)';
+  const readTone = (state) => state === 'live' ? 'var(--t1)' : 'var(--t3)';
+  const ageTone = (state) => state === 'stale' ? 'var(--warnTx)' : 'var(--t3)';
+
+  // Name cell shared by every metered table: label, then its state chip if any.
+  function channelNameCell(label, state, sub) {
+    return `<td style="padding:4px 6px;font-size:10.5px;color:${nameTone(state)};font-weight:500;max-width:150px">
+        <span style="display:flex;align-items:center;gap:6px;min-width:0">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</span>${state === 'stale' ? staleChip() : ''}
+        </span>
+        ${sub ? `<span style="display:block;font-size:9px;color:var(--t3);overflow:hidden;text-overflow:ellipsis">${sub}</span>` : ''}
+      </td>`;
+  }
+
   const sameDay = (a, b) => a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
@@ -1397,15 +1423,21 @@
         </div>`).join('')}` : '';
 
     // FDD messages run long and must not be clipped, so long values stack and wrap.
+    // EKO-020: a point with no value is absent and a faulted point names its FIN
+    // status ("conn fault") — colour alone never carried which of the two it was.
     const pointRows = points.length ? points.map((p) => {
-      const ok = String(p.status || 'ok').toLowerCase() === 'ok';
-      const val = String(p.currentValue == null ? '—' : p.currentValue);
+      const status = String(p.status || 'ok').toLowerCase();
+      const ok = status === 'ok';
+      const has = p.currentValue != null && p.currentValue !== '';
+      const val = has ? String(p.currentValue) : '—';
       const stacked = val.length > 22;
       const valStyle = `font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1.45;` +
-        `color:${ok ? 'var(--t1)' : 'var(--warnTx)'};overflow-wrap:anywhere`;
+        `color:${!has ? 'var(--t3)' : (ok ? 'var(--t1)' : 'var(--warnTx)')};overflow-wrap:anywhere`;
       return `
         <div style="display:flex;${stacked ? 'flex-direction:column;align-items:flex-start;gap:2px' : 'align-items:baseline;gap:10px'};padding:6px 9px;border-top:1px solid var(--bd1)">
-          <span style="${stacked ? '' : 'flex:1;min-width:0;'}font-size:10.5px;line-height:1.45;color:var(--t2);overflow-wrap:anywhere">${esc(p.navName)}${p.his ? '<span style="color:var(--acc);font-size:8px"> ●</span>' : ''}</span>
+          <span style="${stacked ? '' : 'flex:1;min-width:0;'}display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10.5px;line-height:1.45;color:var(--t2);overflow-wrap:anywhere">
+            <span style="overflow-wrap:anywhere">${esc(p.navName)}</span>${p.his ? '<span style="color:var(--acc);font-size:8px">●</span>' : ''}${ok ? '' : stateChip(esc(status))}
+          </span>
           <span style="${stacked ? '' : 'flex:none;text-align:end;'}${valStyle}">${esc(val)}</span>
         </div>`;
     }).join('') : `<div style="padding:10px;text-align:center;font-size:11px;color:var(--t3)">${t('No points reporting')}</div>`;
@@ -1484,35 +1516,20 @@
   }
 
   /* ── Utilities: water + gas metering, and the reference for the four states ── */
-  const TH = (label, end) => `<th style="padding:5px 6px;text-align:${end ? 'right' : 'start'};font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:500;color:var(--t3)">${label}</th>`;
-  const numCell = (text, color) => `<td style="padding:4px 6px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:${color}">${text}</td>`;
-
-  const staleChip = () => `<span style="flex:none;padding:1px 6px;border-radius:4px;background:var(--warnT);border:1px solid var(--warnB);color:var(--warnTx);font-size:9.5px;font-weight:600">${t('stale')}</span>`;
-
-  // A measured 0 is live data: it must render like any other reading, not like a gap.
-  const meterVal = (n, unit) => `${shortNum(n, 1)}${unit ? ' ' + unit : ''}`;
-
   function utilityRowHtml(r, selected) {
     const { state, last } = channelState(r.series);
     const d1 = derivedTotal(r.series, 24, state);
     const d7 = derivedTotal(r.series, 168, state);
-    const stale = state === 'stale';
-    const nameColor = state === 'live' ? 'var(--t1)' : 'var(--t2)';
-    const readColor = state === 'live' ? 'var(--t1)' : 'var(--t3)';
-    const derivedCell = (d) => stale || state === 'absent' || !d
-      ? numCell('—', 'var(--t3)')
-      : numCell(meterVal(d.value, r.unit), 'var(--t1)');
+    const derivedCell = (d) => d
+      ? numCell(meterVal(d.value, r.unit), 'var(--t1)')
+      : numCell('—', 'var(--t3)');
     return `
       <tr data-wm="${esc(r.key)}" style="border-top:1px solid var(--bd1);cursor:pointer;${selected ? 'background:var(--acc8);' : ''}">
-        <td style="padding:4px 6px;font-size:10.5px;color:${nameColor};font-weight:500;max-width:150px">
-          <span style="display:flex;align-items:center;gap:6px;min-width:0">
-            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t(r.label)}</span>${stale ? staleChip() : ''}
-          </span>
-        </td>
-        ${numCell(last ? meterVal(last.val, r.unit) : '—', readColor)}
+        ${channelNameCell(t(r.label), state)}
+        ${numCell(last ? meterVal(last.val, r.unit) : '—', readTone(state))}
         ${derivedCell(d1)}
         ${derivedCell(d7)}
-        ${numCell(last ? ageLabel(last.ageH) : '—', stale ? 'var(--warnTx)' : 'var(--t3)')}
+        ${numCell(last ? ageLabel(last.ageH) : '—', ageTone(state))}
       </tr>`;
   }
 
@@ -1627,33 +1644,31 @@
   ];
 
   // Arbitrary range, unlike weeklyChartHtml, which is fixed at 7 days.
+  // EKO-012: values come from dailyMeterBars, so a rising register is differenced
+  // rather than summed — summing a register would plot nonsense.
   function dailyBarsHtml(series, days) {
-    const now = new Date();
-    const bars = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
-      const s = sumDay(series, d);
-      bars.push({ date: d, sum: s ? s.sum : null });
-    }
-    const known = bars.filter((b) => b.sum != null);
+    const { bars, totalizer } = dailyMeterBars(series, days);
+    const known = bars.filter((b) => b.value != null);
     if (!known.length) return emptyBox(t('No history in this range'));
 
     // Bars grow from the zero line, so a negative day hangs below it
-    const sc = signedScale(bars.map((b) => b.sum));
+    const sc = signedScale(bars.map((b) => b.value));
     const ax = signedAxis(sc);
     const w = 288 / days;
     const bw = Math.max(1, w * (days > 30 ? 0.85 : 0.6));
     const rects = bars.map((b, i) => {
-      if (b.sum == null) return '';
-      const yv = sc.y(b.sum);
+      if (b.value == null) return '';
+      const yv = sc.y(b.value);
       const x = 30 + i * w + (w - bw) / 2;
-      return `<rect x="${x.toFixed(1)}" y="${Math.min(ax.zero, yv).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0.6, Math.abs(yv - ax.zero)).toFixed(1)}" fill="${b.sum < 0 ? 'var(--warn)' : 'var(--btnP)'}"/>`;
+      return `<rect x="${x.toFixed(1)}" y="${Math.min(ax.zero, yv).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0.6, Math.abs(yv - ax.zero)).toFixed(1)}" fill="${b.value < 0 ? 'var(--warn)' : 'var(--btnP)'}"${b.partial ? ' opacity="0.55"' : ''}/>`;
     }).join('');
 
     const mid = bars[Math.floor(bars.length / 2)];
     const tips = bars.map((b) => {
       const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][b.date.getDay()];
-      return `${t(wd)} ${dayMon(b.date)}\n${b.sum == null ? t('no data') : shortNum(b.sum, 1) + ' kWh'}`;
+      const reg = totalizer && b.register != null ? `\n${t('register')} ${shortNum(b.register, 1)}` : '';
+      return `${t(wd)} ${dayMon(b.date)}${b.partial ? ` (${t('partial')})` : ''}\n` +
+        `${b.value == null ? t('no data') : shortNum(b.value, 1) + ' kWh'}${reg}`;
     });
     return `
       <svg viewBox="0 0 330 122" style="width:100%;height:auto;display:block;direction:ltr" role="img" aria-label="daily consumption">
@@ -1730,15 +1745,18 @@
             // A negative daily sum is corrupt meter data, not a share of anything
             const bad = val != null && val < 0;
             const share = (val != null && val >= 0 && denom > 0) ? (val / denom) * 100 : null;
-            const stale = s.last && s.last.ageH > 24;
+            const { state } = channelState(s.series);
+            // Unlike a 24 h figure, a multi-day total from a stale channel still
+            // covers real days — it is shown, but the row says it stopped.
+            const valTone = bad ? 'var(--warnTx)' : (state === 'live' ? 'var(--t1)' : 'var(--t3)');
             return `
             <tr data-cons-svc="${esc(s.key)}" data-tip="${esc(`${s.panel} — ${t(s.desc)}\n${t('metered by')} ${s.meter}`)}" style="border-top:1px solid var(--bd1);cursor:pointer;${s.key === consSelected ? 'background:var(--acc8);' : ''}">
-              <td style="padding:4px 6px;font-size:10.5px;color:var(--t1);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-                ${t(s.label)}<span style="display:block;font-size:9px;color:var(--t3);overflow:hidden;text-overflow:ellipsis">${esc(s.panel)}</span>
-              </td>
-              <td style="padding:4px 6px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:${bad ? 'var(--warnTx)' : 'var(--t2)'}" ${bad ? `title="${t('Negative total — meter reset or bad data')}"` : ''}>${val == null ? '—' : shortNum(val, 0)}</td>
-              <td style="padding:4px 6px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--t3)">${share == null ? '—' : share.toFixed(0) + '%'}</td>
-              <td style="padding:4px 6px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:${stale ? 'var(--warnTx)' : 'var(--t3)'}">${s.last ? ageLabel(s.last.ageH) : '—'}</td>
+              ${channelNameCell(t(s.label), state, esc(s.panel))}
+              ${bad
+                ? `<td style="padding:4px 6px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--warnTx)" title="${t('Negative total — meter reset or bad data')}">${shortNum(val, 0)}</td>`
+                : numCell(val == null ? '—' : shortNum(val, 0), valTone)}
+              ${numCell(share == null ? '—' : share.toFixed(0) + '%', 'var(--t3)')}
+              ${numCell(s.last ? ageLabel(s.last.ageH) : '—', ageTone(state))}
             </tr>`;
           }).join('')}</tbody>
         </table>
@@ -1781,13 +1799,9 @@
 
   function weeklyChartHtml(kind, seriesOverride) {
     const series = seriesOverride || historySeries('Total_Power_Consumption_his');
-    const now = new Date();
-    const days = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
-      const s = sumDay(series, d);
-      days.push({ date: d, sum: s ? s.sum : null });
-    }
+    // EKO-012: differenced when the series is a register, summed when it is not.
+    const { bars: mb, totalizer } = dailyMeterBars(series, 7);
+    const days = mb.map((b) => ({ date: b.date, sum: b.value, register: b.register, partial: b.partial }));
     const known = days.filter(d => d.sum != null);
     if (!known.length) {
       return `<div style="padding:14px;border:1px dashed var(--bd1);border-radius:8px;text-align:center;font-size:12px;color:var(--t3)">${t('No history yet')}</div>`;
@@ -1826,7 +1840,9 @@
             ${marks}
             ${hoverColumns(days.map((d) => {
               const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.date.getDay()];
-              return `${t(wd)} ${dayMon(d.date)}\n${d.sum == null ? t('no data') : shortNum(d.sum, 1) + ' kWh'}`;
+              const reg = totalizer && d.register != null ? `\n${t('register')} ${shortNum(d.register, 1)}` : '';
+              return `${t(wd)} ${dayMon(d.date)}${d.partial ? ` (${t('partial')})` : ''}\n` +
+                `${d.sum == null ? t('no data') : shortNum(d.sum, 1) + ' kWh'}${reg}`;
             }), 30 - 24, 48)}
           </svg>`;
   }

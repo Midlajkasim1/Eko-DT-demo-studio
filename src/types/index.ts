@@ -1,3 +1,5 @@
+import type { RenderSettings } from '@/constants/renderSettings'
+
 export type AppStep =
   | 'projects'
   | 'idle'
@@ -74,41 +76,9 @@ export interface ProjectCamera {
   target: [number, number, number]
 }
 
-export interface ProjectRenderSettings {
-  realisticMode: boolean
-  exposure: number
-  lightIntensity: number
-  ambientIntensity: number
-  timeOfDay: number
-  bloomStrength: number
-  bloomThreshold: number
-  bloomEnabled?: boolean
-  fogDensity: number
-  cloudDensity: number
-  cloudShadowsEnabled?: boolean
-  cloudSpeed: number
-  dofEnabled: boolean
-  dofFocus: number
-  dofAperture: number
-  dofMaxBlur: number
-  visualSaturation: number
-  visualTemperature: number
-  visualContrast: number
-  visualVignette: number
-  godRaysEnabled?: boolean
-  godRayStrength?: number
-  chromaticAberration?: number
-  autoFocus?: boolean
-  ambientOcclusion?: boolean
-  outlineEdges?: boolean
-  pbrMaterials?: boolean
-  iblEnabled?: boolean
-  syncIblWithSun?: boolean
-  envIntensity?: number
-  envRotation?: number
-  aoRadius?: number
-  aoIntensity?: number
-}
+/** Projects written before a setting existed simply omit it, so the store default applies */
+export type ProjectRenderSettings =
+  Partial<RenderSettings> & Pick<RenderSettings, 'realisticMode'>
 
 export interface ProjectMeta {
   version: number
