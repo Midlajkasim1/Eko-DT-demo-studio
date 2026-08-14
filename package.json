@@ -7,7 +7,12 @@
     "dev": "vite --host",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "vendor:boxicons": "node scripts/vendorBoxicons.mjs",
+    "test": "node tests/run.mjs",
+    "test:unit": "node tests/run.mjs --unit",
+    "test:browser": "node tests/run.mjs --browser",
+    "build:renders": "node scripts/buildBuiltinRenders.mjs"
   },
   "dependencies": {
     "@thatopen/components": "^3.4.6",
@@ -17,6 +22,7 @@
     "esbuild": "^0.28.0",
     "idb-keyval": "^6.2.5",
     "jszip": "^3.10.1",
+    "maplibre-gl": "^6.2.0",
     "n8ao": "^2.0.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
@@ -33,6 +39,7 @@
     "@types/stats.js": "^0.17.4",
     "@types/three": "^0.184.1",
     "@vitejs/plugin-react": "^4.7.0",
+    "boxicons": "^2.1.4",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",

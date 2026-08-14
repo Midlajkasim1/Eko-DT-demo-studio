@@ -17,6 +17,7 @@ import {
   cardFromMeta,
 } from '@/lib/projectDb'
 import { ASSETS_VERSION } from '@/lib/textureAssets'
+import { collectMapGarbage, deleteMapAsset, storeMapImage } from '@/lib/mapAssets'
 
 interface RecentProject {
   card: RecentProjectCard
@@ -72,6 +73,8 @@ interface ProjectState {
   updateModelTransform: (modelId: string, transform: { position?: [number, number, number], rotation?: [number, number, number], scale?: [number, number, number] }) => Promise<void>
   updateThumbnail: (dataUrl: string) => Promise<void>
   saveViewAndSettings: (camera: import('@/types').ProjectCamera, renderSettings: import('@/types').ProjectRenderSettings) => Promise<void>
+  saveMapConfig: (mapConfig: import('@/types').MapConfig) => Promise<void>
+  addMapImage: (file: Blob) => Promise<import('@/types').MapAsset | null>
   addTextureAsset: (asset: import('@/types').TextureAsset) => Promise<void>
   setMaterialOverride: (modelId: string, override: import('@/types').MaterialOverride) => Promise<void>
   removeMaterialOverride: (modelId: string, overrideId: string) => Promise<void>
@@ -344,6 +347,47 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const updatedRecent = refreshCard(recentProjects, updated)
     
     set({ currentProject: updated, recentProjects: updatedRecent })
+  },
+
+  saveMapConfig: async (mapConfig) => {
+    const { folderHandle, currentProject, recentProjects } = get()
+    if (!folderHandle || !currentProject) return
+    const updated: ProjectMeta = { ...currentProject, mapConfig, updatedAt: Date.now() }
+    updated.mapAssets = collectMapGarbage(updated)
+
+    try {
+      await saveProjectMeta(folderHandle, updated)
+      await cacheHandle(updated.projectId, folderHandle, updated, updated.thumbnail)
+    } catch (err: any) {
+      console.error("Save Error Details:", err);
+      if (err?.message?.includes('state cached in an interface object')) {
+        alert("The project files were modified externally. Please close and re-open the project folder.");
+      } else {
+        alert("Failed to save changes: " + err?.message);
+      }
+      return;
+    }
+
+    // Renders are megabytes each, so dropped ones are deleted rather than left for export GC
+    for (const [hash, asset] of Object.entries(currentProject.mapAssets ?? {})) {
+      if (!updated.mapAssets?.[hash]) await deleteMapAsset(folderHandle, asset)
+    }
+
+    set({ currentProject: updated, isDirty: false, recentProjects: refreshCard(recentProjects, updated) })
+  },
+
+  addMapImage: async (file) => {
+    const { folderHandle, currentProject } = get()
+    if (!folderHandle || !currentProject) return null
+
+    const asset = await storeMapImage(folderHandle, file)
+    const updated: ProjectMeta = {
+      ...currentProject,
+      mapAssets: { ...(currentProject.mapAssets ?? {}), [asset.hash]: asset },
+    }
+    // Written to disk immediately; project.json catches up when the map is saved
+    set({ currentProject: updated })
+    return asset
   },
 
   saveViewAndSettings: async (camera, renderSettings) => {

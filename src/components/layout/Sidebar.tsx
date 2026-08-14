@@ -9,6 +9,7 @@ import { ModelInfoPanel } from '@/components/model/ModelInfoPanel'
 import { DownloadButton } from '@/components/download/DownloadButton'
 import { FinLoginPanel } from '@/components/fin/FinLoginPanel'
 import { ProjectSettingsModal } from '@/components/project/ProjectSettingsModal'
+import { unloadAllModels } from '@/lib/sceneTeardown'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 
 interface SidebarProps {
@@ -23,7 +24,6 @@ export function Sidebar({ onFiles, engineRef }: SidebarProps) {
   const error = useAppStore(s => s.error)
   const { reset } = useAppStore()
 
-  const models = useModelStore(s => s.models)
   const clearModels = useModelStore(s => s.clearModels)
 
   const currentProject = useProjectStore(s => s.currentProject)
@@ -67,18 +67,7 @@ export function Sidebar({ onFiles, engineRef }: SidebarProps) {
       if (thumb) await updateThumbnail(thumb)
     }
 
-    if (engine && models.length > 0) {
-      models.forEach(m => {
-        if (m.type === 'glb') {
-          const existing = engine.world.scene.three.children.find((c: any) => c.userData?.modelId === m.modelId)
-          if (existing) {
-            engine.world.scene.three.remove(existing)
-          }
-        } else {
-          engine.fragments.disposeModel(m.modelId).catch(() => {})
-        }
-      })
-    }
+    await unloadAllModels(engine)
     clearModels()
     useAppStore.getState().setMaterialPickerActive(false)
     useAppStore.getState().setSelectedMaterialElement(null)

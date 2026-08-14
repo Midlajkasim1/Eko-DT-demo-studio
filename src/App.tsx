@@ -3,6 +3,7 @@ import { Header } from '@/components/layout/Header'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { ViewerCanvas } from '@/components/viewer/ViewerCanvas'
 import { ProjectListPage } from '@/components/project/ProjectListPage'
+import { MapLayer } from '@/components/map/MapLayer'
 import { useIfcConverter } from '@/hooks/useIfcConverter'
 import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
@@ -85,9 +86,9 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      {!isFullscreen && <Header />}
+      {!isFullscreen && step !== 'map' && <Header />}
       <div className="app-body">
-        {!isFullscreen && step !== 'projects' && <Sidebar onFiles={handleFiles} engineRef={engineRef} />}
+        {!isFullscreen && step !== 'projects' && step !== 'map' && <Sidebar onFiles={handleFiles} engineRef={engineRef} />}
         <main className="app-main">
           {step === 'projects' && (
             <div className="projects-page">
@@ -95,6 +96,7 @@ export default function App() {
             </div>
           )}
           <ViewerCanvas onEngineReady={handleEngineReady} adminMode={true} />
+          <MapLayer adminMode={true} engineRef={engineRef} />
         </main>
       </div>
     </div>

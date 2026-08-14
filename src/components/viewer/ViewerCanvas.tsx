@@ -17,6 +17,8 @@ import { MaterialPanel } from '@/components/viewer/MaterialPanel'
 import { FocusModeWidget } from '@/components/viewer/FocusModeWidget'
 import { ModelLoadingProgress } from '@/components/viewer/ModelLoadingProgress'
 import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
+import { unloadAllModels } from '@/lib/sceneTeardown'
+import { attachDevBridge } from '@/lib/devBridge'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 
 interface ViewerCanvasProps {
@@ -60,7 +62,9 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
   const currentProjectId = useProjectStore(s => s.currentProject?.projectId)
 
   useEffect(() => {
-    if (isReady && onEngineReady) onEngineReady(engineRef)
+    if (!isReady) return
+    if (onEngineReady) onEngineReady(engineRef)
+    attachDevBridge(engineRef)
   }, [isReady, onEngineReady])
 
   // Restore the saved view every time a project is opened. The engine is created
@@ -92,29 +96,21 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
 
   useEffect(() => {
     if (!isReady) return
-    // An empty store only means "project closed" once something was actually
-    // loaded; on first mount it is just the session that has not started yet
-    if (useModelStore.getState().models.length === 0 && loadedIdsRef.current.size > 0) {
-      // Drop the geometry from the scene too — otherwise it keeps rendering
-      // behind the project list and bleeds into whichever project is opened next.
-      const engine = engineRef.current
-      if (engine) {
-        for (const id of loadedIdsRef.current) {
-          const existing = engine.world.scene.three.children.find((c: any) => c.userData?.modelId === id)
-          if (existing) engine.world.scene.three.remove(existing)
-          engine.fragments.disposeModel(id).catch(() => {})
-        }
-      }
-      loadedIdsRef.current.clear()
-      useLoadingProgressStore.getState().endSession()
-    }
     // Models stream in one at a time, so this effect re-runs while an earlier
-    // pass is still going — keep engine loads strictly sequential
+    // pass is still going — keep engine loads strictly sequential. Teardown sits
+    // inside the same section so it can never interleave with a load.
     if (isLoadingRef.current) return
     isLoadingRef.current = true
 
     const loadSequentially = async () => {
       try {
+        // An empty store only means "project closed" once something was actually
+        // loaded; on first mount it is just the session that has not started yet
+        if (useModelStore.getState().models.length === 0 && loadedIdsRef.current.size > 0) {
+          await unloadAllModels(engineRef.current)
+          loadedIdsRef.current.clear()
+          useLoadingProgressStore.getState().endSession()
+        }
         for (;;) {
           // Re-read the store each pass so models added mid-load are picked up
           const next = useModelStore.getState().models.find(

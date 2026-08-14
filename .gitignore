@@ -36,3 +36,14 @@ CLAUDE.md
 AUDIT_REPORT.md
 /EKO Digital Twin UI Frame/
 /MarsaAlArab
+/EKO-Modon
+
+# Local verification fixtures, served from public/ by the dev server only
+/public/project.json
+/public/models.json
+/public/models/
+/public/mapassets/
+/scripts/_*.mjs
+/scripts/_shots/
+/scratch/
+/tests

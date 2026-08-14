@@ -1,6 +1,7 @@
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import * as THREE from 'three'
 import { useProjectStore } from '@/store/useProjectStore'
+import { hasMap } from '@/lib/mapConfig'
 
 interface ViewerToolbarProps {
   engineRef: React.MutableRefObject<FragmentsEngine | null>
@@ -21,6 +22,7 @@ export function ViewerToolbar({ engineRef, onToggleStats, statsVisible, pickerAc
   const engine = engineRef.current
   const gridActive = useAppStore(s => s.gridVisible)
   const setLightingParams = useAppStore(s => s.setLightingParams)
+  const currentProject = useProjectStore(s => s.currentProject)
 
   const fitView = async () => {
     if (!engine) return
@@ -76,7 +78,21 @@ export function ViewerToolbar({ engineRef, onToggleStats, statsVisible, pickerAc
     }
   }
 
+  const returnToMap = (window as never as { __returnToMap?: () => void }).__returnToMap
+  const showMapButton = hasMap(currentProject) && !!returnToMap
+
   const tools = [
+    ...(showMapButton ? [{
+      title: 'Back to map',
+      action: () => returnToMap?.(),
+      active: false,
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" width="15" height="15">
+          <path d="M9 4 3 6.5v13L9 17l6 2.5 6-2.5v-13L15 6.5 9 4z" strokeLinejoin="round" />
+          <path d="M9 4v13M15 6.5v13" strokeLinejoin="round" />
+        </svg>
+      ),
+    }] : []),
     {
       title: isFullscreen ? 'Exit Focus Mode' : 'Focus Mode',
       action: toggleFullscreen,

@@ -2,6 +2,7 @@ import type { RenderSettings } from '@/constants/renderSettings'
 
 export type AppStep =
   | 'projects'
+  | 'map'
   | 'idle'
   | 'uploading'
   | 'converting'
@@ -76,6 +77,93 @@ export interface ProjectCamera {
   target: [number, number, number]
 }
 
+/** [longitude, latitude] — MapLibre's order, not the geolocation field's */
+export type LngLat = [number, number]
+
+/** top-left, top-right, bottom-right, bottom-left */
+export type GeoQuad = [LngLat, LngLat, LngLat, LngLat]
+
+export interface MapCamera {
+  center: LngLat
+  zoom: number
+  bearing?: number
+  pitch?: number
+}
+
+/** No layer resolves to the flat background colour, which is a valid offline map */
+export type MapBasemap =
+  | { kind: 'void' }
+  | { kind: 'image'; hash: string; coordinates: GeoQuad }
+  | { kind: 'xyz'; template: string; tileSize?: 256 | 512; maxzoom?: number; attribution?: string }
+  | { kind: 'pack'; hash: string; minzoom?: number; maxzoom?: number }
+
+export interface MapOverlay {
+  id: string
+  /** key into ProjectMeta.mapAssets */
+  hash: string
+  coordinates: GeoQuad
+  fadeIn?: [number, number]
+  fadeOut?: [number, number]
+  opacity?: number
+  /** the level this render belongs to; absent means the root level */
+  parentId?: string
+  /** the tile rectangle it was snapped to, so the snap can be re-derived */
+  grid?: { z: number; x: number; y: number; w: number; h: number }
+  hidden?: boolean
+}
+
+export interface MapLocation {
+  id: string
+  /** absent = top level; present = a child of that location's level */
+  parentId?: string
+  name: string
+  position: LngLat
+  description?: string
+  color?: string
+  category?: string
+  /** place and road are non-interactive labels, not pins */
+  kind?: 'pin' | 'place' | 'road'
+  rotation?: number
+  polygon?: LngLat[]
+  /** loaded into the 3D viewer when this pin is opened */
+  modelIds?: string[]
+  /** where the map lands when entering this node */
+  view?: MapCamera
+  /** the 3D camera restored once this pin's models are in */
+  camera?: ProjectCamera
+  stats?: { label: string; value: string }[]
+}
+
+export interface MapConfig {
+  version: 1
+  camera: MapCamera
+  minZoom?: number
+  maxZoom?: number
+  maxPitch?: number
+  /** maxBounds padding as a fraction of the content span */
+  padding?: number
+  basemap: MapBasemap
+  /** Set false to drop the bundled Dubai render pyramid, e.g. for a site somewhere else */
+  builtinRenders?: boolean
+  overlays?: MapOverlay[]
+  locations?: MapLocation[]
+  categories?: { id: string; label: string; color?: string }[]
+  intro?: { enabled: boolean; pullBack: number; bearingOffset: number; duration: number }
+}
+
+/** A map image or tile pack stored beside project.json at mapassets/<hash>.<ext> */
+export interface MapAsset {
+  kind: 'image' | 'pack'
+  hash: string
+  src: string
+  mime: string
+  bytes: number
+  width?: number
+  height?: number
+  sourceWidth?: number
+  sourceHeight?: number
+}
+
 /** Projects written before a setting existed simply omit it, so the store default applies */
 export type ProjectRenderSettings =
   Partial<RenderSettings> & Pick<RenderSettings, 'realisticMode'>
@@ -103,6 +191,8 @@ export interface ProjectMeta {
   isFinProject?: boolean
   apiSettings?: ProjectApiSettings
   materialOverrides?: Record<string, MaterialOverride>
+  mapConfig?: MapConfig
+  mapAssets?: Record<string, MapAsset>
   /** Attached from thumbnail.webp on open, and persisted back by saveProjectMeta */
   thumbnail?: string
 }
@@ -114,6 +204,7 @@ export interface RecentProjectCard {
   modelCount: number
   updatedAt: number
   isFinProject?: boolean
+  hasMap?: boolean
   thumbnail?: string
 }
 

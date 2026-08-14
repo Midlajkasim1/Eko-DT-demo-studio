@@ -729,6 +729,7 @@ BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BACKEND_DIR, "static")
 MODELS_DIR = os.path.join(BACKEND_DIR, "models")
 TEXTURES_DIR = os.path.join(BACKEND_DIR, "textures")
+MAP_ASSETS_DIR = os.path.join(BACKEND_DIR, "mapassets")
 PROJECT_JSON = os.path.join(BACKEND_DIR, "project.json")
 LOGIN_HTML = os.path.join(BACKEND_DIR, "login.html")
 
@@ -800,6 +801,20 @@ async def serve_texture(filename: str):
     media, _ = mimetypes.guess_type(texture_path)
     return FileResponse(
         texture_path,
+        media_type=media or "application/octet-stream",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+@app.get("/mapassets/{filename:path}")
+async def serve_map_asset(filename: str):
+    """Serve a map render. Names are content hashes, so these never change."""
+    asset_path = _resolve_within(MAP_ASSETS_DIR, filename)
+    if not os.path.exists(asset_path):
+        raise HTTPException(status_code=404, detail=f"Map asset {filename} not found")
+    media, _ = mimetypes.guess_type(asset_path)
+    return FileResponse(
+        asset_path,
         media_type=media or "application/octet-stream",
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )

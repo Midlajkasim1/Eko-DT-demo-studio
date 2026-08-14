@@ -1,6 +1,8 @@
 import { useProjectStore } from '@/store/useProjectStore'
 import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
+import { useMapStore } from '@/store/useMapStore'
+import { hasMap } from '@/lib/mapConfig'
 
 export function Header() {
   const currentProject = useProjectStore(s => s.currentProject)
@@ -8,15 +10,25 @@ export function Header() {
   const closeProject = useProjectStore(s => s.closeProject)
   const saveProject = useProjectStore(s => s.saveProject)
   const setStep = useAppStore(s => s.setStep)
+  const step = useAppStore(s => s.step)
   const clearModels = useModelStore(s => s.clearModels)
 
   const handleBack = () => {
-    clearModels()
     useAppStore.getState().setMaterialPickerActive(false)
     useAppStore.getState().setSelectedMaterialElement(null)
     useAppStore.getState().setIsFullscreen(false)
     useAppStore.getState().setIsToolbarVisible(true)
+
+    // With a map open the previous screen is the map, not the project list
+    const returnToMap = (window as never as { __returnToMap?: () => void }).__returnToMap
+    if (step === 'viewing' && hasMap(currentProject) && returnToMap) {
+      returnToMap()
+      return
+    }
+
+    clearModels()
     useModelStore.getState().setActiveModelId(null)
+    useMapStore.getState().reset()
     closeProject()
     setStep('projects')
   }

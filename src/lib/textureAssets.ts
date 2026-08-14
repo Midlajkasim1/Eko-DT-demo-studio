@@ -12,7 +12,7 @@ const EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
 }
 
-async function sha256Prefix(bytes: ArrayBuffer): Promise<string> {
+export async function sha256Prefix(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes)
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0'))
     .join('')
@@ -21,11 +21,15 @@ async function sha256Prefix(bytes: ArrayBuffer): Promise<string> {
 
 /** Re-encode to WebP under the size cap. Falls back to the original bytes when that
  *  would be larger, or when the browser cannot encode WebP. */
-async function encodeCapped(source: Blob): Promise<{ blob: Blob; width: number; height: number; sourceWidth: number; sourceHeight: number }> {
+export async function encodeCapped(
+  source: Blob,
+  maxSize = MAX_TEXTURE_SIZE,
+  quality = WEBP_QUALITY
+): Promise<{ blob: Blob; width: number; height: number; sourceWidth: number; sourceHeight: number }> {
   const bitmap = await createImageBitmap(source)
   const sourceWidth = bitmap.width
   const sourceHeight = bitmap.height
-  const scale = Math.min(1, MAX_TEXTURE_SIZE / Math.max(sourceWidth, sourceHeight))
+  const scale = Math.min(1, maxSize / Math.max(sourceWidth, sourceHeight))
   const width = Math.max(1, Math.round(sourceWidth * scale))
   const height = Math.max(1, Math.round(sourceHeight * scale))
 
@@ -41,7 +45,7 @@ async function encodeCapped(source: Blob): Promise<{ blob: Blob; width: number; 
   bitmap.close()
 
   const encoded = await new Promise<Blob | null>(resolve =>
-    canvas.toBlob(resolve, 'image/webp', WEBP_QUALITY)
+    canvas.toBlob(resolve, 'image/webp', quality)
   )
   if (!encoded || encoded.type !== 'image/webp' || (encoded.size >= source.size && scale === 1)) {
     return { blob: source, width: sourceWidth, height: sourceHeight, sourceWidth, sourceHeight }

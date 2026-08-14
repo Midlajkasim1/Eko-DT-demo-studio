@@ -1,7 +1,9 @@
 import { get, set, del, keys, createStore } from 'idb-keyval'
 import type JSZip from 'jszip'
 import { ASSETS_VERSION, buildTextureAsset, collectGarbage, TEXTURES_DIR } from '@/lib/textureAssets'
-import type { ProjectMeta, ProjectModel, RecentProjectCard, TextureAsset } from '@/types'
+import { assetFileName, collectMapGarbage, MAP_ASSETS_DIR } from '@/lib/mapAssets'
+import { hasMap, pruneMapConfig } from '@/lib/mapConfig'
+import type { MapAsset, ProjectMeta, ProjectModel, RecentProjectCard, TextureAsset } from '@/types'
 
 // Only used to CACHE folder handles for "recent projects" — no actual data stored here
 const handleStore = createStore('ifcviewer-handles', 'folder-handles')
@@ -22,6 +24,7 @@ export function cardFromMeta(meta: ProjectMeta, thumbnail?: string): RecentProje
     modelCount: meta.models.length,
     updatedAt: meta.updatedAt,
     isFinProject: meta.isFinProject,
+    hasMap: hasMap(meta),
     thumbnail: thumbnail ?? meta.thumbnail,
   }
 }
@@ -359,9 +362,54 @@ function metaForBundledModels(meta: ProjectMeta, bundled: Set<string>): ProjectM
     narrowed.materialOverrides = Object.fromEntries(kept)
   }
 
+  if (meta.mapConfig) {
+    narrowed.mapConfig = pruneMapConfig(meta.mapConfig, bundled)
+    narrowed.mapAssets = collectMapGarbage(narrowed)
+  }
+
   if (meta.textures) narrowed.textures = collectGarbage(narrowed)
 
   return narrowed
+}
+
+/** Ship every map image the pruned config still references. A missing file also disables
+ *  the overlay that wanted it, so the export never declares imagery it does not carry. */
+async function addMapAssetsToZip(
+  handle: FileSystemDirectoryHandle,
+  meta: ProjectMeta,
+  zip: JSZip,
+  prefix: string
+): Promise<ProjectMeta> {
+  if (!meta.mapConfig || !meta.mapAssets || !Object.keys(meta.mapAssets).length) return meta
+
+  const dir = await handle.getDirectoryHandle(MAP_ASSETS_DIR, { create: true })
+  const shipped: Record<string, MapAsset> = {}
+  const missing: string[] = []
+
+  for (const asset of Object.values(meta.mapAssets)) {
+    const bytes = await readBinary(dir, assetFileName(asset))
+    if (bytes) {
+      zip.file(`${prefix}${asset.src}`, bytes, STORED)
+      shipped[asset.hash] = asset
+    } else {
+      missing.push(asset.src)
+    }
+  }
+  if (missing.length) {
+    console.warn(`[export] omitting ${missing.length} map asset(s) missing from disk: ${missing.join(', ')}`)
+  }
+
+  const basemap = meta.mapConfig.basemap
+  const mapConfig = {
+    ...meta.mapConfig,
+    overlays: (meta.mapConfig.overlays ?? []).filter(o => shipped[o.hash]),
+    basemap:
+      (basemap.kind === 'image' || basemap.kind === 'pack') && !shipped[basemap.hash]
+        ? ({ kind: 'void' } as const)
+        : basemap,
+  }
+
+  return { ...meta, mapConfig, mapAssets: shipped }
 }
 
 /** Ship every referenced texture as a sidecar file, converting any that the project
@@ -420,7 +468,8 @@ export async function exportProjectAsZip(handle: FileSystemDirectoryHandle, meta
   const models = await readBundledModels(handle, meta)
   const bundledMeta = metaForBundledModels(meta, new Set(models.map(m => m.modelId)))
 
-  const exportedMeta = await addTexturesToZip(handle, bundledMeta, zip, 'backend/')
+  const texturedMeta = await addTexturesToZip(handle, bundledMeta, zip, 'backend/')
+  const exportedMeta = await addMapAssetsToZip(handle, texturedMeta, zip, 'backend/')
 
   // Project metadata and models go inside backend/ so FastAPI can serve them.
   // Force finDirectMode off — this bundle ships the FastAPI backend, so the viewer
@@ -526,7 +575,8 @@ export async function exportFinProjectAsZip(handle: FileSystemDirectoryHandle, m
   const models = await readBundledModels(handle, meta)
   const bundledMeta = metaForBundledModels(meta, new Set(models.map(m => m.modelId)))
 
-  const exportedMeta = await addTexturesToZip(handle, bundledMeta, zip, '')
+  const texturedMeta = await addTexturesToZip(handle, bundledMeta, zip, '')
+  const exportedMeta = await addMapAssetsToZip(handle, texturedMeta, zip, '')
 
   // Force finDirectMode to true for the FIN standalone viewer since there is no backend
   const finMeta = { ...exportedMeta, apiSettings: { ...(exportedMeta.apiSettings || {}), finDirectMode: true } }

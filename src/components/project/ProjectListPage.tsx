@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react'
 import { useProjectStore } from '@/store/useProjectStore'
 import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
-import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
-import { loadModelsFromProject } from '@/lib/projectDb'
+import { useMapStore } from '@/store/useMapStore'
+import { streamProjectModels } from '@/lib/projectLoad'
+import { hasMap } from '@/lib/mapConfig'
 import { ProjectListSkeleton } from '@/components/project/ProjectListSkeleton'
 import type { ProjectMeta, RecentProjectCard } from '@/types'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
-import * as THREE from 'three'
 
 interface ProjectListPageProps {
   engineRef?: React.MutableRefObject<FragmentsEngine | null>
@@ -71,13 +71,28 @@ export function ProjectListPage({ engineRef }: ProjectListPageProps) {
     }
   }
 
+  const handleOpenMap = async (card: RecentProjectCard, handle: FileSystemDirectoryHandle) => {
+    setOpeningId(card.projectId)
+    try {
+      const openedMeta = await openRecentProject(handle)
+      if (!openedMeta) return
+      useAppStore.getState().reset()
+      if (openedMeta.renderSettings) {
+        setRealisticMode(openedMeta.renderSettings.realisticMode)
+        setLightingParams(openedMeta.renderSettings)
+      }
+      useMapStore.getState().reset()
+      setStep('map')
+    } finally {
+      setOpeningId(null)
+    }
+  }
+
   const loadModelsForProject = async (meta: ProjectMeta) => {
     const { folderHandle } = useProjectStore.getState()
     if (!folderHandle) return
 
     useAppStore.getState().reset()
-
-    setStep('viewing')
 
     // Restore settings before the models stream in
     if (meta.renderSettings) {
@@ -85,36 +100,20 @@ export function ProjectListPage({ engineRef }: ProjectListPageProps) {
       setLightingParams(meta.renderSettings)
     }
 
-    useModelStore.getState().setActiveModelId(null)
+    // A project with a map opens on it, and loads nothing until a location is picked
+    if (hasMap(meta)) {
+      useMapStore.getState().reset()
+      setStep('map')
+      return
+    }
 
-    const { beginSession, updateEntry } = useLoadingProgressStore.getState()
-    beginSession(meta.models.map(m => ({
-      modelId: m.modelId,
-      name: m.originalFileName,
-      sizeBytes: m.convertedFileSizeBytes || m.originalFileSizeBytes || 0,
-    })), 'disk')
+    setStep('viewing')
+
+    useModelStore.getState().setActiveModelId(null)
 
     // Each model is added the moment its bytes are read, so the sidebar list
     // fills in one by one rather than staying empty until the last file lands
-    await loadModelsFromProject(folderHandle, meta, (pm, readMs) => {
-      updateEntry(pm.modelId, { phase: 'pending', readMs, bytesRead: pm.fragBytes.byteLength, sizeBytes: pm.fragBytes.byteLength })
-      addModel({
-        modelId: pm.modelId,
-        originalFileName: pm.originalFileName,
-        originalFileSizeBytes: pm.originalFileSizeBytes,
-        convertedFileSizeBytes: pm.convertedFileSizeBytes,
-        conversionTimeMs: pm.conversionTimeMs,
-        fragBytes: pm.fragBytes,
-        type: pm.type,
-        position: pm.position,
-        rotation: pm.rotation,
-        scale: pm.scale,
-      })
-    }, (modelId, bytesRead, totalBytes) => {
-      updateEntry(modelId, { phase: 'reading', bytesRead, sizeBytes: totalBytes })
-    }, (modelId) => {
-      updateEntry(modelId, { phase: 'error', error: 'model file not found on disk' })
-    })
+    await streamProjectModels(folderHandle, meta)
   }
 
   const handleDeleteRecent = async (projectId: string) => {
@@ -215,6 +214,7 @@ export function ProjectListPage({ engineRef }: ProjectListPageProps) {
               isOpening={openingId === card.projectId}
               isDeleting={deletingId === card.projectId}
               onOpen={() => handleOpenRecent(card, handle)}
+              onOpenMap={() => handleOpenMap(card, handle)}
               onRemoveRecent={() => setDeletingId(card.projectId)}
               onConfirmRemove={() => handleDeleteRecent(card.projectId)}
               onCancelRemove={() => setDeletingId(null)}
@@ -232,6 +232,7 @@ interface ProjectCardProps {
   isOpening: boolean
   isDeleting: boolean
   onOpen: () => void
+  onOpenMap: () => void
   onRemoveRecent: () => void
   onConfirmRemove: () => void
   onCancelRemove: () => void
@@ -240,7 +241,7 @@ interface ProjectCardProps {
 
 function ProjectCard({
   project, isOpening, isDeleting,
-  onOpen, onRemoveRecent, onConfirmRemove, onCancelRemove,
+  onOpen, onOpenMap, onRemoveRecent, onConfirmRemove, onCancelRemove,
   formatDate
 }: ProjectCardProps) {
   const thumbnail = project.thumbnail
@@ -304,6 +305,17 @@ function ProjectCard({
             <button className="project-card-action-btn" onClick={onOpen} title="Open project">
               <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
                 <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+              </svg>
+            </button>
+            <button
+              className="project-card-action-btn"
+              onClick={onOpenMap}
+              title={project.hasMap ? 'Open map' : 'Set up a map'}
+              style={project.hasMap ? { color: 'var(--accent)' } : undefined}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" width="14" height="14">
+                <path d="M9 4 3 6.5v13L9 17l6 2.5 6-2.5v-13L15 6.5 9 4z" strokeLinejoin="round"/>
+                <path d="M9 4v13M15 6.5v13" strokeLinejoin="round"/>
               </svg>
             </button>
             <div style={{ flex: 1 }} />
