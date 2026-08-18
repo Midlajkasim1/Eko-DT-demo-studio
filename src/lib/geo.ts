@@ -99,14 +99,9 @@ export function quadUnion(quads: GeoQuad[]): [LngLat, LngLat] | null {
   return [[west, south], [east, north]]
 }
 
-export function expandBounds([[west, south], [east, north]]: [LngLat, LngLat], ratio: number): [LngLat, LngLat] {
-  const padX = (east - west) * ratio
-  const padY = (north - south) * ratio
-  return [
-    [Math.max(-180, west - padX), Math.max(-MAX_LATITUDE, south - padY)],
-    [Math.min(180, east + padX), Math.min(MAX_LATITUDE, north + padY)],
-  ]
-}
+/** Centre in Mercator rather than in degrees, so framing a box lands on it exactly */
+export const boundsCenter = ([[west, south], [east, north]]: [LngLat, LngLat]): LngLat =>
+  [(west + east) / 2, tileYToLat((mercatorY(south) + mercatorY(north)) / 2, 0)]
 
 export function quadContains(quad: GeoQuad, lon: number, lat: number) {
   const bounds = quadUnion([quad])

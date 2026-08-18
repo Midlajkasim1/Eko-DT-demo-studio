@@ -47,3 +47,7 @@ AUDIT_REPORT.md
 /scripts/_shots/
 /scratch/
 /tests
+
+# Third-party assets captured for architecture analysis only — never shipped
+# *.har
+# /har-extract/

@@ -9,5 +9,7 @@ export const BUILTIN_RENDERS: MapOverlay[] = REGIONS.flatMap(region => region.re
 
 export const findRegion = (id: string) => REGIONS.find(region => region.id === id) ?? null
 
+export const findBuiltinRender = (id: string) => BUILTIN_RENDERS.find(render => render.id === id) ?? null
+
 export type { MapRegion }
 export { BUILTIN_PREFIX, BUILTIN_RENDERS_DIR, builtinHash } from './paths'

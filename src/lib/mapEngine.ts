@@ -1,9 +1,9 @@
 import { Map as MaplibreMap, Marker, setWorkerUrl } from 'maplibre-gl'
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
-import { expandBounds, minZoomToCover, quadContains, quadUnion } from '@/lib/geo'
-import { childrenOf, overlaysForLevel } from '@/lib/mapConfig'
+import { boundsCenter, minZoomToCover, quadContains, quadUnion } from '@/lib/geo'
+import { childrenOf, findLocation, overlaysForLevel } from '@/lib/mapConfig'
 import type { AssetHandle, AssetResolver } from '@/lib/mapAssets'
-import type { GeoQuad, MapConfig, MapLocation, MapOverlay } from '@/types'
+import type { GeoQuad, MapCamera, MapConfig, MapLocation, MapOverlay } from '@/types'
 import type { ImageSource, RasterLayerSpecification, StyleSpecification } from 'maplibre-gl'
 
 setWorkerUrl(workerUrl)
@@ -20,10 +20,19 @@ const RASTER_GRADE = {
   'raster-saturation': 0.12,
 } as const
 
+const DEFAULT_MIN_ZOOM = 1
+const DEFAULT_MAX_ZOOM = 18.4
+const DEFAULT_MAX_PITCH = 70
+
 const OVERVIEW_DURATION = 1200
 const FOCUS_DURATION = 1600
+const LEVEL_DURATION = 1200
 const ZOOM_STEP = 0.8
 const ZOOM_DURATION = 280
+
+/** Entering a level unmounts the pin that was clicked, so the double click has to be ruled out
+ *  before that happens or it can never land. Comfortably inside a system double-click interval. */
+const DOUBLE_CLICK_GRACE = 280
 
 const overlayId = (overlay: MapOverlay) => `overlay-${overlay.id}`
 const BASEMAP_SOURCE = 'basemap'
@@ -97,7 +106,12 @@ export interface MapEngineOptions {
   resolveAsset: AssetResolver
   levelId: string | null
   reducedMotion?: boolean
+  /** A click: show this location */
   onSelectLocation?: (location: MapLocation) => void
+  /** A click no second click followed: go into this location */
+  onEnterLocation?: (location: MapLocation) => void
+  /** A double click: open this location */
+  onOpenLocation?: (location: MapLocation) => void
   onMapClick?: (lngLat: [number, number]) => void
   onLocationMoved?: (id: string, lngLat: [number, number]) => void
 }
@@ -106,9 +120,9 @@ export interface MapEngine {
   readonly map: MaplibreMap
   setConfig(next: MapConfig): Promise<void>
   setLevel(levelId: string | null): void
+  setSelected(id: string | null): void
   setDraggable(draggable: boolean): void
   flyToLocation(id: string): void
-  flyToCamera(camera: MapConfig['camera'], duration?: number): void
   flyToOverview(): void
   playIntro(): void
   zoomBy(delta: number): void
@@ -131,27 +145,39 @@ const Z_TIER: Record<string, number> = { pin: 5, place: 2, road: 2 }
 export function createMapEngine(container: HTMLDivElement, options: MapEngineOptions): MapEngine {
   let config = options.config
   let levelId = options.levelId
+  let selectedId: string | null = null
   let draggable = false
+  let styleReady = false
 
   const teardown: (() => void)[] = []
   const listeners = new Set<(state: MapEngineState) => void>()
   const held = new Map<string, AssetHandle>()
   const markers = new Map<string, MarkerEntry>()
+  let settleTimer = 0
+  teardown.push(() => clearTimeout(settleTimer))
 
   const reduced = options.reducedMotion ??
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const duration = (ms: number) => (reduced ? 0 : ms)
+
+  /** Inside a level, and under an image basemap, the imagery is one fixed rectangle: any bearing
+   *  or pitch swings the viewport off it and exposes the void behind. */
+  const flat = () =>
+    levelId !== null || config.basemap.kind === 'void' || config.basemap.kind === 'image'
+
+  const tiled = () =>
+    levelId === null && (config.basemap.kind === 'xyz' || config.basemap.kind === 'pack')
 
   const map = new MaplibreMap({
     container,
     style: buildStyle(config),
     center: config.camera.center,
     zoom: config.camera.zoom,
-    bearing: config.camera.bearing ?? 0,
-    pitch: config.camera.pitch ?? 0,
-    minZoom: config.minZoom ?? 1,
-    maxZoom: config.maxZoom ?? 18.4,
-    maxPitch: config.maxPitch ?? 70,
+    bearing: flat() ? 0 : config.camera.bearing ?? 0,
+    pitch: flat() ? 0 : config.camera.pitch ?? 0,
+    minZoom: config.minZoom ?? DEFAULT_MIN_ZOOM,
+    maxZoom: config.maxZoom ?? DEFAULT_MAX_ZOOM,
+    maxPitch: flat() ? 0 : config.maxPitch ?? DEFAULT_MAX_PITCH,
     renderWorldCopies: false,
     attributionControl: false,
     fadeDuration: reduced ? 0 : 200,
@@ -166,6 +192,23 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
       teardown.push(() => map.off(type as never, handler))
     }
   }
+
+  function applyInteractions() {
+    if (flat()) {
+      map.dragRotate.disable()
+      map.touchPitch.disable()
+      map.keyboard.disableRotation()
+      map.setMaxPitch(0)
+      if (map.getBearing() !== 0) map.jumpTo({ bearing: 0 })
+      return
+    }
+    map.dragRotate.enable()
+    map.touchPitch.enable()
+    map.keyboard.enableRotation()
+    map.setMaxPitch(config.maxPitch ?? DEFAULT_MAX_PITCH)
+  }
+
+  applyInteractions()
 
   /* ── Camera state, coalesced into one frame and quantised so idle costs nothing ── */
 
@@ -209,7 +252,7 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
     resizeFrame = requestAnimationFrame(() => {
       resizeFrame = 0
       map.resize()
-      applyLimits()
+      if (styleReady) applyLimits()
     })
   })
   observer.observe(container)
@@ -223,32 +266,27 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
   /** Only imagery constrains the camera. Pins alone must not, or a project with two pins and
    *  no renders would be locked into the degenerate box between them. */
   function imageryQuads(): GeoQuad[] {
-    const quads = (config.overlays ?? []).map(o => o.coordinates)
-    if (config.basemap.kind === 'image') quads.push(config.basemap.coordinates)
+    const quads = overlaysForLevel(config, levelId).map(o => o.coordinates)
+    if (levelId === null && config.basemap.kind === 'image') quads.push(config.basemap.coordinates)
     return quads
   }
 
   function applyLimits() {
-    const ceiling = config.maxZoom ?? 18.4
-    const floor = config.minZoom ?? 1
+    const ceiling = config.maxZoom ?? DEFAULT_MAX_ZOOM
+    const floor = config.minZoom ?? DEFAULT_MIN_ZOOM
 
-    const tiled = config.basemap.kind === 'xyz' || config.basemap.kind === 'pack'
-    const bounds = tiled ? null : quadUnion(imageryQuads())
+    // Tiles cover the world, so there is nothing to pull back from and nothing to pan off
+    const bounds = tiled() ? null : quadUnion(imageryQuads())
+    map.setMaxBounds(bounds as never)
 
-    let min = floor
-    if (bounds) {
-      const padded = expandBounds(bounds, config.padding ?? 0.15)
-      map.setMaxBounds(padded as never)
-      // never let the camera pull back past the imagery into the void
-      min = Math.max(floor, minZoomToCover(padded, container.clientWidth || 1, container.clientHeight || 1))
-    } else {
-      map.setMaxBounds(null)
-    }
+    const cover = bounds
+      ? minZoomToCover(bounds, container.clientWidth || 1, container.clientHeight || 1)
+      : floor
 
     // widen before narrowing — MapLibre rejects a max that sits below the current min
     map.setMinZoom(0)
     map.setMaxZoom(ceiling)
-    map.setMinZoom(Math.min(min, ceiling))
+    map.setMinZoom(Math.min(Math.max(floor, cover), ceiling))
   }
 
   /* ── Image sources: filled after creation so the studio can hand over a decoded bitmap ── */
@@ -302,13 +340,18 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
     }
 
     for (const [id, overlay] of nextById) {
-      const previous = previousById.get(id)
-      if (!previous || !map.getSource(id)) {
+      const mounted = !!map.getSource(id)
+      if (!mounted) {
         map.addSource(id, { type: 'image', url: TRANSPARENT_PX, coordinates: overlay.coordinates })
-        map.addLayer(overlayLayer(overlay))
+      }
+      if (!map.getLayer(id)) map.addLayer(overlayLayer(overlay))
+
+      const previous = previousById.get(id)
+      if (!previous || !mounted) {
         await fillImage(id, overlay.hash)
         continue
       }
+
       if (!sameQuad(previous.coordinates, overlay.coordinates)) {
         ;(map.getSource(id) as ImageSource).setCoordinates(overlay.coordinates as never)
       }
@@ -319,7 +362,7 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
       }
     }
 
-    // Shallow first, so deeper pyramid levels composite on top
+    // Config order is draw order, so an author can stack a detail render over a wider one
     const ordered = [...nextById.keys()].filter(id => map.getLayer(id))
     for (let i = ordered.length - 2; i >= 0; i--) map.moveLayer(ordered[i], ordered[i + 1])
 
@@ -329,6 +372,13 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
   async function hydrateBasemap() {
     if (config.basemap.kind !== 'image') return
     await fillImage(BASEMAP_SOURCE, config.basemap.hash)
+  }
+
+  /** A level is a framed view of its own render, so the basemap under it would only show
+   *  through at the edges */
+  function syncBasemapVisibility() {
+    if (!map.getLayer(BASEMAP_SOURCE)) return
+    map.setLayoutProperty(BASEMAP_SOURCE, 'visibility', levelId === null ? 'visible' : 'none')
   }
 
   /* ── Markers: diffed by id, with every visual transform on an inner element because
@@ -353,10 +403,9 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
     root.style.zIndex = String(Z_TIER[kind] ?? 5)
 
     if (kind === 'pin') {
-      const drills = childrenOf(config.locations, spec.id).length > 0
-      const count = drills
-        ? childrenOf(config.locations, spec.id).length
-        : (spec.modelIds?.length ?? 0)
+      const children = childrenOf(config.locations, spec.id).length
+      const models = spec.modelIds?.length ?? 0
+      const count = children || models
       body.innerHTML =
         '<span class="map-marker-dot"></span><span class="map-marker-text"></span><span class="map-marker-count"></span>'
       body.querySelector('.map-marker-text')!.textContent = spec.name
@@ -364,10 +413,10 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
       if (spec.color) body.style.setProperty('--marker-accent', spec.color)
       body.setAttribute(
         'aria-label',
-        drills ? `${spec.name}, ${count} location${count === 1 ? '' : 's'}`
-               : `${spec.name}, ${count} model${count === 1 ? '' : 's'}`
+        children ? `${spec.name}, ${count} location${count === 1 ? '' : 's'}`
+                 : `${spec.name}, ${count} model${count === 1 ? '' : 's'}`
       )
-      const inert = !drills && !spec.modelIds?.length
+      const inert = !children && !models
       body.toggleAttribute('aria-disabled', inert)
       body.classList.toggle('map-marker-body--inert', inert)
     } else {
@@ -376,9 +425,11 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
     }
   }
 
-  const specChanged = (a: MapLocation, b: MapLocation) =>
-    a.name !== b.name || a.kind !== b.kind || a.color !== b.color ||
-    a.rotation !== b.rotation || a.modelIds?.length !== b.modelIds?.length
+  function paintSelection() {
+    for (const [id, entry] of markers) {
+      entry.root.classList.toggle('map-marker-selected', id === selectedId)
+    }
+  }
 
   function syncMarkers() {
     const next = childrenOf(config.locations, levelId)
@@ -391,11 +442,8 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
         if (existing.spec.position[0] !== spec.position[0] || existing.spec.position[1] !== spec.position[1]) {
           existing.marker.setLngLat(spec.position)
         }
-        if (specChanged(existing.spec, spec)) {
-          existing.spec = spec
-          paintMarker(existing, spec)
-        }
         existing.spec = spec
+        paintMarker(existing, spec)
         existing.marker.setDraggable(draggable && (spec.kind ?? 'pin') === 'pin')
         continue
       }
@@ -413,7 +461,19 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
           event.stopPropagation()
           // Read the live spec so a rename or re-point never fires a stale payload
           const current = markers.get(spec.id)?.spec
-          if (current) options.onSelectLocation?.(current)
+          if (!current) return
+          options.onSelectLocation?.(current)
+          clearTimeout(settleTimer)
+          settleTimer = window.setTimeout(
+            () => options.onEnterLocation?.(current),
+            DOUBLE_CLICK_GRACE
+          )
+        })
+        body.addEventListener('dblclick', event => {
+          event.stopPropagation()
+          clearTimeout(settleTimer)
+          const current = markers.get(spec.id)?.spec
+          if (current) options.onOpenLocation?.(current)
         })
         body.id = `map-pin-${spec.id}`
         marker.on('dragend', () => {
@@ -429,34 +489,48 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
       entry.marker.remove()
       markers.delete(id)
     }
+
+    paintSelection()
   }
 
   /* ── Camera ── */
 
-  function flyToCamera(camera: MapConfig['camera'], ms = OVERVIEW_DURATION) {
+  function flyToCamera(camera: MapCamera, ms: number) {
     map.flyTo({
       center: camera.center,
       zoom: camera.zoom,
-      bearing: camera.bearing ?? 0,
-      pitch: camera.pitch ?? 0,
+      bearing: flat() ? 0 : camera.bearing ?? 0,
+      pitch: flat() ? 0 : camera.pitch ?? 0,
       duration: duration(ms),
     })
   }
 
+  /** The one place a level change moves the camera. Framing anywhere else races the limits
+   *  applied alongside it, and the map visibly snaps back mid-flight. */
+  function frameLevel(ms: number) {
+    const level = findLocation(config.locations, levelId)
+    if (level?.view) return flyToCamera(level.view, ms)
+    if (!level) return flyToCamera(config.camera, ms)
+
+    // getMinZoom is the zoom at which this level's imagery exactly covers the viewport
+    const bounds = quadUnion(imageryQuads())
+    if (bounds) return flyToCamera({ center: boundsCenter(bounds), zoom: map.getMinZoom() }, ms)
+    flyToCamera({ center: level.position, zoom: map.getZoom() }, ms)
+  }
+
   function flyToLocation(id: string) {
-    const location = (config.locations ?? []).find(l => l.id === id)
+    const location = findLocation(config.locations, id)
     if (!location) return
-    if (location.view) {
-      flyToCamera(location.view, FOCUS_DURATION)
-      return
-    }
+    if (location.view) return flyToCamera(location.view, FOCUS_DURATION)
+
     // Flat renders look wrong under tilt, so pitch drops where one covers the pin
-    const covered = (config.overlays ?? []).some(o => quadContains(o.coordinates, ...location.position))
+    const covered = overlaysForLevel(config, levelId)
+      .some(o => quadContains(o.coordinates, ...location.position))
     map.flyTo({
       center: location.position,
       zoom: covered ? 13.8 : 13.2,
-      pitch: covered ? 30 : 58,
-      bearing: config.camera.bearing ?? 0,
+      pitch: flat() ? 0 : covered ? 30 : 58,
+      bearing: flat() ? 0 : config.camera.bearing ?? 0,
       duration: duration(FOCUS_DURATION),
     })
   }
@@ -464,37 +538,57 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
   function playIntro() {
     const intro = config.intro
     if (!intro?.enabled || reduced) return
+    const bearing = flat() ? 0 : config.camera.bearing ?? 0
     map.jumpTo({
       center: config.camera.center,
       zoom: config.camera.zoom - intro.pullBack,
-      bearing: (config.camera.bearing ?? 0) + intro.bearingOffset,
+      bearing: bearing + (flat() ? 0 : intro.bearingOffset),
       pitch: 0,
     })
     map.once('idle', () => {
       map.flyTo({
         center: config.camera.center,
         zoom: config.camera.zoom,
-        bearing: config.camera.bearing ?? 0,
-        pitch: config.camera.pitch ?? 0,
+        bearing,
+        pitch: flat() ? 0 : config.camera.pitch ?? 0,
         duration: intro.duration,
         curve: 1.15,
       })
     })
   }
 
-  /* ── Lifecycle ── */
+  /* ── Lifecycle: every style edit is serialised. Overlay sync awaits its textures, and two
+        overlapping runs read the same "what is mounted" snapshot and unmount each other. ── */
 
-  const onStyleReady = async () => {
-    await hydrateBasemap()
-    await syncOverlays()
-    syncMarkers()
-    applyLimits()
-    state = { ...state, ready: true }
-    for (const listener of listeners) listener(state)
+  let queue: Promise<void> = Promise.resolve()
+
+  function enqueue(task: () => Promise<void> | void): Promise<void> {
+    queue = queue
+      .then(() => (styleReady ? task() : undefined))
+      .catch((error: unknown) => { console.error('[map] style update failed', error) })
+    return queue
+  }
+
+  /** Resolves on the rebuilt style, or at once if the engine is disposed while waiting */
+  function nextStyleData() {
+    return new Promise<void>(resolve => {
+      const done = () => resolve()
+      map.once('styledata', done)
+      teardown.push(done)
+    })
   }
 
   map.once('load', () => {
-    void onStyleReady()
+    styleReady = true
+    void enqueue(async () => {
+      await hydrateBasemap()
+      await syncOverlays()
+      syncMarkers()
+      syncBasemapVisibility()
+      applyLimits()
+      state = { ...state, ready: true }
+      for (const listener of listeners) listener(state)
+    })
     playIntro()
   })
 
@@ -505,28 +599,43 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
   return {
     map,
 
-    async setConfig(next: MapConfig) {
+    setConfig(next: MapConfig) {
       const basemapChanged = JSON.stringify(next.basemap) !== JSON.stringify(config.basemap)
       config = next
-      if (!map.isStyleLoaded()) return
-
-      if (basemapChanged) {
-        releaseAll()
-        visibleOverlays = []
-        map.setStyle(buildStyle(next))
-        await new Promise<void>(resolve => map.once('styledata', () => resolve()))
-      }
-      await hydrateBasemap()
-      await syncOverlays()
-      syncMarkers()
-      applyLimits()
+      return enqueue(async () => {
+        if (basemapChanged) {
+          releaseAll()
+          visibleOverlays = []
+          map.setStyle(buildStyle(config))
+          await nextStyleData()
+          if (!styleReady) return
+        }
+        applyInteractions()
+        await hydrateBasemap()
+        await syncOverlays()
+        syncMarkers()
+        syncBasemapVisibility()
+        applyLimits()
+      })
     },
 
     setLevel(next: string | null) {
+      if (next === levelId) return
       levelId = next
-      if (!map.isStyleLoaded()) return
-      void syncOverlays()
-      syncMarkers()
+      void enqueue(async () => {
+        applyInteractions()
+        await syncOverlays()
+        syncMarkers()
+        syncBasemapVisibility()
+        applyLimits()
+        frameLevel(LEVEL_DURATION)
+      })
+    },
+
+    setSelected(id: string | null) {
+      if (id === selectedId) return
+      selectedId = id
+      paintSelection()
     },
 
     setDraggable(next: boolean) {
@@ -537,8 +646,7 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
     },
 
     flyToLocation,
-    flyToCamera,
-    flyToOverview: () => flyToCamera(config.camera, OVERVIEW_DURATION),
+    flyToOverview: () => frameLevel(OVERVIEW_DURATION),
     playIntro,
 
     zoomBy(delta: number) {
@@ -559,6 +667,7 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
     resize: () => map.resize(),
 
     dispose() {
+      styleReady = false
       for (const fn of teardown.splice(0)) fn()
       for (const entry of markers.values()) entry.marker.remove()
       markers.clear()

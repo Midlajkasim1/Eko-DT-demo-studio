@@ -9,7 +9,7 @@ export const DUBAI: MapRegion = {
   id: 'dubai',
   name: 'Dubai',
   country: 'United Arab Emirates',
-  camera: { center: [55.161, 25.131], zoom: 12.35, bearing: -10, pitch: 40 },
+  camera: { center: [55.161, 25.131], zoom: 12.35, bearing: 0, pitch: 0 },
   renders: [
     {
       id: 'dubai-overview',

@@ -19,7 +19,8 @@ interface MapState {
 
   enterLevel: (id: string) => void
   exitLevel: () => void
-  goToLevel: (id: string | null) => void
+  /** Root-first chain of ids; the caller resolves it from the config, which owns the tree */
+  setPath: (path: string[]) => void
   select: (id: string | null) => void
   setPhase: (phase: MapPhase) => void
   setActiveLocationId: (id: string | null) => void
@@ -47,12 +48,10 @@ const INITIAL = {
 export const useMapStore = create<MapState>((set, get) => ({
   ...INITIAL,
 
-  enterLevel: (id) => set(s => ({ path: [...s.path, id], selectedId: null })),
+  // The level stays selected on the way in, so its detail panel describes what is now on screen
+  enterLevel: (id) => set(s => ({ path: [...s.path, id], selectedId: id })),
   exitLevel: () => set(s => ({ path: s.path.slice(0, -1), selectedId: null })),
-  goToLevel: (id) => set(s => ({
-    path: id === null ? [] : s.path.slice(0, s.path.indexOf(id) + 1),
-    selectedId: null,
-  })),
+  setPath: (path) => set({ path, selectedId: null }),
 
   select: (id) => set({ selectedId: id }),
   setPhase: (phase) => set({ phase }),

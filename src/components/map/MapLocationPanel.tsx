@@ -1,19 +1,20 @@
-import type { MapLocation, ProjectModelEntry } from '@/types'
+import type { MapLocation } from '@/types'
 
 interface MapLocationPanelProps {
   location: MapLocation
-  models: ProjectModelEntry[]
   childCount: number
+  /** Only ever the models. Going into a level is what the click on the pin already did. */
+  canExplore: boolean
   busy: boolean
-  onOpen: () => void
+  onExplore: () => void
   onClose: () => void
 }
 
-const formatMb = (bytes: number) => `${(bytes / 1048576).toFixed(1)} MB`
-
-export function MapLocationPanel({ location, models, childCount, busy, onOpen, onClose }: MapLocationPanelProps) {
+export function MapLocationPanel({
+  location, childCount, canExplore, busy, onExplore, onClose,
+}: MapLocationPanelProps) {
   const drills = childCount > 0
-  const canOpen = drills || models.length > 0
+  const hasBody = drills || !!location.description || !!location.stats?.length
 
   return (
     <aside className="map-panel" role="dialog" aria-label={location.name}>
@@ -29,6 +30,7 @@ export function MapLocationPanel({ location, models, childCount, busy, onOpen, o
         </button>
       </header>
 
+      {hasBody && (
       <div className="map-panel-body">
         {location.description && <p className="map-panel-text">{location.description}</p>}
 
@@ -43,31 +45,21 @@ export function MapLocationPanel({ location, models, childCount, busy, onOpen, o
           </div>
         )}
 
-        {drills ? (
-          <p className="map-panel-text" style={{ marginTop: 14 }}>
+        {drills && (
+          <p className="map-panel-text" style={{ marginTop: 14, opacity: 0.7 }}>
             {childCount} location{childCount === 1 ? '' : 's'} inside.
-          </p>
-        ) : models.length ? (
-          <div className="map-model-list">
-            {models.map(model => (
-              <div className="map-model-row" key={model.modelId}>
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{model.originalFileName}</span>
-                <span style={{ opacity: 0.7 }}>{formatMb(model.convertedFileSizeBytes || model.originalFileSizeBytes || 0)}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="map-panel-text map-danger" style={{ marginTop: 14 }}>
-            No models assigned to this location yet.
           </p>
         )}
       </div>
+      )}
 
-      <footer className="map-panel-foot">
-        <button className="map-cta" onClick={onOpen} disabled={!canOpen || busy}>
-          {busy ? 'Loading…' : drills ? 'Enter level' : 'Open model'}
-        </button>
-      </footer>
+      {canExplore && (
+        <footer className="map-panel-foot">
+          <button className="map-cta" onClick={onExplore} disabled={busy}>
+            {busy ? 'Loading…' : 'Explore'}
+          </button>
+        </footer>
+      )}
     </aside>
   )
 }

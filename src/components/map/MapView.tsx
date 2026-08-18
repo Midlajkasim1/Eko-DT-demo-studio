@@ -5,7 +5,9 @@ import { useMapEngine } from '@/hooks/useMapEngine'
 import { useMapStore } from '@/store/useMapStore'
 import { createAssetResolver } from '@/lib/mapAssets'
 import { addLocation, updateLocation } from '@/lib/mapDraft'
-import { childrenOf, emptyMapConfig, findLocation, hasChildren, liveModelIds, pathTo, withBuiltinRenders } from '@/lib/mapConfig'
+import {
+  childrenOf, findLocation, hasChildren, liveModelIds, pathTo, starterMapConfig, withBuiltinRenders,
+} from '@/lib/mapConfig'
 import { MapBreadcrumb } from '@/components/map/MapBreadcrumb'
 import { MapControls } from '@/components/map/MapControls'
 import { MapLocationPanel } from '@/components/map/MapLocationPanel'
@@ -32,16 +34,17 @@ export function MapView({ meta, folderHandle, adminMode, onOpenLocation, onExit 
   const editTool = useMapStore(s => s.editTool)
   const select = useMapStore(s => s.select)
   const enterLevel = useMapStore(s => s.enterLevel)
-  const goToLevel = useMapStore(s => s.goToLevel)
+  const setPath = useMapStore(s => s.setPath)
 
   const updateDraft = useMapStore(s => s.updateDraft)
   const setEditTool = useMapStore(s => s.setEditTool)
 
-  // A project being given its first map has nothing saved yet, so the blank config renders
+  // A project being given its first map has nothing saved yet, so the starter config renders
   const config = useMemo(
-    () => withBuiltinRenders((editing && draft) || meta.mapConfig || emptyMapConfig()),
+    () => withBuiltinRenders((editing && draft) || meta.mapConfig || starterMapConfig()),
     [editing, draft, meta.mapConfig]
   )
+  const locations = config.locations
   const levelId = path.length ? path[path.length - 1] : null
   const resolveAsset = useMemo(
     () => createAssetResolver(meta, folderHandle),
@@ -49,13 +52,23 @@ export function MapView({ meta, folderHandle, adminMode, onOpenLocation, onExit 
   )
 
   const engineOptions = useMemo(
-    () => (config ? { config, levelId, resolveAsset } : null),
+    () => ({ config, levelId, resolveAsset }),
     [config, levelId, resolveAsset]
   )
 
   const handleSelect = useCallback((location: MapLocation) => {
     select(location.id)
   }, [select])
+
+  const handleEnter = useCallback((location: MapLocation) => {
+    if (hasChildren(locations, location.id)) enterLevel(location.id)
+  }, [locations, enterLevel])
+
+  /** Models win the double click; a pin with none falls back to going in, so it always does something */
+  const handleOpen = useCallback((location: MapLocation) => {
+    if (liveModelIds(meta, location).length) onOpenLocation(location)
+    else if (hasChildren(locations, location.id)) enterLevel(location.id)
+  }, [locations, meta, enterLevel, onOpenLocation])
 
   const handleMapClick = useCallback((lngLat: [number, number]) => {
     if (editTool === 'pin') {
@@ -72,6 +85,8 @@ export function MapView({ meta, folderHandle, adminMode, onOpenLocation, onExit 
 
   const { engine } = useMapEngine(containerRef, engineOptions, {
     onSelectLocation: handleSelect,
+    onEnterLocation: handleEnter,
+    onOpenLocation: handleOpen,
     onMapClick: handleMapClick,
     onLocationMoved: handleMoved,
   })
@@ -81,44 +96,33 @@ export function MapView({ meta, folderHandle, adminMode, onOpenLocation, onExit 
   }, [engine, editing, editTool])
 
   useEffect(() => {
+    engine?.setSelected(selectedId)
+  }, [engine, selectedId])
+
+  useEffect(() => {
     if (!import.meta.env.DEV) return
     ;(window as never as { __mapEngineForTest?: unknown }).__mapEngineForTest = engine?.map
   }, [engine])
 
-  // Fly to the pin the moment it is picked, so the panel opens over the right place
+  // Only the main map flies on select: a level frames itself, and inside one the render already fills the screen
+  const selectedEntersLevel = !!selectedId && hasChildren(locations, selectedId)
   useEffect(() => {
-    if (selectedId) engine?.flyToLocation(selectedId)
-  }, [engine, selectedId])
+    if (!selectedId || levelId !== null || selectedEntersLevel) return
+    engine?.flyToLocation(selectedId)
+    // `locations` is deliberately not a dependency: renaming a pin would re-fly the camera
+  }, [engine, selectedId, levelId, selectedEntersLevel])
 
-  const locations = config?.locations
   const selected = findLocation(locations, selectedId)
+  const canExplore = !!selected && liveModelIds(meta, selected).length > 0
+
   const trail = useMemo(
     () => pathTo(locations, levelId).map(id => findLocation(locations, id)).filter(Boolean) as MapLocation[],
     [locations, levelId]
   )
 
-  const selectedModels = useMemo(() => {
-    if (!selected) return []
-    const ids = new Set(liveModelIds(meta, selected))
-    return meta.models.filter(m => ids.has(m.modelId))
-  }, [meta, selected])
-
-  const handleOpen = useCallback(() => {
-    if (!selected) return
-    if (hasChildren(locations, selected.id)) {
-      enterLevel(selected.id)
-      if (selected.view) engine?.flyToCamera(selected.view, 1200)
-      return
-    }
-    onOpenLocation(selected)
-  }, [selected, locations, enterLevel, engine, onOpenLocation])
-
   const handleGoTo = useCallback((id: string | null) => {
-    goToLevel(id)
-    const target = findLocation(locations, id)
-    if (target?.view) engine?.flyToCamera(target.view, 1200)
-    else if (!id && config) engine?.flyToCamera(config.camera, 1200)
-  }, [goToLevel, locations, engine, config])
+    setPath(id ? pathTo(locations, id) : [])
+  }, [setPath, locations])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -147,7 +151,6 @@ export function MapView({ meta, folderHandle, adminMode, onOpenLocation, onExit 
       aria-label="Project location map"
     >
       <div ref={containerRef} className="map-canvas" />
-      <div className="map-vignette" />
 
       <header className="map-topbar">
         <MapBreadcrumb projectName={meta.name} trail={trail} onGoTo={handleGoTo} />
@@ -160,10 +163,10 @@ export function MapView({ meta, folderHandle, adminMode, onOpenLocation, onExit 
       {selected && (
         <MapLocationPanel
           location={selected}
-          models={selectedModels}
           childCount={childrenOf(locations, selected.id).length}
+          canExplore={canExplore}
           busy={phase === 'loading'}
-          onOpen={handleOpen}
+          onExplore={() => onOpenLocation(selected)}
           onClose={() => select(null)}
         />
       )}
