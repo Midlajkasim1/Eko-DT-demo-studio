@@ -234,13 +234,44 @@ export function RenderPanel() {
             onChange={v => { setRealisticMode(v); if (v) setLightingParams({ renderLite: false }) }}
           />
           <Toggle
-            label="Render Lite ⚡"
-            title="Shadows + tone mapping, no skybox/clouds. Matches Autodesk default quality at higher FPS."
+            label="Render Lite"
+            title="Clean BIM quality: shadows, ambient occlusion, edge outlines — no skybox or heavy effects."
             checked={s.renderLite && !s.realisticMode}
-            onChange={v => { setLightingParams({ renderLite: v }); if (v) setRealisticMode(false) }}
+            onChange={v => {
+              setLightingParams({
+                renderLite: v,
+                progressiveRendering: v,
+                // Auto-enable the core BIM quality passes when switching on
+                ...(v ? { shadowsEnabled: true, softShadows: true, ambientOcclusion: true, outlineEdges: true } : {}),
+              })
+              if (v) setRealisticMode(false)
+            }}
           />
           <Toggle label="Ground Grid" checked={s.gridVisible}
             onChange={v => setLightingParams({ gridVisible: v })} />
+
+          {/* ── Render Lite settings ───────────────────────────── */}
+          {s.renderLite && !s.realisticMode && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+              <SectionDivider label="Render Lite" />
+              <Toggle label="Cast Shadows"
+                checked={s.shadowsEnabled}
+                onChange={v => setLightingParams({ shadowsEnabled: v })} />
+              {s.shadowsEnabled && (
+                <Toggle label="Soft Shadows"
+                  checked={s.softShadows}
+                  onChange={v => setLightingParams({ softShadows: v })} />
+              )}
+              <Toggle label="Ambient Occlusion"
+                title="N8AO corner-darkening. Pauses while orbiting for smooth navigation."
+                checked={s.ambientOcclusion !== false}
+                onChange={v => setLightingParams({ ambientOcclusion: v })} />
+              <Toggle label="Fine Outlines"
+                title="Edge outlines. Pauses while orbiting for smooth navigation."
+                checked={s.outlineEdges !== false}
+                onChange={v => setLightingParams({ outlineEdges: v })} />
+            </div>
+          )}
 
           {/* ── Studio Gradient Sky ───────────────────────────── */}
           {!s.realisticMode && (

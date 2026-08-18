@@ -76,9 +76,10 @@ export const RENDER_DEFAULTS = {
   chromaticAberration: 0.0,
 
   antialiasing: true,
+  progressiveRendering: true,  // Pause AO + edges while camera is moving (Autodesk-style)
   ambientOcclusion: false,
-  aoRadius: 50.0,
-  aoIntensity: 5.0,
+  aoRadius: 0.15,
+  aoIntensity: 0.5,
   outlineEdges: false,
   ssrEnabled: false,
 
