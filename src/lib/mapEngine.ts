@@ -272,7 +272,8 @@ export function createMapEngine(container: HTMLDivElement, options: MapEngineOpt
   }
 
   function applyLimits() {
-    const ceiling = config.maxZoom ?? DEFAULT_MAX_ZOOM
+    const defaultMaxZoom = levelId === null ? 12 : DEFAULT_MAX_ZOOM
+    const ceiling = config.maxZoom ?? defaultMaxZoom
     const floor = config.minZoom ?? DEFAULT_MIN_ZOOM
 
     // Tiles cover the world, so there is nothing to pull back from and nothing to pan off

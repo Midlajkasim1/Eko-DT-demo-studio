@@ -342,7 +342,7 @@ export function MapEditorPanel({ engine, meta, levelId }: MapEditorPanelProps) {
               Use current view as start
             </button>
 
-            <div className="map-section-title">Zoom limits</div>
+            {/* <div className="map-section-title">Zoom limits</div>
             <label className="map-check">
               <input type="checkbox" checked={zoomLocked} onChange={e => toggleZoomLock(e.target.checked)} />
               Lock zoom at the current level
@@ -383,7 +383,7 @@ export function MapEditorPanel({ engine, meta, levelId }: MapEditorPanelProps) {
                 Clear
               </button>
             </div>
-            <ZoomReadout engine={engine} />
+            <ZoomReadout engine={engine} /> */}
           </>
         )}
 

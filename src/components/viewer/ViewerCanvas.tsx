@@ -16,6 +16,7 @@ import { DashboardOverlay } from '@/components/viewer/DashboardOverlay'
 import { MaterialPanel } from '@/components/viewer/MaterialPanel'
 import { FocusModeWidget } from '@/components/viewer/FocusModeWidget'
 import { ModelLoadingProgress } from '@/components/viewer/ModelLoadingProgress'
+import { OrientationCube } from '@/components/viewer/OrientationCube'
 import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import { unloadAllModels } from '@/lib/sceneTeardown'
 import { attachDevBridge } from '@/lib/devBridge'
@@ -512,6 +513,11 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
       {/* Dashboard Overlay */}
       {step === 'viewing' && (
         <DashboardOverlay visible={dashboardVisible} />
+      )}
+
+      {/* Orientation Cube (ViewCube) */}
+      {step === 'viewing' && (
+        <OrientationCube engineRef={engineRef} dashboardVisible={dashboardVisible} />
       )}
 
       {/* Toolbar */}

@@ -131,6 +131,29 @@ export async function initFragmentsEngine(
   realisticGroup.add(sky, rAmbient, rDir, cloudsDome)
   world.scene.three.add(realisticGroup)
 
+  // ── Studio gradient background (Autodesk-style CanvasTexture) ───────────────
+  // Using scene.background (not CSS) so it participates in tone-mapping & exposure.
+  // A 2×512 canvas is enough for a vertical linear gradient.
+  const gradCanvas = document.createElement('canvas')
+  gradCanvas.width = 2
+  gradCanvas.height = 512
+  const gradCtx = gradCanvas.getContext('2d')!
+  let gradTexture: THREE.CanvasTexture | null = null
+
+  function applyGradientBackground(top: string, bottom: string) {
+    const g = gradCtx.createLinearGradient(0, 0, 0, 512)
+    g.addColorStop(0, top)
+    g.addColorStop(1, bottom)
+    gradCtx.fillStyle = g
+    gradCtx.fillRect(0, 0, 2, 512)
+    if (gradTexture) {
+      gradTexture.needsUpdate = true
+    } else {
+      gradTexture = new THREE.CanvasTexture(gradCanvas)
+    }
+    world.scene.three.background = gradTexture
+  }
+
   let isRealistic = false
   let bloomPass: UnrealBloomPass
   let currentCloudSpeed = 1.0
@@ -156,6 +179,15 @@ export async function initFragmentsEngine(
     currentCloudSpeed = params.cloudSpeed
     const cloudsVisible = params.cloudsEnabled !== false && params.cloudDensity > 0
     cloudsDome.visible = cloudsVisible
+
+    // Apply studio gradient when not in full Advanced Rendering mode
+    if (!params.realisticMode && params.gradientSkyEnabled !== false) {
+      const top = params.gradientSkyTop ?? '#c5c5c5'
+      const bottom = params.gradientSkyBottom ?? '#7e7e7e'
+      applyGradientBackground(top, bottom)
+    } else if (!params.realisticMode) {
+      world.scene.three.background = null
+    }
 
     if (grid) grid.visible = params.gridVisible === true
     if (smaaPass) smaaPass.enabled = params.antialiasing !== false
@@ -252,10 +284,16 @@ export async function initFragmentsEngine(
               
               if ((mat.isMeshLambertMaterial || mat.isMeshBasicMaterial || mat.isMeshPhongMaterial) && !mat.userData.isUpgraded) {
                 let newMat;
+                
+                const matColor = mat.color as THREE.Color | undefined
+                const isUncolored = !matColor || (matColor.r >= 0.93 && matColor.g >= 0.93 && matColor.b >= 0.93)
+                
                 if (mapping) {
+                  const resolvedColor = isUncolored ? mapping.color : matColor
+                  
                   if (mapping.isPhysical) {
                     newMat = new THREE.MeshPhysicalMaterial({
-                      color: mapping.color,
+                      color: resolvedColor,
                       roughness: mapping.roughness,
                       metalness: mapping.metalness,
                       transmission: mapping.transmission || 0,
@@ -266,7 +304,7 @@ export async function initFragmentsEngine(
                     });
                   } else {
                     newMat = new THREE.MeshStandardMaterial({
-                      color: mapping.color,
+                      color: resolvedColor,
                       roughness: mapping.roughness,
                       metalness: mapping.metalness,
                       side: mat.side,
@@ -429,6 +467,56 @@ export async function initFragmentsEngine(
       if (rDir.target.parent !== world.scene.three) {
         world.scene.three.add(rDir.target)
       }
+
+      world.scene.three.traverse((child: any) => {
+        if ((child.isDirectionalLight || child.isAmbientLight) && child.parent !== realisticGroup) {
+          child.visible = false
+        }
+      })
+    } else if (params.renderLite) {
+      // ── Render Lite ──────────────────────────────────────────────────────
+      // Good-looking BIM without the expensive 3D skybox, clouds, bloom, DOF, god rays.
+      // Shadows + tone mapping + ambient light only — matches Autodesk's default BIM quality.
+      world.renderer.three.shadowMap.enabled = params.shadowsEnabled !== false
+      world.renderer.three.shadowMap.type = params.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap
+      world.renderer.three.toneMapping = TONE_MAPPINGS[params.toneMapping] ?? THREE.ACESFilmicToneMapping
+      world.renderer.three.toneMappingExposure = params.exposure
+      world.scene.three.environment = null
+      world.scene.three.fog = null
+      world.scene.three.background = null
+
+      // Sky/clouds/bloom/god rays all off in Lite mode
+      sky.visible = false
+      cloudsDome.visible = false
+      if (bloomPass) bloomPass.enabled = false
+      if (godRayPass) godRayPass.enabled = false
+      if (edgePass) edgePass.enabled = false
+      if (ssrPass) ssrPass.enabled = false
+      if (bokehPass) bokehPass.enabled = false
+      if (colorGradePass) colorGradePass.enabled = false
+      if (cloudShadowPass) cloudShadowPass.enabled = false
+      if (ssaoPass) {
+        ssaoPass.enabled = params.ambientOcclusion !== false
+        renderPass.enabled = !ssaoPass.enabled
+      }
+
+      realisticGroup.visible = true
+      rDir.castShadow = params.shadowsEnabled !== false
+      rDir.intensity = params.lightIntensity
+      rAmbient.intensity = params.ambientIntensity
+
+      if (rDir.target.parent !== world.scene.three) {
+        world.scene.three.add(rDir.target)
+      }
+
+      // Trigger sun position for correct shadow direction
+      const now = new Date()
+      const date = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(params.timeOfDay) - 4, (params.timeOfDay % 1) * 60, 0))
+      const sunPos = SunCalc.getPosition(date, 25.2048, 55.2708)
+      const phi = Math.PI / 2 - sunPos.altitude * Math.PI / 180
+      const theta = sunPos.azimuth * Math.PI / 180 + Math.PI / 2
+      const sunDistance = 10000
+      rDir.userData.sunOffset = new THREE.Vector3().setFromSphericalCoords(sunDistance, phi, theta)
 
       world.scene.three.traverse((child: any) => {
         if ((child.isDirectionalLight || child.isAmbientLight) && child.parent !== realisticGroup) {

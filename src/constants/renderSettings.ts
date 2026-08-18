@@ -15,7 +15,14 @@ export const SHADOW_MAP_SIZES = [1024, 2048, 4096, 8192]
 /** Every knob the render panel owns, and the look the viewer had before it was tunable */
 export const RENDER_DEFAULTS = {
   realisticMode: false,
+  renderLite: false,
   gridVisible: false,
+
+  // Gradient sky — CanvasTexture applied to scene.background (integrates with tone mapping)
+  // Defaults to Autodesk BIM 360 standard look
+  gradientSkyEnabled: true,
+  gradientSkyTop: '#c8e2f3',
+  gradientSkyBottom: '#c4b59c',
 
   exposure: 0.85,
   toneMapping: 'aces' as ToneMappingId,

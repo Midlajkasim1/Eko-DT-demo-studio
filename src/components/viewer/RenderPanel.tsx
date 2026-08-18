@@ -76,6 +76,26 @@ const SKY_PRESETS: { label: string; params: Partial<RenderSettings> }[] = [
   },
 ]
 
+// ─── Gradient Sky Presets (matched to Autodesk Viewer light presets) ───────────
+// Autodesk's backgrounds are very muted — not vivid blue.
+// Source: APS Viewer LightPresets bgColorGradient values.
+const GRADIENT_PRESETS: { label: string; top: string; bottom: string }[] = [
+  // Crisp light bluish-white to warm ground of BIM 360 / ACC Viewer
+  { label: 'BIM 360',     top: '#c8e2f3', bottom: '#c4b59c' },
+  // Autodesk's default AEC / Simple Grey (with slight blue tint)
+  { label: 'Simple Grey', top: '#dae3ed', bottom: '#94a3b8' },
+  // Autodesk Photo Booth (warm, slightly bluish white top)
+  { label: 'Photo Booth', top: '#f0f1f4', bottom: '#9da3b0' },
+  // Autodesk Dark Sky preset
+  { label: 'Dark Sky',    top: '#2b3543', bottom: '#404040' },
+  // Autodesk Tranquility (muted blue)
+  { label: 'Tranquility', top: '#5f7080', bottom: '#2a3440' },
+  // Warm studio light (Autodesk Warm Light)
+  { label: 'Warm Light',  top: '#d4c7b0', bottom: '#8a7a68' },
+  // Near-black for night/drama
+  { label: 'Night',       top: '#18202a', bottom: '#0a0e14' },
+]
+
 // ─── Helper Components ───────────────────────────────────────────────────────
 function Slider({
   label, value, min, max, step, format, onChange,
@@ -207,9 +227,74 @@ export function RenderPanel() {
         </div>
 
         <div className="position-field-group" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '10px' }}>
-          <Toggle label="Advanced Rendering" checked={s.realisticMode} onChange={setRealisticMode} />
+          {/* ── Render Mode ───────────────────────────────────── */}
+          <Toggle
+            label="Advanced Rendering"
+            checked={s.realisticMode}
+            onChange={v => { setRealisticMode(v); if (v) setLightingParams({ renderLite: false }) }}
+          />
+          <Toggle
+            label="Render Lite ⚡"
+            title="Shadows + tone mapping, no skybox/clouds. Matches Autodesk default quality at higher FPS."
+            checked={s.renderLite && !s.realisticMode}
+            onChange={v => { setLightingParams({ renderLite: v }); if (v) setRealisticMode(false) }}
+          />
           <Toggle label="Ground Grid" checked={s.gridVisible}
             onChange={v => setLightingParams({ gridVisible: v })} />
+
+          {/* ── Studio Gradient Sky ───────────────────────────── */}
+          {!s.realisticMode && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+              <SectionDivider label="Studio Sky" />
+              <Toggle
+                label="Gradient Background"
+                checked={s.gradientSkyEnabled !== false}
+                onChange={v => setLightingParams({ gradientSkyEnabled: v })}
+              />
+              {s.gradientSkyEnabled !== false && (
+                <>
+                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                    {GRADIENT_PRESETS.map(p => {
+                      const isActive = s.gradientSkyTop === p.top && s.gradientSkyBottom === p.bottom
+                      return (
+                        <div
+                          key={p.label}
+                          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}
+                        >
+                          <button
+                            title={p.label}
+                            onClick={() => setLightingParams({ gradientSkyTop: p.top, gradientSkyBottom: p.bottom })}
+                            style={{
+                              width: '34px', height: '48px', borderRadius: '6px', cursor: 'pointer', padding: 0,
+                              border: `2px solid ${isActive ? 'var(--accent)' : 'var(--border)'}`,
+                              background: `linear-gradient(to bottom, ${p.top}, ${p.bottom})`,
+                              flexShrink: 0,
+                              boxShadow: isActive ? '0 0 0 2px rgba(var(--accent-rgb,22,101,52),0.25)' : 'none',
+                              transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
+                            }}
+                          />
+                          <span style={{
+                            fontSize: '7px', color: 'var(--text-secondary)', textAlign: 'center',
+                            width: '38px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            fontWeight: isActive ? 700 : 400,
+                          }}>
+                            {p.label}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <ColorField label="Top" value={s.gradientSkyTop ?? '#c8e2f3'}
+                      onChange={v => setLightingParams({ gradientSkyTop: v })} />
+                    <ColorField label="Bottom" value={s.gradientSkyBottom ?? '#c4b59c'}
+                      onChange={v => setLightingParams({ gradientSkyBottom: v })} />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
 
           {s.realisticMode && (
             <div style={{

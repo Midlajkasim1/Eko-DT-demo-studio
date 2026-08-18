@@ -1,4 +1,5 @@
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
+import { resetCameraToHome } from '@/lib/cameraUtils'
 import * as THREE from 'three'
 import { useProjectStore } from '@/store/useProjectStore'
 import { hasMap } from '@/lib/mapConfig'
@@ -39,24 +40,7 @@ export function ViewerToolbar({ engineRef, onToggleStats, statsVisible, pickerAc
 
   const toggleGrid = () => setLightingParams({ gridVisible: !gridActive })
   const resetCamera = () => {
-    if (!engine) return
-    const camera = useProjectStore.getState().currentProject?.camera
-    if (camera) {
-      const pos = camera.position as any
-      const tgt = camera.target as any
-      
-      const px = Array.isArray(pos) ? pos[0] : pos.x
-      const py = Array.isArray(pos) ? pos[1] : pos.y
-      const pz = Array.isArray(pos) ? pos[2] : pos.z
-      
-      const tx = Array.isArray(tgt) ? tgt[0] : tgt.x
-      const ty = Array.isArray(tgt) ? tgt[1] : tgt.y
-      const tz = Array.isArray(tgt) ? tgt[2] : tgt.z
-
-      engine.world.camera.controls.setLookAt(px, py, pz, tx, ty, tz, true)
-    } else {
-      engine.world.camera.controls.setLookAt(50, 30, 50, 0, 0, 0, true)
-    }
+    resetCameraToHome(engine)
   }
 
   const isFullscreen = useAppStore(s => s.isFullscreen)
