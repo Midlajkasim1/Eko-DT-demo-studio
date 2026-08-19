@@ -131,9 +131,24 @@ export async function initFragmentsEngine(
   realisticGroup.add(sky, rAmbient, rDir, cloudsDome)
   world.scene.three.add(realisticGroup)
 
-  // ── Studio gradient background (Autodesk-style CanvasTexture) ───────────────
-  // Using scene.background (not CSS) so it participates in tone-mapping & exposure.
-  // A 2×512 canvas is enough for a vertical linear gradient.
+  // ── Render Lite ──────────────────────────────────
+  const liteDirLight = new THREE.DirectionalLight(0xfff5e0, 1.2)
+  liteDirLight.name = 'LiteDirLight'
+  liteDirLight.castShadow = true
+  liteDirLight.shadow.mapSize.width = 1024
+  liteDirLight.shadow.mapSize.height = 1024
+  liteDirLight.shadow.camera.near = 1
+  liteDirLight.shadow.camera.far = 10000
+  liteDirLight.shadow.camera.left = -500
+  liteDirLight.shadow.camera.right = 500
+  liteDirLight.shadow.camera.top = 500
+  liteDirLight.shadow.camera.bottom = -500
+  liteDirLight.shadow.bias = -0.0005
+  liteDirLight.shadow.normalBias = 0.05
+  // sunOffset drives the render-loop repositioning relative to camera target
+  liteDirLight.userData.sunOffset = new THREE.Vector3(300, 600, 300)
+  // NOT added to scene yet — only added when Render Lite activates
+
   const gradCanvas = document.createElement('canvas')
   gradCanvas.width = 2
   gradCanvas.height = 512
@@ -171,11 +186,9 @@ export async function initFragmentsEngine(
   let sceneDepthRT: THREE.WebGLRenderTarget
   let autoFocusEnabled = false
   let isPbrEnabled = true
-  // Progressive rendering — pause expensive passes while camera is moving (Autodesk-style)
   let progressiveRenderingEnabled = true
   let cameraMoving = false
   let progressiveRestoreTimer: ReturnType<typeof setTimeout> | null = null
-  // Saved state so we can restore the correct values after movement ends
   let savedAoEnabled = false
   let savedEdgeEnabled = false
 
@@ -190,7 +203,6 @@ export async function initFragmentsEngine(
     const cloudsVisible = params.cloudsEnabled !== false && params.cloudDensity > 0
     cloudsDome.visible = cloudsVisible
 
-    // Apply studio gradient when not in full Advanced Rendering mode
     if (!params.realisticMode && params.gradientSkyEnabled !== false) {
       const top = params.gradientSkyTop ?? '#c5c5c5'
       const bottom = params.gradientSkyBottom ?? '#7e7e7e'
@@ -470,10 +482,9 @@ export async function initFragmentsEngine(
       }
       
       realisticGroup.visible = true
+      if (liteDirLight.parent) liteDirLight.removeFromParent()
       rDir.intensity = params.lightIntensity
       rAmbient.intensity = params.ambientIntensity
-
-      // Add directional light target to scene so it updates correctly
       if (rDir.target.parent !== world.scene.three) {
         world.scene.three.add(rDir.target)
       }
@@ -483,12 +494,21 @@ export async function initFragmentsEngine(
           child.visible = false
         }
       })
+
+      if (ssaoPass) {
+        ssaoPass.enabled = params.realisticMode && params.ambientOcclusion !== false
+        renderPass.enabled = !ssaoPass.enabled
+        if (params.aoRadius !== undefined) ssaoPass.configuration.aoRadius = params.aoRadius
+        if (params.aoIntensity !== undefined) ssaoPass.configuration.intensity = params.aoIntensity
+      }
+
     } else if (params.renderLite) {
       // ── Render Lite ──────────────────────────────────────────────────────
       // Clean BIM quality: shadows + tone mapping + AO + edges + gradient bg.
-      const newShadowType = params.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap
+      // PCFShadowMap is the standard in Three.js 169+ (PCFSoftShadowMap is deprecated).
+      // We achieve softness by adjusting the shadow.radius on the light itself.
+      const newShadowType = THREE.PCFShadowMap
       const shadowTypeChanged = world.renderer.three.shadowMap.type !== newShadowType
-      // Three.js cannot hot-swap shadowMap.type — must disable+re-enable to force regeneration
       if (shadowTypeChanged) {
         world.renderer.three.shadowMap.enabled = false
         world.renderer.three.shadowMap.type = newShadowType
@@ -503,13 +523,10 @@ export async function initFragmentsEngine(
       world.scene.three.environment = null
       world.scene.three.fog = null
 
-      // Keep gradient background (it was set earlier in setLightingParams, don't null it)
-      // Only null if gradient is explicitly disabled
       if (params.gradientSkyEnabled === false) {
         world.scene.three.background = null
       }
 
-      // Sky/clouds/bloom/god rays/DOF/color grade all off in Lite mode
       sky.visible = false
       cloudsDome.visible = false
       if (bloomPass) bloomPass.enabled = false
@@ -519,22 +536,16 @@ export async function initFragmentsEngine(
       if (colorGradePass) colorGradePass.enabled = false
       if (cloudShadowPass) cloudShadowPass.enabled = false
 
-      // AO — enabled in Lite mode. Auto-scale radius from scene bounding box
-      // so it darkens corners (not washes grey across the whole model).
       if (ssaoPass) {
         const aoOn = params.ambientOcclusion !== false
         savedAoEnabled = aoOn
         ssaoPass.enabled = !cameraMoving && aoOn
         renderPass.enabled = !ssaoPass.enabled
-        if (params.aoRadius !== undefined) {
-          ssaoPass.configuration.aoRadius = params.aoRadius
-        }
-        if (params.aoIntensity !== undefined) {
-          ssaoPass.configuration.intensity = params.aoIntensity
-        }
+        ssaoPass.configuration.aoRadius = 50.0
+        ssaoPass.configuration.intensity = 1.0
       }
 
-      // Edge outlines — enabled in Lite mode
+      // Edge outlines
       if (edgePass) {
         const edgeOn = params.outlineEdges !== false
         savedEdgeEnabled = edgeOn
@@ -543,21 +554,51 @@ export async function initFragmentsEngine(
 
       realisticGroup.visible = false
 
-      // In Render Lite, pull rDir out of the realisticGroup so it casts shadows
-      // onto the ShadowCatcherPlane without needing the full realistic group visible.
-      // Ensure it's in the scene directly and configured for shadow casting.
-      if (rDir.parent !== world.scene.three) {
-        world.scene.three.add(rDir)
+      if (liteDirLight.parent !== world.scene.three) {
+        world.scene.three.add(liteDirLight)
       }
-      rDir.visible = true
-      rDir.castShadow = params.shadowsEnabled !== false
-      if (rDir.castShadow) {
-        // Use 1024² shadow map in Render Lite — half the size of Advanced, much cheaper
-        rDir.shadow.mapSize.width = 1024
-        rDir.shadow.mapSize.height = 1024
-        rDir.shadow.map?.dispose()
-        // @ts-ignore
-        rDir.shadow.map = null  // Force Three.js to regenerate at the new size
+      liteDirLight.visible = true
+      liteDirLight.castShadow = params.shadowsEnabled !== false
+
+      if (liteDirLight.castShadow) {
+        // Use PCFShadowMap unconditionally, adjust radius for softness
+        const newShadowType = THREE.PCFShadowMap
+        if (world.renderer.three.shadowMap.type !== newShadowType) {
+          world.renderer.three.shadowMap.enabled = false
+          world.renderer.three.shadowMap.type = newShadowType
+        }
+        
+        let maxRadius = 10000
+        const currentModelCount = fragments.models ? fragments.models.list.size : 0
+        if (world.scene.three.userData.maxRadius && world.scene.three.userData.cachedModelCount === currentModelCount) {
+          maxRadius = world.scene.three.userData.maxRadius
+        } else if (currentModelCount > 0) {
+          const box = new THREE.Box3()
+          for (const model of fragments.models.list.values()) {
+            const obj = (model as any).object || (model as any)
+            if (obj && typeof obj.updateWorldMatrix === 'function') box.expandByObject(obj)
+          }
+          if (!box.isEmpty()) {
+            const size = new THREE.Vector3()
+            box.getSize(size)
+            maxRadius = Math.max(size.x, size.y, size.z) * 0.6
+            world.scene.three.userData.maxRadius = maxRadius
+            world.scene.three.userData.cachedModelCount = currentModelCount
+          }
+        }
+        
+        // Dynamically scale the shadow camera to cover the scene
+        const SHADOW_COVERAGE = Math.min(maxRadius, 1500)
+        liteDirLight.shadow.camera.left = -SHADOW_COVERAGE
+        liteDirLight.shadow.camera.right = SHADOW_COVERAGE
+        liteDirLight.shadow.camera.top = SHADOW_COVERAGE
+        liteDirLight.shadow.camera.bottom = -SHADOW_COVERAGE
+        liteDirLight.shadow.camera.near = 1
+        liteDirLight.shadow.camera.far = 1000 + (maxRadius * 2)
+        liteDirLight.shadow.bias = -0.0005 * Math.max(1.0, maxRadius / 10000)
+        liteDirLight.shadow.radius = params.softShadows ? 4 : 1
+        liteDirLight.shadow.camera.updateProjectionMatrix()
+        
         world.renderer.three.shadowMap.enabled = true
         world.renderer.three.shadowMap.needsUpdate = true
         // Ensure all loaded meshes cast and receive shadows
@@ -567,16 +608,17 @@ export async function initFragmentsEngine(
             child.receiveShadow = true
           }
         })
+      } else {
+        world.renderer.three.shadowMap.enabled = false
       }
 
-      // Also keep the OBC default lights visible for ambient fill
       world.scene.three.traverse((child: any) => {
-        if ((child.isDirectionalLight || child.isAmbientLight || child.isHemisphereLight)
-          && child !== rDir && child.parent !== realisticGroup) {
+        if ((child.isAmbientLight || child.isHemisphereLight) && child.parent !== realisticGroup) {
           child.visible = true
         }
       })
     } else {
+      if (liteDirLight.parent) liteDirLight.removeFromParent()
       world.renderer.three.shadowMap.enabled = false
       world.renderer.three.toneMapping = THREE.NoToneMapping
       world.renderer.three.toneMappingExposure = 1.0
@@ -634,20 +676,18 @@ export async function initFragmentsEngine(
   renderPass = new RenderPass(world.scene.three, world.camera.three)
   composer.addPass(renderPass)
 
-  // Ambient Occlusion (N8AO) - MUST be immediately after RenderPass to avoid overwriting other effects
+  // Ambient Occlusion (N8AO)
   ssaoPass = new N8AOPass(world.scene.three, world.camera.three, window.innerWidth, window.innerHeight)
-  ssaoPass.configuration.aoRadius = 0.15        // Tight — just at corners/crevices
+  ssaoPass.configuration.aoRadius = 16.0        // Tight — just at corners/crevices (in pixels since screenSpaceRadius is true)
   ssaoPass.configuration.intensity = 0.5         // Very subtle
   ssaoPass.configuration.aoSamples = 16          // Lower samples = better FPS
   ssaoPass.configuration.denoiseSamples = 4
   ssaoPass.configuration.denoiseRadius = 8
   ssaoPass.configuration.distanceFalloff = 1.0
-  ssaoPass.configuration.screenSpaceRadius = true // Radius in screen pixels — unit-scale independent
+  ssaoPass.configuration.screenSpaceRadius = true // Radius in screen pixels
   ssaoPass.configuration.halfRes = false // Disabled halfRes to fix ANGLE washout bug on Windows
-  // @ts-ignore - explicitly disable double gamma correction if the property exists
   if (ssaoPass.configuration.gammaCorrection !== undefined) ssaoPass.configuration.gammaCorrection = false
   ssaoPass.enabled = false
-  // N8AO renders the scene itself; exactly one of these two must draw it
   renderPass.enabled = !ssaoPass.enabled
   composer.addPass(ssaoPass)
 
@@ -772,16 +812,15 @@ export async function initFragmentsEngine(
         )
       }
       
-      if (rDir.userData.sunOffset && world.camera.controls) {
+      const activeDirLight = isRenderLite ? liteDirLight : rDir
+      if (activeDirLight.userData.sunOffset && world.camera.controls) {
         const target = new THREE.Vector3()
         world.camera.controls.getTarget(target)
-        rDir.target.position.copy(target)
-        rDir.position.copy(target).add(rDir.userData.sunOffset)
-        rDir.shadow.camera.updateProjectionMatrix()
+        activeDirLight.target.position.copy(target)
+        activeDirLight.position.copy(target).add(activeDirLight.userData.sunOffset)
+        activeDirLight.shadow.camera.updateProjectionMatrix()
       }
       
-      // Unified Scene Depth pre-pass for post-processing effects
-      // Skip if only AO is active — N8AO has its own internal depth buffer, no pre-pass needed
       const needsDepth = (godRayPass && godRayPass.enabled) || (edgePass && edgePass.enabled) || (cloudShadowPass && cloudShadowPass.enabled)
       if (needsDepth) {
         const skyVisible = sky.visible
@@ -860,7 +899,7 @@ export async function initFragmentsEngine(
   grid = grids.create(world)
   grid.visible = RENDER_DEFAULTS.gridVisible
 
-  // Add invisible shadow catcher plane so the building doesn't float
+  //shadow plane  
   const shadowPlaneGeo = new THREE.PlaneGeometry(10000, 10000)
   const shadowPlaneMat = new THREE.ShadowMaterial({ opacity: 0.3, depthWrite: false })
   const shadowPlane = new THREE.Mesh(shadowPlaneGeo, shadowPlaneMat)
@@ -870,22 +909,17 @@ export async function initFragmentsEngine(
   shadowPlane.receiveShadow = true
   world.scene.three.add(shadowPlane)
 
-  // No workerURL: the library resolves the worker bundled with the package
   const fragments = new FRAGS.FragmentsModels()
 
   world.camera.controls.addEventListener('update', () => fragments.update())
 
-  // ── Progressive Rendering (Autodesk-style) ───────────────────────────────────
-  // Disable expensive passes (AO, edges) while the camera is moving to keep FPS
-  // smooth during navigation. Re-enable them ~150 ms after movement stops.
+  // Progressive Rendering
   world.camera.controls.addEventListener('controlstart', () => {
     if (!progressiveRenderingEnabled) return
     cameraMoving = true
     if (progressiveRestoreTimer) { clearTimeout(progressiveRestoreTimer); progressiveRestoreTimer = null }
-    // Save current state before disabling
     if (ssaoPass && ssaoPass.enabled) { savedAoEnabled = true; ssaoPass.enabled = false; renderPass.enabled = true }
     if (edgePass && edgePass.enabled) { savedEdgeEnabled = true; edgePass.enabled = false }
-    // Freeze shadow map updates while moving — biggest single FPS win
     world.renderer.three.shadowMap.autoUpdate = false
   })
 
@@ -896,7 +930,6 @@ export async function initFragmentsEngine(
     progressiveRestoreTimer = setTimeout(() => {
       if (savedAoEnabled && ssaoPass) { ssaoPass.enabled = true; renderPass.enabled = false }
       if (savedEdgeEnabled && edgePass) { edgePass.enabled = true }
-      // Resume and force a single shadow map refresh after movement stops
       world.renderer.three.shadowMap.autoUpdate = true
       world.renderer.three.shadowMap.needsUpdate = true
       progressiveRestoreTimer = null
@@ -912,7 +945,6 @@ export async function initFragmentsEngine(
   })
   
   fragments.models.list.onItemSet.add(async ({ value: model }: any) => {
-    // Always enable shadow casting/receiving so shadows work in both Render Lite and Advanced modes
     model.traverse?.((child: any) => {
       if (child.isMesh) {
         child.castShadow = true

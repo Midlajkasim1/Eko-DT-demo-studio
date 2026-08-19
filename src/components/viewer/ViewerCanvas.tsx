@@ -125,6 +125,10 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
             rotation: next.rotation,
             scale: next.scale,
           }, adminMode && !hasCamera)
+          
+          if (engineRef.current) {
+            engineRef.current.setLightingParams(pickRenderSettings(useAppStore.getState()))
+          }
         }
       } finally {
         isLoadingRef.current = false

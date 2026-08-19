@@ -247,8 +247,8 @@ export function RenderPanel() {
               if (v) setRealisticMode(false)
             }}
           />
-          <Toggle label="Ground Grid" checked={s.gridVisible}
-            onChange={v => setLightingParams({ gridVisible: v })} />
+          {/* <Toggle label="Ground Grid" checked={s.gridVisible}
+            onChange={v => setLightingParams({ gridVisible: v })} /> */}
 
           {/* ── Render Lite settings ───────────────────────────── */}
           {s.renderLite && !s.realisticMode && (
