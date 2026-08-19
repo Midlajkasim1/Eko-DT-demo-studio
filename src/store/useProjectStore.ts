@@ -18,6 +18,8 @@ import {
 } from '@/lib/projectDb'
 import { ASSETS_VERSION } from '@/lib/textureAssets'
 import { collectMapGarbage, deleteMapAsset, storeMapImage } from '@/lib/mapAssets'
+import { pickRenderSettings } from '@/constants/renderSettings'
+import { useAppStore } from '@/store/useAppStore'
 
 interface RecentProject {
   card: RecentProjectCard
@@ -221,9 +223,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { currentProject, folderHandle } = get()
     if (!currentProject || !folderHandle) return
 
+    // Always bake the current live render settings into the export so the
+    // viewer renders exactly as it looks on screen — no need to save first.
+    const liveRenderSettings = pickRenderSettings(useAppStore.getState())
+    const metaToExport: ProjectMeta = { ...currentProject, renderSettings: liveRenderSettings }
+
     let blob: Blob
     try {
-      blob = await exportProjectAsZip(folderHandle, currentProject)
+      blob = await exportProjectAsZip(folderHandle, metaToExport)
     } catch (err) {
       alert('Export failed: ' + (err instanceof Error ? err.message : err))
       return
@@ -240,10 +247,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { currentProject, folderHandle } = get()
     if (!currentProject || !folderHandle) return
 
+    // Always bake the current live render settings into the export
+    const liveRenderSettings = pickRenderSettings(useAppStore.getState())
+    const metaToExport: ProjectMeta = { ...currentProject, renderSettings: liveRenderSettings }
+
     const { exportFinProjectAsZip } = await import('@/lib/projectDb')
     let blob: Blob
     try {
-      blob = await exportFinProjectAsZip(folderHandle, currentProject)
+      blob = await exportFinProjectAsZip(folderHandle, metaToExport)
     } catch (err) {
       alert('Export failed: ' + (err instanceof Error ? err.message : err))
       return
