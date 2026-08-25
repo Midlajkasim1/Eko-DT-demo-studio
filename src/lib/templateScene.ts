@@ -51,6 +51,15 @@ export function makeSkyEnvironment(stops: SkyStop[]) {
   return texture
 }
 
+/**
+ * Below this luminance a delivered colour carries no information — it is a glass
+ * tint or a placeholder — and is replaced before the template's wash is applied.
+ */
+const DARK_FLOOR = 0.06
+
+/** What those surfaces start from instead: a neutral mid-grey. */
+const NEUTRAL_DARK = new THREE.Color(0.45, 0.45, 0.45)
+
 /** What a material arrived as, so a template can be dialled back off it. */
 interface DeliveredMaterial {
   color: THREE.Color
@@ -115,7 +124,19 @@ export function dressMaterial(
 
   const { wash, tint, glow, reflect, faceted, solidify, ghost } = surfaces
 
-  mat.color.copy(base.color).lerp(new THREE.Color(tint), wash)
+  // Some models ship surfaces at near-zero luminance — glass tints and outright
+  // #000000 placeholders. Lit by anything they stay black, and a template with a
+  // light wash cannot lift them: Photoreal pulls only 10% towards its tint, so
+  // #000000 lands on #171717. They read as holes punched through the model, and
+  // because the geometry is single-sided they vanish when you orbit past them,
+  // which is what makes them look like a rendering fault rather than model data.
+  // Anything under DARK_FLOOR starts from a neutral grey instead of its delivered
+  // colour. Authored colours are untouched — this only catches surfaces that
+  // carry no usable colour at all. Set DARK_FLOOR to 0 for the delivered colours.
+  const luminance = 0.2126 * base.color.r + 0.7152 * base.color.g + 0.0722 * base.color.b
+  const start = luminance < DARK_FLOOR ? NEUTRAL_DARK : base.color
+
+  mat.color.copy(start).lerp(new THREE.Color(tint), wash)
   if (mat.emissive) mat.emissive.copy(mat.color).multiplyScalar(glow)
   if ('flatShading' in mat) mat.flatShading = faceted
 
