@@ -140,7 +140,14 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
         toneMapping: 'neutral',
         exposure: 1.08,
         ao: { radius: 1.6, intensity: 0.95 },
-        bloom: { strength: 0.12, radius: 0.5, threshold: 0.9 },
+        // The reference carries a bloom here (photoreal 0.12/0.5/0.9,
+        // x-ray 0.12/0.4/0.82). It is deliberately not built: UnrealBloomPass is
+        // the one pass in this app measured returning garbage — 4 blank frames in
+        // 8 during a drag in the studio chain — and bloom is exactly what the two
+        // templates showing white blocks have and the one that behaves does not.
+        // At 0.12 over these skies it is close to invisible. Restore by putting
+        // the values back here.
+        bloom: null,
         ink: null,
         grade: { saturation: 1.06, contrast: 1.06, warmth: 0.03, vignette: 0.22, levels: 0 },
       },
@@ -236,7 +243,14 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
         toneMapping: 'aces',
         exposure: 1,
         ao: null,
-        bloom: { strength: 0.12, radius: 0.4, threshold: 0.82 },
+        // The reference carries a bloom here (photoreal 0.12/0.5/0.9,
+        // x-ray 0.12/0.4/0.82). It is deliberately not built: UnrealBloomPass is
+        // the one pass in this app measured returning garbage — 4 blank frames in
+        // 8 during a drag in the studio chain — and bloom is exactly what the two
+        // templates showing white blocks have and the one that behaves does not.
+        // At 0.12 over these skies it is close to invisible. Restore by putting
+        // the values back here.
+        bloom: null,
         ink: { color: '#9ad4f0', thickness: 1.2, depth: 0.65, crease: 0.45, strength: 0.75 },
         grade: { saturation: 1.05, contrast: 1.08, warmth: -0.08, vignette: 0.28, levels: 0 },
       },

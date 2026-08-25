@@ -305,6 +305,23 @@ export async function initFragmentsEngine(
   }
 
   /**
+   * The fragments worker registers a model a moment after it enters the list, so
+   * a call made too early rejects. These calls retry rather than give up: a
+   * swallowed rejection here is invisible in the console and shows up on screen
+   * as LOD stand-ins or room volumes that never go away.
+   */
+  const withRetry = async <T,>(run: () => Promise<T>, attempts = 8): Promise<T | null> => {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        return await run()
+      } catch {
+        await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)))
+      }
+    }
+    return null
+  }
+
+  /**
    * Items IFC carries that are not building fabric. Room volumes are the loud
    * ones — they export as translucent boxes that swallow whole floors — but
    * openings, grids and annotations are just as unwanted, and they are what makes
@@ -324,14 +341,13 @@ export async function initFragmentsEngine(
     for (const [id, model] of fragments.models.list.entries()) {
       if (only && id !== only) continue
       if (hiddenNonPhysical.has(id)) continue
-      try {
-        const found = await (model as any).getItemsOfCategories?.(NON_PHYSICAL)
-        if (!found) continue
-        const localIds = Object.values(found).flat() as number[]
-        if (!localIds.length) continue
-        await (model as any).setVisible(localIds, false)
-        hiddenNonPhysical.set(id, localIds)
-      } catch { /* the worker has not registered this model yet */ }
+      const localIds = await withRetry(async () => {
+        const found = await (model as any).getItemsOfCategories(NON_PHYSICAL)
+        return Object.values(found ?? {}).flat() as number[]
+      })
+      if (!localIds?.length) continue
+      const applied = await withRetry(() => (model as any).setVisible(localIds, false))
+      if (applied !== null) hiddenNonPhysical.set(id, localIds)
     }
     void fragments.update(true)
   }
@@ -361,12 +377,10 @@ export async function initFragmentsEngine(
     // of the look, and together they make the worker push tiles at maximum detail
     // roughly every frame. On a large federated model that is most of the cost of
     // a template and none of its appearance, so the project's own values stand.
+    const mode = on ? FRAGS.LodMode.ALL_GEOMETRY : FRAGS.LodMode.DEFAULT
     for (const model of fragments.models.list.values()) {
-      const setLodMode = (model as any).setLodMode
-      if (typeof setLodMode !== 'function') continue
-      // Rejects while the worker is still registering the model; harmless
-      Promise.resolve(setLodMode.call(model, on ? FRAGS.LodMode.ALL_GEOMETRY : FRAGS.LodMode.DEFAULT))
-        .catch(() => { /* model not ready on the worker side yet */ })
+      if (typeof (model as any).setLodMode !== 'function') continue
+      void withRetry(() => (model as any).setLodMode(mode))
     }
   }
 
