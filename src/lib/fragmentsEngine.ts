@@ -222,8 +222,6 @@ export async function initFragmentsEngine(
   let savedEdgeEnabled = false
   /** The template driving the scene, or null when the project settings do */
   let activeTemplate: TemplateScene | null = null
-  /** The camera's own clip planes, restored when the template leaves */
-  let savedClip: { near: number; far: number } | null = null
   let templateSky: THREE.Texture | null = null
   let templateEnv: THREE.Texture | null = null
   /** How the item materials arrived, so a template can be taken back off them */
@@ -365,43 +363,6 @@ export async function initFragmentsEngine(
   }
 
   /**
-   * Pulls the camera's clip planes in around the model while a template runs.
-   *
-   * The project runs near 0.1 / far 200000 so that the map and the sky dome fit.
-   * Nothing screen-space survives that: a depth buffer stretched over two million
-   * to one has almost no precision left near the model, and both passes that read
-   * depth — the occlusion pass and the drawn lines — reconstruct position from it.
-   * GTAO answers "fully occluded" across whole regions, which is the black slab
-   * that appears over the model, and the ink pass finds edges in the noise.
-   *
-   * Measured on the reference architectural model: 14.2% of the frame black at
-   * far 200000, 0.03% once the range is fitted, with occlusion still on.
-   *
-   * A template draws its sky as a background texture rather than a dome, so
-   * nothing needs the far plane out at 200 km.
-   */
-  const fitTemplateClipPlanes = () => {
-    const camera = world.camera.three
-    if (!(camera instanceof THREE.PerspectiveCamera) && !(camera instanceof THREE.OrthographicCamera)) return
-    if (!savedClip) savedClip = { near: camera.near, far: camera.far }
-
-    const radius = computeMaxRadius()
-    // Room to orbit far out without clipping, while keeping the ratio sane
-    camera.near = THREE.MathUtils.clamp(radius / 100, 0.05, 5)
-    camera.far = Math.max(radius * 40, 2000)
-    camera.updateProjectionMatrix()
-  }
-
-  const restoreClipPlanes = () => {
-    const camera = world.camera.three
-    if (!savedClip || (!(camera instanceof THREE.PerspectiveCamera) && !(camera instanceof THREE.OrthographicCamera))) return
-    camera.near = savedClip.near
-    camera.far = savedClip.far
-    camera.updateProjectionMatrix()
-    savedClip = null
-  }
-
-  /**
    * Fragments streams geometry on demand: by default it swaps distant items for
    * LOD boxes and drops off-screen ones, which blinks geometry in and out while
    * the camera moves. That is barely noticeable on the delivered grey model and
@@ -480,7 +441,6 @@ export async function initFragmentsEngine(
     if (tSun.target.parent) tSun.target.removeFromParent()
     const catcher = world.scene.three.getObjectByName('ShadowCatcherPlane')
     if (catcher) catcher.visible = true
-    restoreClipPlanes()
     void showNonPhysical()
     templateSky?.dispose()
     templateSky = null
@@ -553,8 +513,6 @@ export async function initFragmentsEngine(
 
     world.renderer.three.toneMapping = TONE_MAPPINGS[frame.toneMapping]
     world.renderer.three.toneMappingExposure = frame.exposure
-
-    fitTemplateClipPlanes()
 
     // ── Ground ──────────────────────────────────────────────────────────────
     // No shadow map and no slab. The reference lights the model with sun, fill
@@ -1386,7 +1344,6 @@ export async function initFragmentsEngine(
     // A model arriving under a template has to be pinned to full geometry like the
     // ones already in, and stripped of the items a template does not draw
     if (activeTemplate) {
-      fitTemplateClipPlanes()
       setTemplateStreaming(true)
       void hideNonPhysical(model.modelId)
     }
