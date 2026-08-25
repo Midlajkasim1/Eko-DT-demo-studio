@@ -105,9 +105,13 @@ export function dressMaterial(
     cache.set(material, base)
   }
 
-  // Proxy volumes — IfcSpace and friends — arrive as all-but-invisible materials.
-  // Solidifying them would fill whole floors with boxes.
-  if (base.opacity < 0.06 || mat.colorWrite === false) return false
+  // Everything else is dressed, including the barely-there materials architectural
+  // glass arrives as. They used to be skipped here, to stop IfcSpace proxy volumes
+  // solidifying into boxes — but that is handled properly now by hiding the
+  // non-physical categories outright, and skipping them left every glass panel
+  // with its delivered dark tint and its translucency: unwashed, unsolidified, and
+  // stacking up into grey rectangles across a white model. The reference dresses
+  // every material it is handed, and so does this.
 
   const { wash, tint, glow, reflect, faceted, solidify, ghost } = surfaces
 
