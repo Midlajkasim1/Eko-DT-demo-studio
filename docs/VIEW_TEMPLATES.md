@@ -16,55 +16,50 @@ and X-ray read here the way they do there.
 | **X-ray**       | See through structure: a night sky, every surface pulled to 22% opacity and tinted blue, cyan lines over the whole model so floors and structure read through the enclosure. |
 
 Every sky, light, surface and grade value is taken verbatim from the reference viewer's
-`looks.ts`. One deliberate deviation: X-ray drops the reference's 0.12 bloom, because
-X-ray is the only template whose scene is drawn by `RenderPass` rather than by the
-ambient-occlusion pass, and in that chain `UnrealBloomPass` intermittently returns an
-empty frame while the camera moves (measured at 4 blank frames out of 8 during a drag,
-0 out of 8 with bloom off). At that strength over a near-black sky it is close to
-invisible. Restoring it is one line in `viewTemplates.ts` if it behaves on your GPU.
+`looks.ts` — 104 of 116 fields compared byte for byte. The 12 that differ are the
+`surfaces.platform` colours, which describe a slab this viewer does not draw.
 
-A template stands in for **Advanced Rendering** and **Render Lite** rather than layering
-on top of them: picking one switches those off, and turning either back on returns the
-template to Default.
+## How a template renders
 
-A template owns everything the eye reads as rendering style; only **anti-aliasing** and the
-**ground grid** are still the project's to set, and both sit under the template's own
-heading in the Render panel.
+A template does **not** borrow the studio's post-processing chain. It builds the reference
+viewer's chain instead, in `buildTemplateComposer`:
 
-### The ground
+    multisampled half-float target → RenderPass → GTAO → ink → bloom → grade → OutputPass
 
-There is no shadow map under a template. The model stands on a **platform**: a slab whose
-top sits at grade, turned onto the building's own structural grid, with a soft contact
-shadow where the building meets it — the same slab the reference viewer draws, ported in
-[`templatePlatform.ts`](../src/lib/templatePlatform.ts). Grade comes from the lowest
-IFC storey that is not a basement; the grid angle is averaged from the normals of vertical
-wall faces; the size comes from the item bounding boxes with the outermost 0.05% trimmed
-off, so a few strays cannot double the slab. It re-measures when models are added.
+That matters for how clean the result looks:
 
-The engine's 10 km `ShadowCatcherPlane` is hidden while a template runs — it has nothing
-to catch without a shadow map, and it painted a bright band across the horizon.
+- **Edges** come from a 4× multisampled render target, not from a post-process SMAA pass.
+  There is no SMAA under a template, which is why the panel offers no anti-aliasing toggle.
+- **Occlusion** is `GTAOPass` with a radius in metres (1.6 for Photoreal, 2.4 for
+  Minimalist), exactly as the reference configures it. The studio's screen-space N8AO is a
+  different algorithm and was visibly grainier on building-scale geometry.
+- **Nothing else runs.** The studio's own passes are switched off while a template is
+  active, and switched back when it leaves, so Advanced Rendering and Render Lite are
+  untouched.
 
-### Ambient occlusion
+### What is not drawn
 
-The AO radius in a template is in **metres**, not screen pixels: N8AO is switched into
-world-space mode for templates so the reference viewer's numbers (1.6 m for Photoreal,
-2.4 m for Minimalist) mean here what they mean there. Leaving a template puts the pass
-back into screen-space mode, which is how Advanced Rendering and Render Lite read it.
+- **No slab.** The reference stands its model on a platform; this viewer does not draw one.
+- **No shadow map.** Sun, fill and bounce light the model and the occlusion pass does the
+  contact darkening.
+- **No grid**, and the engine's 10 km `ShadowCatcherPlane` is hidden — with no shadow map
+  it has nothing to catch and it painted a bright band across the horizon.
+- **No non-building fabric.** `IFCSPACE`, `IFCSPATIALZONE`, `IFCZONE`, `IFCOPENINGELEMENT`,
+  `IFCVIRTUALELEMENT`, `IFCGRID` and `IFCANNOTATION` are hidden while a template runs, and
+  restored on the way out. Room volumes export as translucent boxes that swallow whole
+  floors, and grids and annotations draw as stray dashes; hiding them is most of the
+  difference between a washed model reading as clean and reading as cluttered.
 
 ### Staying steady while the camera moves
 
-Two things that make a template flicker on a drag are deliberately switched off:
-
-- **The passes stay on.** Advanced Rendering and Render Lite drop ambient occlusion and
-  edge outlines on mouse-down and restore them shortly after mouse-up. On a template that
-  is not a sharpening step — it changes the picture, and on X-ray it blanked the canvas
-  outright — so a template holds its passes for the whole drag.
+- **The passes stay on.** Advanced Rendering and Render Lite drop occlusion and edges on
+  mouse-down and restore them after mouse-up. On a template that is not a sharpening step —
+  it changes the picture — so a template holds its passes for the whole drag.
 - **Full geometry.** Fragments swaps distant items for LOD stand-ins while the camera
-  moves. Those stand-ins are not the template's colour, so the swap that is nearly
-  invisible on the delivered grey model blinks badly once surfaces are washed or ghosted.
-  Templates pin every model to `LodMode.ALL_GEOMETRY` (not `ALL_VISIBLE` — items hidden by
-  a material override must stay hidden) and raise the streaming quality, and put both back
-  on the way out. This costs frame rate on a large model; say so if it bites.
+  moves. Those are not the template's colour, so a swap that is nearly invisible on the
+  delivered grey model blinks badly once surfaces are washed or ghosted. Templates pin
+  every model to `LodMode.ALL_GEOMETRY` — not `ALL_VISIBLE`, which would revive items
+  hidden by a material override — and restore the defaults on the way out.
 
 ## Where it lives
 

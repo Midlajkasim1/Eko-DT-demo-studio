@@ -284,16 +284,11 @@ export function RenderPanel() {
           {templated && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
               <SectionDivider label={activeTemplate.label} />
-              <Toggle label="Anti-Aliasing (SMAA)"
-                checked={s.antialiasing}
-                onChange={v => setLightingParams({ antialiasing: v })} />
-              <Toggle label="Ground Grid"
-                checked={s.gridVisible}
-                onChange={v => setLightingParams({ gridVisible: v })} />
               <p style={{ fontSize: '9px', lineHeight: 1.4, color: 'var(--text-secondary)', margin: 0 }}>
-                The model stands on a slab measured from its own storeys and grid, lit
-                with a contact shadow rather than a shadow map — the way the reference
-                viewer draws it.
+                Rendered through the reference viewer's own chain — a multisampled
+                target, then occlusion, drawn lines, bloom and grade. Anti-aliasing,
+                the grid and the passes are the template's to decide, so there is
+                nothing here to set.
               </p>
             </div>
           )}

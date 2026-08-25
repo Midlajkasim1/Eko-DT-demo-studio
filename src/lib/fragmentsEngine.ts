@@ -31,7 +31,7 @@ import * as SunCalc from 'suncalc'
 import { PBR_MATERIAL_MAPPINGS } from '../constants/pbrMaterials'
 import { RENDER_DEFAULTS, type RenderSettings, type ToneMappingId } from '../constants/renderSettings'
 import { getTemplateScene, type TemplateScene } from '../constants/viewTemplates'
-import { TemplatePlatform } from './templatePlatform'
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { N8AOPass } from 'n8ao'
 
 const TONE_MAPPINGS: Record<ToneMappingId, THREE.ToneMapping> = {
@@ -220,16 +220,131 @@ export async function initFragmentsEngine(
   let progressiveRestoreTimer: ReturnType<typeof setTimeout> | null = null
   let savedAoEnabled = false
   let savedEdgeEnabled = false
-  let savedInkEnabled = false
-  let inkPass: InkPass | null = null
-  let templateGradePass: any
   /** The template driving the scene, or null when the project settings do */
   let activeTemplate: TemplateScene | null = null
   let templateSky: THREE.Texture | null = null
   let templateEnv: THREE.Texture | null = null
-  let templatePlatform: TemplatePlatform | null = null
   /** How the item materials arrived, so a template can be taken back off them */
   const templateBase: DeliveredMaterials = new WeakMap()
+
+  // ── The template's own composer ──────────────────────────────────────────
+  // A template does not borrow the studio's post-processing chain. It builds the
+  // reference viewer's chain instead — a multisampled half-float target, then
+  // occlusion, lines, bloom and grade in that order — so a template renders here
+  // the way it renders there. The studio's own passes are left alone, which also
+  // keeps Advanced Rendering and Render Lite exactly as they were.
+  let templateComposer: EffectComposer | null = null
+  let templateRenderPass: RenderPass | null = null
+  let templateAoPass: GTAOPass | null = null
+  let templateInkPass: InkPass | null = null
+
+  const disposeTemplateComposer = () => {
+    if (!templateComposer) return
+    for (const pass of templateComposer.passes) (pass as any).dispose?.()
+    templateComposer.renderTarget1.dispose()
+    templateComposer.renderTarget2.dispose()
+    templateComposer = null
+    templateRenderPass = null
+    templateAoPass = null
+    templateInkPass = null
+  }
+
+  const buildTemplateComposer = (frame: TemplateScene['frame']) => {
+    disposeTemplateComposer()
+
+    const size = world.renderer.three.getDrawingBufferSize(new THREE.Vector2())
+    // Multisampled and half float: the edges stay clean without a post-process
+    // anti-aliasing pass, and tone mapping has headroom above white to work with.
+    const target = new THREE.WebGLRenderTarget(size.x, size.y, {
+      type: THREE.HalfFloatType,
+      samples: 4,
+    })
+
+    const composer = new EffectComposer(world.renderer.three, target)
+    composer.setSize(size.x, size.y)
+
+    templateRenderPass = new RenderPass(world.scene.three, world.camera.three)
+    composer.addPass(templateRenderPass)
+
+    if (frame.ao) {
+      // GTAO, as the reference uses — its radius is in world units, and it reads
+      // far cleaner on building-scale geometry than a screen-space pass does.
+      const ao = new GTAOPass(world.scene.three, world.camera.three, size.x, size.y)
+      ao.updateGtaoMaterial({ radius: frame.ao.radius, distanceExponent: 1.5, thickness: 1 })
+      ao.blendIntensity = frame.ao.intensity
+      composer.addPass(ao)
+      templateAoPass = ao
+    }
+
+    if (frame.ink) {
+      const ink = new InkPass(world.scene.three, world.camera.three, frame.ink)
+      composer.addPass(ink)
+      templateInkPass = ink
+    }
+
+    if (frame.bloom) {
+      composer.addPass(new UnrealBloomPass(
+        new THREE.Vector2(size.x, size.y),
+        frame.bloom.strength, frame.bloom.radius, frame.bloom.threshold,
+      ))
+    }
+
+    if (frame.grade) {
+      const grade = new ShaderPass(TemplateGradeShader)
+      grade.uniforms.saturation.value = frame.grade.saturation
+      grade.uniforms.contrast.value = frame.grade.contrast
+      grade.uniforms.warmth.value = frame.grade.warmth
+      grade.uniforms.vignette.value = frame.grade.vignette
+      grade.uniforms.levels.value = frame.grade.levels
+      composer.addPass(grade)
+    }
+
+    // Tone maps and converts to sRGB; every pass above works in linear light
+    composer.addPass(new OutputPass())
+    templateComposer = composer
+  }
+
+  /**
+   * Items IFC carries that are not building fabric. Room volumes are the loud
+   * ones — they export as translucent boxes that swallow whole floors — but
+   * openings, grids and annotations are just as unwanted, and they are what makes
+   * a washed or white model read as cluttered instead of clean. Hidden while a
+   * template runs and put back on the way out; the reference viewer drops them on
+   * load and never shows them at all.
+   */
+  const NON_PHYSICAL = [
+    /^IFCSPACE$/, /^IFCSPATIALZONE$/, /^IFCZONE$/, /^IFCOPENINGELEMENT$/,
+    /^IFCVIRTUALELEMENT$/, /^IFCGRID$/, /^IFCANNOTATION$/,
+  ]
+
+  /** modelId -> the ids this hid, so nothing hidden by an override is revived */
+  const hiddenNonPhysical = new Map<string, number[]>()
+
+  const hideNonPhysical = async (only?: string) => {
+    for (const [id, model] of fragments.models.list.entries()) {
+      if (only && id !== only) continue
+      if (hiddenNonPhysical.has(id)) continue
+      try {
+        const found = await (model as any).getItemsOfCategories?.(NON_PHYSICAL)
+        if (!found) continue
+        const localIds = Object.values(found).flat() as number[]
+        if (!localIds.length) continue
+        await (model as any).setVisible(localIds, false)
+        hiddenNonPhysical.set(id, localIds)
+      } catch { /* the worker has not registered this model yet */ }
+    }
+    void fragments.update(true)
+  }
+
+  const showNonPhysical = async () => {
+    for (const [id, localIds] of hiddenNonPhysical.entries()) {
+      const model = fragments.models.list.get(id)
+      if (!model) continue
+      try { await (model as any).setVisible(localIds, true) } catch { /* model gone */ }
+    }
+    hiddenNonPhysical.clear()
+    void fragments.update(true)
+  }
 
   /**
    * Fragments streams geometry on demand: by default it swaps distant items for
@@ -308,21 +423,17 @@ export async function initFragmentsEngine(
     templateGroup.visible = false
     tSun.castShadow = false
     if (tSun.target.parent) tSun.target.removeFromParent()
-    if (templatePlatform) templatePlatform.visible = false
     const catcher = world.scene.three.getObjectByName('ShadowCatcherPlane')
     if (catcher) catcher.visible = true
+    void showNonPhysical()
     templateSky?.dispose()
     templateSky = null
     templateEnv?.dispose()
     templateEnv = null
     world.scene.three.environment = null
     world.scene.three.background = null
-    if (inkPass) inkPass.enabled = false
-    if (templateGradePass) templateGradePass.enabled = false
-    // The other modes read aoRadius as screen pixels, which is how the pass was built
-    if (ssaoPass) ssaoPass.configuration.screenSpaceRadius = true
+    disposeTemplateComposer()
     setTemplateStreaming(false)
-    savedInkEnabled = false
   }
 
   /**
@@ -388,88 +499,37 @@ export async function initFragmentsEngine(
     world.renderer.three.toneMappingExposure = frame.exposure
 
     // ── Ground ──────────────────────────────────────────────────────────────
-    // No shadow map: the reference viewer casts none, and a hard sun shadow on a
-    // white or ghosted model reads as a mistake. The platform's contact shadow is
-    // what grounds the building instead.
+    // No shadow map and no slab. The reference lights the model with sun, fill
+    // and bounce and lets the occlusion pass do the contact darkening; a hard sun
+    // shadow across a white or ghosted model reads as a mistake.
     world.renderer.three.shadowMap.enabled = false
     tSun.castShadow = false
 
     // The catcher is a 10 km plane at grade. With no shadow map it has nothing to
-    // catch, it lies under the template's own slab, and it paints a bright band
-    // across the horizon — glaring against the X-ray sky.
+    // catch, and it paints a bright band across the horizon — glaring on X-ray.
     const catcher = world.scene.three.getObjectByName('ShadowCatcherPlane')
     if (catcher) catcher.visible = false
-
-    if (!templatePlatform) {
-      templatePlatform = new TemplatePlatform(fragments)
-      world.scene.three.add(templatePlatform.group)
-    }
-    templatePlatform.setStyle(surfaces, templateEnv)
-    // Measuring the storeys and the grid angle has to wait on the worker, so the
-    // slab appears a moment after the template does rather than holding it up
-    void templatePlatform.build().then(built => {
-      if (built !== null && activeTemplate) templatePlatform!.visible = true
-    })
+    if (grid) grid.visible = false
 
     // ── Surfaces ────────────────────────────────────────────────────────────
+    void hideNonPhysical()
     for (const material of fragments.models.materials.list.values()) {
       dressMaterial(material as THREE.Material, surfaces, templateEnv, templateBase)
     }
 
     // ── Frame ───────────────────────────────────────────────────────────────
-    // A template's passes keep running while the camera moves. Dropping the
-    // ambient occlusion and the drawn lines on mouse-down and bringing them back
-    // a moment later is exactly the flicker the progressive path is meant to
-    // avoid, and on a template it changes the picture rather than just its
-    // sharpness. savedAo/savedInk stay false so the orbit handlers leave them be.
+    // The template draws through its own composer, so none of the studio's passes
+    // run. They are switched off anyway, so nothing is left half-enabled when the
+    // project goes back to Advanced Rendering or Render Lite.
+    for (const pass of [ssaoPass, bloomPass, colorGradePass, edgePass, godRayPass,
+                        ssrPass, bokehPass, cloudShadowPass, smaaPass]) {
+      if (pass) pass.enabled = false
+    }
+    renderPass.enabled = true
     savedAoEnabled = false
-    savedInkEnabled = false
-
-    if (ssaoPass) {
-      ssaoPass.enabled = !!frame.ao
-      // N8AO renders the scene itself; exactly one of these two must draw it
-      renderPass.enabled = !ssaoPass.enabled
-      if (frame.ao) {
-        // The radius is in metres, the way the reference viewer's GTAO reads it
-        ssaoPass.configuration.screenSpaceRadius = false
-        ssaoPass.configuration.aoRadius = frame.ao.radius
-        ssaoPass.configuration.intensity = frame.ao.intensity
-      }
-    }
-
-    if (inkPass) {
-      inkPass.enabled = !!frame.ink
-      if (frame.ink) inkPass.setInk(frame.ink)
-    }
-
-    if (bloomPass) {
-      bloomPass.enabled = !!frame.bloom
-      if (frame.bloom) {
-        bloomPass.strength = frame.bloom.strength
-        bloomPass.radius = frame.bloom.radius
-        bloomPass.threshold = frame.bloom.threshold
-      }
-    }
-
-    if (templateGradePass) {
-      templateGradePass.enabled = !!frame.grade
-      if (frame.grade) {
-        templateGradePass.uniforms.saturation.value = frame.grade.saturation
-        templateGradePass.uniforms.contrast.value = frame.grade.contrast
-        templateGradePass.uniforms.warmth.value = frame.grade.warmth
-        templateGradePass.uniforms.vignette.value = frame.grade.vignette
-        templateGradePass.uniforms.levels.value = frame.grade.levels
-      }
-    }
-
-    // Everything else belongs to the modes a template stands in for
-    if (colorGradePass) colorGradePass.enabled = false
-    if (edgePass) edgePass.enabled = false
-    if (godRayPass) godRayPass.enabled = false
-    if (ssrPass) ssrPass.enabled = false
-    if (bokehPass) bokehPass.enabled = false
-    if (cloudShadowPass) cloudShadowPass.enabled = false
     savedEdgeEnabled = false
+
+    buildTemplateComposer(frame)
   }
 
   const setLightingParams = (params: RenderSettings) => {
@@ -484,9 +544,9 @@ export async function initFragmentsEngine(
       isRenderLite = false
       isPbrEnabled = params.pbrMaterials !== false
       if (params.progressiveRendering !== undefined) progressiveRenderingEnabled = params.progressiveRendering
-      if (grid) grid.visible = params.gridVisible === true
-      if (smaaPass) smaaPass.enabled = params.antialiasing !== false
-
+      // The grid and anti-aliasing are the template's to decide, not the
+      // project's: the reference draws no grid, and its edges come from a
+      // multisampled target rather than from a post-process pass.
       revertUpgradedMaterials()
       setTemplateStreaming(true)
       applyTemplate(template, params)
@@ -957,13 +1017,6 @@ export async function initFragmentsEngine(
   renderPass.enabled = !ssaoPass.enabled
   composer.addPass(ssaoPass)
 
-  // Drawn lines along silhouettes and creases — view templates only
-  inkPass = new InkPass(world.scene.three, world.camera.three, {
-    color: '#93a1af', thickness: 1, depth: 1.3, crease: 0.85, strength: 0.9,
-  })
-  inkPass.enabled = false
-  composer.addPass(inkPass)
-
   // Bloom Pass
   bloomPass = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
@@ -1014,11 +1067,6 @@ export async function initFragmentsEngine(
   colorGradePass.enabled = false
   composer.addPass(colorGradePass)
 
-  // The grade a view template carries, in its own numbers — view templates only
-  templateGradePass = new ShaderPass(TemplateGradeShader)
-  templateGradePass.enabled = false
-  composer.addPass(templateGradePass)
-
   // Custom Edge Outline Pass
   edgePass = new ShaderPass(CustomEdgeShader)
   edgePass.enabled = false
@@ -1045,7 +1093,7 @@ export async function initFragmentsEngine(
   // Which passes are live is the first thing to check when a frame comes out wrong,
   // and the composer is a closure otherwise. Never attached in a production build.
   if (import.meta.env.DEV) {
-    ;(world as any).__passes = () => composer.passes
+    ;(world as any).__passes = () => (templateComposer ?? composer).passes
   }
 
   const clock = new THREE.Clock()
@@ -1053,11 +1101,41 @@ export async function initFragmentsEngine(
   const defaultUpdate = world.renderer.update.bind(world.renderer)
   world.renderer.update = () => {
     const delta = clock.getDelta()
-    if (isRealistic || isRenderLite || activeTemplate) {
+
+    // A template renders through its own chain and touches none of the studio's
+    if (activeTemplate && templateComposer) {
+      if (!world.renderer.enabled || !world.renderer.currentWorld) return
+
+      const scene = world.scene.three
+      const camera = world.camera.three
+      // The camera object is swapped when the projection changes, and the passes
+      // each hold their own reference to it
+      if (templateRenderPass) {
+        templateRenderPass.scene = scene
+        templateRenderPass.camera = camera
+      }
+      if (templateAoPass) templateAoPass.camera = camera
+      templateInkPass?.view(scene, camera)
+
+      if (tSun.userData.sunOffset && world.camera.controls) {
+        const target = new THREE.Vector3()
+        world.camera.controls.getTarget(target)
+        tSun.target.position.copy(target)
+        tSun.position.copy(target).add(tSun.userData.sunOffset)
+      }
+
+      world.renderer.needsUpdate = false
+      world.renderer.onBeforeUpdate.trigger(world.renderer)
+      templateComposer.render()
+      world.renderer.onAfterUpdate.trigger(world.renderer)
+      return
+    }
+
+    if (isRealistic || isRenderLite) {
       if (!world.renderer.enabled || !world.renderer.currentWorld) return
 
       cloudMat.uniforms.time.value += delta * currentCloudSpeed
-      
+
       if (cloudShadowPass && cloudShadowPass.enabled) {
         cloudShadowPass.uniforms.tDepth.value = sceneDepthRT.depthTexture
         cloudShadowPass.uniforms.time.value = cloudMat.uniforms.time.value
@@ -1096,12 +1174,7 @@ export async function initFragmentsEngine(
         )
       }
       
-      if (inkPass && inkPass.enabled) {
-        // Both objects are swapped when the world reloads or the projection changes
-        inkPass.view(world.scene.three, world.camera.three)
-      }
-
-      const activeDirLight = activeTemplate ? tSun : isRenderLite ? liteDirLight : rDir
+      const activeDirLight = isRenderLite ? liteDirLight : rDir
       if (activeDirLight.userData.sunOffset && world.camera.controls) {
         const target = new THREE.Vector3()
         world.camera.controls.getTarget(target)
@@ -1174,6 +1247,7 @@ export async function initFragmentsEngine(
       world.camera.three.updateProjectionMatrix()
     }
     composer.setSize(size.x, size.y)
+    templateComposer?.setSize(size.x, size.y)
     smaaPass.setSize(size.x * window.devicePixelRatio, size.y * window.devicePixelRatio)
     if (ssaoPass && typeof ssaoPass.setSize === 'function') ssaoPass.setSize(size.x, size.y)
     if (bloomPass) bloomPass.setSize(size.x, size.y)
@@ -1207,14 +1281,12 @@ export async function initFragmentsEngine(
     if (!progressiveRenderingEnabled) return
     cameraMoving = true
     if (progressiveRestoreTimer) { clearTimeout(progressiveRestoreTimer); progressiveRestoreTimer = null }
-    // A template's ambient occlusion and drawn lines are part of its picture, not
-    // a sharpening step laid over it. Dropping them on mouse-down and bringing
-    // them back on mouse-up is itself the flicker, so a template keeps its passes
-    // for the whole drag.
+    // A template's occlusion and drawn lines are part of its picture, not a
+    // sharpening step laid over it, and they live on a chain of their own. Only
+    // the studio's passes are paused for the drag.
     if (!activeTemplate) {
       if (ssaoPass && ssaoPass.enabled) { savedAoEnabled = true; ssaoPass.enabled = false; renderPass.enabled = true }
       if (edgePass && edgePass.enabled) { savedEdgeEnabled = true; edgePass.enabled = false }
-      if (inkPass && inkPass.enabled) { savedInkEnabled = true; inkPass.enabled = false }
     }
     world.renderer.three.shadowMap.autoUpdate = false
   })
@@ -1226,7 +1298,6 @@ export async function initFragmentsEngine(
     progressiveRestoreTimer = setTimeout(() => {
       if (savedAoEnabled && ssaoPass) { ssaoPass.enabled = true; renderPass.enabled = false }
       if (savedEdgeEnabled && edgePass) { edgePass.enabled = true }
-      if (savedInkEnabled && inkPass) { inkPass.enabled = true }
       world.renderer.three.shadowMap.autoUpdate = true
       world.renderer.three.shadowMap.needsUpdate = true
       progressiveRestoreTimer = null
@@ -1254,14 +1325,11 @@ export async function initFragmentsEngine(
       }
     })
 
-    // A new model changes where the ground is and how the slab is turned, and it
-    // has to be pinned to full geometry like the ones already in
+    // A model arriving under a template has to be pinned to full geometry like the
+    // ones already in, and stripped of the items a template does not draw
     if (activeTemplate) {
-      templatePlatform?.invalidate()
       setTemplateStreaming(true)
-      void templatePlatform?.build().then(built => {
-        if (built !== null && activeTemplate) templatePlatform!.visible = true
-      })
+      void hideNonPhysical(model.modelId)
     }
     
     // Async compute PBR mapping
@@ -1364,8 +1432,7 @@ export async function initFragmentsEngine(
     depthMaterial.dispose()
     templateSky?.dispose()
     templateEnv?.dispose()
-    templatePlatform?.dispose()
-    inkPass?.dispose()
+    disposeTemplateComposer()
     components.dispose()
   }
 

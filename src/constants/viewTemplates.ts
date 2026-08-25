@@ -31,16 +31,13 @@ export interface TemplateSurfaces {
    * whole model a soft ghost so interiors read through the enclosure.
    */
   ghost: number
-  /** The slab the model stands on, and how dark it sits into it. */
-  platform: { color: string; roughness: number; edge: string; shadow: number }
 }
 
 export interface TemplateFrame {
   toneMapping: 'none' | 'aces' | 'neutral'
   exposure: number
-  /** Contact darkening in corners and under overhangs. The radius is in world
-   *  units (metres), the way the reference viewer's GTAO reads it — N8AO is put
-   *  into world-space mode for templates so the same number means the same thing. */
+  /** Contact darkening in corners and under overhangs, drawn by GTAO exactly as
+   *  the reference does it. The radius is in world units (metres). */
   ao: { radius: number; intensity: number } | null
   /** Glow spilling off the brightest surfaces. */
   bloom: { strength: number; radius: number; threshold: number } | null
@@ -138,7 +135,6 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
         faceted: false,
         solidify: 0.2,
         ghost: 0,
-        platform: { color: '#d8d4cb', roughness: 0.8, edge: '#b6afa4', shadow: 0.45 },
       },
       frame: {
         toneMapping: 'neutral',
@@ -187,7 +183,6 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
         faceted: false,
         solidify: 0.55,
         ghost: 0,
-        platform: { color: '#ffffff', roughness: 0.95, edge: '#c8d0d8', shadow: 0.2 },
       },
       frame: {
         toneMapping: 'none',
@@ -236,20 +231,12 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
         faceted: false,
         solidify: 0,
         ghost: 1,
-        platform: { color: '#0c1520', roughness: 0.9, edge: '#3a6a88', shadow: 0.15 },
       },
       frame: {
         toneMapping: 'aces',
         exposure: 1,
         ao: null,
-        // The reference look carries a 0.12 bloom here. It is dropped on purpose:
-        // X-ray is the one template whose scene is drawn by RenderPass rather than
-        // by the ambient-occlusion pass, and in that chain UnrealBloomPass
-        // intermittently hands back an empty frame while the camera moves — half
-        // the frames of a drag come out blank. Measured: bloom on 4/8 blank, bloom
-        // off 0/8, with every other pass ablated in turn. Over a near-black sky at
-        // that strength it is close to invisible, so stability wins.
-        bloom: null,
+        bloom: { strength: 0.12, radius: 0.4, threshold: 0.82 },
         ink: { color: '#9ad4f0', thickness: 1.2, depth: 0.65, crease: 0.45, strength: 0.75 },
         grade: { saturation: 1.05, contrast: 1.08, warmth: -0.08, vignette: 0.28, levels: 0 },
       },
