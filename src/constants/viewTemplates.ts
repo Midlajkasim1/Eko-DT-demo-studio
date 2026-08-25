@@ -31,13 +31,16 @@ export interface TemplateSurfaces {
    * whole model a soft ghost so interiors read through the enclosure.
    */
   ghost: number
+  /** The slab the model stands on, and how dark it sits into it. */
+  platform: { color: string; roughness: number; edge: string; shadow: number }
 }
 
 export interface TemplateFrame {
   toneMapping: 'none' | 'aces' | 'neutral'
   exposure: number
-  /** Contact darkening in corners and under overhangs. Radius is in screen
-   *  pixels — N8AO runs with a screen-space radius here. */
+  /** Contact darkening in corners and under overhangs. The radius is in world
+   *  units (metres), the way the reference viewer's GTAO reads it — N8AO is put
+   *  into world-space mode for templates so the same number means the same thing. */
   ao: { radius: number; intensity: number } | null
   /** Glow spilling off the brightest surfaces. */
   bloom: { strength: number; radius: number; threshold: number } | null
@@ -68,8 +71,6 @@ export interface TemplateScene {
   }
   surfaces: TemplateSurfaces
   frame: TemplateFrame
-  /** Whether the sun drops a shadow map. Off where the model is see-through. */
-  sunShadows: boolean
 }
 
 /** Colours for the little scene drawn on the template's card. */
@@ -137,16 +138,16 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
         faceted: false,
         solidify: 0.2,
         ghost: 0,
+        platform: { color: '#d8d4cb', roughness: 0.8, edge: '#b6afa4', shadow: 0.45 },
       },
       frame: {
         toneMapping: 'neutral',
         exposure: 1.08,
-        ao: { radius: 32, intensity: 1.0 },
+        ao: { radius: 1.6, intensity: 0.95 },
         bloom: { strength: 0.12, radius: 0.5, threshold: 0.9 },
         ink: null,
         grade: { saturation: 1.06, contrast: 1.06, warmth: 0.03, vignette: 0.22, levels: 0 },
       },
-      sunShadows: true,
     },
     card: {
       sky: [
@@ -186,16 +187,16 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
         faceted: false,
         solidify: 0.55,
         ghost: 0,
+        platform: { color: '#ffffff', roughness: 0.95, edge: '#c8d0d8', shadow: 0.2 },
       },
       frame: {
         toneMapping: 'none',
         exposure: 1,
-        ao: { radius: 48, intensity: 0.85 },
+        ao: { radius: 2.4, intensity: 0.85 },
         bloom: null,
         ink: { color: '#93a1af', thickness: 1, depth: 1.3, crease: 0.85, strength: 0.9 },
         grade: { saturation: 0.35, contrast: 1.06, warmth: 0, vignette: 0.1, levels: 0 },
       },
-      sunShadows: true,
     },
     card: {
       sky: [
@@ -235,17 +236,23 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
         faceted: false,
         solidify: 0,
         ghost: 1,
+        platform: { color: '#0c1520', roughness: 0.9, edge: '#3a6a88', shadow: 0.15 },
       },
       frame: {
         toneMapping: 'aces',
         exposure: 1,
         ao: null,
-        bloom: { strength: 0.12, radius: 0.4, threshold: 0.82 },
+        // The reference look carries a 0.12 bloom here. It is dropped on purpose:
+        // X-ray is the one template whose scene is drawn by RenderPass rather than
+        // by the ambient-occlusion pass, and in that chain UnrealBloomPass
+        // intermittently hands back an empty frame while the camera moves — half
+        // the frames of a drag come out blank. Measured: bloom on 4/8 blank, bloom
+        // off 0/8, with every other pass ablated in turn. Over a near-black sky at
+        // that strength it is close to invisible, so stability wins.
+        bloom: null,
         ink: { color: '#9ad4f0', thickness: 1.2, depth: 0.65, crease: 0.45, strength: 0.75 },
         grade: { saturation: 1.05, contrast: 1.08, warmth: -0.08, vignette: 0.28, levels: 0 },
       },
-      // Every surface is see-through here, so a shadow map only muddies it.
-      sunShadows: false,
     },
     card: {
       sky: [

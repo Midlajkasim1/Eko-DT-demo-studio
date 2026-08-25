@@ -30,10 +30,13 @@ export class InkPass extends Pass {
     const depth = new THREE.DepthTexture(1, 1)
     depth.format = THREE.DepthFormat
     depth.type = THREE.UnsignedIntType
+    // Plain 8-bit colour: MeshNormalMaterial writes 0..1, so a half-float target
+    // buys nothing, and a half-float colour buffer paired with a 32-bit depth
+    // texture is the combination drivers are least happy about — under software
+    // GL it intermittently yields an empty frame.
     this.buffer = new THREE.WebGLRenderTarget(1, 1, {
       minFilter: THREE.NearestFilter,
       magFilter: THREE.NearestFilter,
-      type: THREE.HalfFloatType,
       depthTexture: depth,
     })
 

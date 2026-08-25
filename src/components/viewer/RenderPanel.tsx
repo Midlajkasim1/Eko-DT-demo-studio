@@ -284,25 +284,17 @@ export function RenderPanel() {
           {templated && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
               <SectionDivider label={activeTemplate.label} />
-              {activeTemplate.scene?.sunShadows && (
-                <>
-                  <Toggle label="Cast Shadows"
-                    checked={s.shadowsEnabled}
-                    onChange={v => setLightingParams({ shadowsEnabled: v })} />
-                  {s.shadowsEnabled && (
-                    <Toggle label="Soft Shadows"
-                      checked={s.softShadows}
-                      onChange={v => setLightingParams({ softShadows: v })} />
-                  )}
-                </>
-              )}
               <Toggle label="Anti-Aliasing (SMAA)"
                 checked={s.antialiasing}
                 onChange={v => setLightingParams({ antialiasing: v })} />
-              <Toggle label="Smooth Navigation"
-                title="Pauses ambient occlusion and drawn lines while orbiting, then brings them back."
-                checked={s.progressiveRendering}
-                onChange={v => setLightingParams({ progressiveRendering: v })} />
+              <Toggle label="Ground Grid"
+                checked={s.gridVisible}
+                onChange={v => setLightingParams({ gridVisible: v })} />
+              <p style={{ fontSize: '9px', lineHeight: 1.4, color: 'var(--text-secondary)', margin: 0 }}>
+                The model stands on a slab measured from its own storeys and grid, lit
+                with a contact shadow rather than a shadow map — the way the reference
+                viewer draws it.
+              </p>
             </div>
           )}
 

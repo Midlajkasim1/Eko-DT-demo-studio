@@ -31,6 +31,7 @@ import * as SunCalc from 'suncalc'
 import { PBR_MATERIAL_MAPPINGS } from '../constants/pbrMaterials'
 import { RENDER_DEFAULTS, type RenderSettings, type ToneMappingId } from '../constants/renderSettings'
 import { getTemplateScene, type TemplateScene } from '../constants/viewTemplates'
+import { TemplatePlatform } from './templatePlatform'
 import { N8AOPass } from 'n8ao'
 
 const TONE_MAPPINGS: Record<ToneMappingId, THREE.ToneMapping> = {
@@ -226,8 +227,31 @@ export async function initFragmentsEngine(
   let activeTemplate: TemplateScene | null = null
   let templateSky: THREE.Texture | null = null
   let templateEnv: THREE.Texture | null = null
+  let templatePlatform: TemplatePlatform | null = null
   /** How the item materials arrived, so a template can be taken back off them */
   const templateBase: DeliveredMaterials = new WeakMap()
+
+  /**
+   * Fragments streams geometry on demand: by default it swaps distant items for
+   * LOD boxes and drops off-screen ones, which blinks geometry in and out while
+   * the camera moves. That is barely noticeable on the delivered grey model and
+   * very noticeable once a template has washed or ghosted the surfaces, because
+   * the LOD stand-ins are not the template's colour. Templates therefore pin the
+   * models to full geometry. ALL_GEOMETRY rather than ALL_VISIBLE: it still
+   * honours items hidden by a material override.
+   */
+  const setTemplateStreaming = (on: boolean) => {
+    // 0 / 100 ms are the library defaults, so switching off restores them
+    fragments.settings.graphicsQuality = on ? 1 : 0
+    fragments.settings.maxUpdateRate = on ? 16 : 100
+    for (const model of fragments.models.list.values()) {
+      const setLodMode = (model as any).setLodMode
+      if (typeof setLodMode !== 'function') continue
+      // Rejects while the worker is still registering the model; harmless
+      Promise.resolve(setLodMode.call(model, on ? FRAGS.LodMode.ALL_GEOMETRY : FRAGS.LodMode.DEFAULT))
+        .catch(() => { /* model not ready on the worker side yet */ })
+    }
+  }
 
   /**
    * Half the largest dimension of everything loaded — what the sun distance and
@@ -284,6 +308,9 @@ export async function initFragmentsEngine(
     templateGroup.visible = false
     tSun.castShadow = false
     if (tSun.target.parent) tSun.target.removeFromParent()
+    if (templatePlatform) templatePlatform.visible = false
+    const catcher = world.scene.three.getObjectByName('ShadowCatcherPlane')
+    if (catcher) catcher.visible = true
     templateSky?.dispose()
     templateSky = null
     templateEnv?.dispose()
@@ -292,6 +319,9 @@ export async function initFragmentsEngine(
     world.scene.three.background = null
     if (inkPass) inkPass.enabled = false
     if (templateGradePass) templateGradePass.enabled = false
+    // The other modes read aoRadius as screen pixels, which is how the pass was built
+    if (ssaoPass) ssaoPass.configuration.screenSpaceRadius = true
+    setTemplateStreaming(false)
     savedInkEnabled = false
   }
 
@@ -357,33 +387,29 @@ export async function initFragmentsEngine(
     world.renderer.three.toneMapping = TONE_MAPPINGS[frame.toneMapping]
     world.renderer.three.toneMappingExposure = frame.exposure
 
-    // ── Shadows ─────────────────────────────────────────────────────────────
-    const shadowsOn = template.sunShadows && params.shadowsEnabled !== false
-    if (world.renderer.three.shadowMap.type !== THREE.PCFShadowMap) {
-      world.renderer.three.shadowMap.enabled = false
-      world.renderer.three.shadowMap.type = THREE.PCFShadowMap
+    // ── Ground ──────────────────────────────────────────────────────────────
+    // No shadow map: the reference viewer casts none, and a hard sun shadow on a
+    // white or ghosted model reads as a mistake. The platform's contact shadow is
+    // what grounds the building instead.
+    world.renderer.three.shadowMap.enabled = false
+    tSun.castShadow = false
+
+    // The catcher is a 10 km plane at grade. With no shadow map it has nothing to
+    // catch, it lies under the template's own slab, and it paints a bright band
+    // across the horizon — glaring against the X-ray sky.
+    const catcher = world.scene.three.getObjectByName('ShadowCatcherPlane')
+    if (catcher) catcher.visible = false
+
+    if (!templatePlatform) {
+      templatePlatform = new TemplatePlatform(fragments)
+      world.scene.three.add(templatePlatform.group)
     }
-    world.renderer.three.shadowMap.enabled = shadowsOn
-    tSun.castShadow = shadowsOn
-    if (shadowsOn) {
-      const coverage = Math.min(maxRadius, 1500)
-      tSun.shadow.camera.left = -coverage
-      tSun.shadow.camera.right = coverage
-      tSun.shadow.camera.top = coverage
-      tSun.shadow.camera.bottom = -coverage
-      tSun.shadow.camera.far = sunDistance + maxRadius * 2
-      tSun.shadow.bias = -0.0005 * Math.max(1.0, maxRadius / 10000)
-      // Softness comes from the filter radius; PCFSoftShadowMap ignores it
-      tSun.shadow.radius = params.softShadows ? 4 : 1
-      tSun.shadow.camera.updateProjectionMatrix()
-      world.renderer.three.shadowMap.needsUpdate = true
-      world.scene.three.traverse((child: any) => {
-        if (child.isMesh && child.name !== 'ShadowCatcherPlane') {
-          child.castShadow = true
-          child.receiveShadow = true
-        }
-      })
-    }
+    templatePlatform.setStyle(surfaces, templateEnv)
+    // Measuring the storeys and the grid angle has to wait on the worker, so the
+    // slab appears a moment after the template does rather than holding it up
+    void templatePlatform.build().then(built => {
+      if (built !== null && activeTemplate) templatePlatform!.visible = true
+    })
 
     // ── Surfaces ────────────────────────────────────────────────────────────
     for (const material of fragments.models.materials.list.values()) {
@@ -391,23 +417,28 @@ export async function initFragmentsEngine(
     }
 
     // ── Frame ───────────────────────────────────────────────────────────────
-    // Passes that pause while orbiting are restated by the progressive handlers
-    const paused = progressiveRenderingEnabled && cameraMoving
+    // A template's passes keep running while the camera moves. Dropping the
+    // ambient occlusion and the drawn lines on mouse-down and bringing them back
+    // a moment later is exactly the flicker the progressive path is meant to
+    // avoid, and on a template it changes the picture rather than just its
+    // sharpness. savedAo/savedInk stay false so the orbit handlers leave them be.
+    savedAoEnabled = false
+    savedInkEnabled = false
 
-    savedAoEnabled = !!frame.ao
     if (ssaoPass) {
-      ssaoPass.enabled = !!frame.ao && !paused
+      ssaoPass.enabled = !!frame.ao
       // N8AO renders the scene itself; exactly one of these two must draw it
       renderPass.enabled = !ssaoPass.enabled
       if (frame.ao) {
+        // The radius is in metres, the way the reference viewer's GTAO reads it
+        ssaoPass.configuration.screenSpaceRadius = false
         ssaoPass.configuration.aoRadius = frame.ao.radius
         ssaoPass.configuration.intensity = frame.ao.intensity
       }
     }
 
-    savedInkEnabled = !!frame.ink
     if (inkPass) {
-      inkPass.enabled = !!frame.ink && !paused
+      inkPass.enabled = !!frame.ink
       if (frame.ink) inkPass.setInk(frame.ink)
     }
 
@@ -457,6 +488,7 @@ export async function initFragmentsEngine(
       if (smaaPass) smaaPass.enabled = params.antialiasing !== false
 
       revertUpgradedMaterials()
+      setTemplateStreaming(true)
       applyTemplate(template, params)
 
       world.scene.three.traverse((child: any) => {
@@ -1010,6 +1042,12 @@ export async function initFragmentsEngine(
   bokehPass.enabled = false
   composer.addPass(bokehPass)
 
+  // Which passes are live is the first thing to check when a frame comes out wrong,
+  // and the composer is a closure otherwise. Never attached in a production build.
+  if (import.meta.env.DEV) {
+    ;(world as any).__passes = () => composer.passes
+  }
+
   const clock = new THREE.Clock()
   const depthMaterial = new THREE.MeshDepthMaterial()
   const defaultUpdate = world.renderer.update.bind(world.renderer)
@@ -1169,9 +1207,15 @@ export async function initFragmentsEngine(
     if (!progressiveRenderingEnabled) return
     cameraMoving = true
     if (progressiveRestoreTimer) { clearTimeout(progressiveRestoreTimer); progressiveRestoreTimer = null }
-    if (ssaoPass && ssaoPass.enabled) { savedAoEnabled = true; ssaoPass.enabled = false; renderPass.enabled = true }
-    if (edgePass && edgePass.enabled) { savedEdgeEnabled = true; edgePass.enabled = false }
-    if (inkPass && inkPass.enabled) { savedInkEnabled = true; inkPass.enabled = false }
+    // A template's ambient occlusion and drawn lines are part of its picture, not
+    // a sharpening step laid over it. Dropping them on mouse-down and bringing
+    // them back on mouse-up is itself the flicker, so a template keeps its passes
+    // for the whole drag.
+    if (!activeTemplate) {
+      if (ssaoPass && ssaoPass.enabled) { savedAoEnabled = true; ssaoPass.enabled = false; renderPass.enabled = true }
+      if (edgePass && edgePass.enabled) { savedEdgeEnabled = true; edgePass.enabled = false }
+      if (inkPass && inkPass.enabled) { savedInkEnabled = true; inkPass.enabled = false }
+    }
     world.renderer.three.shadowMap.autoUpdate = false
   })
 
@@ -1209,6 +1253,16 @@ export async function initFragmentsEngine(
         child.receiveShadow = true
       }
     })
+
+    // A new model changes where the ground is and how the slab is turned, and it
+    // has to be pinned to full geometry like the ones already in
+    if (activeTemplate) {
+      templatePlatform?.invalidate()
+      setTemplateStreaming(true)
+      void templatePlatform?.build().then(built => {
+        if (built !== null && activeTemplate) templatePlatform!.visible = true
+      })
+    }
     
     // Async compute PBR mapping
     model.userData = model.userData || {};
@@ -1310,6 +1364,7 @@ export async function initFragmentsEngine(
     depthMaterial.dispose()
     templateSky?.dispose()
     templateEnv?.dispose()
+    templatePlatform?.dispose()
     inkPass?.dispose()
     components.dispose()
   }
