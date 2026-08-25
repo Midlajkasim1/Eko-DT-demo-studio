@@ -22,6 +22,7 @@ high-performance 3D viewer, and allows downloading the converted file for fast r
 - [Build & Deployment](./docs/10-build-and-deployment.md)
 - [Performance Guide](./docs/11-performance.md)
 - [Roadmap](./docs/12-roadmap.md)
+- [View Templates](./docs/VIEW_TEMPLATES.md) — Photoreal / Minimalist / X-ray, and the dashboard API
 
 ---
 

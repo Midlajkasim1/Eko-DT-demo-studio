@@ -12,6 +12,7 @@ import { useProjectStore } from '@/store/useProjectStore'
 import { ViewerToolbar } from './ViewerToolbar'
 import { ModelPositionPanel } from '@/components/viewer/ModelPositionPanel'
 import { RenderPanel } from '@/components/viewer/RenderPanel'
+import { TemplateBar } from '@/components/viewer/TemplatePicker'
 import { DashboardOverlay } from '@/components/viewer/DashboardOverlay'
 import { MaterialPanel } from '@/components/viewer/MaterialPanel'
 import { FocusModeWidget } from '@/components/viewer/FocusModeWidget'
@@ -20,6 +21,7 @@ import { OrientationCube } from '@/components/viewer/OrientationCube'
 import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import { unloadAllModels } from '@/lib/sceneTeardown'
 import { attachDevBridge } from '@/lib/devBridge'
+import { installViewerTemplateApi } from '@/lib/viewerTemplateApi'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 
 interface ViewerCanvasProps {
@@ -67,6 +69,9 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
     if (onEngineReady) onEngineReady(engineRef)
     attachDevBridge(engineRef)
   }, [isReady, onEngineReady])
+
+  // window.ViewerTemplates — how an injected dashboard switches templates
+  useEffect(() => { installViewerTemplateApi() }, [])
 
   // Restore the saved view every time a project is opened. The engine is created
   // once and outlives project switches, so this cannot hang off engine-ready alone.
@@ -543,6 +548,13 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
             if (!materialPickerActive) setPickerActive(false)
           }}
         />
+      )}
+
+      {/* Template switcher — the exported viewer's only render control. A
+          dashboard brings its own chrome along the bottom edge, so it starts
+          folded down to its pill there. */}
+      {step === 'viewing' && !adminMode && renderSettings.templateSwitcher !== false && (
+        <TemplateBar defaultOpen={!dashboardVisible} />
       )}
 
       {/* Right side panels */}

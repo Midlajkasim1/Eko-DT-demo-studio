@@ -12,7 +12,15 @@ export const TONE_MAPPING_OPTIONS: { value: ToneMappingId; label: string }[] = [
 
 export const SHADOW_MAP_SIZES = [1024, 2048, 4096, 8192]
 
+/** A whole rendering style, picked as one. 'default' hands the scene back to the
+ *  realistic / lite / plain pipeline and its individual controls. */
+export type TemplateId = 'default' | 'photoreal' | 'minimal' | 'xray'
+
 export const RENDER_DEFAULTS = {
+  templateId: 'default' as TemplateId,
+  /** Whether the exported viewer shows its own template switcher */
+  templateSwitcher: true,
+
   realisticMode: false,
   renderLite: false,
   gridVisible: false,

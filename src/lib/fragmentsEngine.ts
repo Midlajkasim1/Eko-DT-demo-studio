@@ -16,11 +16,21 @@ import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js'
 import { SSRPass } from 'three/examples/jsm/postprocessing/SSRPass.js'
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js'
 import { ColorGradeShader } from './ColorGradeShader'
+import { TemplateGradeShader } from './TemplateGradeShader'
 import { GodRayShader } from './GodRayShader'
 import { CustomEdgeShader } from './CustomEdgeShader'
+import { InkPass } from './InkPass'
+import {
+  dressMaterial,
+  makeSkyEnvironment,
+  makeSkyTexture,
+  restoreMaterial,
+  type DeliveredMaterials,
+} from './templateScene'
 import * as SunCalc from 'suncalc'
 import { PBR_MATERIAL_MAPPINGS } from '../constants/pbrMaterials'
 import { RENDER_DEFAULTS, type RenderSettings, type ToneMappingId } from '../constants/renderSettings'
+import { getTemplateScene, type TemplateScene } from '../constants/viewTemplates'
 import { N8AOPass } from 'n8ao'
 
 const TONE_MAPPINGS: Record<ToneMappingId, THREE.ToneMapping> = {
@@ -149,6 +159,24 @@ export async function initFragmentsEngine(
   liteDirLight.userData.sunOffset = new THREE.Vector3(300, 600, 300)
   // NOT added to scene yet — only added when Render Lite activates
 
+  // ── View Templates ───────────────────────────────
+  // Lit by hand rather than by the realistic rig, because every light is part of
+  // the template and has to be reachable when the template changes.
+  const templateGroup = new THREE.Group()
+  templateGroup.name = 'TemplateLights'
+  const tSun = new THREE.DirectionalLight()
+  tSun.name = 'TemplateSun'
+  tSun.shadow.mapSize.setScalar(2048)
+  tSun.shadow.camera.near = 1
+  tSun.shadow.bias = -0.0005
+  tSun.shadow.normalBias = 0.05
+  const tFill = new THREE.DirectionalLight()
+  const tBounce = new THREE.HemisphereLight()
+  const tAmbient = new THREE.AmbientLight()
+  templateGroup.add(tSun, tFill, tBounce, tAmbient)
+  templateGroup.visible = false
+  world.scene.three.add(templateGroup)
+
   const gradCanvas = document.createElement('canvas')
   gradCanvas.width = 2
   gradCanvas.height = 512
@@ -191,8 +219,252 @@ export async function initFragmentsEngine(
   let progressiveRestoreTimer: ReturnType<typeof setTimeout> | null = null
   let savedAoEnabled = false
   let savedEdgeEnabled = false
+  let savedInkEnabled = false
+  let inkPass: InkPass | null = null
+  let templateGradePass: any
+  /** The template driving the scene, or null when the project settings do */
+  let activeTemplate: TemplateScene | null = null
+  let templateSky: THREE.Texture | null = null
+  let templateEnv: THREE.Texture | null = null
+  /** How the item materials arrived, so a template can be taken back off them */
+  const templateBase: DeliveredMaterials = new WeakMap()
+
+  /**
+   * Half the largest dimension of everything loaded — what the sun distance and
+   * the shadow camera are sized against. Cached per model count, because it walks
+   * every model's bounding box.
+   */
+  const computeMaxRadius = () => {
+    const currentModelCount = fragments.models ? fragments.models.list.size : 0
+    if (world.scene.three.userData.maxRadius && world.scene.three.userData.cachedModelCount === currentModelCount) {
+      return world.scene.three.userData.maxRadius as number
+    }
+    if (currentModelCount === 0) return 10000
+
+    const box = new THREE.Box3()
+    for (const model of fragments.models.list.values()) {
+      const obj = (model as any).object || (model as any)
+      if (obj && typeof obj.updateWorldMatrix === 'function') box.expandByObject(obj)
+    }
+    if (box.isEmpty()) return 10000
+
+    const size = new THREE.Vector3()
+    box.getSize(size)
+    // Padded by the bounding box radius so shadows aren't clipped
+    const maxRadius = Math.max(size.x, size.y, size.z) * 0.6
+    world.scene.three.userData.maxRadius = maxRadius
+    world.scene.three.userData.cachedModelCount = currentModelCount
+    return maxRadius
+  }
+
+  /**
+   * Puts back the Lambert materials the realistic pipeline swapped for Standard
+   * ones. A template dresses the materials the fragments worker hands out, so it
+   * can only be seen if those are the materials actually on the meshes.
+   */
+  const revertUpgradedMaterials = () => {
+    world.scene.three.traverse((child: any) => {
+      if (!child.isMesh || !child.material) return
+      const revert = (mat: any) => {
+        if (!mat?.userData?.isUpgraded || !mat.userData.originalMaterial) return mat
+        const original = mat.userData.originalMaterial
+        mat.dispose()
+        return original
+      }
+      if (Array.isArray(child.material)) child.material = child.material.map(revert)
+      else child.material = revert(child.material)
+    })
+  }
+
+  /** Takes the template back off the scene, so another mode can set up its own. */
+  const clearTemplate = () => {
+    for (const material of fragments.models.materials.list.values()) {
+      restoreMaterial(material as THREE.Material, templateBase)
+    }
+    templateGroup.visible = false
+    tSun.castShadow = false
+    if (tSun.target.parent) tSun.target.removeFromParent()
+    templateSky?.dispose()
+    templateSky = null
+    templateEnv?.dispose()
+    templateEnv = null
+    world.scene.three.environment = null
+    world.scene.three.background = null
+    if (inkPass) inkPass.enabled = false
+    if (templateGradePass) templateGradePass.enabled = false
+    savedInkEnabled = false
+  }
+
+  /**
+   * Puts a whole rendering style on the scene at once: the sky behind the model,
+   * the lights, what the surfaces are made of, and the passes that run over the
+   * finished frame. Switching is instant — nothing is reloaded, only restated.
+   */
+  const applyTemplate = (template: TemplateScene, params: RenderSettings) => {
+    const { lights, surfaces, frame } = template
+
+    // ── Lights ──────────────────────────────────────────────────────────────
+    const maxRadius = computeMaxRadius()
+    const sunDistance = Math.max(1000, maxRadius * 4)
+    const from = new THREE.Vector3(...lights.sun.from).normalize()
+
+    tSun.color.set(lights.sun.color)
+    tSun.intensity = lights.sun.intensity
+    // Repositioned in the render loop so it follows the camera target
+    tSun.userData.sunOffset = from.clone().multiplyScalar(sunDistance)
+    tSun.position.copy(tSun.userData.sunOffset)
+
+    // Opposite the sun, so faces turned away from it still describe themselves.
+    tFill.color.set(lights.fill.color)
+    tFill.intensity = lights.fill.intensity
+    tFill.position
+      .set(-lights.sun.from[0], lights.sun.from[1] * 0.6, -lights.sun.from[2])
+      .normalize()
+      .multiplyScalar(sunDistance)
+
+    tBounce.color.set(lights.bounce.sky)
+    tBounce.groundColor.set(lights.bounce.ground)
+    tBounce.intensity = lights.bounce.intensity
+    tAmbient.intensity = lights.ambient
+    templateGroup.visible = true
+
+    if (tSun.target.parent !== world.scene.three) world.scene.three.add(tSun.target)
+
+    // Every other light in the scene belongs to a mode that is not running. The
+    // realistic rig is switched off as a group, so its own lights are left alone
+    // — they have to still be on when that mode comes back.
+    realisticGroup.visible = false
+    if (liteDirLight.parent) liteDirLight.removeFromParent()
+    world.scene.three.traverse((child: any) => {
+      if ((child.isDirectionalLight || child.isAmbientLight || child.isHemisphereLight)
+        && child.parent !== templateGroup && child.parent !== realisticGroup) {
+        child.visible = false
+      }
+    })
+
+    // ── Sky, environment, tone ──────────────────────────────────────────────
+    templateSky?.dispose()
+    templateEnv?.dispose()
+    templateSky = makeSkyTexture(template.sky)
+    templateEnv = makeSkyEnvironment(template.sky)
+    world.scene.three.background = templateSky
+    world.scene.three.environment = templateEnv
+    world.scene.three.environmentIntensity = 1
+    world.scene.three.fog = null
+    sky.visible = false
+    cloudsDome.visible = false
+
+    world.renderer.three.toneMapping = TONE_MAPPINGS[frame.toneMapping]
+    world.renderer.three.toneMappingExposure = frame.exposure
+
+    // ── Shadows ─────────────────────────────────────────────────────────────
+    const shadowsOn = template.sunShadows && params.shadowsEnabled !== false
+    if (world.renderer.three.shadowMap.type !== THREE.PCFShadowMap) {
+      world.renderer.three.shadowMap.enabled = false
+      world.renderer.three.shadowMap.type = THREE.PCFShadowMap
+    }
+    world.renderer.three.shadowMap.enabled = shadowsOn
+    tSun.castShadow = shadowsOn
+    if (shadowsOn) {
+      const coverage = Math.min(maxRadius, 1500)
+      tSun.shadow.camera.left = -coverage
+      tSun.shadow.camera.right = coverage
+      tSun.shadow.camera.top = coverage
+      tSun.shadow.camera.bottom = -coverage
+      tSun.shadow.camera.far = sunDistance + maxRadius * 2
+      tSun.shadow.bias = -0.0005 * Math.max(1.0, maxRadius / 10000)
+      // Softness comes from the filter radius; PCFSoftShadowMap ignores it
+      tSun.shadow.radius = params.softShadows ? 4 : 1
+      tSun.shadow.camera.updateProjectionMatrix()
+      world.renderer.three.shadowMap.needsUpdate = true
+      world.scene.three.traverse((child: any) => {
+        if (child.isMesh && child.name !== 'ShadowCatcherPlane') {
+          child.castShadow = true
+          child.receiveShadow = true
+        }
+      })
+    }
+
+    // ── Surfaces ────────────────────────────────────────────────────────────
+    for (const material of fragments.models.materials.list.values()) {
+      dressMaterial(material as THREE.Material, surfaces, templateEnv, templateBase)
+    }
+
+    // ── Frame ───────────────────────────────────────────────────────────────
+    // Passes that pause while orbiting are restated by the progressive handlers
+    const paused = progressiveRenderingEnabled && cameraMoving
+
+    savedAoEnabled = !!frame.ao
+    if (ssaoPass) {
+      ssaoPass.enabled = !!frame.ao && !paused
+      // N8AO renders the scene itself; exactly one of these two must draw it
+      renderPass.enabled = !ssaoPass.enabled
+      if (frame.ao) {
+        ssaoPass.configuration.aoRadius = frame.ao.radius
+        ssaoPass.configuration.intensity = frame.ao.intensity
+      }
+    }
+
+    savedInkEnabled = !!frame.ink
+    if (inkPass) {
+      inkPass.enabled = !!frame.ink && !paused
+      if (frame.ink) inkPass.setInk(frame.ink)
+    }
+
+    if (bloomPass) {
+      bloomPass.enabled = !!frame.bloom
+      if (frame.bloom) {
+        bloomPass.strength = frame.bloom.strength
+        bloomPass.radius = frame.bloom.radius
+        bloomPass.threshold = frame.bloom.threshold
+      }
+    }
+
+    if (templateGradePass) {
+      templateGradePass.enabled = !!frame.grade
+      if (frame.grade) {
+        templateGradePass.uniforms.saturation.value = frame.grade.saturation
+        templateGradePass.uniforms.contrast.value = frame.grade.contrast
+        templateGradePass.uniforms.warmth.value = frame.grade.warmth
+        templateGradePass.uniforms.vignette.value = frame.grade.vignette
+        templateGradePass.uniforms.levels.value = frame.grade.levels
+      }
+    }
+
+    // Everything else belongs to the modes a template stands in for
+    if (colorGradePass) colorGradePass.enabled = false
+    if (edgePass) edgePass.enabled = false
+    if (godRayPass) godRayPass.enabled = false
+    if (ssrPass) ssrPass.enabled = false
+    if (bokehPass) bokehPass.enabled = false
+    if (cloudShadowPass) cloudShadowPass.enabled = false
+    savedEdgeEnabled = false
+  }
 
   const setLightingParams = (params: RenderSettings) => {
+    const template = getTemplateScene(params.templateId)
+    // A template owns the whole picture, so it stands in for the other modes
+    // rather than layering on top of them
+    if (activeTemplate && !template) clearTemplate()
+    activeTemplate = template
+
+    if (template) {
+      isRealistic = false
+      isRenderLite = false
+      isPbrEnabled = params.pbrMaterials !== false
+      if (params.progressiveRendering !== undefined) progressiveRenderingEnabled = params.progressiveRendering
+      if (grid) grid.visible = params.gridVisible === true
+      if (smaaPass) smaaPass.enabled = params.antialiasing !== false
+
+      revertUpgradedMaterials()
+      applyTemplate(template, params)
+
+      world.scene.three.traverse((child: any) => {
+        if (child.isMesh && child.material) child.material.needsUpdate = true
+      })
+      return
+    }
+
     isRealistic = params.realisticMode
     isRenderLite = params.renderLite === true
     isPbrEnabled = params.pbrMaterials !== false
@@ -390,28 +662,7 @@ export async function initFragmentsEngine(
         cloudsDome.castShadow = false
       }
       
-      let maxRadius = 10000
-      const currentModelCount = fragments.models ? fragments.models.list.size : 0;
-      
-      if (world.scene.three.userData.maxRadius && world.scene.three.userData.cachedModelCount === currentModelCount) {
-        maxRadius = world.scene.three.userData.maxRadius
-      } else if (currentModelCount > 0) {
-        const box = new THREE.Box3()
-        for (const model of fragments.models.list.values()) {
-          const obj = (model as any).object || (model as any)
-          if (obj && typeof obj.updateWorldMatrix === 'function') {
-            box.expandByObject(obj)
-          }
-        }
-        if (!box.isEmpty()) {
-          const size = new THREE.Vector3()
-          box.getSize(size)
-          // Pad the bounding box radius by 1.2x to ensure shadows aren't clipped
-          maxRadius = Math.max(size.x, size.y, size.z) * 0.6
-          world.scene.three.userData.maxRadius = maxRadius
-          world.scene.three.userData.cachedModelCount = currentModelCount
-        }
-      }
+      const maxRadius = computeMaxRadius()
 
       // Ensure the sun is placed far enough outside the bounding box
       const sunDistance = Math.max(10000, maxRadius * 4)
@@ -568,25 +819,8 @@ export async function initFragmentsEngine(
           world.renderer.three.shadowMap.type = newShadowType
         }
         
-        let maxRadius = 10000
-        const currentModelCount = fragments.models ? fragments.models.list.size : 0
-        if (world.scene.three.userData.maxRadius && world.scene.three.userData.cachedModelCount === currentModelCount) {
-          maxRadius = world.scene.three.userData.maxRadius
-        } else if (currentModelCount > 0) {
-          const box = new THREE.Box3()
-          for (const model of fragments.models.list.values()) {
-            const obj = (model as any).object || (model as any)
-            if (obj && typeof obj.updateWorldMatrix === 'function') box.expandByObject(obj)
-          }
-          if (!box.isEmpty()) {
-            const size = new THREE.Vector3()
-            box.getSize(size)
-            maxRadius = Math.max(size.x, size.y, size.z) * 0.6
-            world.scene.three.userData.maxRadius = maxRadius
-            world.scene.three.userData.cachedModelCount = currentModelCount
-          }
-        }
-        
+        const maxRadius = computeMaxRadius()
+
         // Dynamically scale the shadow camera to cover the scene
         const SHADOW_COVERAGE = Math.min(maxRadius, 1500)
         liteDirLight.shadow.camera.left = -SHADOW_COVERAGE
@@ -691,6 +925,13 @@ export async function initFragmentsEngine(
   renderPass.enabled = !ssaoPass.enabled
   composer.addPass(ssaoPass)
 
+  // Drawn lines along silhouettes and creases — view templates only
+  inkPass = new InkPass(world.scene.three, world.camera.three, {
+    color: '#93a1af', thickness: 1, depth: 1.3, crease: 0.85, strength: 0.9,
+  })
+  inkPass.enabled = false
+  composer.addPass(inkPass)
+
   // Bloom Pass
   bloomPass = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
@@ -740,7 +981,12 @@ export async function initFragmentsEngine(
   colorGradePass = new ShaderPass(ColorGradeShader)
   colorGradePass.enabled = false
   composer.addPass(colorGradePass)
-  
+
+  // The grade a view template carries, in its own numbers — view templates only
+  templateGradePass = new ShaderPass(TemplateGradeShader)
+  templateGradePass.enabled = false
+  composer.addPass(templateGradePass)
+
   // Custom Edge Outline Pass
   edgePass = new ShaderPass(CustomEdgeShader)
   edgePass.enabled = false
@@ -769,9 +1015,9 @@ export async function initFragmentsEngine(
   const defaultUpdate = world.renderer.update.bind(world.renderer)
   world.renderer.update = () => {
     const delta = clock.getDelta()
-    if (isRealistic || isRenderLite) {
+    if (isRealistic || isRenderLite || activeTemplate) {
       if (!world.renderer.enabled || !world.renderer.currentWorld) return
-      
+
       cloudMat.uniforms.time.value += delta * currentCloudSpeed
       
       if (cloudShadowPass && cloudShadowPass.enabled) {
@@ -812,7 +1058,12 @@ export async function initFragmentsEngine(
         )
       }
       
-      const activeDirLight = isRenderLite ? liteDirLight : rDir
+      if (inkPass && inkPass.enabled) {
+        // Both objects are swapped when the world reloads or the projection changes
+        inkPass.view(world.scene.three, world.camera.three)
+      }
+
+      const activeDirLight = activeTemplate ? tSun : isRenderLite ? liteDirLight : rDir
       if (activeDirLight.userData.sunOffset && world.camera.controls) {
         const target = new THREE.Vector3()
         world.camera.controls.getTarget(target)
@@ -920,6 +1171,7 @@ export async function initFragmentsEngine(
     if (progressiveRestoreTimer) { clearTimeout(progressiveRestoreTimer); progressiveRestoreTimer = null }
     if (ssaoPass && ssaoPass.enabled) { savedAoEnabled = true; ssaoPass.enabled = false; renderPass.enabled = true }
     if (edgePass && edgePass.enabled) { savedEdgeEnabled = true; edgePass.enabled = false }
+    if (inkPass && inkPass.enabled) { savedInkEnabled = true; inkPass.enabled = false }
     world.renderer.three.shadowMap.autoUpdate = false
   })
 
@@ -930,6 +1182,7 @@ export async function initFragmentsEngine(
     progressiveRestoreTimer = setTimeout(() => {
       if (savedAoEnabled && ssaoPass) { ssaoPass.enabled = true; renderPass.enabled = false }
       if (savedEdgeEnabled && edgePass) { edgePass.enabled = true }
+      if (savedInkEnabled && inkPass) { inkPass.enabled = true }
       world.renderer.three.shadowMap.autoUpdate = true
       world.renderer.three.shadowMap.needsUpdate = true
       progressiveRestoreTimer = null
@@ -941,6 +1194,11 @@ export async function initFragmentsEngine(
       material.polygonOffset = true
       material.polygonOffsetUnits = 1
       material.polygonOffsetFactor = Math.random()
+    }
+    // Materials are made as tiles arrive, so the template has to be put on each
+    // one as it appears, not only when the template changes
+    if (activeTemplate) {
+      dressMaterial(material, activeTemplate.surfaces, templateEnv, templateBase)
     }
   })
   
@@ -1050,6 +1308,9 @@ export async function initFragmentsEngine(
     const ids = [...fragments.models.list.values()].map((m: any) => m.modelId)
     await Promise.all(ids.map((id: string) => fragments.disposeModel(id)))
     depthMaterial.dispose()
+    templateSky?.dispose()
+    templateEnv?.dispose()
+    inkPass?.dispose()
     components.dispose()
   }
 

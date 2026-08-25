@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { RENDER_DEFAULTS, type RenderSettings } from '@/constants/renderSettings'
+import { RENDER_DEFAULTS, type RenderSettings, type TemplateId } from '@/constants/renderSettings'
 import type { AppStep } from '@/types'
 
 interface AppState extends RenderSettings {
@@ -17,6 +17,7 @@ interface AppState extends RenderSettings {
   setProgress: (progress: number, label?: string) => void
   setError: (error: string) => void
   setRealisticMode: (enabled: boolean) => void
+  setTemplate: (templateId: TemplateId) => void
   setLightingParams: (params: Partial<RenderSettings>) => void
   setMaterialPickerActive: (active: boolean) => void
   setSelectedMaterialElement: (element: { modelId: string, id: number, category?: string } | null) => void
@@ -42,6 +43,11 @@ export const useAppStore = create<AppState>((set) => ({
   setProgress: (progress, label = '') => set({ conversionProgress: progress, conversionStepLabel: label }),
   setError: (error) => set({ step: 'error', error }),
   setRealisticMode: (realisticMode) => set({ realisticMode }),
+  // A template owns the whole picture, so the modes it stands in for go off with it
+  setTemplate: (templateId) =>
+    set(templateId === 'default'
+      ? { templateId }
+      : { templateId, realisticMode: false, renderLite: false }),
   setLightingParams: (params) => set((state) => ({ ...state, ...params })),
   setMaterialPickerActive: (materialPickerActive) => set({ materialPickerActive, selectedMaterialElement: null }),
   setSelectedMaterialElement: (selectedMaterialElement) => set({ selectedMaterialElement }),

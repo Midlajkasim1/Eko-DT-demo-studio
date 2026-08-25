@@ -8,6 +8,8 @@ import {
   type ToneMappingId,
 } from '@/constants/renderSettings'
 import { useAppStore } from '@/store/useAppStore'
+import { TemplatePicker } from '@/components/viewer/TemplatePicker'
+import { getViewTemplate } from '@/constants/viewTemplates'
 
 // ─── Sky Presets ────────────────────────────────────────────────────────────
 const DEFAULT_PRESET = {
@@ -195,6 +197,11 @@ export function RenderPanel() {
   // Tracks which preset button is currently active (null = no preset / custom)
   const [activePreset, setActivePreset] = useState<string | null>(null)
 
+  // A template owns sky, lights, surfaces and post-processing, so the controls it
+  // stands in for are put away while one is on
+  const activeTemplate = getViewTemplate(s.templateId)
+  const templated = activeTemplate.scene !== null
+
   const formatTime = (time: number) => {
     const hours   = Math.floor(time)
     const minutes = Math.floor((time - hours) * 60)
@@ -217,7 +224,7 @@ export function RenderPanel() {
       </button>
 
       {/* Panel body */}
-      <div className="position-panel-body" style={{ maxHeight: '290px', overflowY: 'auto' }}>
+      <div className="position-panel-body" style={{ maxHeight: '380px', overflowY: 'auto' }}>
         <div className="position-panel-header">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14" style={{ color: 'var(--accent)' }}>
             <circle cx="12" cy="12" r="5" />
@@ -227,20 +234,43 @@ export function RenderPanel() {
         </div>
 
         <div className="position-field-group" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '10px' }}>
+          {/* ── Template ──────────────────────────────────────── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+            <SectionDivider label="Template" />
+            <TemplatePicker variant="panel" />
+            {templated && (
+              <p style={{ fontSize: '9px', lineHeight: 1.4, color: 'var(--text-secondary)', margin: 0 }}>
+                <strong>{activeTemplate.label}</strong> owns sky, lights, surfaces and
+                post-processing. <strong>Default</strong> hands them back.
+              </p>
+            )}
+            <Toggle
+              label="Switcher in exported viewer"
+              title="Ships the template strip with the exported project, so the viewer can change templates on its own."
+              checked={s.templateSwitcher !== false}
+              onChange={v => setLightingParams({ templateSwitcher: v })}
+            />
+          </div>
+
           {/* ── Render Mode ───────────────────────────────────── */}
+          <SectionDivider label="Render Mode" />
           <Toggle
             label="Advanced Rendering"
-            checked={s.realisticMode}
-            onChange={v => { setRealisticMode(v); if (v) setLightingParams({ renderLite: false }) }}
+            checked={s.realisticMode && !templated}
+            onChange={v => {
+              setRealisticMode(v)
+              if (v) setLightingParams({ renderLite: false, templateId: 'default' })
+            }}
           />
           <Toggle
             label="Render Lite"
             title="Clean BIM quality: shadows, ambient occlusion, edge outlines — no skybox or heavy effects."
-            checked={s.renderLite && !s.realisticMode}
+            checked={s.renderLite && !s.realisticMode && !templated}
             onChange={v => {
               setLightingParams({
                 renderLite: v,
                 progressiveRendering: v,
+                ...(v ? { templateId: 'default' } : {}),
                 // Auto-enable the core BIM quality passes when switching on
                 ...(v ? { shadowsEnabled: true, softShadows: true, ambientOcclusion: true, outlineEdges: true } : {}),
               })
@@ -250,8 +280,34 @@ export function RenderPanel() {
           {/* <Toggle label="Ground Grid" checked={s.gridVisible}
             onChange={v => setLightingParams({ gridVisible: v })} /> */}
 
+          {/* ── Template settings ─────────────────────────────── */}
+          {templated && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+              <SectionDivider label={activeTemplate.label} />
+              {activeTemplate.scene?.sunShadows && (
+                <>
+                  <Toggle label="Cast Shadows"
+                    checked={s.shadowsEnabled}
+                    onChange={v => setLightingParams({ shadowsEnabled: v })} />
+                  {s.shadowsEnabled && (
+                    <Toggle label="Soft Shadows"
+                      checked={s.softShadows}
+                      onChange={v => setLightingParams({ softShadows: v })} />
+                  )}
+                </>
+              )}
+              <Toggle label="Anti-Aliasing (SMAA)"
+                checked={s.antialiasing}
+                onChange={v => setLightingParams({ antialiasing: v })} />
+              <Toggle label="Smooth Navigation"
+                title="Pauses ambient occlusion and drawn lines while orbiting, then brings them back."
+                checked={s.progressiveRendering}
+                onChange={v => setLightingParams({ progressiveRendering: v })} />
+            </div>
+          )}
+
           {/* ── Render Lite settings ───────────────────────────── */}
-          {s.renderLite && !s.realisticMode && (
+          {s.renderLite && !s.realisticMode && !templated && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
               <SectionDivider label="Render Lite" />
               <Toggle label="Cast Shadows"
@@ -274,7 +330,7 @@ export function RenderPanel() {
           )}
 
           {/* ── Studio Gradient Sky ───────────────────────────── */}
-          {!s.realisticMode && (
+          {!s.realisticMode && !templated && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
               <SectionDivider label="Studio Sky" />
               <Toggle
@@ -327,7 +383,7 @@ export function RenderPanel() {
           )}
 
 
-          {s.realisticMode && (
+          {s.realisticMode && !templated && (
             <div style={{
               display: 'flex', flexDirection: 'column', gap: '12px',
               width: '100%', marginTop: '12px', paddingLeft: '22px',
