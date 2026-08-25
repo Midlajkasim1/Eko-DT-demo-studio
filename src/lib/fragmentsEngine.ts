@@ -356,9 +356,11 @@ export async function initFragmentsEngine(
    * honours items hidden by a material override.
    */
   const setTemplateStreaming = (on: boolean) => {
-    // 0 / 100 ms are the library defaults, so switching off restores them
-    fragments.settings.graphicsQuality = on ? 1 : 0
-    fragments.settings.maxUpdateRate = on ? 16 : 100
+    // The reference also raises graphicsQuality to 1 and maxUpdateRate to 16 ms.
+    // Both are deliberately NOT copied: they are streaming knobs rather than part
+    // of the look, and together they make the worker push tiles at maximum detail
+    // roughly every frame. On a large federated model that is most of the cost of
+    // a template and none of its appearance, so the project's own values stand.
     for (const model of fragments.models.list.values()) {
       const setLodMode = (model as any).setLodMode
       if (typeof setLodMode !== 'function') continue
