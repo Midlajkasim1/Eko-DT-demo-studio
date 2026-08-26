@@ -574,7 +574,7 @@ export async function initFragmentsEngine(
   }
 
   const setLightingParams = (params: RenderSettings) => {
-    const template = getTemplateScene(params.templateId)
+    const template = getTemplateScene(params.templateId, params.xrayColor)
     // A template owns the whole picture, so it stands in for the other modes
     // rather than layering on top of them
     if (activeTemplate && !template) clearTemplate()

@@ -247,6 +247,27 @@ export function RenderPanel() {
               checked={s.templateSwitcher !== false}
               onChange={v => setLightingParams({ templateSwitcher: v })}
             />
+            {s.templateId === 'xray' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', marginTop: '6px' }}>
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>X-ray Color</span>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {(['blue', 'white'] as const).map(c => (
+                    <button
+                      key={c}
+                      onClick={() => setLightingParams({ xrayColor: c })}
+                      style={{
+                        flex: 1, padding: '4px', borderRadius: '4px', border: `1px solid ${s.xrayColor === c ? 'var(--accent)' : 'var(--border)'}`,
+                        background: 'var(--bg-surface)', color: s.xrayColor === c ? 'var(--accent)' : 'var(--text-primary)',
+                        fontSize: '9px', fontWeight: s.xrayColor === c ? 700 : 500, cursor: 'pointer',
+                        textTransform: 'capitalize'
+                      }}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ── Render Mode ───────────────────────────────────── */}

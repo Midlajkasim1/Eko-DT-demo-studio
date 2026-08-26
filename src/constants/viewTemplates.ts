@@ -201,7 +201,7 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
         glow: 0,
         reflect: 0.02,
         faceted: false,
-        solidify: 1.0,
+        solidify: 0.55,
         ghost: 0,
       },
       frame: {
@@ -209,7 +209,7 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
         exposure: 1.0,
         ao: { radius: 1.2, intensity: 1.2 },
         bloom: null,
-        ink: { color: '#1a1a1a', thickness: 1.5, depth: 1.8, crease: 1.2, strength: 1.0 },
+        ink: { color: '#1a1a1a', thickness: 1.1, depth: 1.5, crease: 1.0, strength: 0.95 },
         grade: { saturation: 0, contrast: 1.22, warmth: 0, vignette: 0.18, levels: 0 },
       },
     },
@@ -283,8 +283,27 @@ export function getViewTemplate(id: TemplateId | undefined | null): ViewTemplate
   return VIEW_TEMPLATES.find(t => t.id === id) ?? DEFAULT_TEMPLATE
 }
 
-export function getTemplateScene(id: TemplateId | undefined | null): TemplateScene | null {
-  return getViewTemplate(id).scene
+export function getTemplateScene(
+  id: TemplateId | undefined | null,
+  xrayColor?: 'blue' | 'yellow' | 'white'
+): TemplateScene | null {
+  const t = VIEW_TEMPLATES.find(t => t.id === id) ?? DEFAULT_TEMPLATE
+  if (!t.scene) return null
+
+  // If we're on X-ray and a custom color is requested, deep clone and modify the scene
+  if (id === 'xray' && xrayColor && xrayColor !== 'blue') {
+    const scene = JSON.parse(JSON.stringify(t.scene)) as TemplateScene
+    if (xrayColor === 'yellow') {
+      scene.surfaces.tint = '#e8c848' // Yellow tint
+      scene.frame.ink!.color = '#f0d49a'
+    } else if (xrayColor === 'white') {
+      scene.surfaces.tint = '#e0e0e0' // White tint
+      scene.frame.ink!.color = '#f0f0f0'
+    }
+    return scene
+  }
+
+  return t.scene
 }
 
 export function skyCss(stops: SkyStop[]): string {
