@@ -241,14 +241,8 @@ export function RenderPanel() {
             <p style={{ fontSize: '9px', lineHeight: 1.4, color: 'var(--text-secondary)', margin: 0 }}>
               {activeTemplate.description}
             </p>
-            <Toggle
-              label="Switcher in exported viewer"
-              title="Ships the template strip with the exported project, so the viewer can change templates on its own."
-              checked={s.templateSwitcher !== false}
-              onChange={v => setLightingParams({ templateSwitcher: v })}
-            />
             {s.templateId === 'xray' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', marginTop: '6px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', marginTop: '6px', marginBottom: '6px' }}>
                 <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>X-ray Color</span>
                 <div style={{ display: 'flex', gap: '6px' }}>
                   {(['blue', 'white'] as const).map(c => (
@@ -268,6 +262,12 @@ export function RenderPanel() {
                 </div>
               </div>
             )}
+            <Toggle
+              label="Switcher in exported viewer"
+              title="Ships the template strip with the exported project, so the viewer can change templates on its own."
+              checked={s.templateSwitcher !== false}
+              onChange={v => setLightingParams({ templateSwitcher: v })}
+            />
           </div>
 
           {/* ── Render Mode ───────────────────────────────────── */}

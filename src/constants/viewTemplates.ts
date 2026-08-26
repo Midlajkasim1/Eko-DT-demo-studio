@@ -177,6 +177,7 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
       line: true,
     },
   },
+  /*
   {
     id: 'monochrome',
     label: 'Monochrome',
@@ -226,6 +227,7 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
       line: true,
     },
   },
+  */
   {
     id: 'xray',
     label: 'X-ray',
@@ -258,7 +260,7 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
         exposure: 1,
         ao: null,
         bloom: null,
-        ink: { color: '#9ad4f0', thickness: 1.2, depth: 0.65, crease: 0.45, strength: 0.75 },
+        ink: null,
         grade: { saturation: 1.05, contrast: 1.08, warmth: -0.08, vignette: 0.28, levels: 0 },
       },
     },
