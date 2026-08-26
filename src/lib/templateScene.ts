@@ -55,7 +55,7 @@ export function makeSkyEnvironment(stops: SkyStop[]) {
  * Below this luminance a delivered colour carries no information — it is a glass
  * tint or a placeholder — and is replaced before the template's wash is applied.
  */
-const DARK_FLOOR = 0.06
+const DARK_FLOOR = 0.18
 
 /** What those surfaces start from instead: a neutral mid-grey. */
 const NEUTRAL_DARK = new THREE.Color(0.45, 0.45, 0.45)
@@ -68,6 +68,8 @@ interface DeliveredMaterial {
   transparent: boolean
   depthWrite: boolean
   flatShading: boolean
+  visible: boolean
+  side: THREE.Side
   envMap: THREE.Texture | null
   envMapIntensity: number | null
   reflectivity: number | null
@@ -78,12 +80,14 @@ export type DeliveredMaterials = WeakMap<THREE.Material, DeliveredMaterial>
 
 function capture(mat: any): DeliveredMaterial {
   return {
-    color: mat.color.clone(),
+    color: mat.color ? mat.color.clone() : new THREE.Color(0, 0, 0),
     emissive: mat.emissive ? mat.emissive.clone() : null,
     opacity: mat.opacity,
     transparent: mat.transparent,
     depthWrite: mat.depthWrite,
     flatShading: mat.flatShading ?? false,
+    visible: mat.visible ?? true,
+    side: mat.side ?? THREE.FrontSide,
     envMap: mat.envMap ?? null,
     envMapIntensity: 'envMapIntensity' in mat ? mat.envMapIntensity : null,
     reflectivity: 'reflectivity' in mat ? mat.reflectivity : null,
@@ -114,29 +118,59 @@ export function dressMaterial(
     cache.set(material, base)
   }
 
-  // Everything else is dressed, including the barely-there materials architectural
-  // glass arrives as. They used to be skipped here, to stop IfcSpace proxy volumes
-  // solidifying into boxes — but that is handled properly now by hiding the
-  // non-physical categories outright, and skipping them left every glass panel
-  // with its delivered dark tint and its translucency: unwashed, unsolidified, and
-  // stacking up into grey rectangles across a white model. The reference dresses
-  // every material it is handed, and so does this.
+  // LOD stand-in boxes: the fragments worker uses these while full geometry
+  // streams in. They carry their own dark material that is not part of the
+  // model's palette, so a template cannot wash them meaningfully.
+  if (mat.isLodMaterial) {
+    mat.visible = false
+    mat.needsUpdate = true
+    return true
+  }
+
+  // Materials without a colour property cannot be dressed
+  if (!mat.color) return false
+
+  // If it was already hidden by something else, leave it hidden
+  if (!base.visible) {
+    mat.visible = false
+    mat.needsUpdate = true
+    return true
+  }
 
   const { wash, tint, glow, reflect, faceted, solidify, ghost } = surfaces
 
-  // Some models ship surfaces at near-zero luminance — glass tints and outright
-  // #000000 placeholders. Lit by anything they stay black, and a template with a
-  // light wash cannot lift them: Photoreal pulls only 10% towards its tint, so
-  // #000000 lands on #171717. They read as holes punched through the model, and
-  // because the geometry is single-sided they vanish when you orbit past them,
-  // which is what makes them look like a rendering fault rather than model data.
-  // Anything under DARK_FLOOR starts from a neutral grey instead of its delivered
-  // colour. Authored colours are untouched — this only catches surfaces that
-  // carry no usable colour at all. Set DARK_FLOOR to 0 for the delivered colours.
+  // Proxy geometry (IfcSpace, IfcOpeningElement) is often exported as either
+  // completely transparent (opacity 0) or extremely translucent. If we solidify
+  // it, it turns into solid walls blocking the view. If it's single-sided, it
+  // turns into pitch-black boxes from the back. We must hide it outright.
+  // 1. Any material with opacity < 0.15 is almost certainly a proxy (architectural glass is usually >0.2).
+  // 2. Any material that is dark AND translucent is a void proxy.
+  // 3. Materials with names suggesting proxy elements.
   const luminance = 0.2126 * base.color.r + 0.7152 * base.color.g + 0.0722 * base.color.b
-  const start = luminance < DARK_FLOOR ? NEUTRAL_DARK : base.color
+  const name = mat.name?.toLowerCase() ?? ''
+  const isProxyName = name.includes('space') || name.includes('proxy') || name.includes('opening') || name.includes('zone')
+  
+  if (base.opacity < 0.15 || (luminance < DARK_FLOOR && base.opacity < 0.95) || isProxyName) {
+    mat.visible = false
+    mat.needsUpdate = true
+    return true
+  }
 
-  mat.color.copy(start).lerp(new THREE.Color(tint), wash)
+  // Ensure ALL dressed materials are double-sided!
+  // Single-sided geometry (like canopies or accidental single-sided exports) 
+  // will render pitch-black when viewed from the back because the normals point 
+  // away from the light. By forcing DoubleSide, they receive lighting on both 
+  // sides and wash correctly.
+  if ('side' in mat) mat.side = THREE.DoubleSide
+
+  // For dark opaque materials (dark concrete, dark steel, etc.) we still want
+  // them visible but washed aggressively toward the template tint
+  const isDarkOpaque = luminance < DARK_FLOOR
+  const neutralDark = new THREE.Color(0.45, 0.45, 0.45)
+  const start = isDarkOpaque ? neutralDark : base.color
+  const effectiveWash = isDarkOpaque ? Math.max(wash, 0.85) : wash
+
+  mat.color.copy(start).lerp(new THREE.Color(tint), effectiveWash)
   if (mat.emissive) mat.emissive.copy(mat.color).multiplyScalar(glow)
   if ('flatShading' in mat) mat.flatShading = faceted
 
@@ -171,12 +205,16 @@ export function restoreMaterial(material: THREE.Material, cache: DeliveredMateri
   if (!base) return
   const mat = material as any
 
+  // Restore visibility first — LOD and proxy materials may have been hidden
+  mat.visible = base.visible
+
   mat.color.copy(base.color)
   if (mat.emissive && base.emissive) mat.emissive.copy(base.emissive)
   mat.opacity = base.opacity
   mat.transparent = base.transparent
   mat.depthWrite = base.depthWrite
   if ('flatShading' in mat) mat.flatShading = base.flatShading
+  if ('side' in mat) mat.side = base.side ?? THREE.FrontSide
   mat.envMap = base.envMap
   if (base.envMapIntensity !== null) mat.envMapIntensity = base.envMapIntensity
   if (base.reflectivity !== null) mat.reflectivity = base.reflectivity

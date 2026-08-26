@@ -220,6 +220,8 @@ export async function initFragmentsEngine(
   let progressiveRestoreTimer: ReturnType<typeof setTimeout> | null = null
   let savedAoEnabled = false
   let savedEdgeEnabled = false
+  let savedTemplateAoEnabled = false
+  let savedTemplateInkEnabled = false
   /** The template driving the scene, or null when the project settings do */
   let activeTemplate: TemplateScene | null = null
   let templateSky: THREE.Texture | null = null
@@ -368,20 +370,26 @@ export async function initFragmentsEngine(
    * the camera moves. That is barely noticeable on the delivered grey model and
    * very noticeable once a template has washed or ghosted the surfaces, because
    * the LOD stand-ins are not the template's colour. Templates therefore pin the
-   * models to full geometry. ALL_GEOMETRY rather than ALL_VISIBLE: it still
-   * honours items hidden by a material override.
+   * models to full geometry and ask the worker to push tiles at maximum detail
+   * so stand-in boxes never appear as black blocks against the washed surfaces.
+   * ALL_GEOMETRY rather than ALL_VISIBLE: it still honours items hidden by a
+   * material override.
    */
   const setTemplateStreaming = (on: boolean) => {
-    // The reference also raises graphicsQuality to 1 and maxUpdateRate to 16 ms.
-    // Both are deliberately NOT copied: they are streaming knobs rather than part
-    // of the look, and together they make the worker push tiles at maximum detail
-    // roughly every frame. On a large federated model that is most of the cost of
-    // a template and none of its appearance, so the project's own values stand.
     const mode = on ? FRAGS.LodMode.ALL_GEOMETRY : FRAGS.LodMode.DEFAULT
     for (const model of fragments.models.list.values()) {
       if (typeof (model as any).setLodMode !== 'function') continue
       void withRetry(() => (model as any).setLodMode(mode))
     }
+    // In template mode: raise graphics quality to the finest detail threshold
+    // and shorten the update interval so the worker pushes full-resolution tiles
+    // roughly every frame. This is what stops LOD stand-in boxes from showing up
+    // as black blocks against a washed or white-model surface — exactly what the
+    // Ellisdon reference viewer does (graphicsQuality=1, maxUpdateRate=16).
+    // On exit, restore the defaults (graphicsQuality=0, maxUpdateRate=100) so
+    // the project's own performance profile takes over again.
+    fragments.settings.graphicsQuality = on ? 1 : 0
+    fragments.settings.maxUpdateRate = on ? 16 : 100
   }
 
   /**
@@ -448,6 +456,23 @@ export async function initFragmentsEngine(
     templateEnv = null
     world.scene.three.environment = null
     world.scene.three.background = null
+
+    // Restore visibility of any LOD meshes we hid in the render loop
+    for (const model of fragments.models.list.values()) {
+      const object = model.object || (model as any).mesh
+      if (object && object.children) {
+        for (let i = 0; i < object.children.length; i++) {
+          const child = object.children[i]
+          if (child.material) {
+            const matArray = Array.isArray(child.material) ? child.material : [child.material]
+            if (matArray.some(m => m && m.isLodMaterial)) {
+              child.visible = true
+            }
+          }
+        }
+      }
+    }
+
     disposeTemplateComposer()
     setTemplateStreaming(false)
   }
@@ -1122,6 +1147,26 @@ export async function initFragmentsEngine(
     if (activeTemplate && templateComposer) {
       if (!world.renderer.enabled || !world.renderer.currentWorld) return
 
+      // The LOD worker streams geometry in chunks, placing LOD boxes (LODMesh) in
+      // the model's direct children while full geometry arrives. Because these
+      // are generated dynamically and don't go through our onItemSet material
+      // hooks, we quickly hide them here before rendering so they don't appear
+      // as black blocks against the template sky.
+      for (const model of fragments.models.list.values()) {
+        const object = model.object || (model as any).mesh
+        if (object && object.children) {
+          for (let i = 0; i < object.children.length; i++) {
+            const child = object.children[i]
+            if (child.material) {
+              const matArray = Array.isArray(child.material) ? child.material : [child.material]
+              if (matArray.some(m => m && m.isLodMaterial)) {
+                child.visible = false
+              }
+            }
+          }
+        }
+      }
+
       const scene = world.scene.three
       const camera = world.camera.three
       // The camera object is swapped when the projection changes, and the passes
@@ -1297,13 +1342,16 @@ export async function initFragmentsEngine(
     if (!progressiveRenderingEnabled) return
     cameraMoving = true
     if (progressiveRestoreTimer) { clearTimeout(progressiveRestoreTimer); progressiveRestoreTimer = null }
-    // A template's occlusion and drawn lines are part of its picture, not a
-    // sharpening step laid over it, and they live on a chain of their own. Only
-    // the studio's passes are paused for the drag.
-    if (!activeTemplate) {
+    
+    // Disable heavy passes during camera movement for better FPS
+    if (activeTemplate) {
+      if (templateAoPass && templateAoPass.enabled) { savedTemplateAoEnabled = true; templateAoPass.enabled = false }
+      if (templateInkPass && templateInkPass.enabled) { savedTemplateInkEnabled = true; templateInkPass.enabled = false }
+    } else {
       if (ssaoPass && ssaoPass.enabled) { savedAoEnabled = true; ssaoPass.enabled = false; renderPass.enabled = true }
       if (edgePass && edgePass.enabled) { savedEdgeEnabled = true; edgePass.enabled = false }
     }
+    
     world.renderer.three.shadowMap.autoUpdate = false
   })
 
@@ -1312,8 +1360,14 @@ export async function initFragmentsEngine(
     if (!progressiveRenderingEnabled) return
     if (progressiveRestoreTimer) clearTimeout(progressiveRestoreTimer)
     progressiveRestoreTimer = setTimeout(() => {
-      if (savedAoEnabled && ssaoPass) { ssaoPass.enabled = true; renderPass.enabled = false }
-      if (savedEdgeEnabled && edgePass) { edgePass.enabled = true }
+      if (activeTemplate) {
+        if (savedTemplateAoEnabled && templateAoPass) { templateAoPass.enabled = true }
+        if (savedTemplateInkEnabled && templateInkPass) { templateInkPass.enabled = true }
+      } else {
+        if (savedAoEnabled && ssaoPass) { ssaoPass.enabled = true; renderPass.enabled = false }
+        if (savedEdgeEnabled && edgePass) { edgePass.enabled = true }
+      }
+      
       world.renderer.three.shadowMap.autoUpdate = true
       world.renderer.three.shadowMap.needsUpdate = true
       progressiveRestoreTimer = null
