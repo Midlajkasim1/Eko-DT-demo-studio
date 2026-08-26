@@ -1,53 +1,26 @@
 import type { TemplateId } from './renderSettings'
 
-/**
- * A template is one row of settings for the whole picture: the sky behind the
- * model, the lights on it, what its surfaces are made to look like, and which
- * post-processing passes run over the frame. Everything the eye reads as
- * "rendering style" is in here, so a new style is a new entry in
- * {@link VIEW_TEMPLATES} and nothing else.
- *
- * Ported from the EllisDon review viewer's "looks", so Photoreal, Minimalist and
- * X-ray read the same way here as they do there.
- */
-
-/** One stop of a vertical gradient: how far down, and the colour there. */
 export type SkyStop = [number, string]
 
 export interface TemplateSurfaces {
-  /** How far item colours are pulled towards {@link tint}: 0 keeps IFC's own. */
   wash: number
   tint: string
-  /** Self-lit floor, so unlit faces keep some colour. */
   glow: number
-  /** How much sky the surfaces mirror back. */
   reflect: number
-  /** Facets instead of smooth normals. */
   faceted: boolean
-  /** Pushes translucent items — glass, fabric — towards solid. */
   solidify: number
-  /**
-   * Pulls every surface toward see-through. 0 leaves opacity alone; 1 makes the
-   * whole model a soft ghost so interiors read through the enclosure.
-   */
   ghost: number
 }
 
 export interface TemplateFrame {
   toneMapping: 'none' | 'aces' | 'neutral'
   exposure: number
-  /** Contact darkening in corners and under overhangs, drawn by GTAO exactly as
-   *  the reference does it. The radius is in world units (metres). */
   ao: { radius: number; intensity: number } | null
-  /** Glow spilling off the brightest surfaces. */
   bloom: { strength: number; radius: number; threshold: number } | null
-  /** Drawn lines along silhouettes and creases. */
   ink: { color: string; thickness: number; depth: number; crease: number; strength: number } | null
-  /** Colour grade over the finished frame. `levels` of 0 leaves it continuous. */
   grade: {
     saturation: number
     contrast: number
-    /** Positive warms the frame, negative cools it. */
     warmth: number
     vignette: number
     levels: number
@@ -55,14 +28,10 @@ export interface TemplateFrame {
 }
 
 export interface TemplateScene {
-  /** Sky wash, zenith first. Painted behind the model and used for reflections. */
   sky: SkyStop[]
   lights: {
-    /** The sun: colour, strength, and the direction it comes from. */
     sun: { color: string; intensity: number; from: [number, number, number] }
-    /** Cool light from the opposite side, so shaded faces do not go flat black. */
     fill: { color: string; intensity: number }
-    /** Bounce: sky above, ground below. */
     bounce: { sky: string; ground: string; intensity: number }
     ambient: number
   }
@@ -70,7 +39,6 @@ export interface TemplateScene {
   frame: TemplateFrame
 }
 
-/** Colours for the little scene drawn on the template's card. */
 export interface TemplateCard {
   sky: SkyStop[]
   horizon: string
@@ -85,7 +53,7 @@ export interface ViewTemplate {
   id: TemplateId
   label: string
   note: string
-  /** null — no template pipeline; the project's own render settings drive the scene. */
+  description: string
   scene: TemplateScene | null
   card: TemplateCard
 }
@@ -95,6 +63,7 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
     id: 'default',
     label: 'Default',
     note: 'Project settings',
+    description: 'Uses your own sky, lights and render settings. Switch on Advanced Rendering or Render Lite below for extra quality.',
     scene: null,
     card: {
       sky: [
@@ -113,6 +82,7 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
     id: 'photoreal',
     label: 'Photoreal',
     note: 'Soft daylight',
+    description: 'Warm blue sky with a soft sun, contact shadows and a subtle colour grade. Best for realistic presentation views.',
     scene: {
       sky: [
         [0, '#5388c2'],
@@ -140,13 +110,6 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
         toneMapping: 'neutral',
         exposure: 1.08,
         ao: { radius: 1.6, intensity: 0.95 },
-        // The reference carries a bloom here (photoreal 0.12/0.5/0.9,
-        // x-ray 0.12/0.4/0.82). It is deliberately not built: UnrealBloomPass is
-        // the one pass in this app measured returning garbage — 4 blank frames in
-        // 8 during a drag in the studio chain — and bloom is exactly what the two
-        // templates showing white blocks have and the one that behaves does not.
-        // At 0.12 over these skies it is close to invisible. Restore by putting
-        // the values back here.
         bloom: null,
         ink: null,
         grade: { saturation: 1.06, contrast: 1.06, warmth: 0.03, vignette: 0.22, levels: 0 },
@@ -170,6 +133,7 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
     id: 'minimal',
     label: 'Minimalist',
     note: 'White model',
+    description: 'Bleached-white surfaces on a bright studio backdrop, with soft grey AO shadows and thin pencil-line edges.',
     scene: {
       sky: [
         [0, '#e9eff5'],
@@ -214,9 +178,59 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
     },
   },
   {
+    id: 'monochrome',
+    label: 'Monochrome',
+    note: 'Bold B&W linework',
+    description: 'Full greyscale with punchy contrast, tight AO corner shadows and bold black ink lines on silhouettes and edges.',
+    scene: {
+      sky: [
+        [0, '#d4d4d4'],
+        [0.4, '#e8e8e8'],
+        [0.7, '#f4f4f4'],
+        [1, '#ffffff'],
+      ],
+      lights: {
+        sun: { color: '#ffffff', intensity: 2.8, from: [0.45, 1, 0.35] },
+        fill: { color: '#d0d8e8', intensity: 0.55 },
+        bounce: { sky: '#e0e0e0', ground: '#f0f0f0', intensity: 0.6 },
+        ambient: 0.25,
+      },
+      surfaces: {
+        wash: 1.0,
+        tint: '#c8c8c8',
+        glow: 0,
+        reflect: 0.02,
+        faceted: false,
+        solidify: 1.0,
+        ghost: 0,
+      },
+      frame: {
+        toneMapping: 'none',
+        exposure: 1.0,
+        ao: { radius: 1.2, intensity: 1.2 },
+        bloom: null,
+        ink: { color: '#1a1a1a', thickness: 1.5, depth: 1.8, crease: 1.2, strength: 1.0 },
+        grade: { saturation: 0, contrast: 1.22, warmth: 0, vignette: 0.18, levels: 0 },
+      },
+    },
+    card: {
+      sky: [
+        [0, '#d4d4d4'],
+        [1, '#ffffff'],
+      ],
+      horizon: '#f4f4f4',
+      face: '#e0e0e0',
+      shade: '#8a8a8a',
+      ink: '#1a1a1a',
+      glow: 0,
+      line: true,
+    },
+  },
+  {
     id: 'xray',
     label: 'X-ray',
     note: 'See through structure',
+    description: 'Dark night sky with blue-tinted translucent surfaces — all floors and walls become see-through so structure reads at a glance.',
     scene: {
       sky: [
         [0, '#070b14'],
@@ -243,13 +257,6 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
         toneMapping: 'aces',
         exposure: 1,
         ao: null,
-        // The reference carries a bloom here (photoreal 0.12/0.5/0.9,
-        // x-ray 0.12/0.4/0.82). It is deliberately not built: UnrealBloomPass is
-        // the one pass in this app measured returning garbage — 4 blank frames in
-        // 8 during a drag in the studio chain — and bloom is exactly what the two
-        // templates showing white blocks have and the one that behaves does not.
-        // At 0.12 over these skies it is close to invisible. Restore by putting
-        // the values back here.
         bloom: null,
         ink: { color: '#9ad4f0', thickness: 1.2, depth: 0.65, crease: 0.45, strength: 0.75 },
         grade: { saturation: 1.05, contrast: 1.08, warmth: -0.08, vignette: 0.28, levels: 0 },
@@ -276,12 +283,10 @@ export function getViewTemplate(id: TemplateId | undefined | null): ViewTemplate
   return VIEW_TEMPLATES.find(t => t.id === id) ?? DEFAULT_TEMPLATE
 }
 
-/** The scene a template drives, or null when it defers to the project settings. */
 export function getTemplateScene(id: TemplateId | undefined | null): TemplateScene | null {
   return getViewTemplate(id).scene
 }
 
-/** A stop list as a CSS gradient, for the page and the picker cards. */
 export function skyCss(stops: SkyStop[]): string {
   return `linear-gradient(180deg, ${stops
     .map(([at, color]) => `${color} ${Math.round(at * 100)}%`)

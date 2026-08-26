@@ -238,12 +238,9 @@ export function RenderPanel() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
             <SectionDivider label="Template" />
             <TemplatePicker variant="panel" />
-            {templated && (
-              <p style={{ fontSize: '9px', lineHeight: 1.4, color: 'var(--text-secondary)', margin: 0 }}>
-                <strong>{activeTemplate.label}</strong> owns sky, lights, surfaces and
-                post-processing. <strong>Default</strong> hands them back.
-              </p>
-            )}
+            <p style={{ fontSize: '9px', lineHeight: 1.4, color: 'var(--text-secondary)', margin: 0 }}>
+              {activeTemplate.description}
+            </p>
             <Toggle
               label="Switcher in exported viewer"
               title="Ships the template strip with the exported project, so the viewer can change templates on its own."
@@ -280,18 +277,8 @@ export function RenderPanel() {
           {/* <Toggle label="Ground Grid" checked={s.gridVisible}
             onChange={v => setLightingParams({ gridVisible: v })} /> */}
 
-          {/* ── Template settings ─────────────────────────────── */}
-          {templated && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
-              <SectionDivider label={activeTemplate.label} />
-              <p style={{ fontSize: '9px', lineHeight: 1.4, color: 'var(--text-secondary)', margin: 0 }}>
-                Rendered through the reference viewer's own chain — a multisampled
-                target, then occlusion, drawn lines, bloom and grade. Anti-aliasing,
-                the grid and the passes are the template's to decide, so there is
-                nothing here to set.
-              </p>
-            </div>
-          )}
+          {/* Template settings section is intentionally empty — all controls are owned
+              by the template itself. The description above the picker explains each one. */}
 
           {/* ── Render Lite settings ───────────────────────────── */}
           {s.renderLite && !s.realisticMode && !templated && (
