@@ -685,7 +685,15 @@
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
   display: flex; flex-direction: column; gap: 1px; z-index: 40; pointer-events: auto;
 }
-.vp-floors-menu[hidden] { display: none; }
+.vp-floors-menu[hidden], .vp-render-menu[hidden] { display: none; }
+.vp-render-menu {
+  position: absolute; inset-inline-end: 66px; top: 50%; transform: translateY(-50%);
+  width: 140px; max-height: 320px; overflow-y: auto;
+  background: var(--tlbg); backdrop-filter: blur(14px);
+  border: 1px solid var(--bd2); border-radius: 8px; padding: 5px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  display: flex; flex-direction: column; gap: 1px; z-index: 40; pointer-events: auto;
+}
 .floor-item {
   display: flex; align-items: center; width: 100%; padding: 6px 9px;
   background: transparent; border: none; border-radius: 6px;
@@ -694,6 +702,19 @@
 }
 .floor-item:hover { background: var(--s2); color: var(--t1); }
 .floor-item.active { background: var(--accT); color: var(--acc); }
+
+/* X-ray color swatch buttons */
+.xray-color-row {
+  display: flex; gap: 6px; padding: 4px 4px 2px;
+}
+.xray-color-btn {
+  flex: 1; padding: 5px 8px; border-radius: 6px;
+  font-size: 11px; font-family: var(--fM), monospace;
+  border: 1px solid var(--bd2); background: var(--s2); color: var(--t1);
+  cursor: pointer; text-align: center; transition: border-color .15s;
+}
+.xray-color-btn:hover { border-color: var(--acc); color: var(--acc); }
+.xray-color-btn.active { border-color: var(--acc); background: var(--accT); color: var(--acc); font-weight: 600; }
 
 /* Bottom Scrubbar */
 .vp-scrubbar {

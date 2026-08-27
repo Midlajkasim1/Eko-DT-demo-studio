@@ -3333,6 +3333,8 @@
   const toolBtns   = $$('.vp-toolbar .tool-btn');
   const floorsBtn  = $('.vp-toolbar .tool-btn[data-tool="floors"]');
   const floorsMenu = $('#vpFloorsMenu');
+  const renderBtn  = $('.vp-toolbar .tool-btn[data-tool="render"]');
+  const renderMenu = $('#vpRenderMenu');
   // reuses the existing `vpCaption` element reference declared above
   const FLOORS = ['ALL', 'Roof', 'L12', 'L11', 'L10', 'L9', 'L8', 'L7', 'L6', 'L5', 'L4', 'L3', 'L2', 'L1', 'G', 'B1'];
   const VP_CAPTION_TXT = {
@@ -3387,8 +3389,16 @@
       syncToolActive();
     }
 
+    function closeRenderMenu() {
+      if (!renderMenu || renderMenu.hidden) return;
+      renderMenu.hidden = true;
+      if (renderBtn) renderBtn.setAttribute('aria-expanded', 'false');
+      syncToolActive();
+    }
+
     function openFloorsMenu() {
       if (!floorsMenu) return;
+      closeRenderMenu();
       floorsMenu.innerHTML = '';
       FLOORS.forEach((f) => {
         const b = document.createElement('button');
@@ -3407,13 +3417,82 @@
       toolBtns.forEach((b) => b.classList.toggle('active', b === floorsBtn));
     }
 
+    let currentTemplate = window.INJECTED_PROJECT_CONFIG?.initialTemplate || 'default';
+    let currentXrayColor = window.INJECTED_PROJECT_CONFIG?.initialXrayColor || 'blue';
+
+    window.addEventListener('viewer-state-sync', (e) => {
+      if (e.detail?.templateId) currentTemplate = e.detail.templateId;
+      if (e.detail?.xrayColor) currentXrayColor = e.detail.xrayColor;
+      if (renderMenu && !renderMenu.hidden) openRenderMenu();
+    });
+
+    function openRenderMenu() {
+      if (!renderMenu) return;
+      closeFloorsMenu();
+      renderMenu.innerHTML = '';
+      
+      const templates = [
+        { id: 'default', label: 'Default' },
+        { id: 'photoreal', label: 'Photoreal' },
+        { id: 'minimal', label: 'Minimalist' },
+        { id: 'xray', label: 'X-ray' }
+      ];
+
+      templates.forEach((t) => {
+        const b = document.createElement('button');
+        b.className = 'floor-item' + (t.id === currentTemplate ? ' active' : '');
+        b.setAttribute('role', 'menuitem');
+        b.textContent = t.label;
+        b.addEventListener('click', () => {
+          currentTemplate = t.id;
+          window.dispatchEvent(new CustomEvent('dashboard-event', { detail: { action: 'setTemplate', templateId: t.id } }));
+          openRenderMenu(); // refresh to show active state and optionally xray colors
+        });
+        renderMenu.appendChild(b);
+      });
+
+      if (currentTemplate === 'xray') {
+        const divider = document.createElement('div');
+        divider.style.height = '1px';
+        divider.style.background = 'var(--bd2)';
+        divider.style.margin = '4px 0';
+        renderMenu.appendChild(divider);
+
+        const colorRow = document.createElement('div');
+        colorRow.className = 'xray-color-row';
+        ['blue', 'white'].forEach(c => {
+          const b = document.createElement('button');
+          b.className = 'xray-color-btn' + (c === currentXrayColor ? ' active' : '');
+          b.setAttribute('role', 'menuitem');
+          b.textContent = c.charAt(0).toUpperCase() + c.slice(1);
+          b.addEventListener('click', () => {
+            currentXrayColor = c;
+            window.dispatchEvent(new CustomEvent('dashboard-event', { detail: { action: 'setXrayColor', color: c } }));
+            openRenderMenu(); // refresh
+          });
+          colorRow.appendChild(b);
+        });
+        renderMenu.appendChild(colorRow);
+      }
+
+      renderMenu.hidden = false;
+      if (renderBtn) renderBtn.setAttribute('aria-expanded', 'true');
+      toolBtns.forEach((b) => b.classList.toggle('active', b === renderBtn));
+    }
+
     function activateTool(tool) {
       if (tool === 'floors') {
         if (floorsMenu && floorsMenu.hidden) openFloorsMenu();
         else closeFloorsMenu();
         return;
       }
+      if (tool === 'render') {
+        if (renderMenu && renderMenu.hidden) openRenderMenu();
+        else closeRenderMenu();
+        return;
+      }
       closeFloorsMenu();
+      closeRenderMenu();
       if (tool === 'reset') {
         currentFloor = 'ALL';
         updateVpCaption();
@@ -3429,6 +3508,10 @@
       if (floorsMenu && !floorsMenu.hidden &&
           !e.target.closest('.vp-floors-menu, .tool-btn[data-tool="floors"]')) {
         closeFloorsMenu();
+      }
+      if (renderMenu && !renderMenu.hidden &&
+          !e.target.closest('.vp-render-menu, .tool-btn[data-tool="render"]')) {
+        closeRenderMenu();
       }
     });
 

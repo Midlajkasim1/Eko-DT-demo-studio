@@ -14,12 +14,14 @@ interface ViewerToolbarProps {
   onToggleDashboard: () => void
   materialPickerActive?: boolean
   onToggleMaterialPicker?: () => void
+  renderPanelActive?: boolean
+  onToggleRenderPanel?: () => void
 }
 
 import { useEffect } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 
-export function ViewerToolbar({ engineRef, onToggleStats, statsVisible, pickerActive, onTogglePicker, dashboardVisible, onToggleDashboard, materialPickerActive, onToggleMaterialPicker }: ViewerToolbarProps) {
+export function ViewerToolbar({ engineRef, onToggleStats, statsVisible, pickerActive, onTogglePicker, dashboardVisible, onToggleDashboard, materialPickerActive, onToggleMaterialPicker, renderPanelActive, onToggleRenderPanel }: ViewerToolbarProps) {
   const engine = engineRef.current
   const gridActive = useAppStore(s => s.gridVisible)
   const setLightingParams = useAppStore(s => s.setLightingParams)
@@ -146,6 +148,17 @@ export function ViewerToolbar({ engineRef, onToggleStats, statsVisible, pickerAc
       icon: (
         <svg viewBox="0 0 24 24" fill="currentColor" width="15" height="15">
           <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8z"/>
+        </svg>
+      ),
+    },
+    {
+      title: renderPanelActive ? 'Hide Rendering Engine' : 'Rendering Engine',
+      action: onToggleRenderPanel || (() => {}),
+      active: !!renderPanelActive,
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="15" height="15">
+          <circle cx="12" cy="12" r="5" />
+          <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
         </svg>
       ),
     },

@@ -8,6 +8,7 @@ interface AppState extends RenderSettings {
   conversionStepLabel: string
   error: string | null
   materialPickerActive: boolean
+  renderPanelActive: boolean
   selectedMaterialElement: { modelId: string, id: number, category?: string } | null
   copiedMaterial: any | null
   isFullscreen: boolean
@@ -20,6 +21,7 @@ interface AppState extends RenderSettings {
   setTemplate: (templateId: TemplateId) => void
   setLightingParams: (params: Partial<RenderSettings>) => void
   setMaterialPickerActive: (active: boolean) => void
+  setRenderPanelActive: (active: boolean) => void
   setSelectedMaterialElement: (element: { modelId: string, id: number, category?: string } | null) => void
   setCopiedMaterial: (material: any) => void
   setIsFullscreen: (full: boolean) => void
@@ -34,6 +36,7 @@ export const useAppStore = create<AppState>((set) => ({
   conversionStepLabel: '',
   error: null,
   materialPickerActive: false,
+  renderPanelActive: false,
   selectedMaterialElement: null,
   copiedMaterial: null,
   isFullscreen: false,
@@ -50,6 +53,7 @@ export const useAppStore = create<AppState>((set) => ({
       : { templateId, realisticMode: false, renderLite: false }),
   setLightingParams: (params) => set((state) => ({ ...state, ...params })),
   setMaterialPickerActive: (materialPickerActive) => set({ materialPickerActive, selectedMaterialElement: null }),
+  setRenderPanelActive: (renderPanelActive) => set({ renderPanelActive }),
   setSelectedMaterialElement: (selectedMaterialElement) => set({ selectedMaterialElement }),
   setCopiedMaterial: (copiedMaterial) => set({ copiedMaterial }),
   setIsFullscreen: (isFullscreen) => set({ isFullscreen }),
@@ -62,6 +66,7 @@ export const useAppStore = create<AppState>((set) => ({
       conversionStepLabel: '',
       error: null,
       materialPickerActive: false,
+      renderPanelActive: false,
       selectedMaterialElement: null,
       copiedMaterial: null,
       isFullscreen: false,

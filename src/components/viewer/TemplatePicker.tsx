@@ -3,34 +3,70 @@ import { useAppStore } from '@/store/useAppStore'
 import { VIEW_TEMPLATES, getViewTemplate, skyCss, type ViewTemplate } from '@/constants/viewTemplates'
 import type { TemplateId } from '@/constants/renderSettings'
 
-/**
- * The strip of cards, one per view template. Each card is a tiny picture of what
- * it does — its own sky behind two massing blocks, lit and drawn the way that
- * template draws the model — so the choice is made by eye rather than by name.
- *
- * Built from {@link VIEW_TEMPLATES} rather than written out, so a new template
- * appears here by existing.
- */
 
 interface TemplatePickerProps {
-  /** 'panel' is the studio's render panel; 'bar' is the exported viewer's switcher */
+ 
   variant?: 'panel' | 'bar'
 }
+import { useProjectStore } from '@/store/useProjectStore'
 
 export function TemplatePicker({ variant = 'panel' }: TemplatePickerProps) {
   const templateId = useAppStore(s => s.templateId)
   const setTemplate = useAppStore(s => s.setTemplate)
+  const setLightingParams = useAppStore(s => s.setLightingParams)
+  const currentProject = useProjectStore(s => s.currentProject)
+  const xrayColor = useAppStore(s => s.xrayColor || 'blue')
+
+  const handlePick = (id: TemplateId) => {
+    if (id === 'default' && currentProject?.renderSettings) {
+      setLightingParams({
+        templateId: 'default',
+        realisticMode: currentProject.renderSettings.realisticMode ?? false,
+        renderLite: currentProject.renderSettings.renderLite ?? false
+      })
+    } else {
+      setTemplate(id)
+    }
+  }
 
   return (
-    <div className={`tpl-grid tpl-grid--${variant}`} role="group" aria-label="Rendering template">
-      {VIEW_TEMPLATES.map(template => (
-        <TemplateCard
-          key={template.id}
-          template={template}
-          active={templateId === template.id}
-          onPick={setTemplate}
-        />
-      ))}
+    <div className={`tpl-picker-container`}>
+      <div className={`tpl-grid tpl-grid--${variant}`} role="group" aria-label="Rendering template">
+        {VIEW_TEMPLATES.map(template => (
+          <TemplateCard
+            key={template.id}
+            template={template}
+            active={templateId === template.id}
+            onPick={handlePick}
+          />
+        ))}
+      </div>
+      {templateId === 'xray' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', marginTop: '10px' }}>
+          <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>X-ray Color</span>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            {(['blue', 'white'] as const).map(c => {
+              const isActive = xrayColor === c
+              return (
+                <button
+                  key={c}
+                  onClick={() => setLightingParams({ xrayColor: c })}
+                  style={{
+                    flex: 1, padding: '5px 8px', borderRadius: '6px',
+                    border: `1px solid ${isActive ? '#29a8df' : 'rgba(255,255,255,0.18)'}`,
+                    background: isActive ? '#29a8df' : 'rgba(255,255,255,0.07)',
+                    color: '#ffffff',
+                    fontSize: '11px', fontWeight: isActive ? 600 : 400,
+                    cursor: 'pointer', transition: 'all 0.15s'
+                  }}
+                >
+                  {c.charAt(0).toUpperCase() + c.slice(1)}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -39,7 +75,7 @@ function TemplateCard({
   template, active, onPick,
 }: { template: ViewTemplate; active: boolean; onPick: (id: TemplateId) => void }) {
   const { card } = template
-  // The card is drawn from the template's own colours, so the two never drift apart
+  
   const style = {
     '--card-sky': skyCss(card.sky),
     '--card-horizon': card.horizon,
@@ -71,15 +107,8 @@ function TemplateCard({
   )
 }
 
-/**
- * The switcher the exported viewer carries: the same cards as a floating strip
- * along the bottom, so a template can be changed without the studio.
- *
- * It folds down to a pill, because a project with a dashboard has its own chrome
- * along the bottom edge. A dashboard that wants it somewhere else can move it
- * without touching this code — `--tpl-bar-bottom` and `--tpl-bar-left` are read
- * off the page, so one CSS rule in the dashboard template is enough.
- */
+
+// Exported viewer
 export function TemplateBar({ defaultOpen = true }: { defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen)
   const templateId = useAppStore(s => s.templateId)

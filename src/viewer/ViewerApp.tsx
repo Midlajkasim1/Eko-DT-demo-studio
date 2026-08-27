@@ -5,6 +5,7 @@ import { useModelStore } from '@/store/useModelStore'
 import { loadProjectFromHandle, loadModelsFromProject } from '@/lib/projectDb'
 import { useProjectStore } from '@/store/useProjectStore'
 import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
+import { MapLayer } from '@/components/map/MapLayer'
 import { SignInOverlay, checkSession } from '@/viewer/SignInOverlay'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import type { LoadedModel, ProjectMeta } from '@/types'
@@ -316,6 +317,7 @@ export default function ViewerApp() {
         <main className="app-main">
           {/* adminMode=false hides RenderPanel + ModelPositionPanel */}
           <ViewerCanvas onEngineReady={handleEngineReady} adminMode={false} isFinProject={projectMeta?.isFinProject} />
+          <MapLayer adminMode={false} engineRef={engineRef} />
 
           {/* Open Project overlay — dev fallback only, never in the exported viewer */}
           {!standalone && !hasModels && !isLoading && (

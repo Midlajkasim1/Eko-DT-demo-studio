@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useProjectStore } from '@/store/useProjectStore'
+import { useAppStore } from '@/store/useAppStore'
 import type { ProjectApiSettings } from '@/types'
 
 interface DashboardOverlayProps {
@@ -9,6 +10,14 @@ interface DashboardOverlayProps {
 export function DashboardOverlay({ visible }: DashboardOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const currentProject = useProjectStore(s => s.currentProject)
+  const templateId = useAppStore(s => s.templateId)
+  const xrayColor = useAppStore(s => s.xrayColor)
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('viewer-state-sync', { 
+      detail: { templateId, xrayColor } 
+    }))
+  }, [templateId, xrayColor])
 
   useEffect(() => {
     if (!visible) return
@@ -16,6 +25,24 @@ export function DashboardOverlay({ visible }: DashboardOverlayProps) {
     const handler = (e: Event) => {
       const customEvent = e as CustomEvent
       console.log('[DashboardOverlay] Event caught:', customEvent.detail)
+      if (customEvent.detail?.action === 'setTemplate') {
+        const { templateId } = customEvent.detail
+        const setLightingParams = useAppStore.getState().setLightingParams
+        const setTemplate = useAppStore.getState().setTemplate
+        const currentProject = useProjectStore.getState().currentProject
+        
+        if (templateId === 'default' && currentProject?.renderSettings) {
+          setLightingParams({
+            templateId: 'default',
+            realisticMode: currentProject.renderSettings.realisticMode ?? false,
+            renderLite: currentProject.renderSettings.renderLite ?? false
+          })
+        } else {
+          setTemplate(templateId)
+        }
+      } else if (customEvent.detail?.action === 'setXrayColor') {
+        useAppStore.getState().setLightingParams({ xrayColor: customEvent.detail.color })
+      }
     }
     window.addEventListener('dashboard-event', handler)
 
@@ -55,6 +82,8 @@ export function DashboardOverlay({ visible }: DashboardOverlayProps) {
         const apiSettings: ProjectApiSettings = currentProject?.apiSettings || {}
         const configScript = `
           window.INJECTED_PROJECT_CONFIG = {
+            initialTemplate: "${currentProject?.renderSettings?.templateId || 'default'}",
+            initialXrayColor: "${currentProject?.renderSettings?.xrayColor || 'blue'}",
             fin: {
               baseUrl: "${apiSettings.finBaseUrl || 'https://localhost'}",
               project: "${apiSettings.finProjectName || 'EllisDonDemo'}",
@@ -88,7 +117,13 @@ export function DashboardOverlay({ visible }: DashboardOverlayProps) {
         scripts.forEach(s => {
           if (s.src) {
             const script = document.createElement('script')
-            script.src = s.src
+            try {
+              const url = new URL(s.src)
+              url.searchParams.set('v', Date.now().toString())
+              script.src = url.toString()
+            } catch {
+              script.src = s.src + (s.src.includes('?') ? '&' : '?') + 'v=' + Date.now()
+            }
             script.className = 'dt-dashboard-injected'
             document.body.appendChild(script)
           } else {

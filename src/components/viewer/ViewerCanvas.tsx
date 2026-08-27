@@ -44,6 +44,7 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
   const setSelectedMaterialElement = useAppStore(s => s.setSelectedMaterialElement)
   const isFullscreen = useAppStore(s => s.isFullscreen)
   const isToolbarVisible = useAppStore(s => s.isToolbarVisible)
+  const renderPanelActive = useAppStore(s => s.renderPanelActive)
 
   useEffect(() => {
     if (isFinProject || !adminMode) {
@@ -547,26 +548,30 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
             setMaterialPickerActive(!materialPickerActive)
             if (!materialPickerActive) setPickerActive(false)
           }}
+          renderPanelActive={renderPanelActive}
+          onToggleRenderPanel={() => useAppStore.getState().setRenderPanelActive(!renderPanelActive)}
         />
       )}
 
-      {/* Template switcher — the exported viewer's only render control. A
-          dashboard brings its own chrome along the bottom edge, so it starts
-          folded down to its pill there. */}
-      {step === 'viewing' && !adminMode && renderSettings.templateSwitcher !== false && (
-        <TemplateBar defaultOpen={!dashboardVisible} />
+      {/* Floating template pill — only when the FIN dashboard overlay is active */}
+      {step === 'viewing' && renderSettings.templateSwitcher !== false && dashboardVisible && (
+        <div style={{ '--tpl-bar-bottom': '140px' } as React.CSSProperties}>
+          <TemplateBar defaultOpen={false} />
+        </div>
       )}
 
       {/* Right side panels */}
-      {step === 'viewing' && adminMode && (!isFullscreen || isToolbarVisible) && (
+      {step === 'viewing' && (adminMode || renderPanelActive) && (!isFullscreen || isToolbarVisible) && (
         <div className="right-panels-container" key={currentProjectId || 'empty'}>
-          <RenderPanel />
-          <ModelPositionPanel 
-            engineRef={engineRef} 
-            pickedCoord={pickedCoord}
-            onClearPickedCoord={() => setPickedCoord(null)}
-          />
-          <MaterialPanel engineRef={engineRef} />
+          {(adminMode || renderPanelActive) && <RenderPanel />}
+          {adminMode && (
+            <ModelPositionPanel 
+              engineRef={engineRef} 
+              pickedCoord={pickedCoord}
+              onClearPickedCoord={() => setPickedCoord(null)}
+            />
+          )}
+          {adminMode && <MaterialPanel engineRef={engineRef} />}
         </div>
       )}
 

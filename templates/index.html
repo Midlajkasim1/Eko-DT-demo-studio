@@ -9,8 +9,7 @@
 
     html, body { margin: 0; }
 
-    /* The viewer's template switcher (.tpl-bar) floats over the canvas at the
-       bottom. Lift it clear of the scrubbar — this dashboard owns that edge. */
+    /* viewer's template switcher */
     .tpl-bar { --tpl-bar-bottom: 140px; }
   </style>
 </head>
@@ -489,6 +488,9 @@
               <button class="tool-btn tipL" data-tool="slice" data-tip="Slice section &middot; S" data-i18n-tip="toolSlice" aria-label="Slice section">
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 14h18" stroke-dasharray="3 3"></path></svg>
               </button>
+              <button class="tool-btn tipL" data-tool="render" data-tip="Rendering Engine &middot; E" data-i18n-tip="toolRender" aria-haspopup="menu" aria-expanded="false" aria-label="Rendering Engine">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path></svg>
+              </button>
               <button class="tool-btn tipL" data-tool="floors" data-tip="Floors &middot; F" data-i18n-tip="toolFloors" aria-haspopup="menu" aria-expanded="false" aria-label="Floors">
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 4.9-9 4.9-9-4.9Z"></path><path d="m3 11.9 9 4.9 9-4.9"></path><path d="m3 16.9 9 4.9 9-4.9"></path></svg>
               </button>
@@ -505,6 +507,9 @@
 
             <!-- Floors flyout (opened by the Floors tool) -->
             <div class="vp-floors-menu" id="vpFloorsMenu" role="menu" aria-label="Floors" hidden></div>
+
+            <!-- Render flyout (opened by the Render tool) -->
+            <div class="vp-render-menu" id="vpRenderMenu" role="menu" aria-label="Rendering Engine" hidden></div>
 
             <!-- Bottom Scrubbar -->
             <div class="vp-scrubbar">

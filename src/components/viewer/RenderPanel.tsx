@@ -193,7 +193,8 @@ export function RenderPanel() {
   const setRealisticMode  = useAppStore(st => st.setRealisticMode)
   const setLightingParams = useAppStore(st => st.setLightingParams)
 
-  const [open, setOpen] = useState(false)
+  const open = useAppStore(st => st.renderPanelActive)
+  const setOpen = useAppStore(st => st.setRenderPanelActive)
   const [activePreset, setActivePreset] = useState<string | null>(null)
 
   const activeTemplate = getViewTemplate(s.templateId)
@@ -210,7 +211,7 @@ export function RenderPanel() {
       {/* Toggle tab */}
       <button
         className="position-panel-tab"
-        onClick={() => setOpen(v => !v)}
+        onClick={() => setOpen(!open)}
         title={open ? 'Close Render Panel' : 'Open Render Panel'}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
@@ -238,27 +239,6 @@ export function RenderPanel() {
             <p style={{ fontSize: '9px', lineHeight: 1.4, color: 'var(--text-secondary)', margin: 0 }}>
               {activeTemplate.description}
             </p>
-            {s.templateId === 'xray' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', marginTop: '6px', marginBottom: '6px' }}>
-                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>X-ray Color</span>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  {(['blue', 'white'] as const).map(c => (
-                    <button
-                      key={c}
-                      onClick={() => setLightingParams({ xrayColor: c })}
-                      style={{
-                        flex: 1, padding: '4px', borderRadius: '4px', border: `1px solid ${s.xrayColor === c ? 'var(--accent)' : 'var(--border)'}`,
-                        background: 'var(--bg-surface)', color: s.xrayColor === c ? 'var(--accent)' : 'var(--text-primary)',
-                        fontSize: '9px', fontWeight: s.xrayColor === c ? 700 : 500, cursor: 'pointer',
-                        textTransform: 'capitalize'
-                      }}
-                    >
-                      {c}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
             <Toggle
               label="Switcher in exported viewer"
               title="Ships the template strip with the exported project, so the viewer can change templates on its own."

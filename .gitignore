@@ -39,6 +39,8 @@ AUDIT_REPORT.md
 /MarsaAlArab
 /EKO-Modon
 /ellisdon-templates-main
+fix.js
+map_export.md
 
 # Local verification fixtures, served from public/ by the dev server only
 /public/project.json
