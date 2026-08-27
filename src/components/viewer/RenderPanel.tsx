@@ -194,11 +194,8 @@ export function RenderPanel() {
   const setLightingParams = useAppStore(st => st.setLightingParams)
 
   const [open, setOpen] = useState(false)
-  // Tracks which preset button is currently active (null = no preset / custom)
   const [activePreset, setActivePreset] = useState<string | null>(null)
 
-  // A template owns sky, lights, surfaces and post-processing, so the controls it
-  // stands in for are put away while one is on
   const activeTemplate = getViewTemplate(s.templateId)
   const templated = activeTemplate.scene !== null
 
@@ -271,30 +268,34 @@ export function RenderPanel() {
           </div>
 
           {/* ── Render Mode ───────────────────────────────────── */}
-          <SectionDivider label="Render Mode" />
-          <Toggle
-            label="Advanced Rendering"
-            checked={s.realisticMode && !templated}
-            onChange={v => {
-              setRealisticMode(v)
-              if (v) setLightingParams({ renderLite: false, templateId: 'default' })
-            }}
-          />
-          <Toggle
-            label="Render Lite"
-            title="Clean BIM quality: shadows, ambient occlusion, edge outlines — no skybox or heavy effects."
-            checked={s.renderLite && !s.realisticMode && !templated}
-            onChange={v => {
-              setLightingParams({
-                renderLite: v,
-                progressiveRendering: v,
-                ...(v ? { templateId: 'default' } : {}),
-                // Auto-enable the core BIM quality passes when switching on
-                ...(v ? { shadowsEnabled: true, softShadows: true, ambientOcclusion: true, outlineEdges: true } : {}),
-              })
-              if (v) setRealisticMode(false)
-            }}
-          />
+          {!templated && (
+            <>
+              <SectionDivider label="Render Mode" />
+              <Toggle
+                label="Advanced Rendering"
+                checked={s.realisticMode && !templated}
+                onChange={v => {
+                  setRealisticMode(v)
+                  if (v) setLightingParams({ renderLite: false, templateId: 'default' })
+                }}
+              />
+              <Toggle
+                label="Render Lite"
+                title="Clean BIM quality: shadows, ambient occlusion, edge outlines — no skybox or heavy effects."
+                checked={s.renderLite && !s.realisticMode && !templated}
+                onChange={v => {
+                  setLightingParams({
+                    renderLite: v,
+                    progressiveRendering: v,
+                    ...(v ? { templateId: 'default' } : {}),
+                    // Auto-enable the core BIM quality passes when switching on
+                    ...(v ? { shadowsEnabled: true, softShadows: true, ambientOcclusion: true, outlineEdges: true } : {}),
+                  })
+                  if (v) setRealisticMode(false)
+                }}
+              />
+            </>
+          )}
           {/* <Toggle label="Ground Grid" checked={s.gridVisible}
             onChange={v => setLightingParams({ gridVisible: v })} /> */}
 

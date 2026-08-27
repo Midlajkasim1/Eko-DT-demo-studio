@@ -71,6 +71,13 @@ export async function initFragmentsEngine(
   world.renderer = new OBC.SimpleRenderer(components, container, { preserveDrawingBuffer: true, antialias: true })
   
   // Prepare Environment
+  // IMPORTANT: We NEVER change these properties after initialization!
+  // Changing them at runtime forces a global shader recompile, which breaks LodMaterial.
+  world.renderer.three.shadowMap.enabled = true
+  world.renderer.three.shadowMap.type = THREE.PCFShadowMap
+  world.renderer.three.toneMapping = THREE.NoToneMapping
+  world.renderer.three.toneMappingExposure = 1.0
+
   const pmremGenerator = new THREE.PMREMGenerator(world.renderer.three)
   pmremGenerator.compileEquirectangularShader()
   const envScene = new RoomEnvironment()
@@ -434,9 +441,28 @@ export async function initFragmentsEngine(
         mat.dispose()
         return original
       }
-      if (Array.isArray(child.material)) child.material = child.material.map(revert)
-      else child.material = revert(child.material)
+      if (Array.isArray(child.material)) {
+        for (let i = 0; i < child.material.length; i++) {
+          child.material[i] = revert(child.material[i])
+        }
+      } else {
+        child.material = revert(child.material)
+      }
     })
+  }
+
+  const cleanupRealisticState = () => {
+    revertUpgradedMaterials()
+    world.scene.three.traverse((child: any) => {
+      if (!child.isMesh) return
+      if (!child.visible && child.material) {
+        const mats = Array.isArray(child.material) ? child.material : [child.material]
+        const wasHidden = mats.some((m: any) => m && m.transparent && (m.opacity < 0.05 || m.colorWrite === false))
+        if (wasHidden) child.visible = true
+      }
+    })
+    world.scene.three.environmentRotation.set(0, 0, 0)
+    world.scene.three.overrideMaterial = null
   }
 
   /** Takes the template back off the scene, so another mode can set up its own. */
@@ -509,7 +535,10 @@ export async function initFragmentsEngine(
     tBounce.intensity = lights.bounce.intensity
     tAmbient.intensity = lights.ambient
     templateGroup.visible = true
-
+    tSun.visible = true
+    tFill.visible = true
+    tBounce.visible = true
+    tAmbient.visible = true
     if (tSun.target.parent !== world.scene.three) world.scene.three.add(tSun.target)
 
     // Every other light in the scene belongs to a mode that is not running. The
@@ -543,7 +572,8 @@ export async function initFragmentsEngine(
     // No shadow map and no slab. The reference lights the model with sun, fill
     // and bounce and lets the occlusion pass do the contact darkening; a hard sun
     // shadow across a white or ghosted model reads as a mistake.
-    world.renderer.three.shadowMap.enabled = false
+    world.renderer.three.shadowMap.enabled = true
+    world.renderer.three.shadowMap.needsUpdate = true
     tSun.castShadow = false
 
     // The catcher is a 10 km plane at grade. With no shadow map it has nothing to
@@ -585,16 +615,21 @@ export async function initFragmentsEngine(
       isRenderLite = false
       isPbrEnabled = params.pbrMaterials !== false
       if (params.progressiveRendering !== undefined) progressiveRenderingEnabled = params.progressiveRendering
-      // The grid and anti-aliasing are the template's to decide, not the
-      // project's: the reference draws no grid, and its edges come from a
-      // multisampled target rather than from a post-process pass.
-      revertUpgradedMaterials()
+
+      cleanupRealisticState()
       setTemplateStreaming(true)
       applyTemplate(template, params)
 
       world.scene.three.traverse((child: any) => {
-        if (child.isMesh && child.material) child.material.needsUpdate = true
+        if (child.isMesh && child.material) {
+          const update = (m: any) => { if (m && !m.isShaderMaterial) m.needsUpdate = true }
+          if (Array.isArray(child.material)) child.material.forEach(update)
+          else update(child.material)
+        }
       })
+
+
+
       return
     }
 
@@ -759,7 +794,9 @@ export async function initFragmentsEngine(
               return mat
             }
             if (Array.isArray(child.material)) {
-              child.material = child.material.map(convert)
+              for (let i = 0; i < child.material.length; i++) {
+                child.material[i] = convert(child.material[i])
+              }
             } else {
               child.material = convert(child.material)
             }
@@ -810,7 +847,7 @@ export async function initFragmentsEngine(
 
       const shadowsOn = params.shadowsEnabled !== false
       world.renderer.three.shadowMap.enabled = shadowsOn
-      world.renderer.three.shadowMap.type = params.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap
+      world.renderer.three.shadowMap.type = THREE.PCFShadowMap
       world.renderer.three.shadowMap.autoUpdate = true
       rDir.castShadow = shadowsOn
       if (rDir.shadow.mapSize.width !== params.shadowMapSize) {
@@ -874,7 +911,7 @@ export async function initFragmentsEngine(
       }
 
       world.scene.three.traverse((child: any) => {
-        if ((child.isDirectionalLight || child.isAmbientLight) && child.parent !== realisticGroup) {
+        if ((child.isDirectionalLight || child.isAmbientLight) && child.parent !== realisticGroup && child.parent !== templateGroup) {
           child.visible = false
         }
       })
@@ -894,16 +931,17 @@ export async function initFragmentsEngine(
       const newShadowType = THREE.PCFShadowMap
       const shadowTypeChanged = world.renderer.three.shadowMap.type !== newShadowType
       if (shadowTypeChanged) {
-        world.renderer.three.shadowMap.enabled = false
+        world.renderer.three.shadowMap.enabled = true
         world.renderer.three.shadowMap.type = newShadowType
-        world.renderer.three.shadowMap.enabled = params.shadowsEnabled !== false
+        world.renderer.three.shadowMap.enabled = true
         world.renderer.three.shadowMap.needsUpdate = true
       } else {
-        world.renderer.three.shadowMap.enabled = params.shadowsEnabled !== false
+        world.renderer.three.shadowMap.enabled = true
         if (params.shadowsEnabled !== false) world.renderer.three.shadowMap.needsUpdate = true
       }
       world.renderer.three.toneMapping = THREE.NoToneMapping
       world.renderer.three.toneMappingExposure = 1.0
+      if (params.shadowsEnabled !== false) world.renderer.three.shadowMap.needsUpdate = true
       world.scene.three.environment = null
       world.scene.three.fog = null
 
@@ -948,7 +986,7 @@ export async function initFragmentsEngine(
         // Use PCFShadowMap unconditionally, adjust radius for softness
         const newShadowType = THREE.PCFShadowMap
         if (world.renderer.three.shadowMap.type !== newShadowType) {
-          world.renderer.three.shadowMap.enabled = false
+          world.renderer.three.shadowMap.enabled = true
           world.renderer.three.shadowMap.type = newShadowType
         }
         
@@ -976,17 +1014,17 @@ export async function initFragmentsEngine(
           }
         })
       } else {
-        world.renderer.three.shadowMap.enabled = false
+        world.renderer.three.shadowMap.enabled = true
       }
 
       world.scene.three.traverse((child: any) => {
-        if ((child.isAmbientLight || child.isHemisphereLight) && child.parent !== realisticGroup) {
+        if ((child.isAmbientLight || child.isHemisphereLight) && child.parent !== realisticGroup && child.parent !== templateGroup) {
           child.visible = true
         }
       })
     } else {
       if (liteDirLight.parent) liteDirLight.removeFromParent()
-      world.renderer.three.shadowMap.enabled = false
+      world.renderer.three.shadowMap.enabled = true
       world.renderer.three.toneMapping = THREE.NoToneMapping
       world.renderer.three.toneMappingExposure = 1.0
       world.scene.three.environment = null
@@ -999,7 +1037,7 @@ export async function initFragmentsEngine(
       realisticGroup.visible = false
 
       world.scene.three.traverse((child: any) => {
-        if ((child.isDirectionalLight || child.isAmbientLight) && child.parent !== realisticGroup) {
+        if ((child.isDirectionalLight || child.isAmbientLight) && child.parent !== realisticGroup && child.parent !== templateGroup) {
           child.visible = true
         }
       })
@@ -1007,7 +1045,9 @@ export async function initFragmentsEngine(
 
     world.scene.three.traverse((child: any) => {
       if (child.isMesh && child.material) {
-        child.material.needsUpdate = true
+        const update = (m: any) => { if (m && !m.isShaderMaterial) m.needsUpdate = true }
+        if (Array.isArray(child.material)) child.material.forEach(update)
+        else update(child.material)
       }
     })
   }
@@ -1482,8 +1522,13 @@ export async function initFragmentsEngine(
                        }
                        return mat;
                     };
-                    if (Array.isArray(child.material)) child.material = child.material.map(convert);
-                    else child.material = convert(child.material);
+                    if (Array.isArray(child.material)) {
+              for (let i = 0; i < child.material.length; i++) {
+                child.material[i] = convert(child.material[i])
+              }
+            } else {
+              child.material = convert(child.material)
+            };
                 }
              });
           }
