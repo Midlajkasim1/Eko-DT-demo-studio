@@ -5,9 +5,10 @@ import topLevelAwait from 'vite-plugin-top-level-await'
 import path from 'path'
 import fs from 'fs'
 
-// wasm and the bundled render pyramid are studio-only; models/ and mapassets/ are project data
-// that both exporters write from the project folder, so anything under dist/ is a dev fixture.
-const EXPORT_SKIP = ['wasm/', 'map/', 'models/', 'mapassets/']
+// wasm is studio-only. models/ and mapassets/ are project data that both exporters write
+// from the project folder, so anything under dist/ is a dev fixture. map/regions ships
+// with the exported viewer so location maps keep their bundled satellite renders.
+const EXPORT_SKIP = ['wasm/', 'models/', 'mapassets/']
 const skipFromExport = (rel: string) => EXPORT_SKIP.some(prefix => rel.startsWith(prefix))
 
 function viewerAssetsPlugin() {
@@ -44,6 +45,10 @@ function viewerAssetsPlugin() {
         if (fs.existsSync(staticPath)) {
           walk(staticPath, 'static')
         }
+        const publicMapPath = path.resolve(__dirname, 'public', 'map')
+        if (!files.some(f => f.path.startsWith('map/')) && fs.existsSync(publicMapPath)) {
+          walk(publicMapPath, 'map')
+        }
         
         res.setHeader('Content-Type', 'application/json')
         res.end(JSON.stringify(files))
@@ -75,6 +80,10 @@ function viewerAssetsPlugin() {
       walk(distPath, '')
       walk(templatesPath, 'templates')
       walk(staticPath, 'static')
+      const publicMapPath = path.resolve(__dirname, 'public', 'map')
+      if (!files.some(f => f.path.startsWith('map/')) && fs.existsSync(publicMapPath)) {
+        walk(publicMapPath, 'map')
+      }
       fs.writeFileSync(outPath, JSON.stringify(files))
     }
   }

@@ -820,6 +820,21 @@ async def serve_map_asset(filename: str):
     )
 
 
+@app.get("/map/regions/{filename:path}")
+async def serve_builtin_map_region(filename: str):
+    """Serve bundled satellite renders that ship with the exported viewer."""
+    regions_dir = os.path.join(STATIC_DIR, "map", "regions")
+    asset_path = _resolve_within(regions_dir, filename)
+    if not os.path.exists(asset_path):
+        raise HTTPException(status_code=404, detail=f"Map region {filename} not found")
+    media, _ = mimetypes.guess_type(asset_path)
+    return FileResponse(
+        asset_path,
+        media_type=media or "image/webp",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
 @app.get("/models/{filename:path}")
 async def serve_model(filename: str, request: Request):
     """Serve model files (.frag / .glb); ungated so they load during sign-in."""

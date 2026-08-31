@@ -20,7 +20,7 @@ interface MapViewProps {
   folderHandle: FileSystemDirectoryHandle | null
   adminMode: boolean
   onOpenLocation: (location: MapLocation) => void
-  onExit: () => void
+  onExit?: () => void
 }
 
 export function MapView({ meta, folderHandle, adminMode, onOpenLocation, onExit }: MapViewProps) {
@@ -155,7 +155,7 @@ export function MapView({ meta, folderHandle, adminMode, onOpenLocation, onExit 
       <header className="map-topbar">
         <MapBreadcrumb projectName={meta.name} trail={trail} onGoTo={handleGoTo} />
         <div className="map-spacer" />
-        <button className="map-pill" onClick={onExit}>Back to projects</button>
+        {onExit && <button className="map-pill" onClick={onExit}>Back to projects</button>}
       </header>
 
       <MapControls engine={engine} />

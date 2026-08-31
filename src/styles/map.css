@@ -32,7 +32,15 @@
 
 .map-layer--leaving { opacity: 0; pointer-events: none; }
 
-.map-canvas { position: absolute; inset: 0; }
+/* Beat MapLibre's `.maplibregl-map { position: relative }` (it adds that class to this
+ *  same node). Relative without a height collapses the canvas to 0 and the map looks empty. */
+.map-layer .map-canvas,
+.map-layer .map-canvas.maplibregl-map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
 
 /* One line does most of the colour grading the reference gets from its warm-sand filter */
 .map-canvas .maplibregl-canvas {
@@ -308,6 +316,28 @@
   box-shadow: var(--map-shadow);
 }
 .map-pill:hover { border-color: var(--map-acc); }
+
+/* Exported viewer: sits below the dashboard header so the 3D view can return to the map */
+.viewer-map-back {
+  position: absolute;
+  top: 64px;
+  left: 16px;
+  z-index: 80;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px 0 12px;
+  border-radius: 999px;
+  border: 1px solid #26324a;
+  background: rgba(16, 27, 48, 0.88);
+  color: #e4e9f1;
+  font: 600 12px 'DM Sans', system-ui, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  pointer-events: auto;
+}
+.viewer-map-back:hover { border-color: #29a8df; }
 
 /* ── Progress, shown by the map itself so there is one loading surface ── */
 

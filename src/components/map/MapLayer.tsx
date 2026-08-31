@@ -4,9 +4,9 @@ import { useProjectStore } from '@/store/useProjectStore'
 import { useModelStore } from '@/store/useModelStore'
 import { useMapStore } from '@/store/useMapStore'
 import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
-import { loadModelSet } from '@/lib/projectLoad'
+import { loadHttpModelSet, loadModelSet } from '@/lib/projectLoad'
 import { unloadAllModels } from '@/lib/sceneTeardown'
-import { liveModelIds } from '@/lib/mapConfig'
+import { hasMap, liveModelIds } from '@/lib/mapConfig'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import type { MapLocation } from '@/types'
 
@@ -17,6 +17,8 @@ const MapView = lazy(() =>
 interface MapLayerProps {
   adminMode: boolean
   engineRef: React.MutableRefObject<FragmentsEngine | null>
+  /** Studio has a project list; the exported viewer does not */
+  showProjectExit?: boolean
 }
 
 /** The 3D world keeps rendering its full composer chain even when hidden, so it is paused
@@ -26,7 +28,7 @@ function setWorldEnabled(engine: FragmentsEngine | null, enabled: boolean) {
   if (world) world.enabled = enabled
 }
 
-export function MapLayer({ adminMode, engineRef }: MapLayerProps) {
+export function MapLayer({ adminMode, engineRef, showProjectExit = true }: MapLayerProps) {
   const step = useAppStore(s => s.step)
   const setStep = useAppStore(s => s.setStep)
   const currentProject = useProjectStore(s => s.currentProject)
@@ -43,8 +45,7 @@ export function MapLayer({ adminMode, engineRef }: MapLayerProps) {
 
   const openLocation = useCallback(async (location: MapLocation) => {
     const meta = useProjectStore.getState().currentProject
-    const handle = useProjectStore.getState().folderHandle
-    if (!meta || !handle) return
+    if (!meta) return
 
     const modelIds = liveModelIds(meta, location)
     if (!modelIds.length) return
@@ -55,7 +56,12 @@ export function MapLayer({ adminMode, engineRef }: MapLayerProps) {
     setStep('viewing')
 
     try {
-      await loadModelSet(engineRef.current, handle, meta, modelIds)
+      const handle = useProjectStore.getState().folderHandle
+      if (handle) {
+        await loadModelSet(engineRef.current, handle, meta, modelIds)
+      } else {
+        await loadHttpModelSet(engineRef.current, meta, modelIds)
+      }
     } finally {
       setPhase('idle')
     }
@@ -102,6 +108,22 @@ export function MapLayer({ adminMode, engineRef }: MapLayerProps) {
     setStep('projects')
   }, [engineRef, setStep])
 
+  if (step === 'viewing' && !adminMode && hasMap(currentProject)) {
+    return (
+      <button
+        type="button"
+        className="viewer-map-back"
+        onClick={() => void returnToMap()}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" width="15" height="15" aria-hidden="true">
+          <path d="M9 4 3 6.5v13L9 17l6 2.5 6-2.5v-13L15 6.5 9 4z" strokeLinejoin="round" />
+          <path d="M9 4v13M15 6.5v13" strokeLinejoin="round" />
+        </svg>
+        Back to map
+      </button>
+    )
+  }
+
   if (!onMap || !currentProject) return null
 
   return (
@@ -111,7 +133,7 @@ export function MapLayer({ adminMode, engineRef }: MapLayerProps) {
         folderHandle={folderHandle}
         adminMode={adminMode}
         onOpenLocation={openLocation}
-        onExit={exitToProjects}
+        onExit={showProjectExit ? exitToProjects : undefined}
       />
     </Suspense>
   )
