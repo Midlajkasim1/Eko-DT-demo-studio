@@ -108,21 +108,21 @@ export function MapLayer({ adminMode, engineRef, showProjectExit = true }: MapLa
     setStep('projects')
   }, [engineRef, setStep])
 
-  if (step === 'viewing' && !adminMode && hasMap(currentProject)) {
-    return (
-      <button
-        type="button"
-        className="viewer-map-back"
-        onClick={() => void returnToMap()}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" width="15" height="15" aria-hidden="true">
-          <path d="M9 4 3 6.5v13L9 17l6 2.5 6-2.5v-13L15 6.5 9 4z" strokeLinejoin="round" />
-          <path d="M9 4v13M15 6.5v13" strokeLinejoin="round" />
-        </svg>
-        Back to map
-      </button>
-    )
-  }
+  // if (step === 'viewing' && !adminMode && hasMap(currentProject)) {
+  //   return (
+  //     <button
+  //       type="button"
+  //       className="viewer-map-back"
+  //       onClick={() => void returnToMap()}
+  //     >
+  //       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" width="15" height="15" aria-hidden="true">
+  //         <path d="M9 4 3 6.5v13L9 17l6 2.5 6-2.5v-13L15 6.5 9 4z" strokeLinejoin="round" />
+  //         <path d="M9 4v13M15 6.5v13" strokeLinejoin="round" />
+  //       </svg>
+  //       Back to map
+  //     </button>
+  //   )
+  // }
 
   if (!onMap || !currentProject) return null
 

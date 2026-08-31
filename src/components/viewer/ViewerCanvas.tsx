@@ -12,7 +12,7 @@ import { useProjectStore } from '@/store/useProjectStore'
 import { ViewerToolbar } from './ViewerToolbar'
 import { ModelPositionPanel } from '@/components/viewer/ModelPositionPanel'
 import { RenderPanel } from '@/components/viewer/RenderPanel'
-import { TemplateBar } from '@/components/viewer/TemplatePicker'
+// import { TemplateBar } from '@/components/viewer/TemplatePicker'
 import { DashboardOverlay } from '@/components/viewer/DashboardOverlay'
 import { MaterialPanel } from '@/components/viewer/MaterialPanel'
 import { FocusModeWidget } from '@/components/viewer/FocusModeWidget'
@@ -554,11 +554,11 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
       )}
 
       {/* Floating template pill — only when the FIN dashboard overlay is active */}
-      {step === 'viewing' && renderSettings.templateSwitcher !== false && dashboardVisible && (
+      {/* {step === 'viewing' && renderSettings.templateSwitcher !== false && dashboardVisible && (
         <div style={{ '--tpl-bar-bottom': '140px' } as React.CSSProperties}>
           <TemplateBar defaultOpen={false} />
         </div>
-      )}
+      )} */}
 
       {/* Right side panels */}
       {step === 'viewing' && (adminMode || renderPanelActive) && (!isFullscreen || isToolbarVisible) && (

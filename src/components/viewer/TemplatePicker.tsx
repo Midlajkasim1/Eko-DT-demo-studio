@@ -108,28 +108,28 @@ function TemplateCard({
 }
 
 
-// Exported viewer
-export function TemplateBar({ defaultOpen = true }: { defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen)
-  const templateId = useAppStore(s => s.templateId)
-  const active = getViewTemplate(templateId)
+// Exported Templatebar on viewer
+// export function TemplateBar({ defaultOpen = true }: { defaultOpen?: boolean }) {
+//   const [open, setOpen] = useState(defaultOpen)
+//   const templateId = useAppStore(s => s.templateId)
+//   const active = getViewTemplate(templateId)
 
-  return (
-    <div className={`tpl-bar${open ? ' open' : ''}`}>
-      {open && <TemplatePicker variant="bar" />}
-      <button
-        type="button"
-        className="tpl-bar-toggle"
-        aria-expanded={open}
-        title={open ? 'Hide templates' : 'Change template'}
-        onClick={() => setOpen(v => !v)}
-      >
-        <span className="tpl-swatch" style={{ background: skyCss(active.card.sky) }} aria-hidden="true" />
-        <span className="tpl-bar-label">{active.label}</span>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="11" height="11" aria-hidden="true">
-          <path d={open ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'} />
-        </svg>
-      </button>
-    </div>
-  )
-}
+//   return (
+//     <div className={`tpl-bar${open ? ' open' : ''}`}>
+//       {open && <TemplatePicker variant="bar" />}
+//       <button
+//         type="button"
+//         className="tpl-bar-toggle"
+//         aria-expanded={open}
+//         title={open ? 'Hide templates' : 'Change template'}
+//         onClick={() => setOpen(v => !v)}
+//       >
+//         <span className="tpl-swatch" style={{ background: skyCss(active.card.sky) }} aria-hidden="true" />
+//         <span className="tpl-bar-label">{active.label}</span>
+//         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="11" height="11" aria-hidden="true">
+//           <path d={open ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'} />
+//         </svg>
+//       </button>
+//     </div>
+//   )
+// }
