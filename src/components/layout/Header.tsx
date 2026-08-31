@@ -19,9 +19,11 @@ export function Header() {
     useAppStore.getState().setIsFullscreen(false)
     useAppStore.getState().setIsToolbarVisible(true)
 
-    // With a map open the previous screen is the map, not the project list
+    // Only bounce to the map if this 3D session came from a pin. Otherwise Back
+    // would trap an editing session on the map every time.
     const returnToMap = (window as never as { __returnToMap?: () => void }).__returnToMap
-    if (step === 'viewing' && hasMap(currentProject) && returnToMap) {
+    const fromMap = !!useMapStore.getState().activeLocationId
+    if (step === 'viewing' && hasMap(currentProject) && fromMap && returnToMap) {
       returnToMap()
       return
     }

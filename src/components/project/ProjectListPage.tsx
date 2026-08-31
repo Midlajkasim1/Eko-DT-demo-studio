@@ -5,6 +5,7 @@ import { useModelStore } from '@/store/useModelStore'
 import { useMapStore } from '@/store/useMapStore'
 import { streamProjectModels } from '@/lib/projectLoad'
 import { hasMap } from '@/lib/mapConfig'
+import { getStudioOpenOnMap, setStudioOpenOnMap } from '@/lib/studioPrefs'
 import { ProjectListSkeleton } from '@/components/project/ProjectListSkeleton'
 import type { ProjectMeta, RecentProjectCard } from '@/types'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
@@ -35,6 +36,7 @@ export function ProjectListPage({ engineRef }: ProjectListPageProps) {
   const [showNewForm, setShowNewForm] = useState(false)
   const [openingId, setOpeningId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [openOnMap, setOpenOnMap] = useState(getStudioOpenOnMap)
 
   useEffect(() => {
     loadRecentProjects()
@@ -100,8 +102,8 @@ export function ProjectListPage({ engineRef }: ProjectListPageProps) {
       setLightingParams(meta.renderSettings)
     }
 
-    // A project with a map opens on it, and loads nothing until a location is picked
-    if (hasMap(meta)) {
+    // Map is still on the card's map button. Auto-opening it here blocks editing.
+    if (hasMap(meta) && getStudioOpenOnMap()) {
       useMapStore.getState().reset()
       setStep('map')
       return
@@ -144,6 +146,18 @@ export function ProjectListPage({ engineRef }: ProjectListPageProps) {
           <p className="project-list-subtitle">Open or create an IFC project</p>
         </div>
         <div className="project-list-actions">
+          <label className="project-map-pref" title="When off, opening a project goes to the 3D view. The map icon still opens the map. Export is unchanged.">
+            <input
+              type="checkbox"
+              checked={openOnMap}
+              onChange={e => {
+                const on = e.target.checked
+                setOpenOnMap(on)
+                setStudioOpenOnMap(on)
+              }}
+            />
+            Open on map
+          </label>
           <button className="project-new-btn" onClick={() => setShowNewForm(true)}>
             <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
               <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd"/>
