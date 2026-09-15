@@ -1,0 +1,229 @@
+/* ============================================================================
+   EKO design tokens — the single source for every colour, surface and font.
+   Values are carried over VERBATIM from the approved reference
+   (EKO_Frame_New_extracted_source.html, style block 2). Do not rename tokens:
+   handoff/design-tokens.md and every component reference them by these names.
+   ============================================================================ */.dashboard-native-container{
+  /* Type families. --fH headings (Sora), --fB body (DM Sans). Arabic swaps both
+     to Cairo via html[lang="ar"] below. Mono is always JetBrains Mono. */
+  --fH:'Sora';
+  --fB:'DM Sans';
+
+  /* Surfaces (D83): a tonal LADDER, each step clearly lighter than the one
+     below — page ground (s0) → chrome: top bar, nav, ask bar, panel shells
+     (s1) → cards and panels (s2) → controls, inputs, chips, hover (s3). */
+  --s0:#0A0F1F;
+  --s1:#121A2C;
+  --s2:#182236;
+  --s3:#212D45;
+
+  /* Borders: hairline and emphasised (D83: visible on the ladder). */
+  --bd1:rgba(255,255,255,0.08);
+  --bd2:rgba(255,255,255,0.16);
+
+  /* Text: primary, secondary, tertiary. */
+  --t1:#F0F3F8;
+  /* D46 text roles (reference-adopted; sizes floored at 12px by our law).
+     Components consume these — no component sets its own size or colour. */
+  --txSectionSz:12px; --txSectionW:700; --txSectionLs:.8px; --txSectionC:var(--t1);
+  --txBodySz:12.5px;  --txBodyC:var(--t1);
+  --txValueSz:13px;   --txValueW:600;
+  --txSubSz:12px;     --txSubC:var(--t2);
+  --txCapSz:12px;
+  --txChipSz:12px;    --txChipW:600;
+  --txBtnSz:12.5px;   --txBtnW:500;
+  --txTabSz:13px;     --txTabCa:var(--t1); --txTabCi:var(--t2);
+  --txNavSz:12.5px;   --txNavW:500;
+  --txThSz:12px;      --txThW:700; --txThLs:.6px;
+  --txTdSz:12.5px;    --txTdC:var(--t1);
+  /* D53 size ladder (every component size maps here; nothing below 12px) */
+  --txTitleSz:14px; --txPanelSz:15px; --txH2Sz:16px; --txH1Sz:18px; --txLgSz:20px;
+  --txXlSz:22px;    --txKpiSz:24px;   --txHeroSz:28px; --txDispSz:38px;
+  --inkOnFill:#0B1020;   /* text/glyph ink on a filled chip, marker or button */
+  --t2:#BEC8D8;
+  --t3:#93A1B8;
+
+  /* Interaction accent (never the only colour on data). */
+  --acc:#29A8DF;
+  --ai-accent:#4C7DFF;   /* D132: the ONE AI accent — sparkles, the Ask EKO bar glyph, the conversation panel; nothing else */
+  --ai-tint:rgba(76,125,255,.14);
+  --accs:#29A8DF;
+  --onAcc:#0A0F1F;   /* D123: text on a solid accent fill (the notification count) */
+  --link:#29A8DF;
+  --navy:#0D2558;
+
+  /* Status hues + their readable text variants. */
+  --pos:#4E9C7C;   --posTx:#A9DCC4;   --posHue:#5FD08C;   /* D118: the saturated verdict hue (chips, abnormal values), from the Final mockup */
+  --warn:#C2955A;  --warnTx:#EBD0A6;  --warnHue:#FFC53D;
+  --crit:#C56A6A;  --critTx:#F0B8B8;
+  --info:#6D8FBE;  --infTx:#BAD0EC;
+
+  /* Tints (T) and borders (B) of the status families. */
+  --accT:rgba(41,168,223,.12);
+  --acc8:rgba(41,168,223,.08);
+  --posT:rgba(78,156,124,.12);   --posB:rgba(78,156,124,.3);
+  --warnT:rgba(194,149,90,.12);  --warnB:rgba(194,149,90,.3);
+  --critT:rgba(197,106,106,.12); --critB:rgba(197,106,106,.3);
+  --infT:rgba(109,143,190,.12);  --infB:rgba(109,143,190,.3);
+  --warn40:rgba(194,149,90,.4);
+
+  /* Overlay / glass surfaces (summary panel gradient stops, timeline, scene). */
+  --ovbg:rgba(13,22,40,.62);
+  --ovg1:rgba(18,26,42,.92);
+  --ovg2:rgba(18,26,42,.6);
+  --ovgA:rgba(18,26,42,.86);
+  --ovgB:rgba(18,26,42,.72);
+  --ovgC:rgba(18,26,42,.52);
+  --ovgD:rgba(18,26,42,.3);
+  --tlbg:rgba(24,34,54,.9);
+  --sc1:rgba(24,34,54,.92);
+  --vpt1:rgba(11,20,36,.18);
+  --vpt2:rgba(11,20,36,.5);
+  --sceneTint:#2E4368;
+
+  /* Primary button. */
+  --btnP:#1256B4;
+  --btnPfg:#FFFFFF;
+
+  --shadow:0 2px 8px rgba(0,0,0,.25);
+
+  /* Elevated (floating) surfaces — popovers, menus, palette, toasts (D63).
+     Dark-mode elevation rule: a floating surface is LIGHTER than the page it
+     floats over, with a hairline and a real shadow; hover inside it is a
+     translucent lift so it never goes darker than its own surface. */
+  --elev:#222938;           /* D100g: one overlay surface for every popover, menu and dialog — charcoal with the page's cool cast, lifted above --s3 */
+  --elevBd:rgba(255,255,255,.16);
+  --radPop:4px;             /* D100g: one corner for every overlay */
+  --elevHover:rgba(255,255,255,.06);
+  --elevChip:rgba(255,255,255,.08);
+  --shadowPop:0 18px 48px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.35);
+
+  /* D134 CHROME — the frame around the workspace: top bar, nav rail, timeline bar, phone tabs and
+     page head, wall footer, sheet handle areas. Chrome sits at the tonal EXTREME, content surfaces in
+     the middle, so the chrome reads as a frame. Nothing except chrome takes these tokens.
+     Dark: near-black, never #000 (halation on light text, OLED smear). */
+  --chrome-bg:#07080B;
+  --chrome-edge:rgba(255,255,255,.07);     /* 1px hairline on the chrome's inner edge */
+  --chrome-ctl:rgba(255,255,255,.04);      /* a boxed control resting on chrome: search, ribbon, pills, selects */
+  --chrome-ctlBd:rgba(255,255,255,.12);
+  --chrome-hover:rgba(255,255,255,.06);    /* a translucent lift, no glare */
+  --chrome-active:rgba(255,255,255,.10);   /* pressed, and the trigger of an open menu */
+  --chrome-sel:rgba(41,168,223,.14);       /* selected: accent tint + the accent indicator/text */
+  --chrome-focus:#29A8DF;                  /* 2px ring inside the control */
+
+  /* D134 AI IDENTITY — the Ask EKO launcher's fill. Never redefined for the light theme: the AI
+     identity does not change with theme. The ONLY gradient fill in the product (design-tokens.md). */
+  --ai-launch-a:#4C7DFF; --ai-launch-b:#7B6CFF; --ai-launch-ink:#FFFFFF;
+  --ai-launch-glow:rgba(76,125,255,.25); --ai-launch-glowHi:rgba(76,125,255,.40);
+  /* D134 the launcher's corner, reserved by every route's layout at desktop widths */
+  --aiCornerH:56px;   /* 16 inset + 40 launcher */
+  --aiCornerW:140px;  /* 16 inset + 108 launcher + 16 clear */
+
+  /* Alarm category chips: strong fills (F2), borders (B2), text (Tx). */
+  --critF2:rgba(197,106,106,.22); --critB2:rgba(227,163,163,.55);
+  --sysF2:rgba(240,138,60,.22);   --sysB2:rgba(240,138,60,.55);   --sysTx:#F5C08A;
+  --fddF2:rgba(244,104,94,.22);   --fddB2:rgba(244,104,94,.55);   --fddTx:#F8B3AC;
+  --warnF2:rgba(212,167,44,.22);  --warnB2:rgba(224,190,141,.55); --warnTx2:var(--warnTx);
+  --stF2:rgba(154,166,187,.16);   --stB2:rgba(154,166,187,.45);
+  /* D97 chart surfaces: tracks, bands and axis text are theme tokens, never literals */
+  --chTrack:#1F2B44; --chTrack2:#0E1526; --chFill:#3E5C8A; --chTx:#9AA6C0;
+  --chBandWarn:#4A3A12; --chBandHot:#6B4E0F; --chBandCrit:#5A1E1A;
+  --pmOkF:#0F2E1C; --pmOkB:#2E7D4F; --pmWarnF:#3A2E0A; --pmWarnB:#E8A317;
+
+  /* Work-order status glyph colours. */
+  --woPend:#F5A623;
+  --woAsgn:#6E9BD1;
+  --woProg:#29A8DF;
+  --woDone:#2FBF71;
+
+  /* Layout widths driven by state attributes (see base.css). */
+  --navw:240px;
+  --panRail:44px;   /* D134: the collapsed module panel's rail (the timeline's corner maths reads it) */
+  --ovw:352px;
+}
+
+/* Light theme — every dark token above has its light counterpart here,
+   carried verbatim from the reference. Toggled by html[data-theme="light"]. */.dashboard-native-container[data-theme="light"]{
+  /* D84 light ladder: ground (s0) is a cool grey, chrome (s1) a light tint,
+     cards and popovers (s2) the one WHITE surface, controls (s3) a clear
+     step below the card — so hierarchy reads without a hairline. */
+  --s0:#E9EDF3; --s1:#E9EDF3;   /* D134: panel shells sit on the page ground — at #F2F4F8 the off-white chrome framed them at 1.03:1, dark frames its panels at 1.15:1; now 1.10:1 */ --s2:#FFFFFF; --s3:#E3E8F0;
+  --bd1:rgba(15,23,42,0.14); --bd2:#B3BFD2;   /* D98: crisper hairlines on white */
+  --t1:#0E1930; --t2:#33425C; --t3:#52627C;   /* D97: a step darker so captions and mono read on white */
+  --acc:#0A8FD9; --accs:#0A8FD9; --link:#0069A8; --onAcc:#FFFFFF; --ai-accent:#3563E9; --ai-tint:rgba(53,99,233,.10);   /* D98: one step brighter for interactive elements */
+  --pos:#23745A; --warn:#8A661F; --crit:#A04545; --info:#2E5B92;
+  --posTx:#23745A; --warnTx:#8A661F; --critTx:#A04545; --infTx:#2E5B92;
+  --posHue:#1B7F4D; --warnHue:#B7791F;
+  --accT:rgba(0,144,206,.10); --acc8:rgba(0,144,206,.08);
+  --posT:rgba(35,116,90,.10); --posB:rgba(35,116,90,.3);
+  --warnT:rgba(138,102,31,.10); --warnB:rgba(138,102,31,.3);
+  --critT:rgba(160,69,69,.10); --critB:rgba(160,69,69,.3);
+  --infB:rgba(46,91,146,.3); --infT:rgba(46,91,146,.10);
+  --warn40:rgba(138,102,31,.4);
+  --ovbg:rgba(255,255,255,.62); --ovg1:rgba(255,255,255,.92); --ovg2:rgba(255,255,255,.55);
+  --ovgA:rgba(255,255,255,.85); --ovgB:rgba(255,255,255,.7);
+  --ovgC:rgba(255,255,255,.5);  --ovgD:rgba(255,255,255,.28);
+  --tlbg:rgba(247,249,252,.94); --sc1:rgba(247,249,252,.92);
+  --vpt1:rgba(184,196,216,.10); --vpt2:rgba(184,196,216,.5);   /* D84: the scene gets a frame */
+  --btnP:#0D2558; --btnPfg:#FFFFFF;
+  --sceneTint:#C4CEDC;
+  --shadow:0 2px 8px rgba(22,35,60,.18);
+  --elev:#FFFFFF; --elevBd:#B9C4D6; --elevHover:rgba(15,23,42,.05); --elevChip:rgba(15,23,42,.06);
+  --shadowPop:0 18px 48px rgba(22,35,60,.22), 0 2px 6px rgba(22,35,60,.12);
+  /* D134 chrome, light: the same step in the other direction — a cool off-white frame, the page
+     ground one step darker (--s0 #E9EDF3), cards white. */
+  --chrome-bg:#F6F7FA; --chrome-edge:rgba(0,0,0,.08);
+  --chrome-ctl:#FFFFFF; --chrome-ctlBd:rgba(15,23,42,.14);
+  --chrome-hover:rgba(15,23,42,.05); --chrome-active:rgba(15,23,42,.09);
+  --chrome-sel:rgba(10,143,217,.10); --chrome-focus:#0A8FD9;
+  /* D98 light chips: fills and edges are mixes of the severity hue itself
+     (14% and 40% on white), so every chip tone is one formula */
+  --sysHue:#D9741A; --warnHue:#D4A72C; --critHue:#C8362B; --stHue:#6B7A94;
+  --critF2:color-mix(in srgb, var(--critHue) 14%, #fff); --critB2:color-mix(in srgb, var(--critHue) 40%, #fff);
+  --sysF2:color-mix(in srgb, var(--sysHue) 14%, #fff);   --sysB2:color-mix(in srgb, var(--sysHue) 40%, #fff);   --sysTx:#8F4A0E;
+  --fddF2:var(--critF2); --fddB2:var(--critB2); --fddTx:#A83A31;
+  --warnF2:color-mix(in srgb, var(--warnHue) 14%, #fff); --warnB2:color-mix(in srgb, var(--warnHue) 45%, #fff);
+  --stF2:color-mix(in srgb, var(--stHue) 10%, #fff);     --stB2:color-mix(in srgb, var(--stHue) 35%, #fff);
+  --chTrack:#E3E8F0; --chTrack2:#DCE3EE; --chFill:#6E93C7; --chTx:#52627C;
+  --chBandWarn:#F3E3BE; --chBandHot:#EDD5A0; --chBandCrit:#F5D5D2;
+  --pmOkF:#E6F3EC; --pmOkB:#9CCDB5; --pmWarnF:#FBF1D6; --pmWarnB:#E1C46F;
+  --woPend:#F59E0B; --woAsgn:#3D6FB5; --woProg:#0090CE; --woDone:#16A34A;
+}
+
+/* Arabic: heading and body families swap to Cairo; tracking resets because
+   Latin letterspacing breaks Arabic joining. */.dashboard-native-container[lang="ar"]{ --fH:'IBM Plex Sans Arabic'; --fB:'IBM Plex Sans Arabic' }.dashboard-native-container[lang="ar"] *{ letter-spacing:normal }
+/* Plex Arabic has tight vertical metrics (D29) — only a modest leading
+   bump over Latin; the uppercase micro-title treatment has no meaning in
+   Arabic script, so micro-titles get one extra pixel, nothing more. */.dashboard-native-container[lang="ar"] body{ line-height:1.5 }.dashboard-native-container[lang="ar"] .ovtitle,.dashboard-native-container[lang="ar"] .mzflyT,.dashboard-native-container[lang="ar"] .ovklbl{ font-size:var(--txCapSz) }
+/* Numeric/unit runs keep their LTR internal order inside RTL lines
+   ("2.2 °C", never "C° 2.2"). Numerals stay Western by product rule. */.dashboard-native-container[dir="rtl"] .tMono,.dashboard-native-container[dir="rtl"] .tMonoS,.dashboard-native-container[dir="rtl"] .ovknum,.dashboard-native-container[dir="rtl"] .kbd,.dashboard-native-container[dir="rtl"] .clock{ direction:ltr; unicode-bidi:isolate }
+/* LTR islands (D29): numbers and charts stay left-to-right INSIDE the RTL
+   layout — gauges (dial + ticks + readout), trends, numeric tile grids and
+   value rows keep their English-identical internal geometry; only their
+   labels and placement mirror. Standard RTL dashboard practice. */.dashboard-native-container[dir="rtl"] .ovgauge,.dashboard-native-container[dir="rtl"] .sysgauge,.dashboard-native-container[dir="rtl"] .systrend,.dashboard-native-container[dir="rtl"] .iaqgrid,.dashboard-native-container[dir="rtl"] .benchbar,.dashboard-native-container[dir="rtl"] .scrubtrack{ direction:ltr }.dashboard-native-container[dir="rtl"] .ovkval{ direction:ltr; justify-content:flex-end }
+
+/* ----------------------------------------------------------------------------
+   SPEC ADDITIONS (not in the reference; required by the build spec's colour
+   law — logged in /docs/deviations.md). Domain identity hues: a domain keeps
+   its hue everywhere. Severity trio maps to the reference status families.
+   ---------------------------------------------------------------------------- */.dashboard-native-container{
+  --domEnergy:#2DD4BF;   /* Energy — teal    */
+  --domWater:#60A5FA;    /* Water — blue     */
+  --domGas:#A78BFA;      /* Gas — violet     */
+  --domCo2:#8A94AD;      /* CO2 — neutral slate */
+  --domKitchens:#818CF8; /* energy split: Kitchens — indigo */
+
+  /* Severity: critical red, high orange, medium yellow.
+     critical reuses --crit; high and medium are distinct from the identity hues. */
+  --sevCrit:#F4685E;      /* reference FD&D red (parity pass) */
+  --sevHigh:#F08A3C;      /* reference System amber (parity pass) */
+  --sevMed:#C4B03A;
+  --sevHighTx:#F5C08A;
+  --sevMedTx:#E4D98F;
+  --sevHighT:rgba(240,138,60,.12);
+  --sevMedT:rgba(196,176,58,.12);
+}.dashboard-native-container[data-theme="light"]{
+  --sevHigh:#B4690E; --sevMed:#8A7A10;
+  --sevHighTx:#B4690E; --sevMedTx:#8A7A10;
+  --sevHighT:rgba(180,105,14,.10); --sevMedT:rgba(138,122,16,.10);
+}

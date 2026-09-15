@@ -1,801 +1,114 @@
 <!doctype html>
-<html lang="en" data-theme="dark" data-nav="max">
+<html lang="en" class="dashboard-native-container" data-theme="dark" data-nav="full">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Digital Twin Dashboard</title>
-  <link rel="stylesheet" href="/static/css/dashboard.css?v=1" />
+  <link rel="stylesheet" href="/static/dashboard/css/fonts.css" />
+  <link rel="stylesheet" href="/static/dashboard/css/tokens.css" />
+  <link rel="stylesheet" href="/static/dashboard/css/base.css" />
+  <link rel="stylesheet" href="/static/dashboard/css/components.css" />
+  <link rel="stylesheet" href="/static/dashboard/css/wall.css" />
+  <link rel="stylesheet" href="/static/css/overlay.css" />
   <style>
-
-    html, body { margin: 0; }
-
-    /* viewer's template switcher */
+    html, body { margin: 0; height: 100%; }
     .tpl-bar { --tpl-bar-bottom: 140px; }
   </style>
 </head>
 <body>
-  <div class="app-shell">
-
-    <header class="app-header">
-      <div class="header-brand">
-        <div class="brand-icon">E</div>
-        <span class="brand-text">EKO</span>
-      </div>
-
-      <nav class="header-breadcrumb" aria-label="Breadcrumb">
-        <span class="crumb-text" data-i18n="dt">Digital Twin</span>
-        <span class="crumb-sep" aria-hidden="true">/</span>
-        <span class="crumb-dropdown">
-          <button class="crumb-trigger" id="propSwitcher" aria-haspopup="menu" aria-expanded="false">
-            <span id="crumbName" data-i18n="marsaalarab">Marsa Al Arab</span>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>
-          </button>
-          <div class="dropdown-menu" id="propMenu" role="menu" aria-label="Properties">
-            <button role="menuitem" class="dropdown-item" data-action="portfolio">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"></rect><rect width="7" height="7" x="14" y="3" rx="1"></rect><rect width="7" height="7" x="14" y="14" rx="1"></rect><rect width="7" height="7" x="3" y="14" rx="1"></rect></svg>
-              <span data-i18n="portOverview">Portfolio overview</span>
-            </button>
-            <div class="dropdown-divider"></div>
-            <button role="menuitem" class="dropdown-item active" data-key="maa"><span data-i18n="marsaalarab">Marsa Al Arab</span><span class="item-sub" data-i18n="dubai">Dubai</span></button>
-            <button role="menuitem" class="dropdown-item" data-key="p2"><span data-i18n="propertytwo">Property Two</span><span class="item-sub" data-i18n="dubai">Dubai</span></button>
-            <button role="menuitem" class="dropdown-item" data-key="p3"><span data-i18n="propertythree">Property Three</span><span class="item-sub" data-i18n="abudhabi">Abu Dhabi</span></button>
-            <button role="menuitem" class="dropdown-item" data-key="p4"><span data-i18n="propertyfour">Property Four</span><span class="item-sub" data-i18n="riyadh">Riyadh</span></button>
-          </div>
-        </span>
-        <span class="crumb-sep" aria-hidden="true">/</span>
-        <span class="crumb-module" id="crumbModule" data-i18n="operations">Operations</span>
-      </nav>
-
-      <div class="header-badges">
-        <span class="badge badge-live"><span class="pulse-dot"></span><span data-i18n="live">LIVE</span></span>
-        <span class="badge" data-i18n="onprem">ON-PREMISES</span>
-        <button class="badge badge-systems" id="systemsBtn" aria-haspopup="dialog" aria-expanded="false">
-          <span class="status-dot" id="systemsDot"></span><span id="systemsLabel">—</span>
-        </button>
-      </div>
-
-      <div class="header-spacer"></div>
-
-      <div class="header-actions">
-        <span class="clock" id="liveClock">11:42:18</span>
-        <div class="lang-toggle" role="group" aria-label="Language">
-          <button class="lang-btn active" data-lang="en">EN</button>
-          <button class="lang-btn" data-lang="ar">عربي</button>
-        </div>
-        <button class="icon-btn" id="themeToggle" aria-label="Toggle theme" title="Toggle theme (T)">
-          <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
-          <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
-        </button>
-        <button class="icon-btn" id="searchBtn" aria-label="Search" title="Search &middot; Ctrl K" data-i18n-title="searchTip">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
-        </button>
-        <button class="icon-btn" id="reportsBtn" aria-label="Reports library" title="Reports library" data-i18n-title="reportsTip" aria-haspopup="dialog" aria-expanded="false">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v5h5"></path><path d="M16 13H8M16 17H8"></path></svg>
-        </button>
-        <button class="icon-btn" aria-label="Notifications" title="Notifications">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
-          <span class="notif-badge" style="display:none"></span>
-        </button>
-        <div class="avatar-wrap">
-          <button class="avatar-btn" id="userMenu" aria-haspopup="menu" aria-expanded="false" aria-label="Account menu">AY</button>
-          <div class="account-menu" id="accountMenu" role="menu" aria-label="Account" hidden>
-            <div class="account-head">
-              <div class="account-name">Armani YM</div>
-              <div class="account-role" data-i18n="roleCap">Facilities Director &middot; Operations Admin</div>
-            </div>
-            <div class="account-items">
-              <button role="menuitem" class="account-item" data-i18n="profile">Profile</button>
-              <button role="menuitem" class="account-item" data-i18n="switchRole">Switch role</button>
-              <button role="menuitem" class="account-item danger" data-i18n="logout">Log out</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </header>
-
-    <!-- Language Translation Data -->
-    <script>
-      const i18n = {
-        en: {
-          dt: 'Digital Twin',
-          portOverview: 'Portfolio overview',
-          live: 'LIVE',
-          onprem: 'ON-PREMISES',
-          operations: 'Operations',
-          askHdr: 'ASK EKO',
-          clearChat: 'Clear',
-          chatFoot: 'Assistant not connected yet',
-          escCloses: 'Esc closes',
-          askPh: 'Ask EKO: "why is the west tower above baseline?"',
-          btnYest: 'What happened yesterday afternoon?',
-          btnSpike: 'Explain today\'s spike',
-          btnFaults: 'Open FDD faults',
-          btnReport: 'Generate owner report',
-            marsaalarab: 'Marsa Al Arab',
-            propertytwo: 'Property Two',
-            propertythree: 'Property Three',
-            propertyfour: 'Property Four',
-            dubai: 'Dubai',
-            abudhabi: 'Abu Dhabi',
-            riyadh: 'Riyadh',
-            vpcaption: 'MARSA AL ARAB &middot; LIVE MODEL &middot; ALL FLOORS',
-            toolSelect: 'Select · V',
-            toolSlice: 'Slice section · S',
-            toolFloors: 'Floors · F',
-            toolWalk: 'Walkthrough · W',
-            toolMeasure: 'Measure · M',
-            toolReset: 'Reset view · R',
-            allFloorsShort: 'ALL FLOORS',
-            searchTip: 'Search · Ctrl K',
-            palPh: 'Search assets, faults, documents, pages…',
-            palFoot: 'enter Open · tab Next group · esc Close',
-            reportsTip: 'Reports library',
-            reportsH: 'REPORTS',
-            repFoot: 'Reports generate in context and archive here automatically.',
-            roleCap: 'Facilities Director &middot; Operations Admin',
-            profile: 'Profile',
-            switchRole: 'Switch role',
-            logout: 'Log out',
-            sGen: 'General',
-            sAudit: 'Audit Trail',
-            settingsCap: 'Admin only. All keys and changes are recorded in the audit trail.',
-            auditCap: 'Append-only record. Entries cannot be edited or deleted.',
-            setStub: 'Section in design &mdash; see Audit Trail for the built pattern.',
-            thTime: 'Timestamp',
-            thUser: 'User',
-            thAction: 'Action',
-            thTarget: 'Target',
-            thSource: 'Source',
-            readOnlyW: 'read-only',
-            operations: 'Operations',
-            eventstatistics: 'Event Statistics',
-            livesystems: 'Live Systems',
-            historycharts: 'History Charts',
-            alarms: 'Alarms',
-            water: 'Utilities',
-            energy: 'Energy',
-            wasteprevention: 'Waste Prevention',
-            portfoliobenchmarking: 'Portfolio Benchmarking',
-            locationbasedmetering: 'Location Based Metering',
-            flowandtrendanomaly: 'Flow and Trend Anomaly',
-            budgetoverrun: 'Budget Overrun',
-            consumption: 'Consumption',
-            forecasting: 'Forecasting',
-            esg: 'ESG',
-            targetvsactual: 'Target vs Actual',
-            netzero: 'Net Zero',
-            utilitybillmanagement: 'Utility Bill Management',
-            reporting: 'Reporting',
-            assets: 'Assets',
-            registry: 'Registry',
-            workorders: 'Work Orders',
-            analytics: 'Analytics',
-            rfid: 'RFID',
-            spaces: 'Spaces',
-            roomdatasheets: 'Room Data Sheets',
-            heatmap: 'Heat Map',
-            zonestatus: 'Zone Status',
-            thermalcomfort: 'Thermal Comfort',
-            ieq: 'IEQ',
-            maintenance: 'Maintenance',
-            preventivejobs: 'Preventive Jobs',
-            schedules: 'Schedules',
-            status: 'Status',
-            security: 'Security',
-            cctv: 'CCTV',
-            accesscontrol: 'Access Control',
-            lifesafety: 'Life Safety',
-            settings: 'Settings',
-            help: 'Help',
-            collapse: 'Collapse',
-            viewingHistory: 'Viewing history:',
-            backToLive: 'Back to live',
-            timelineLive: 'Live',
-            timelineHistory: 'History'
-        },
-        ar: {
-          dt: 'التوأم الرقمي',
-          portOverview: 'نظرة عامة على المحفظة',
-          live: 'مباشر',
-          onprem: 'تشغيل محلي',
-          operations: 'التشغيل',
-          askHdr: 'اسأل EKO',
-          clearChat: 'مسح',
-          chatFoot: 'المساعد غير متصل بعد',
-          escCloses: 'Esc للإغلاق',
-          askPh: 'اسأل EKO: "لماذا يتجاوز البرج الغربي خط الأساس؟"',
-          btnYest: 'ماذا حدث بعد ظهر الأمس؟',
-          btnSpike: 'اشرح ارتفاع اليوم',
-          btnFaults: 'الأعطال المفتوحة في FDD',
-          btnReport: 'إنشاء تقرير المالك',
-            operations: 'التشغيل',
-            eventstatistics: 'إحصاءات الأحداث',
-            livesystems: 'الأنظمة المباشرة',
-            historycharts: 'الرسوم التاريخية',
-            alarms: 'التنبيهات',
-            water: 'المرافق',
-            energy: 'الطاقة',
-            wasteprevention: 'منع الهدر',
-            portfoliobenchmarking: 'مقارنة المحفظة',
-            locationbasedmetering: 'القياس حسب الموقع',
-            flowandtrendanomaly: 'شذوذ التدفق والاتجاه',
-            budgetoverrun: 'تجاوز الميزانية',
-            consumption: 'الاستهلاك',
-            forecasting: 'التنبؤ',
-            esg: 'الاستدامة',
-            targetvsactual: 'الهدف مقابل الفعلي',
-            netzero: 'الحياد الكربوني',
-            utilitybillmanagement: 'إدارة فواتير الخدمات',
-            reporting: 'التقارير',
-            assets: 'الأصول',
-            registry: 'السجل',
-            workorders: 'أوامر العمل',
-            analytics: 'التحليلات',
-            rfid: 'تتبع RFID',
-            spaces: 'المساحات',
-            roomdatasheets: 'بيانات الغرف',
-            heatmap: 'الخريطة الحرارية',
-            zonestatus: 'حالة المنطقة',
-            thermalcomfort: 'الراحة الحرارية',
-            ieq: 'جودة البيئة (IEQ)',
-            maintenance: 'الصيانة',
-            preventivejobs: 'الأعمال الوقائية',
-            schedules: 'الجداول الزمنية',
-            status: 'الحالة',
-            security: 'الأمن',
-            cctv: 'كاميرات المراقبة',
-            accesscontrol: 'التحكم بالوصول',
-            lifesafety: 'سلامة الأرواح',
-            settings: 'الإعدادات',
-            help: 'المساعدة',
-            collapse: 'طي القائمة',
-            viewingHistory: 'عرض السجل:',
-            backToLive: 'العودة إلى المباشر',
-            timelineLive: 'مباشر',
-            timelineHistory: 'السجل',
-            marsaalarab: 'مرسى العرب',
-            propertytwo: 'العقار الثاني',
-            propertythree: 'العقار الثالث',
-            propertyfour: 'العقار الرابع',
-            dubai: 'دبي',
-            abudhabi: 'أبو ظبي',
-            riyadh: 'الرياض',
-            vpcaption: 'مرسى العرب &middot; نموذج مباشر &middot; كل الطوابق',
-            toolSelect: 'تحديد · V',
-            toolSlice: 'مقطع · S',
-            toolFloors: 'الطوابق · F',
-            toolWalk: 'جولة · W',
-            toolMeasure: 'قياس · M',
-            toolReset: 'إعادة العرض · R',
-            allFloorsShort: 'كل الطوابق',
-            searchTip: 'بحث · Ctrl K',
-            palPh: 'ابحث في الأصول والأعطال والمستندات…',
-            palFoot: 'enter فتح · tab المجموعة التالية · esc إغلاق',
-            reportsTip: 'مكتبة التقارير',
-            reportsH: 'التقارير',
-            repFoot: 'تُنشأ التقارير في سياقها وتُؤرشف هنا تلقائيًا.',
-            roleCap: 'مدير المرافق &middot; مسؤول العمليات',
-            profile: 'الملف الشخصي',
-            switchRole: 'تبديل الدور',
-            logout: 'تسجيل الخروج',
-            sGen: 'عام',
-            sAudit: 'سجل التدقيق',
-            settingsCap: 'للمشرفين فقط. تُسجل جميع المفاتيح والتغييرات في سجل التدقيق.',
-            auditCap: 'سجل إلحاقي فقط. لا يمكن تعديل الإدخالات أو حذفها.',
-            setStub: 'القسم قيد التصميم — راجع سجل التدقيق كنموذج مكتمل.',
-            thTime: 'الوقت',
-            thUser: 'المستخدم',
-            thAction: 'الإجراء',
-            thTarget: 'الهدف',
-            thSource: 'المصدر',
-            readOnlyW: 'قراءة فقط'
-        }
-      };
-
-      document.addEventListener('DOMContentLoaded', () => {
-        // Initial translation if needed
-        window.updateTranslations(document.documentElement.getAttribute('lang') || 'en');
-      });
-
-      window.updateTranslations = function(lang) {
-        const dict = i18n[lang];
-        if (!dict) return;
-        document.querySelectorAll('[data-i18n]').forEach(el => {
-          const key = el.getAttribute('data-i18n');
-          if (dict[key]) {
-            if (el.tagName === 'INPUT') el.placeholder = dict[key];
-            else el.innerHTML = dict[key];
-          }
-        });
-        document.querySelectorAll('[data-i18n-tip]').forEach(el => {
-          const key = el.getAttribute('data-i18n-tip');
-          if (dict[key]) el.setAttribute('data-tip', dict[key]);
-        });
-        document.querySelectorAll('[data-i18n-title]').forEach(el => {
-          const key = el.getAttribute('data-i18n-title');
-          if (dict[key]) el.setAttribute('title', dict[key]);
-        });
-      };
-    </script>
-
-    <div class="app-body">
-      <aside class="app-sidebar" id="appSidebar" aria-label="Modules">
-
-        <button class="nav-item active" data-module="operations">
-          <span class="nav-indicator"></span>
-          <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"></path><path d="M3.34 19a10 10 0 1 1 17.32 0"></path></svg>
-          <svg class="nav-icon-badge" aria-hidden="true" width="9" height="9" viewBox="0 0 24 24" fill="var(--s1)" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
-          <span class="nav-label" data-i18n="operations">Operations</span>
-          <span class="nav-chevron"><span class="nav-chevron-circle"><svg class="chevron-icon open" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span>
-        </button>
-        <div class="nav-subs" data-parent="operations">
-          <button class="sub-item" data-sub="evstats"><span class="sub-label" data-i18n="eventstatistics">Event Statistics</span></button>
-          <button class="sub-item" data-sub="livesys"><span class="sub-label" data-i18n="livesystems">Live Systems</span></button>
-          <button class="sub-item" data-sub="histch"><span class="sub-label" data-i18n="historycharts">History Charts</span></button>
-          <button class="sub-item" data-sub="alarms"><span class="sub-label" data-i18n="alarms">Alarms</span></button>
-          <button class="sub-item" data-sub="water"><span class="sub-label" data-i18n="water">Utilities</span></button>
-        </div>
-
-        <button class="nav-item" data-module="energy">
-          <span class="nav-indicator"></span>
-          <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-          <span class="nav-label" data-i18n="energy">Energy</span>
-          <span class="nav-chevron"><span class="nav-chevron-circle"><svg class="chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span>
-        </button>
-        <div class="nav-subs hidden" data-parent="energy">
-          <button class="sub-item" data-sub="waste"><span class="sub-label" data-i18n="wasteprevention">Waste Prevention</span></button>
-          <!-- <button class="sub-item" data-sub="bench"><span class="sub-label" data-i18n="portfoliobenchmarking">Portfolio Benchmarking</span></button> -->
-          <button class="sub-item" data-sub="lbm"><span class="sub-label" data-i18n="locationbasedmetering">Location Based Metering</span></button>
-          <button class="sub-item" data-sub="anom"><span class="sub-label" data-i18n="flowandtrendanomaly">Flow and Trend Anomaly</span></button>
-          <!-- <button class="sub-item" data-sub="budget"><span class="sub-label" data-i18n="budgetoverrun">Budget Overrun</span></button> -->
-          <button class="sub-item" data-sub="cons"><span class="sub-label" data-i18n="consumption">Consumption</span></button>
-          <!-- <button class="sub-item" data-sub="fcst"><span class="sub-label" data-i18n="forecasting">Forecasting</span></button> -->
-        </div>
-
-        <button class="nav-item" data-module="esg">
-          <span class="nav-indicator"></span>
-          <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"></path><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"></path></svg>
-          <span class="nav-label" data-i18n="esg">ESG</span>
-          <span class="nav-chevron"><span class="nav-chevron-circle"><svg class="chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span>
-        </button>
-        <div class="nav-subs hidden" data-parent="esg">
-          <button class="sub-item" data-sub="tva"><span class="sub-label" data-i18n="targetvsactual">Target vs Actual</span></button>
-          <button class="sub-item" data-sub="nz"><span class="sub-label" data-i18n="netzero">Net Zero</span></button>
-          <button class="sub-item" data-sub="ubm"><span class="sub-label" data-i18n="utilitybillmanagement">Utility Bill Management</span></button>
-          <button class="sub-item" data-sub="rep"><span class="sub-label" data-i18n="reporting">Reporting</span></button>
-        </div>
-
-        <button class="nav-item" data-module="assets">
-          <span class="nav-indicator"></span>
-          <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4.27 9 5.15"></path><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"></path><path d="m3.3 7 8.7 5 8.7-5M12 22V12"></path></svg>
-          <span class="nav-label" data-i18n="assets">Assets</span>
-          <span class="nav-chevron"><span class="nav-chevron-circle"><svg class="chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span>
-        </button>
-        <div class="nav-subs hidden" data-parent="assets">
-          <button class="sub-item" data-sub="reg"><span class="sub-label" data-i18n="registry">Registry</span></button>
-          <button class="sub-item" data-sub="wo"><span class="sub-label" data-i18n="workorders">Work Orders</span></button>
-          <button class="sub-item" data-sub="ana"><span class="sub-label" data-i18n="analytics">Analytics</span></button>
-          <button class="sub-item" data-sub="rfid"><span class="sub-label" data-i18n="rfid">RFID</span></button>
-        </div>
-
-        <button class="nav-item" data-module="spaces">
-          <span class="nav-indicator"></span>
-          <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9h18v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9Z"></path><path d="m3 9 2.45-4.9A2 2 0 0 1 7.24 3h9.52a2 2 0 0 1 1.8 1.1L21 9"></path><path d="M12 3v6"></path></svg>
-          <span class="nav-label" data-i18n="spaces">Spaces</span>
-          <span class="nav-chevron"><span class="nav-chevron-circle"><svg class="chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span>
-        </button>
-        <div class="nav-subs hidden" data-parent="spaces">
-          <button class="sub-item" data-sub="rds"><span class="sub-label" data-i18n="roomdatasheets">Room Data Sheets</span></button>
-          <button class="sub-item" data-sub="heat"><span class="sub-label" data-i18n="heatmap">Heat Map</span></button>
-          <button class="sub-item" data-sub="zone"><span class="sub-label" data-i18n="zonestatus">Zone Status</span></button>
-          <button class="sub-item" data-sub="tc"><span class="sub-label" data-i18n="thermalcomfort">Thermal Comfort</span></button>
-          <button class="sub-item" data-sub="ieq"><span class="sub-label" data-i18n="ieq">IEQ</span></button>
-        </div>
-
-        <button class="nav-item" data-module="maintenance">
-          <span class="nav-indicator"></span>
-          <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z"></path></svg>
-          <span class="nav-label" data-i18n="maintenance">Maintenance</span>
-          <span class="nav-chevron"><span class="nav-chevron-circle"><svg class="chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span>
-        </button>
-        <div class="nav-subs hidden" data-parent="maintenance">
-          <button class="sub-item" data-sub="pj"><span class="sub-label" data-i18n="preventivejobs">Preventive Jobs</span></button>
-          <button class="sub-item" data-sub="sch"><span class="sub-label" data-i18n="schedules">Schedules</span></button>
-          <button class="sub-item" data-sub="stat"><span class="sub-label" data-i18n="status">Status</span></button>
-        </div>
-
-        <button class="nav-item" data-module="security">
-          <span class="nav-indicator"></span>
-          <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path></svg>
-          <span class="nav-label" data-i18n="security">Security</span>
-          <span class="nav-chevron"><span class="nav-chevron-circle"><svg class="chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span>
-        </button>
-        <div class="nav-subs hidden" data-parent="security">
-          <button class="sub-item" data-sub="cctv"><span class="sub-label" data-i18n="cctv">CCTV</span></button>
-          <button class="sub-item" data-sub="ac"><span class="sub-label" data-i18n="accesscontrol">Access Control</span></button>
-          <button class="sub-item" data-sub="ls"><span class="sub-label" data-i18n="lifesafety">Life Safety</span></button>
-        </div>
-
-        <div class="nav-spacer"></div>
-
-        <button class="nav-item" id="settingsNavBtn" title="Settings">
-          <span class="nav-indicator"></span>
-          <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-          <span class="nav-label" data-i18n="settings">Settings</span>
-        </button>
-
-        <button class="nav-item" title="Help">
-          <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg>
-          <span class="nav-label" data-i18n="help">Help</span>
-        </button>
-
-        <button class="nav-item" id="collapseBtn" title="Collapse" aria-label="Toggle navigation width">
-          <svg class="collapse-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m11 17-5-5 5-5"></path><path d="m18 17-5-5 5-5"></path></svg>
-          <span class="nav-label" data-i18n="collapse">Collapse</span>
-        </button>
-      </aside>
-
-      <!-- Main Content Area -->
-      <main class="app-main" style="flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; overflow: hidden;">
-        <div class="app-view-container" style="flex: 1; display: flex; flex-direction: row; align-items: stretch; min-height: 0; min-width: 0; position: relative;">
-          
-          <div class="vp-wrapper" style="flex: 1; min-width: 0; position: relative; overflow: hidden; pointer-events: none;">
-            <div class="vp-bg"></div>
-            <div class="vp-tint"></div>
-            <div class="vp-grad"></div>
-            
-            <div class="vp-layer" style="position: absolute; inset: 0; pointer-events: none;">
-            <!-- Viewport UI Overlays -->
-            <div class="vp-caption" style="letter-spacing: 1px; font-weight: 500;" data-i18n="vpcaption">MARSA AL ARAB &middot; LIVE MODEL &middot; ALL FLOORS</div>
-            <div class="vp-histbanner" style="display: none;">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <path d="M12 6v6l4 2"></path>
-              </svg>
-              <span><span data-i18n="viewingHistory">Viewing history:</span> <span id="histBannerTime" style="font-family: 'JetBrains Mono', monospace; font-weight: 600;">Tue 15:05</span></span>
-              <span aria-hidden="true">&middot;</span>
-              <button id="histBannerBack" style="background: transparent; border: none; color: var(--warnTx); text-decoration: underline; font-size: 11.5px; font-weight: 600; cursor: pointer; padding: 0;" data-i18n="backToLive">Back to live</button>
-            </div>
-
-            <!-- Overview Panel -->
-            <div class="vp-ovp">
-              <div class="vp-ovp-glass"></div>
-              <div class="vp-ovp-tint"></div>
-              
-              <button class="ovtab" id="ovpTabBtn" aria-label="Expand overview panel">
-                <span class="ovtab-text">OPERATIONS OVERVIEW</span>
-              </button>
-
-              <div class="vp-ovp-content">
-                <div class="vp-ovp-header">
-                  <span class="ovp-title">OPERATIONS OVERVIEW</span>
-                  <svg class="histclock" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--warnTx)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:none;"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>
-                  <button class="ovp-close-btn" aria-label="Collapse overview panel" title="Collapse">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m11 17-5-5 5-5"></path><path d="m18 17-5-5 5-5"></path></svg>
-                  </button>
-                </div>
-                <div class="vp-ovp-scroll" id="vpOvpScroll">
-                  <!-- Dynamic Content injected via dashboard-ui.js -->
-                </div>
-              </div>
-            </div>
-
-            <!-- Floating Toolbar -->
-            <div class="vp-toolbar">
-              <button class="tool-btn tipL active" data-tool="select" data-tip="Select &middot; V" data-i18n-tip="toolSelect" aria-label="Select tool">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 7 19 2-8 8-2z"></path></svg>
-              </button>
-              <button class="tool-btn tipL" data-tool="slice" data-tip="Slice section &middot; S" data-i18n-tip="toolSlice" aria-label="Slice section">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 14h18" stroke-dasharray="3 3"></path></svg>
-              </button>
-              <button class="tool-btn tipL" data-tool="render" data-tip="Rendering Engine &middot; E" data-i18n-tip="toolRender" aria-haspopup="menu" aria-expanded="false" aria-label="Rendering Engine">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path></svg>
-              </button>
-              <button class="tool-btn tipL" data-tool="floors" data-tip="Floors &middot; F" data-i18n-tip="toolFloors" aria-haspopup="menu" aria-expanded="false" aria-label="Floors">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 4.9-9 4.9-9-4.9Z"></path><path d="m3 11.9 9 4.9 9-4.9"></path><path d="m3 16.9 9 4.9 9-4.9"></path></svg>
-              </button>
-              <button class="tool-btn tipL" data-tool="walk" data-tip="Walkthrough &middot; W" data-i18n-tip="toolWalk" aria-label="Walkthrough">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"></polygon></svg>
-              </button>
-              <button class="tool-btn tipL" data-tool="measure" data-tip="Measure &middot; M" data-i18n-tip="toolMeasure" aria-label="Measure">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 8.7 15.3 2.7a1 1 0 0 0-1.4 0L2.7 13.9a1 1 0 0 0 0 1.4l6 6a1 1 0 0 0 1.4 0L21.3 10.1a1 1 0 0 0 0-1.4z"></path><path d="m7.5 10.5 2 2"></path><path d="m10.5 7.5 2 2"></path><path d="m13.5 4.5 2 2"></path></svg>
-              </button>
-              <button class="tool-btn tipL" data-tool="reset" data-tip="Reset view &middot; R" data-i18n-tip="toolReset" aria-label="Reset view">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
-              </button>
-            </div>
-
-            <!-- Floors flyout (opened by the Floors tool) -->
-            <div class="vp-floors-menu" id="vpFloorsMenu" role="menu" aria-label="Floors" hidden></div>
-
-            <!-- Render flyout (opened by the Render tool) -->
-            <div class="vp-render-menu" id="vpRenderMenu" role="menu" aria-label="Rendering Engine" hidden></div>
-
-            <!-- Bottom Scrubbar -->
-            <div class="vp-scrubbar">
-              <div class="scrub-controls">
-                <div class="scrub-toggle">
-                  <button id="scrubLiveBtn" class="scrub-toggle-btn active"><span class="live-dot"></span><span data-i18n="timelineLive">Live</span></button>
-                  <button id="scrubHistBtn" class="scrub-toggle-btn" data-i18n="timelineHistory">History</button>
-                </div>
-                <button id="scrubPrevBtn" class="scrub-step-btn" aria-label="Previous event" title="Previous event">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"></path></svg>
-                </button>
-                <button id="scrubNextBtn" class="scrub-step-btn" aria-label="Next event" title="Next event" disabled>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="transform: scaleX(-1)"><path d="m15 18-6-6 6-6"></path></svg>
-                </button>
-              </div>
-
-              <!-- Interactive Timeline — SVG chart + overlay elements -->
-              <div class="scrub-timeline" id="scrubTimeline" role="slider" aria-label="History timeline, 48 hours" aria-valuemin="0" aria-valuemax="48" aria-valuenow="0" tabindex="0">
-                <!-- Chart SVG: viewBox 480×34, preserveAspectRatio=none so it stretches -->
-                <svg id="scrubSvg" viewBox="0 0 480 34" preserveAspectRatio="none"
-                  style="position:absolute;left:0;top:2px;width:100%;height:32px;pointer-events:none;" aria-hidden="true">
-                  <defs>
-                    <linearGradient id="tlGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stop-color="var(--acc)" stop-opacity="0.35"/>
-                      <stop offset="100%" stop-color="var(--acc)" stop-opacity="0"/>
-                    </linearGradient>
-                  </defs>
-                  <path id="scrubArea" fill="url(#tlGrad)"></path>
-                  <path id="scrubLine" fill="none" stroke="var(--acc)" stroke-width="1.5" vector-effect="non-scaling-stroke"></path>
-                </svg>
-
-                <!-- Event dots — rendered by JS as absolutely positioned buttons -->
-                <div id="scrubEventsEl" style="position:absolute;inset:0;pointer-events:none;"></div>
-
-                <!-- Time ticks — rendered by JS -->
-                <div id="scrubTicksEl" style="position:absolute;bottom:0;left:0;right:0;height:20px;pointer-events:none;"></div>
-
-                <!-- Ghost hover line -->
-                <div id="scrubGhost" aria-hidden="true"
-                  style="display:none;position:absolute;top:2px;bottom:20px;width:1px;background:var(--t3);opacity:.5;pointer-events:none;z-index:2;"></div>
-                <div id="scrubGhostLabel" aria-hidden="true"
-                  style="display:none;position:absolute;top:-2px;transform:translateX(-50%);font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--t3);pointer-events:none;white-space:nowrap;z-index:2;"></div>
-
-                <!-- Cursor line + label (history mode) -->
-                <div id="scrubCursorLine" aria-hidden="true"
-                  style="display:none;position:absolute;top:2px;bottom:20px;width:1px;background:var(--t1);opacity:.65;pointer-events:none;z-index:4;"></div>
-                <div id="scrubCursorLabel" aria-hidden="true"
-                  style="display:none;position:absolute;top:-2px;transform:translateX(-50%);font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;color:var(--t1);pointer-events:none;white-space:nowrap;z-index:4;"></div>
-              </div>
-
-              <div id="scrubStatus" class="scrub-status">
-                <span id="scrubStatusMode" style="font-family: var(--fH), sans-serif; font-weight: 600; color: var(--t1);">LIVE</span>
-                <span style="color: var(--t3);">&middot;</span>
-                <span id="scrubStatusTime" style="color: var(--t1); font-weight: 500;">12:56</span>
-              </div>
-            </div>
-
-          </div> <!-- End of vp-layer -->
-        </div> <!-- End of vp-wrapper -->
-
-          <!-- Settings View (replaces the viewer when Settings is open) -->
-          <div class="settings-view" id="settingsView" hidden>
-            <nav class="settings-nav" aria-label="Settings sections">
-              <div class="settings-nav-title" data-i18n="settings">Settings</div>
-              <button class="settings-sec-btn active" data-sec="gen" data-i18n="sGen">General</button>
-              <button class="settings-sec-btn" data-sec="audit" data-i18n="sAudit">Audit Trail</button>
-            </nav>
-
-            <div class="settings-body">
-              <!-- General -->
-              <div class="settings-pane" data-pane="gen">
-                <div class="settings-h" data-i18n="sGen">General</div>
-                <div class="settings-cap" data-i18n="settingsCap">Admin only. All keys and changes are recorded in the audit trail.</div>
-                <div class="settings-stub" data-i18n="setStub">Section in design &mdash; see Audit Trail for the built pattern.</div>
-              </div>
-
-              <!-- Audit Trail -->
-              <div class="settings-pane" data-pane="audit" hidden>
-                <div class="audit-wrap">
-                  <div class="settings-h" data-i18n="sAudit">Audit Trail</div>
-                  <div class="settings-cap" data-i18n="auditCap">Append-only record. Entries cannot be edited or deleted.</div>
-                  <section class="audit-table">
-                    <div class="audit-row audit-head">
-                      <span data-i18n="thTime">Timestamp</span>
-                      <span data-i18n="thUser">User</span>
-                      <span data-i18n="thAction">Action</span>
-                      <span data-i18n="thTarget">Target</span>
-                      <span data-i18n="thSource">Source</span>
-                    </div>
-                    <div class="audit-row">
-                      <span class="audit-time">31 Jul 09:12:04</span>
-                      <span>a.yusuf</span>
-                      <span class="audit-action">Acknowledged alarm</span>
-                      <span>AHU-L12-03 setpoint deviation</span>
-                      <span>Web</span>
-                    </div>
-                    <div class="audit-row">
-                      <span class="audit-time">31 Jul 08:47:22</span>
-                      <span>a.yusuf</span>
-                      <span class="audit-action">Created work order <span class="audit-mono">WO-2231</span></span>
-                      <span>from fault: CH-2 approach rising</span>
-                      <span>Web</span>
-                    </div>
-                    <div class="audit-row">
-                      <span class="audit-time">30 Jul 17:05:41</span>
-                      <span>m.khan</span>
-                      <span class="audit-action">Schedule change</span>
-                      <span>L11 west preconditioning <span class="audit-mono">04:30 &rarr; 05:00</span></span>
-                      <span>Web</span>
-                    </div>
-                    <div class="audit-row">
-                      <span class="audit-time">30 Jul 14:22:10</span>
-                      <span>system</span>
-                      <span class="audit-action">Baseline update</span>
-                      <span><span class="audit-mono">71.8 kW &rarr; 72.4 kW</span> site load baseline</span>
-                      <span>FDD engine</span>
-                    </div>
-                    <div class="audit-row">
-                      <span class="audit-time">29 Jul 11:03:55</span>
-                      <span>admin</span>
-                      <span class="audit-action">API key created</span>
-                      <span><span class="audit-mono">eko-prod-read</span> (<span data-i18n="readOnlyW">read-only</span>)</span>
-                      <span>Console</span>
-                    </div>
-                    <div class="audit-row">
-                      <span class="audit-time">28 Jul 16:40:18</span>
-                      <span>a.yusuf</span>
-                      <span class="audit-action">Report exported</span>
-                      <span>Owner Report July (PDF)</span>
-                      <span>Ask EKO</span>
-                    </div>
-                  </section>
-                  <div class="settings-foot" data-i18n="auditCap">Append-only record. Entries cannot be edited or deleted.</div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <section id="rightPanel" class="right-panel" style="flex: none; width: 378px; background: var(--s1); border-inline-start: 1px solid var(--bd1); display: flex; flex-direction: column; min-height: 0; z-index: 20; position: relative;">
-            <!-- Drag handle on the inner edge to resize the panel -->
-            <div class="rp-resizer" id="rpResizer" aria-hidden="true"></div>
-            <!-- Tab shown when collapsed -->
-            <button class="rptab" id="rpOpenTab" aria-label="Expand right panel">
-              <span class="rptab-text" id="rpTabText">OPERATIONS</span>
-            </button>
-            
-            <div class="rp-inner" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
-              <div class="rp-header" style="flex: none; display: flex; align-items: flex-start; gap: 9px; padding: 13px 14px 9px;">
-                <button class="rp-back" style="flex: none; background: var(--s2); border: 1px solid var(--bd2); border-radius: 4px; color: var(--t2); padding: 4px; margin-top: 2px; cursor: pointer; display: none; align-items: center; justify-content: center;">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>
-                </button>
-                <div style="flex: 1; min-width: 0;">
-                  <div style="display: flex; align-items: center; gap: 6px;">
-                    <div class="rp-title" style="font-family: var(--fH), sans-serif; font-size: 13px; font-weight: 600; color: var(--t1);">Operations</div>
-                    <svg class="histclock" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--warnTx)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:none;"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>
-                  </div>
-                  <div class="rp-subtitle" style="font-size: 11px; color: var(--t3); margin-block-start: 2px; display: none;">Module highlights</div>
-                </div>
-                <!-- Widen / narrow button -->
-                <button id="rpWidenBtn" data-dir="widen" title="Widen panel" aria-label="Widen panel" style="flex:none;width:26px;height:26px;display:flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--bd1);border-radius:4px;color:var(--t2);cursor:pointer;margin-top:1px;transition:background 0.15s,color 0.15s" onmouseover="this.style.background='var(--s3)';this.style.color='var(--t1)'" onmouseout="this.style.background='transparent';this.style.color='var(--t2)'">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m11 17-5-5 5-5"></path><path d="m18 17-5-5 5-5"></path></svg>
-                </button>
-                <!-- Collapse button -->
-                <button id="rpCollapseBtn" title="Collapse panel" style="flex:none;width:26px;height:26px;display:flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--bd1);border-radius:4px;color:var(--t2);cursor:pointer;margin-top:1px;transition:background 0.15s,color 0.15s" onmouseover="this.style.background='var(--s3)';this.style.color='var(--t1)'" onmouseout="this.style.background='transparent';this.style.color='var(--t2)'">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 17 5-5-5-5"></path><path d="m6 17 5-5-5-5"></path></svg>
-                </button>
-              </div>
-              <div id="rpContent" style="flex: 1; overflow-y: auto; padding: 0 14px 14px; display: flex; flex-direction: column; gap: 10px;">
-                <!-- Populated dynamically by dashboard-ui.js renderRightPanel() -->
-              </div>
-            </div>
-          </section>
-        </div> <!-- End of app-view-container -->
-
-      </main>
-    </div> <!-- End of app-body -->
-
-    <!-- Floating EKO Chat Window (now spans over everything including right panel) -->
-    <div class="eko-chat-modal" id="ekoChatModal" style="display: none; position: absolute; inset-inline-end: 24px; bottom: 84px; width: 440px; height: 480px; background: var(--s1); border: 1px solid var(--bd1); border-radius: 12px; box-shadow: 0 20px 40px rgba(0,0,0,0.6); z-index: 100; flex-direction: column; overflow: hidden; backdrop-filter: blur(16px);">
-      <!-- Header -->
-      <div style="flex: none; display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--bd1); background: var(--s2);">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--acc)" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path></svg>
-          <span style="font-family: var(--fH), sans-serif; font-weight: 700; font-size: 13px; letter-spacing: 0.5px; color: var(--t1);" data-i18n="askHdr">ASK EKO</span>
-          <span style="padding: 2px 8px; border-radius: 10px; background: var(--s3); font-size: 11px; color: var(--t3);" id="ekoChatScope">Operations &middot; Marsa Al Arab</span>
-        </div>
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <button id="ekoClearChat" style="background: none; border: none; font-size: 11px; color: var(--t3); cursor: pointer; padding: 2px 4px;" data-i18n="clearChat">Clear</button>
-          <button id="ekoCloseChat" style="background: none; border: none; font-size: 16px; color: var(--t3); cursor: pointer; padding: 2px 4px; line-height: 1;">&times;</button>
-        </div>
-      </div>
-
-      <!-- Message History List -->
-      <div id="ekoChatMessages" style="flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px;">
-        <!-- Messages dynamically appended by JS -->
-      </div>
-
-      <!-- Footer -->
-      <div style="flex: none; padding: 8px 14px; border-top: 1px solid var(--bd1); background: var(--s2); font-size: 11px; color: var(--t3); display: flex; align-items: center; justify-content: space-between;">
-        <span data-i18n="chatFoot">Assistant not connected yet</span>
-        <span data-i18n="escCloses">Esc closes</span>
-      </div>
+  <div id="app">
+    <header id="topbar"></header>
+    <div id="shellmain">
+      <div id="histframe" aria-hidden="true"></div>
+      <aside id="ekonav" aria-label="Modules"></aside>
+      <main id="mount"></main>
     </div>
-
-    <!-- Search Palette (Ctrl+K) -->
-    <div class="pal-overlay" id="palOverlay" hidden></div>
-    <div class="pal" id="palDialog" role="dialog" aria-label="Search" hidden>
-      <div class="pal-head">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
-        <input type="text" id="palInput" aria-label="Search" data-i18n="palPh" placeholder="Search assets, faults, documents, pages&hellip;" autocomplete="off" />
-        <span class="pal-esc">esc</span>
-      </div>
-      <div class="pal-body" id="palBody"></div>
-      <div class="pal-foot" data-i18n="palFoot">enter Open &middot; tab Next group &middot; esc Close</div>
-    </div>
-
-    <!-- Reports Library -->
-    <div class="reports-panel" id="reportsPanel" role="dialog" aria-label="Reports library" hidden>
-      <div class="reports-head">
-        <span class="reports-title" data-i18n="reportsH">REPORTS</span>
-        <button class="reports-close" id="reportsClose" aria-label="Close">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"></path></svg>
-        </button>
-      </div>
-      <div class="reports-list">
-        <div class="report-row">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v5h5"></path></svg>
-          <div class="report-info">
-            <div class="report-name">Owner Report July</div>
-            <div class="report-meta">Ask EKO &middot; <span class="mono">28 Jul</span></div>
-          </div>
-          <span class="report-type">PDF</span>
-          <button class="report-dl" aria-label="Download Owner Report July">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>
-          </button>
-        </div>
-        <div class="report-row">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v5h5"></path></svg>
-          <div class="report-info">
-            <div class="report-name">Al Sa'fat Submission Draft</div>
-            <div class="report-meta">Compliance &middot; <span class="mono">25 Jul</span></div>
-          </div>
-          <span class="report-type">XLSX</span>
-          <button class="report-dl" aria-label="Download Al Sa'fat Submission Draft">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>
-          </button>
-        </div>
-        <div class="report-row">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v5h5"></path></svg>
-          <div class="report-info">
-            <div class="report-name">Energy Month Summary</div>
-            <div class="report-meta">Energy &middot; <span class="mono">21 Jul</span></div>
-          </div>
-          <span class="report-type">PDF</span>
-          <button class="report-dl" aria-label="Download Energy Month Summary">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>
-          </button>
-        </div>
-        <div class="report-row">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v5h5"></path></svg>
-          <div class="report-info">
-            <div class="report-name">Waste Prevention Opportunities</div>
-            <div class="report-meta">Energy &middot; <span class="mono">18 Jul</span></div>
-          </div>
-          <span class="report-type">PDF</span>
-          <button class="report-dl" aria-label="Download Waste Prevention Opportunities">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>
-          </button>
-        </div>
-      </div>
-      <div class="reports-foot" data-i18n="repFoot">Reports generate in context and archive here automatically.</div>
-    </div>
-
-    <!-- Ask EKO Bottom Bar -->
-    <footer class="ask-eko-bar" style="flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--s1); border-block-start: 1px solid var(--bd1); z-index: 30;">
-      <form class="askbox" style="flex: 1; display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--s2); pointer-events: auto; border-radius: 6px;">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--acc)" aria-hidden="true" style="flex: none"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path></svg>
-        <input type="text" aria-label="Ask EKO" data-i18n="askPh" placeholder="Ask EKO: &quot;why is the west tower above baseline?&quot;" style="flex: 1; background: transparent; border: none; outline: none; color: var(--t1); font-family: var(--fB), sans-serif; font-size: 13px;" />
-      </form>
-      <button data-i18n="btnYest" style="flex: none; padding: 8px 13px; border-radius: 4px; background: transparent; border: 1px solid var(--bd2); color: var(--t2); font-size: 12px; font-weight: 500; cursor: pointer;">What happened yesterday afternoon?</button>
-      <button data-i18n="btnSpike" style="flex: none; padding: 8px 13px; border-radius: 4px; background: transparent; border: 1px solid var(--bd2); color: var(--t2); font-size: 12px; font-weight: 500; cursor: pointer;">Explain today's spike</button>
-      <button data-i18n="btnFaults" style="flex: none; padding: 8px 13px; border-radius: 4px; background: transparent; border: 1px solid var(--bd2); color: var(--t2); font-size: 12px; font-weight: 500; cursor: pointer;">Open FDD faults</button>
-      <button data-i18n="btnReport" style="flex: none; padding: 8px 13px; border-radius: 6px; background: var(--btnP); border: 1px solid transparent; color: var(--btnPfg); font-size: 12px; font-weight: 500; cursor: pointer;">Generate owner report</button>
-    </footer>
-
+    <nav id="mobtabs" aria-label="Modules"></nav>
   </div>
-  <script src="/static/js/data-provider.js?v=1" defer></script>
-  <script src="/static/js/dashboard.js?v=1" defer></script>
+  <div id="overlays"></div>
+  <script src="/static/js/overlay-boot.js"></script>
+  <script src="/static/dashboard/js/build.js"></script>
+  <script src="/static/dashboard/js/i18n/en.js"></script>
+  <script src="/static/dashboard/js/i18n/ar.js"></script>
+  <script src="/static/dashboard/js/data/site.marsa.js" onerror="window.EKO_DATA_FAILED=true"></script>
+  <script src="/static/dashboard/js/data/portfolio.js"></script>
+  <script src="/static/dashboard/js/layouts/nav.js"></script>
+  <script src="/static/dashboard/js/layouts/marsa-overview.js"></script>
+  <script src="/static/dashboard/js/layouts/energy.js"></script>
+  <script src="/static/dashboard/js/layouts/utilities.js"></script>
+  <script src="/static/dashboard/js/layouts/spaces.js"></script>
+  <script src="/static/dashboard/js/layouts/power.js"></script>
+  <script src="/static/dashboard/js/layouts/power-model.js"></script>
+  <script src="/static/dashboard/js/layouts/notifications.js"></script>
+  <script src="/static/dashboard/js/layouts/assets-register.js"></script>
+  <script src="/static/dashboard/js/layouts/assets.js"></script>
+  <script src="/static/dashboard/js/layouts/systems.js"></script>
+  <script src="/static/dashboard/js/layouts/systems-subs.js"></script>
+  <script src="/static/dashboard/js/layouts/module-locked.js"></script>
+  <script src="/static/dashboard/js/layouts/bench.js"></script>
+  <script src="/static/dashboard/js/layouts/anom.js"></script>
+  <script src="/static/dashboard/js/layouts/fcst.js"></script>
+  <script src="/static/dashboard/js/layouts/water.js"></script>
+  <script src="/static/dashboard/js/layouts/gas.js"></script>
+  <script src="/static/dashboard/js/layouts/heatmap.js"></script>
+  <script src="/static/dashboard/js/layouts/demo-utilities-lite.js"></script>
+  <script src="/static/dashboard/js/components/charts.js"></script>
+  <script src="/static/dashboard/js/viewer/viewer-api.js"></script>
+  <script src="/static/dashboard/js/viewer/adapter-host.js"></script>
+  <script src="/static/dashboard/js/viewer/adapter-static.js"></script>
+  <script src="/static/dashboard/js/components/widgets.js"></script>
+  <script src="/static/dashboard/js/components/meters.js"></script>
+  <script src="/static/dashboard/js/components/datagrid.js"></script>
+  <script src="/static/dashboard/js/layouts/grids.js"></script>
+  <script src="/static/dashboard/js/components/bva.js"></script>
+  <script src="/static/dashboard/js/components/analytics.js"></script>
+  <script src="/static/dashboard/js/viewer/viewer.js"></script>
+  <script src="/static/dashboard/js/viewer/toolbar.js"></script>
+  <script src="/static/dashboard/js/pages/archetypes.js"></script>
+  <script src="/static/dashboard/js/version.js"></script>
+  <script src="/static/dashboard/js/reports/report-api.js"></script>
+  <script src="/static/dashboard/js/reports/templates/morning-brief.js"></script>
+  <script src="/static/dashboard/js/reports/templates/energy-performance.js"></script>
+  <script src="/static/dashboard/js/reports/templates/alarm-summary.js"></script>
+  <script src="/static/dashboard/js/reports/templates/utilities-water-gas.js"></script>
+  <script src="/static/dashboard/js/reports/templates/pm-compliance.js"></script>
+  <script src="/static/dashboard/js/reports/templates/shift-handover.js"></script>
+  <script src="/static/dashboard/js/reports/templates/incident-report.js"></script>
+  <script src="/static/dashboard/js/reports/templates/executive-monthly.js"></script>
+  <script src="/static/dashboard/js/llm/llm-api.js"></script>
+  <script src="/static/dashboard/js/llm/adapter-mock.js"></script>
+  <script src="/static/dashboard/js/llm/adapter-ollama.js"></script>
+  <script src="/static/dashboard/js/reports/intent.js"></script>
+  <script src="/static/dashboard/js/reports/narrate.js"></script>
+  <script src="/static/dashboard/js/reports/export.js"></script>
+  <script src="/static/dashboard/js/reports/render.js"></script>
+  <script src="/static/dashboard/js/notif/notif-types.js"></script>
+  <script src="/static/dashboard/js/notif/notif-store.js"></script>
+  <script src="/static/dashboard/js/notif/notif-ui.js"></script>
+  <script src="/static/dashboard/js/cmms/adapter-mock.js"></script>
+  <script src="/static/dashboard/js/cmms/adapter-hexagon.js"></script>
+  <script src="/static/dashboard/js/cmms/cmms-api.js"></script>
+  <script src="/static/dashboard/js/layouts/panels.js"></script>
+  <script src="/static/dashboard/js/layouts/tools.js"></script>
+  <script src="/static/dashboard/js/layouts/help.js"></script>
+  <script src="/static/dashboard/js/layouts/report-preview.js"></script>
+  <script src="/static/dashboard/js/layouts/reports-hub.js"></script>
+  <script src="/static/dashboard/js/portfolio/rollup.js"></script>
+  <script src="/static/dashboard/js/portfolio/estate.js"></script>
+  <script src="/static/dashboard/js/portfolio/map.js"></script>
+  <script src="/static/dashboard/js/portfolio/page.js"></script>
+  <script src="/static/dashboard/js/layouts/portfolio.js"></script>
+  <script src="/static/dashboard/js/wall/wall.js"></script>
+  <script src="/static/dashboard/js/shell/splitters.js"></script>
+  <script src="/static/dashboard/js/shell/sheets.js"></script>
+  <script src="/static/dashboard/js/control.js"></script>
+  <script src="/static/dashboard/js/shell/pwa.js"></script>
+  <script src="/static/dashboard/js/shell/tooltip.js"></script>
+  <script src="/static/dashboard/js/shell/feedback.js"></script>
+  <script src="/static/dashboard/js/shell/surfaces.js"></script>
+  <script>if(window.EKO_DATA && window.EKO_DATA.marsa) window.EKO_CTL.validate(window.EKO_DATA.marsa);</script>
+  <script src="/static/dashboard/js/addons.js"></script>
+  <script src="/static/dashboard/js/ai/ask.js"></script>
+  <script src="/static/dashboard/js/app.js"></script>
 </body>
 </html>

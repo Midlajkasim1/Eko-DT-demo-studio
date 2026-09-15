@@ -21,7 +21,7 @@ import { OrientationCube } from '@/components/viewer/OrientationCube'
 import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import { unloadAllModels } from '@/lib/sceneTeardown'
 import { attachDevBridge } from '@/lib/devBridge'
-import { installViewerTemplateApi } from '@/lib/viewerTemplateApi'
+import { installStudioViewerApi } from '@/lib/studioViewerApi'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 
 interface ViewerCanvasProps {
@@ -71,8 +71,7 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
     attachDevBridge(engineRef)
   }, [isReady, onEngineReady])
 
-  // window.ViewerTemplates — how an injected dashboard switches templates
-  useEffect(() => { installViewerTemplateApi() }, [])
+  useEffect(() => { installStudioViewerApi() }, [])
 
   // Restore the saved view every time a project is opened. The engine is created
   // once and outlives project switches, so this cannot hang off engine-ready alone.

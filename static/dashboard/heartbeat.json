@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "ts": "2026-09-03T10:20:00Z",
+  "feed": {
+    "status": "ok",
+    "sources": {
+      "bms": {
+        "status": "ok",
+        "lastSample": "2026-09-03T10:19:45Z"
+      },
+      "fin": {
+        "status": "ok",
+        "lastSample": "2026-09-03T10:19:50Z"
+      },
+      "cmms": {
+        "status": "ok",
+        "lastSample": "2026-09-03T10:18:00Z"
+      }
+    }
+  }
+}

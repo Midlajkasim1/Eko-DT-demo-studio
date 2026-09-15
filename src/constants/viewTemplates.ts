@@ -296,11 +296,11 @@ export function getTemplateScene(
   if (id === 'xray' && xrayColor && xrayColor !== 'blue') {
     const scene = JSON.parse(JSON.stringify(t.scene)) as TemplateScene
     if (xrayColor === 'yellow') {
-      scene.surfaces.tint = '#e8c848' // Yellow tint
-      scene.frame.ink!.color = '#f0d49a'
+      scene.surfaces.tint = '#e8c848'
+      if (scene.frame.ink) scene.frame.ink.color = '#f0d49a'
     } else if (xrayColor === 'white') {
-      scene.surfaces.tint = '#e0e0e0' // White tint
-      scene.frame.ink!.color = '#f0f0f0'
+      scene.surfaces.tint = '#e0e0e0'
+      if (scene.frame.ink) scene.frame.ink.color = '#f0f0f0'
     }
     return scene
   }

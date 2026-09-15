@@ -1,0 +1,92 @@
+/* ============================================================================
+   EKO base — reset, shell layout, state attributes, responsive breakpoints.
+   No colours or sizes are invented here: everything visual comes from
+   tokens.css. Zero !important: the reference needed 107 of them to fight its
+   own inline styles; with styles in classes, specificity alone is enough.
+   ============================================================================ */.dashboard-native-container *,.dashboard-native-container *::before,.dashboard-native-container *::after{ box-sizing:border-box }.dashboard-native-container,.dashboard-native-container{ height:100% }.dashboard-native-container{
+  margin:0; overflow:hidden;              /* zero page scroll on desktop */
+  background:var(--s0); color:var(--t1);
+  font-family:var(--fB),sans-serif; font-size:var(--txValueSz);  /* reference root size */
+  -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+  text-rendering:optimizeLegibility;
+}.dashboard-native-container a{ color:var(--link); text-decoration:none }.dashboard-native-container a:hover{ text-decoration:underline }.dashboard-native-container button{ font-family:var(--fB),sans-serif; color:inherit; background:none; border:none; padding:0; cursor:pointer }.dashboard-native-container button:disabled{ opacity:.4; cursor:default; pointer-events:none }.dashboard-native-container input,.dashboard-native-container select{ font-family:var(--fB),sans-serif; color:var(--t1) }.dashboard-native-container ul{ margin:0; padding:0; list-style:none }.dashboard-native-container h1,.dashboard-native-container h2,.dashboard-native-container h3,.dashboard-native-container h4,.dashboard-native-container p{ margin:0 }.dashboard-native-container svg{ display:block }.dashboard-native-container img{ max-width:100% }.dashboard-native-container :focus-visible{ outline:2px solid var(--acc); outline-offset:2px; border-radius:4px}.dashboard-native-container ::-webkit-scrollbar{ width:8px; height:8px }.dashboard-native-container ::-webkit-scrollbar-thumb{ background:var(--bd2); border-radius:4px}.dashboard-native-container ::-webkit-scrollbar-track{ background:transparent }
+
+/* Typography scale (spec: nothing below 12px; hero 28px; card titles 13px
+   uppercase letterspaced; body values 14px mono). */.dashboard-native-container .tHero{ font-family:'JetBrains Mono',monospace; font-size:var(--txHeroSz); font-weight:600; font-variant-numeric:tabular-nums }.dashboard-native-container .tCard{ font-family:var(--fH),sans-serif; font-size:var(--txValueSz); font-weight:600; letter-spacing:1px; text-transform:uppercase; color:var(--t2) }.dashboard-native-container .tMono{ font-family:'JetBrains Mono',monospace; font-size:var(--txTitleSz); font-variant-numeric:tabular-nums }.dashboard-native-container .tMonoS{ font-family:'JetBrains Mono',monospace; font-size:var(--txCapSz); font-variant-numeric:tabular-nums }.dashboard-native-container .tCap{ font-size:var(--txCapSz); color:var(--t3) }.dashboard-native-container .tLbl{ font-family:var(--fH),sans-serif; font-size:var(--txCapSz); font-weight:600; letter-spacing:.8px; text-transform:uppercase; color:var(--t3) }
+
+/* Layout primitives. */.dashboard-native-container .row{ display:flex; align-items:center }.dashboard-native-container .col{ display:flex; flex-direction:column }.dashboard-native-container .grow{ flex:1 1 auto; min-width:0 }.dashboard-native-container .gap4{ gap:4px }.dashboard-native-container .gap6{ gap:6px }.dashboard-native-container .gap8{ gap:8px }.dashboard-native-container .gap10{ gap:10px }.dashboard-native-container .gap12{ gap:12px }.dashboard-native-container .gap16{ gap:16px }.dashboard-native-container .hide{ display:none }
+
+/* ---------------------------------------------------------------------------
+   SHELL GRID
+   header (52px) / main row: nav rail | content mount | asset panel / ask bar
+   --------------------------------------------------------------------------- */.dashboard-native-container #app{ height:100%; display:flex; flex-direction:column; min-width:0 }.dashboard-native-container #topbar{
+  flex:none; height:52px; display:flex; align-items:center; gap:16px;
+  padding-inline:14px; background:var(--chrome-bg);
+  border-block-end:1px solid var(--chrome-edge); z-index:30;
+}.dashboard-native-container #shellmain{ flex:1; display:flex; min-height:0; position:relative }.dashboard-native-container #ekonav{
+  flex:none; width:var(--navw); background:var(--chrome-bg);
+  border-inline-end:1px solid var(--chrome-edge);
+  display:flex; flex-direction:column; gap:2px; padding:10px 8px;
+  overflow-y:auto; overflow-x:hidden;
+  transition:width .2s ease-out;
+}.dashboard-native-container[data-nav="min"]{ --navw:56px }.dashboard-native-container[data-nav="min"] #ekonav{ overflow:visible }.dashboard-native-container #mount{ flex:1; display:flex; min-width:0; min-height:0; position:relative }.dashboard-native-container #mobtabs{ display:none }
+
+/* Bottom sheets / dialogs layer. */.dashboard-native-container #overlays{ position:fixed; inset:0; pointer-events:none; z-index:60 }.dashboard-native-container #overlays>*{ pointer-events:auto }
+
+/* ---------------------------------------------------------------------------
+   RESPONSIVE — 1920 / 1440 / 1280 / 1024 / 768 / 390.
+   Desktop (≥1024): zero page scroll, panels dock.
+   Stacked (≤1023): bottom tab bar, stacked cards, sheets, FAB dock, 44px targets.
+   --------------------------------------------------------------------------- */
+
+/* 1440 is the design base; the reference keeps the same metrics at 1920. */
+
+/* ≤1280: laptop condensation (mirrors the reference data-lap rules). */
+@media (max-width:1280px){.dashboard-native-container #topbar{ gap:10px }.dashboard-native-container #topbar .srchbtn{ width:132px; flex:0 1 132px }.dashboard-native-container #alarmribbon .ribw,.dashboard-native-container #alarmribbon .ribu{ display:none }.dashboard-native-container #alarmribbon .ribseg{ padding-inline:7px }.dashboard-native-container{ --ovw:320px }
+}
+
+/* ≤1024: nav rail auto-collapses to icons; summary narrows further. */
+@media (max-width:1024px){.dashboard-native-container{ --navw:56px }.dashboard-native-container #ekonav .nlbl,.dashboard-native-container #ekonav .nchevb,.dashboard-native-container #ekonav .nsubs{ display:none }.dashboard-native-container{ --ovw:300px }.dashboard-native-container .deskwide{ display:none }
+}
+
+/* ≤1023: stacked. Page scrolls; rail becomes bottom tabs; cards stack.
+   (Was ≤767; the 768–1023 split could not hold nav+summary+panel+dock — D22.) */
+@media (max-width:1023px){.dashboard-native-container{ overflow:auto }.dashboard-native-container #app{ height:auto; min-height:100% }.dashboard-native-container #ekonav{ display:none }.dashboard-native-container #mount{ flex-direction:column }.dashboard-native-container #topbar{ gap:8px; padding-inline:10px; position:sticky; top:0 }.dashboard-native-container .deskonly{ display:none }.dashboard-native-container #mobtabs{
+    display:flex; position:fixed; inset-inline:0; bottom:0; z-index:55;
+    background:var(--chrome-bg); border-block-start:1px solid var(--chrome-edge);
+    padding-bottom:env(safe-area-inset-bottom);
+  }.dashboard-native-container #mobtabs button{
+    flex:1; min-height:48px; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:2px;
+    font-size:var(--txCapSz); color:var(--t3);
+  }.dashboard-native-container #mobtabs button[data-on="page"]{ color:var(--acc) }
+  /* touch targets */.dashboard-native-container button{ min-height:44px; min-width:44px }.dashboard-native-container .kbd,.dashboard-native-container button.seg,.dashboard-native-container button.chip,.dashboard-native-container .vrb{ min-height:0; min-width:0 }
+}
+
+/* ≤390 fine-tuning. */
+@media (max-width:390px){.dashboard-native-container #topbar{ gap:6px }.dashboard-native-container .tHero{ font-size:var(--txKpiSz) }
+}
+
+/* ---------------------------------------------------------------------------
+   STATE ATTRIBUTES (set by app.js on <html> / shell nodes)
+   --------------------------------------------------------------------------- */.dashboard-native-container[data-hist="1"] #histframe{ display:block }.dashboard-native-container #histframe{
+  display:none; position:absolute; inset:0;
+  inset-inline-start:var(--navw);
+  border:2px solid var(--warn40); pointer-events:none; z-index:26;
+  transition:inset-inline-start .2s ease;
+}
+
+/* Theme cross-fade (reference .tfade). */.dashboard-native-container.tfade,.dashboard-native-container.tfade *{
+  transition:background-color .3s ease,color .3s ease,border-color .3s ease,
+             fill .3s ease,stroke .3s ease;
+}
+
+/* RTL mirroring helpers (reference .dirx / chevrons). */.dashboard-native-container[dir="rtl"] .dirx{ transform:scaleX(-1) }
+
+/* Reduced motion: kill animation globally; components add their static
+   equivalents (double ring on the ribbon leader, no flyout spring). */
+@media (prefers-reduced-motion:reduce){.dashboard-native-container *{ animation:none; transition:none }
+}
+
+/* Utility classes (replacing what would otherwise be inline styles;
+   inline style= is reserved for computed positions and chart geometry). */.dashboard-native-container .taS{ text-align:start }.dashboard-native-container .msA{ margin-inline-start:auto }.dashboard-native-container .mt10{ margin-top:10px }.dashboard-native-container .cT2{ color:var(--t2) }.dashboard-native-container .cT3{ color:var(--t3) }.dashboard-native-container .cPos{ color:var(--posTx) }.dashboard-native-container .cWarn{ color:var(--warnTx) }.dashboard-native-container .fw6{ font-weight:600 }.dashboard-native-container .flexnone{ flex:none }.dashboard-native-container .ellip{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }.dashboard-native-container .scrollY{ overflow-y:auto; min-height:0 }.dashboard-native-container .pagepad{ padding:16px; overflow-y:auto }.dashboard-native-container .seclbl{ margin-top:10px; display:block }
