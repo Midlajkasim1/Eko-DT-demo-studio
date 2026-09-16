@@ -110,6 +110,16 @@
 .dashboard-native-container .scrim {
   position: absolute;
 }
+.dashboard-native-container .dlgdrop.dropMid {
+  position: absolute;
+  inset: auto;
+  inset-inline-start: auto;
+  margin: 0;
+  width: 300px;
+}
+.dashboard-native-container .dlgdrop.dropMid.dlgalerts {
+  width: 360px;
+}
 .dashboard-native-container #ekotip {
   position: absolute;
   left: 0;

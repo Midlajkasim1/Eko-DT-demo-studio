@@ -506,7 +506,7 @@
         ${(l => `<span class="acwhat grow taS" data-tip="${esc(l.main + (l.sub ? ' · ' + l.sub : ''))}" data-tipif="trunc">${esc(l.main)}${l.sub ? `<span class="alrtech acsub">${esc(l.sub)}</span>` : ''}</span>`)(E.alarmLines(a, true))}
         <span class="tMonoS cT3 flexnone">${esc(E.fmtAge(a.ageH))}</span></button>`).join('');
       out += `<div class="scrim scrimclear" data-born="${E.state.born==='dlg'?1:0}" data-act="closeDlg"></div>
-      <div class="dlg dlgdrop dropEnd dlgalerts" data-born="${E.state.born==='dlg'?1:0}" role="dialog" aria-label="${esc(E.t('alertCentre'))}">
+      <div class="dlg dlgdrop dropMid dlgalerts" data-born="${E.state.born==='dlg'?1:0}" role="dialog" aria-label="${esc(E.t('alertCentre'))}">
         <div class="draghandle"></div>
         <div class="dlghead achead"><h2>${esc(E.t('alertCentre'))}</h2><span class="acmeta" data-tip="${esc(E.t('alarmsMetaTip'))}">${esc(E.t('acActiveN',{n:vis.filter(a=>!a.ack).length}))}</span>
           <button class="iconbtn msA" data-act="closeDlg" aria-label="${esc(E.t('close'))}">${icon('x',14)}</button></div>
@@ -611,14 +611,41 @@
     clock();
     const pal = $('palin'); if(pal){ pal.focus(); pal.setSelectionRange(pal.value.length, pal.value.length); }
     const drop = document.querySelector('.dlgdrop.dropMid');
-    if(drop && E.state.dlgAnchor != null && matchMedia('(min-width:1024px)').matches){
-      const root = window.DASHBOARD_ROOT;
-      const rr = root && root.getBoundingClientRect ? root.getBoundingClientRect() : { left: 0, right: window.innerWidth };
-      const x = Math.max(12, Math.min(E.state.dlgAnchor - rr.left - drop.offsetWidth / 2,
-        rr.right - rr.left - drop.offsetWidth - 12));
-      drop.style.left = x.toFixed(0) + 'px';
-      drop.style.right = 'auto';
-      drop.style.insetInlineStart = 'auto';
+    if(drop && E.state.dlg){
+      const place = () => {
+        const v = E.state.dlg;
+        const openers = document.querySelectorAll('[data-act="dlg"][data-v="' + v + '"]');
+        let opener = openers[0] || null;
+        if(openers.length > 1 && E.state.dlgAnchor != null){
+          let best = Infinity;
+          openers.forEach(o => {
+            const r = o.getBoundingClientRect();
+            const d = Math.abs((r.left + r.right) / 2 - E.state.dlgAnchor);
+            if(d < best){ best = d; opener = o; }
+          });
+        }
+        const ovEl = $('overlays') || window.DASHBOARD_ROOT;
+        if(!opener || !ovEl) return;
+        const br = opener.getBoundingClientRect();
+        const ov = ovEl.getBoundingClientRect();
+        const w = Math.min(drop.classList.contains('dlgalerts') ? 360 : 300, Math.max(200, ov.width - 24));
+        drop.style.position = 'absolute';
+        drop.style.inset = 'auto';
+        drop.style.insetInlineStart = 'auto';
+        drop.style.insetInlineEnd = 'auto';
+        drop.style.width = w + 'px';
+        drop.style.maxWidth = 'none';
+        drop.style.margin = '0';
+        drop.style.right = 'auto';
+        drop.style.bottom = 'auto';
+        let x = br.left + br.width / 2 - ov.left - w / 2;
+        x = Math.max(12, Math.min(x, ov.width - w - 12));
+        const y = Math.max(8, br.bottom - ov.top + 6);
+        drop.style.left = x.toFixed(0) + 'px';
+        drop.style.top = y.toFixed(0) + 'px';
+      };
+      place();
+      requestAnimationFrame(place);
     }
     restoreScroll();                                             /* D86 */
     if(window.EKO_BVA) window.EKO_BVA.mount(E);                   /* D96: pixel charts after the frame is built */
@@ -734,6 +761,7 @@
       E.state.disclose = loadDisclose(); E.state.dlg = null; const l = E.landing(); E.go(l.pageId, l.module, null); },
     dlg(el){ const r = el.getBoundingClientRect();
       E.state.dlgAnchor = (r.left + r.right) / 2;
+      E.state.dlgAnchorBottom = r.bottom;
       E.set({ born:'dlg', dlg: el.dataset.v, palQ:'', palSel:0, mobMore:false, helpTab: el.dataset.tab || 'legend', settingsTab: el.dataset.stab || E.state.settingsTab }); },   /* a menu closes on selection (R1) */
     helpTab(el){ E.set({ helpTab: el.dataset.v }); },
     closeDlg(){ E.state.rlAsk = false; E.set({ dlg:null, mobMore:false }); },
