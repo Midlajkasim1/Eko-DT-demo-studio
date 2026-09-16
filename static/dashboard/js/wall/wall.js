@@ -488,8 +488,10 @@ window.EKO_WALL = (function(){
     if(list && !list.children.length){ const h = q('.wlisth'); if(h) h.remove(); list.remove(); }
     if(over(zone) && !(list && list.children.length)){ const x = q('.walarm .wnotrep'); if(x){ x.remove(); shed(zone, 'notrep'); } }
     const chipsEl = q('.wchips'); guard = 0;
-    while(chipsEl && chipsEl.lastElementChild && (over(chipsEl) || [...chipsEl.children].some(ch => outside(ch, chipsEl))) && guard++ < 20){ chipsEl.removeChild(chipsEl.lastElementChild); shed(q('.wcentre'), 'chip'); }
-    if(chipsEl && !chipsEl.children.length) chipsEl.remove();
+    if(!window.DASHBOARD_OVERLAY){
+      while(chipsEl && chipsEl.lastElementChild && (over(chipsEl) || [...chipsEl.children].some(ch => outside(ch, chipsEl))) && guard++ < 20){ chipsEl.removeChild(chipsEl.lastElementChild); shed(q('.wcentre'), 'chip'); }
+      if(chipsEl && !chipsEl.children.length) chipsEl.remove();
+    }
     const kp = q('.wkpis');
     if(over(kp) || [...document.querySelectorAll('.wkpi')].some(over)){ document.querySelectorAll('.wkpis .wextra').forEach(el => el.remove()); shed(kp, 'cap'); }
     /* side cards: caption line · the shift block · bars from the bottom · not-reporting rows from the bottom */

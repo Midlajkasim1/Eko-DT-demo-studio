@@ -52,6 +52,8 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
     }
   }, [isFinProject, adminMode])
 
+
+
   const { engineRef, isReady, error } = useFragmentsEngine(containerRef)
   const { loadModel, isLoading } = useModelLoader(engineRef)
   const progressSessionActive = useLoadingProgressStore(s => s.sessionActive)
@@ -529,7 +531,6 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
         <OrientationCube engineRef={engineRef} dashboardVisible={dashboardVisible} />
       )}
 
-      {/* Toolbar */}
       {step === 'viewing' && adminMode && isToolbarVisible && (
         <ViewerToolbar
           engineRef={engineRef}

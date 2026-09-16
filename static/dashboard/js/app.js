@@ -577,7 +577,12 @@
       const freshW = document.getElementById('enginehost'); if(freshW && keptHost) freshW.replaceWith(keptHost);
       $('topbar').innerHTML = ''; $('ekonav').innerHTML = ''; $('mobtabs').innerHTML = ''; $('overlays').innerHTML = '';
       if(document.getElementById('enginehost')) window.EKO_V.mountEngine(E);
-      window.EKO_WALL.mount(); E.state.born = null; return;
+      window.EKO_WALL.mount();
+      if (window.syncWallHole) {
+        window.syncWallHole();
+        requestAnimationFrame(window.syncWallHole);
+      }
+      E.state.born = null; return;
     }
     const restoreScroll = keepScroll();
     if(window.EKO_SURF) window.EKO_SURF.reconcile();            /* R2 (D67) */

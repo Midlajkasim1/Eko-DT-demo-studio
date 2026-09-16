@@ -117,4 +117,48 @@
   z-index: 250;
   pointer-events: none;
 }
+.dashboard-native-container[data-wall="1"],
+.dashboard-native-container[data-wall="1"] #app,
+.dashboard-native-container[data-wall="1"] #mount {
+  background: transparent;
+}
+.dashboard-native-container[data-wall="1"] #mount {
+  position: absolute;
+  inset: 0;
+}
+.dashboard-native-container[data-wall="1"] .wbgfill {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.dashboard-native-container[data-wall="1"] .wbgfill > i {
+  position: absolute;
+  background: var(--wbg);
+}
+.dashboard-native-container[data-wall="1"] .wall {
+  background: transparent;
+  filter: none;
+  z-index: 1;
+}
+.dashboard-native-container[data-wall="1"] .wcentre[data-pane="model"],
+.dashboard-native-container[data-wall="1"][data-theme="light"] .wcentre[data-pane="model"],
+.dashboard-native-container[data-wall="1"][data-theme="dark"] .wcentre[data-pane="model"] {
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+.dashboard-native-container[data-wall="1"] .wcentre[data-pane="model"] .wmodel,
+.dashboard-native-container[data-wall="1"] .wcentre[data-pane="model"] #vpmain,
+.dashboard-native-container[data-wall="1"] .wcentre[data-pane="model"] #enginehost {
+  background: transparent;
+  animation: none;
+}
+.dashboard-native-container[data-wall="1"] .wcentre:not([data-pane="model"]) {
+  background: var(--wcard);
+}
+.dashboard-native-container[data-wall="1"] .wchips {
+  max-height: none;
+  overflow: visible;
+}
 
