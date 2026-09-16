@@ -117,6 +117,15 @@
   z-index: 250;
   pointer-events: none;
 }
+.dashboard-native-container #wmaxov {
+  position: absolute;
+  inset: 0;
+  z-index: 220;
+  pointer-events: auto;
+}
+.dashboard-native-container .wmaxbox {
+  width: min(1080px, 94%);
+}
 .dashboard-native-container[data-wall="1"],
 .dashboard-native-container[data-wall="1"] #app,
 .dashboard-native-container[data-wall="1"] #mount {

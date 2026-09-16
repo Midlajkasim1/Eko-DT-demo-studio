@@ -675,7 +675,7 @@
       clone.querySelectorAll('.wchrome').forEach(n => n.remove());
       ov.querySelector('.wmaxbody').appendChild(clone);
       ov.addEventListener('click', ev => { if(ev.target === ov) ACTS.wmaxClose(); });
-      document.body.appendChild(ov);
+      (window.DASHBOARD_ROOT || document.body).appendChild(ov);
       ov.querySelector('.wmaxx').focus();
     },
     wmaxClose(){ const ov = document.getElementById('wmaxov'); if(ov) ov.remove(); },
