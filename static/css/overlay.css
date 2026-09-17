@@ -9,6 +9,12 @@
 .dashboard-native-container #app {
   background: transparent;
 }
+.dashboard-native-container:not(:has(#vpmain)),
+.dashboard-native-container:not(:has(#vpmain)) #app,
+.dashboard-native-container:not(:has(#vpmain)) #shellmain,
+.dashboard-native-container:not(:has(#vpmain)) #mount {
+  background: var(--s0);
+}
 .dashboard-native-container #vpmain,
 .dashboard-native-container #enginehost {
   background: transparent;
