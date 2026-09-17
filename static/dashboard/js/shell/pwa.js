@@ -69,7 +69,9 @@ window.EKO_PWA = (function(){
      feed block reports anything but healthy is DEGRADED: the platform is up
      but cannot reach the building system. One healthy 2xx is ONLINE again.
      The production feed swaps HB_URL only. ?simDegraded=1 is the test hook. */
-  let HB_URL = (window.EKO_BUILD && window.EKO_BUILD.demo && /simDegraded=1/.test(location.search)) ? '/static/dashboard/heartbeat-degraded.json' : '/static/dashboard/heartbeat.json';   /* D129: the hook exists only in demo builds */
+  let HB_URL = '/static/dashboard/heartbeat.json';
+  if (window.DASHBOARD_OVERLAY) HB_URL = '/api/fin/status';
+  else if (window.EKO_BUILD && window.EKO_BUILD.demo && /simDegraded=1/.test(location.search)) HB_URL = '/static/dashboard/heartbeat-degraded.json';
   const HB_TIMEOUT = 5000;
   const BAD = { stale:1, disconnected:1, error:1, down:1 };
   function readFeed(body){
@@ -92,7 +94,22 @@ window.EKO_PWA = (function(){
     try{
       const r = await fetch(HB_URL + '?ts=' + Date.now(), { cache:'no-store', signal: ctl ? ctl.signal : undefined });
       if(!r.ok) throw new Error(r.status);
-      const f = readFeed(await r.text());
+      let text = await r.text();
+      if(window.DASHBOARD_OVERLAY){
+        let st = {};
+        try { st = JSON.parse(text); } catch(e) { throw new Error('bad status'); }
+        const ok = !!st.connected;
+        const now = new Date().toISOString();
+        text = JSON.stringify({
+          ok: ok,
+          ts: now,
+          feed: {
+            status: ok ? 'ok' : 'disconnected',
+            sources: { fin: { status: ok ? 'ok' : 'disconnected', lastSample: now } }
+          }
+        });
+      }
+      const f = readFeed(text);
       s.feed = { ts: f.ts, status: f.status, sources: f.all };   /* the last heartbeat body, for the connection popover (D130) */
       if(f.degraded) setMode('degraded', f); else setMode('online');
       return !f.degraded;
