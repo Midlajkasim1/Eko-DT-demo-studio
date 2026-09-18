@@ -8,7 +8,7 @@
   const DG = () => window.EKO_DG, C = () => window.EKO_C;
   const esc = s => C().esc(s);
   const ar = E => E.lang === 'ar';
-  const worst = (E, r) => (r.alarms || []).map(id => E.alarm(id)).sort((x, y) => ({ critical:0, high:1, medium:2 }[x.sev] - { critical:0, high:1, medium:2 }[y.sev]))[0];
+  const worst = (E, r) => (r.alarms || []).map(id => E.alarm(id)).filter(Boolean).sort((x, y) => ({ critical:0, high:1, medium:2 }[x.sev] - { critical:0, high:1, medium:2 }[y.sev]))[0];
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const svcDate = s => { if(!s || s === '–') return null; const m = /^(\d{1,2}) ([A-Za-z]{3})$/.exec(s); if(!m) return null; const mi = MONTHS.indexOf(m[2]); return mi < 0 ? null : new Date(2026, mi, +m[1]); };
   const isoDate = s => s ? new Date(s) : null;
@@ -54,8 +54,8 @@
     },
     columns:[
       { key:'id', labelKey:'dgc.id', type:'text', width:116, mono:true, def:true, grp:'identity', mob:'title', get:(E2, r) => r.id, text:(E2, r) => r.id },
-      { key:'st', labelKey:'dgc.status', type:'enum', width:138, def:true, grp:'condition', mob:'chip', get:(E2, r) => r.st, text:(E2, r) => r.st === 'alarm' ? (r.alarms.length > 1 ? r.alarms.length + ' ' + E2.t('alarms').toLowerCase() : E2.t('chipAlarm', { sev:E2.t('rib' + worst(E2, r).sev[0].toUpperCase() + worst(E2, r).sev.slice(1)) })) : r.st === 'stale' ? E2.t('chipStale', { h:r.staleH }) : E2.t('stNormal'),
-        cell:(E2, r) => r.st === 'alarm' ? `<span class="statchip" data-sev="${worst(E2, r).sev}">${esc(r.alarms.length > 1 ? r.alarms.length + ' ' + E2.t('alarms').toLowerCase() : E2.t('chipAlarm', { sev:E2.t('rib' + worst(E2, r).sev[0].toUpperCase() + worst(E2, r).sev.slice(1)) }))}</span>` : r.st === 'stale' ? `<span class="statchip" data-sev="stale">${esc(E2.t('chipStale', { h:r.staleH }))}</span>` : `<span class="tCap">${esc(E2.t('stNormal'))}</span>`,
+      { key:'st', labelKey:'dgc.status', type:'enum', width:138, def:true, grp:'condition', mob:'chip', get:(E2, r) => r.st, text:(E2, r) => r.st === 'alarm' ? ((r.alarms||[]).length > 1 ? (r.alarms||[]).length + ' ' + E2.t('alarms').toLowerCase() : E2.t('chipAlarm', { sev:E2.t('rib' + ((worst(E2, r)||{sev:'high'}).sev[0].toUpperCase() + (worst(E2, r)||{sev:'high'}).sev.slice(1))) })) : r.st === 'stale' ? E2.t('chipStale', { h:r.staleH }) : E2.t('stNormal'),
+        cell:(E2, r) => r.st === 'alarm' ? `<span class="statchip" data-sev="${(worst(E2, r)||{sev:'high'}).sev}">${esc((r.alarms||[]).length > 1 ? (r.alarms||[]).length + ' ' + E2.t('alarms').toLowerCase() : E2.t('chipAlarm', { sev:E2.t('rib' + ((worst(E2, r)||{sev:'high'}).sev[0].toUpperCase() + (worst(E2, r)||{sev:'high'}).sev.slice(1))) }))}</span>` : r.st === 'stale' ? `<span class="statchip" data-sev="stale">${esc(E2.t('chipStale', { h:r.staleH }))}</span>` : `<span class="tCap">${esc(E2.t('stNormal'))}</span>`,
         enumOpts:E2 => [{ v:'alarm', label:E2.t('dgv.alarm') }, { v:'stale', label:E2.t('dgst.stale') }, { v:'ok', label:E2.t('stNormal') }],
         sortVal:(E2, r) => ({ alarm:0, stale:1, ok:2 }[r.st]) },
       { key:'trend', labelKey:'dgc.trend', type:'text', width:132, def:true, grp:'condition', noFilter:true, get:(E2, r) => trendText(E2, r), text:(E2, r) => trendText(E2, r), cell:(E2, r) => trendCell(E2, r), sortVal:(E2, r) => { const d = trendDelta(r); return d == null ? null : -d; } },

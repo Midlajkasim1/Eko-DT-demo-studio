@@ -35,21 +35,21 @@ window.EKO_DATA.marsa = {
   },
 
   "metrics": {
-    "energyTodayMwh": 42.6,
-    "waterTodayM3": 380,
-    "gasTodayM3": 210,
-    "comfortIndex": 111.83,
-    "iaq": 88,
-    "loadNowMw": 3.65,
-    "todayForecastEodMwh": 70.8,
-    "loadAboveBaselinePct": 23,
+    "energyTodayMwh": null,
+    "waterTodayM3": null,
+    "gasTodayM3": null,
+    "comfortIndex": null,
+    "iaq": null,
+    "loadNowMw": null,
+    "todayForecastEodMwh": null,
+    "loadAboveBaselinePct": null,
     "baselineKw": 71.0,
-    "peakTodayMw": 4.96,
-    "peakPctOfLimit": 95,
+    "peakTodayMw": null,
+    "peakPctOfLimit": null,
     "contractedKw": 125,
-    "pfNow": 0.99,
+    "pfNow": null,
     "pfTarget": 0.95,
-    "avoidableKwhMo": 3332
+    "avoidableKwhMo": null
   },
 
   /* Executive summary rows (Overview). delta = vs typical; spark = relative
@@ -57,15 +57,15 @@ window.EKO_DATA.marsa = {
   /* D135: a summary row names its measured value (metric + decimals); it never stores a second copy of the number */
   "summary": [
     { "key": "energy", "dom": "#2DD4BF", "icon": "bolt",  "label": "kEnergyToday", "metric": "energyTodayMwh", "d": 1, "u": "MWh",
-      "deltaEn": "+4% vs typical", "deltaAr": "‎+4% مقابل المعتاد", "spark": [18,17,15,12,8,6,7,8,10,9,8,7,7] },
+      "deltaEn": null, "deltaAr": null, "spark": [] },
     { "key": "water",  "dom": "#60A5FA", "icon": "drop",  "label": "kWaterToday", "metric": "waterTodayM3", "d": 0, "u": "m³",
-      "deltaEn": "−2% vs typical", "deltaAr": "‎−2% مقابل المعتاد", "spark": [15,14,12,11,10,12,11,10,9,10] },
+      "deltaEn": null, "deltaAr": null, "spark": [] },
     { "key": "gas",    "dom": "#A78BFA", "icon": "flame", "label": "kGasToday", "metric": "gasTodayM3", "d": 0, "u": "m³",
-      "deltaEn": "+1% vs typical", "deltaAr": "‎+1% مقابل المعتاد", "spark": [16,16,12,12,15,15,9,9,13,13,11,11] },
+      "deltaEn": null, "deltaAr": null, "spark": [] },
     { "key": "comfort","dom": "#4E9C7C", "icon": "gauge", "label": "kComfortIdx", "metric": "comfortIndex", "d": 2, "u": "",
-      "capEn": "Excellent", "capAr": "ممتاز", "capTone": "t3" },
+      "capEn": null, "capAr": null, "capTone": "t3" },
     { "key": "iaq",    "dom": "#4E9C7C", "icon": "wind",  "label": "kIaq", "metric": "iaq", "d": 0, "u": "",
-      "capEn": "Good to excellent", "capAr": "جيد إلى ممتاز", "capTone": "pos" }
+      "capEn": null, "capAr": null, "capTone": "pos" }
   ],
 
   /* Integrations (drawer + top-bar pill count). */
@@ -175,11 +175,11 @@ window.EKO_DATA.marsa = {
      AED figures derive from kWh × basis.aedPerKwh at render.
      ------------------------------------------------------------------------ */
   "energyLanding": {
-    "performancePct": 95.13, "perfSpark": [92.8, 93.4, 93.1, 94.0, 94.6, 94.4, 95.13], "perfDeltaEn": "+1.8% vs last month", "perfDeltaAr": "‎+1.8% عن الشهر الماضي",
-    "perfWordEn": "Excellent", "perfWordAr": "ممتاز",
-    "currentKw": 108.25, "baselineKw": 96.1,
-    "mtdKwh": 56621.99,
-    "overnightDeviationPct": 37.6,
+    "performancePct": null, "perfSpark": [], "perfDeltaEn": null, "perfDeltaAr": null,
+    "perfWordEn": null, "perfWordAr": null,
+    "currentKw": null, "baselineKw": 96.1,
+    "mtdKwh": null,
+    "overnightDeviationPct": null,
     "sumGauges": [
       { "labelEn": "ENERGY DEVIATION", "labelAr": "\u0627\u0646\u062d\u0631\u0627\u0641 \u0627\u0644\u0637\u0627\u0642\u0629", "val": 1.4, "max": 100, "u": "%", "wordEn": "Healthy", "wordAr": "\u0633\u0644\u064a\u0645", "tone": "ok" },
       { "labelEn": "LOAD FACTOR", "labelAr": "\u0645\u0639\u0627\u0645\u0644 \u0627\u0644\u062d\u0645\u0644", "val": 66.83, "max": 100, "u": "%", "wordEn": "Acceptable", "wordAr": "\u0645\u0642\u0628\u0648\u0644", "tone": "ok" }
@@ -308,18 +308,12 @@ window.EKO_DATA.marsa = {
       }
     },
     /* kW per 15-min sample, 00:00→14:00 (reference curve shape). */
-    "peakSeries": [38,36,35,34,34,35,36,38,42,48,55,63,72,82,90,96,101,104,106,108,110,112,114,118,121,123,124,122,119,116,113,111,109,108,107,106,105,104,103,102,101,100,99,98,97,96,95,94,93,92,91,90,89,88,87,86],
+    "peakSeries": [],
     /* Stacked kWh per hour by zone, 00→14. */
     "zones": ["Burger King","C-Store","Utility & Canopy","Car Services","Booster & Fire Pumps"],
     "zonesAr": ["Burger King","C-Store","المرافق والمظلة","خدمات السيارات","مضخات التعزيز والحريق"],
     "zoneHues": ["#4EA3E8","#F0A93B","#45C79A","#E48FC4","#A78BFA"],
-    "zoneHourly": [
-      [21.9,21,20.5,20,21,22.4,27.8,31.7,36.2,40.6,43.5,46.4,48.9,41.5],
-      [12.7,12.2,11.9,11.6,12.2,13,16.2,18.5,21.2,23.8,25.5,27.2,28.7,24.3],
-      [5.8,5.6,5.4,5.3,5.6,6,7.5,8.6,9.9,11.2,12,12.8,13.5,11.4],
-      [2.6,2.5,2.4,2.3,2.5,2.7,3.5,4,4.7,5.3,5.7,6.1,6.5,5.4],
-      [0.4,0.4,0.4,0.4,0.4,0.4,0.4,0.4,0.4,0.4,0.4,0.4,0.4,0.4]
-    ]
+    "zoneHourly": [[], [], [], [], [], []]
   },
 
   /* ------------------------------------------------------------------------

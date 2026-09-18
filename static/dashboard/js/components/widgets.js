@@ -203,18 +203,23 @@ window.EKO_C = (function(){
 
   /* Overview executive summary: KPI rows with domain hue wash + sparkline. */
   /* D135: a summary row's value is read from metrics.* (one data layer); unmeasured = the dash */
-  const sumVal = (E, r) => { const m = (E.data.metrics || {})[r.metric]; return m == null ? '\u2013' : fmt(m, r.d || 0); };
+  const sumVal = (E, r) => { const m = (E.data.metrics || {})[r.metric]; return m == null ? '--' : fmt(m, r.d || 0); };
   function execSummary(E){
     const rows = E.data.summary.map(r => {
-      const spark = r.spark
+      const deltaText = E.lang === 'ar' ? r.deltaAr : r.deltaEn;
+      const capText   = E.lang === 'ar' ? r.capAr   : r.capEn;
+      const hasSpark  = Array.isArray(r.spark) && r.spark.length >= 2;
+      const spark = hasSpark
         ? `<div class="ovkspark"><svg viewBox="0 0 100 22" width="100" height="22" aria-hidden="true">
              <path d="${sparkPath(r.spark)}" fill="none" stroke="${r.dom}" stroke-width="1.5"/></svg>
-           <span class="ovkdelta">${esc(E.lang==='ar'?r.deltaAr:r.deltaEn)}</span></div>`
-        : `<div class="ovkcap" data-tone="${r.capTone||'t3'}">${esc(E.lang==='ar'?r.capAr:r.capEn)}</div>`;
+           ${deltaText ? `<span class="ovkdelta">${esc(deltaText)}</span>` : ''}</div>`
+        : (capText
+            ? `<div class="ovkcap" data-tone="${r.capTone||'t3'}">${esc(capText)}</div>`
+            : '');
       return `<div class="ovk" style="background:color-mix(in srgb, ${r.dom} 3%, transparent)">
         <div class="ovkhead"><span style="color:${r.dom}">${icon(r.icon,14,2)}</span>
           <span class="ovklbl">${esc(E.t(r.label))}</span>${ctl(E, E.t(r.label), E.lang==='ar' ? (r.capAr || r.deltaAr || '') : (r.capEn || r.deltaEn || ''))}</div>
-        <div class="ovkval"><span class="ovknum">${esc(sumVal(E, r))}</span><span class="ovkunit">${esc(r.u)}</span></div>
+        <div class="ovkval"><span class="ovknum">${esc(sumVal(E, r))}</span>${sumVal(E, r) !== '--' ? `<span class="ovkunit">${esc(r.u)}</span>` : ''}</div>
         ${spark}</div>`;
     }).join('');
     return summaryShell(E, E.t('execSummary'), `<div class="ovklist">${rows}</div>`);
@@ -231,7 +236,11 @@ window.EKO_C = (function(){
     const gaugeRow = (lbl, val, mx, u, word, tone) => {
       /* Energy dial (D38, Final mock): NOT the ramp gauge — a plain track
          with ONE tone-coloured arc (state colour), a needle and a hub, and
-         no tick labels. */
+         no tick labels. When val is null show '--' placeholder, no dial. */
+      if (val == null) {
+        return `<div class="ovk ovkDark"><div class="ovkhead"><span class="scdot" data-tone="${tone==='warn'?'warn':'ok'}"></span><span class="ovklbl">${esc(lbl)}</span>${ctl(E, lbl, '')}</div>
+          <div class="ovkval"><span class="ovknum">--</span></div></div>`;
+      }
       const g = ekoGauge(val, 0, mx, 'risk');
       const arcC = tone==='warn' ? '#E08A2E' : '#4EA36B';
       return `<div class="ovk ovkDark"><div class="ovkhead"><span class="scdot" data-tone="${tone==='warn'?'warn':'ok'}"></span><span class="ovklbl">${esc(lbl)}</span>${ctl(E, lbl, '')}</div>
@@ -243,15 +252,20 @@ window.EKO_C = (function(){
         <div class="scrow"><span class="tMonoS fw6">${esc(String(val))}${esc(u)}</span>
           <span class="ovkcap msA" data-tone="${tone==='warn'?'warn':'pos'}">${esc(word)}</span></div></div>`;
     };
-    const sp = d.perfSpark, mn = Math.min(...sp), mx2 = Math.max(...sp), span = (mx2-mn)||1;
-    const pts = sp.map((v,i2)=>`${(i2/(sp.length-1)*90).toFixed(1)},${(18-(v-mn)/span*14).toFixed(1)}`).join(' ');
+    const hasSpark = Array.isArray(d.perfSpark) && d.perfSpark.length >= 2;
+    const mn = hasSpark ? Math.min(...d.perfSpark) : 0;
+    const mx2 = hasSpark ? Math.max(...d.perfSpark) : 0;
+    const span = (mx2 - mn) || 1;
+    const pts = hasSpark ? d.perfSpark.map((v,i2) => `${(i2/(d.perfSpark.length-1)*90).toFixed(1)},${(18-(v-mn)/span*14).toFixed(1)}`).join(' ') : '';
+    const perfDelta = ar ? d.perfDeltaAr : d.perfDeltaEn;
+    const perfWord  = ar ? d.perfWordAr  : d.perfWordEn;
     return summaryShell(E, E.t('energySummary'), '<div class="ovklist">'
       + `<div class="ovk ovkDark"><div class="ovkhead"><span class="scdot" data-tone="ok"></span><span class="ovklbl">${esc(E.t('enPerf'))}</span>${ctl(E, E.t('enPerf'), '')}</div>
-          <div class="ovkval"><span class="ovknum">${fmt(d.performancePct,2)}</span><span class="ovkunit">%</span></div>
-          <div class="scrow"><svg viewBox="0 0 90 20" width="90" height="20" aria-hidden="true">
+          <div class="ovkval"><span class="ovknum">${d.performancePct == null ? '--' : fmt(d.performancePct,2)}</span>${d.performancePct != null ? '<span class="ovkunit">%</span>' : ''}</div>
+          ${hasSpark ? `<div class="scrow"><svg viewBox="0 0 90 20" width="90" height="20" aria-hidden="true">
             <polyline points="${pts}" fill="none" stroke="var(--domEnergy)" stroke-width="1.5"/></svg>
-          <span class="ovkcap msA" data-tone="t3">${esc(ar?d.perfDeltaAr:d.perfDeltaEn)}</span></div>
-          <div class="scrow"><span class="ovkcap msA" data-tone="pos">${esc(ar?d.perfWordAr:d.perfWordEn)}</span></div></div>`
+          ${perfDelta ? `<span class="ovkcap msA" data-tone="t3">${esc(perfDelta)}</span>` : ''}</div>` : ''}
+          ${perfWord ? `<div class="scrow"><span class="ovkcap msA" data-tone="pos">${esc(perfWord)}</span></div>` : ''}</div>`
       + gaugeRow(E.t('enOvernight'), d.overnightDeviationPct, 100, '%', ar?'\u062a\u062d\u0630\u064a\u0631':'Warning', 'warn')
       + d.sumGauges.map(g2 => gaugeRow(ar?g2.labelAr:g2.labelEn, g2.val, g2.max, g2.u, ar?g2.wordAr:g2.wordEn, g2.tone)).join('')
       + '</div>');
@@ -262,23 +276,28 @@ window.EKO_C = (function(){
   function utilitiesSummary(E){
     const m = E.data.metrics, u = E.data.utilLanding, ar = E.lang==='ar';
     const srow = key => (E.data.summary.find(r=>r.key===key)||{});
-    /* Consumption rows carry the mock's 100x22 spark beside the delta \u2014
-       water a smooth curve, gas a stepped line (paths mock-verbatim). */
+    /* Consumption rows carry the mock's 100x22 spark beside the delta —
+       water a smooth curve, gas a stepped line (paths mock-verbatim).
+       When value is null show '--' with no unit and no spark/delta. */
     const row = (hue,ic,icC,lbl,v,unit,cap,capTone,sparkPath) =>
       `<div class="ovk uvk" style="background:color-mix(in srgb, ${hue} 50%, transparent)">
         <div class="ovkhead"><span class="uvic" style="color:${icC}">${icon(ic,14)}</span><span class="ovklbl">${esc(lbl)}</span>${ctl(E, lbl, cap)}</div>
-        <div class="ovkval"><span class="ovknum">${esc(v)}</span><span class="ovkunit">${esc(unit)}</span></div>
-        ${sparkPath
+        <div class="ovkval"><span class="ovknum">${esc(v)}</span>${v !== '--' ? `<span class="ovkunit">${esc(unit)}</span>` : ''}</div>
+        ${sparkPath && v !== '--'
           ? `<div class="uvspark"><svg viewBox="0 0 100 22" width="100" height="22" aria-hidden="true">
               <path d="${sparkPath}" fill="none" stroke="${icC}" stroke-width="1.5"/></svg>
             <span class="ovkcap" data-tone="${capTone||'t3'}">${esc(cap)}</span></div>`
-          : `<div class="ovkcap" data-tone="${capTone||'t3'}">${esc(cap)}</div>`}</div>`;
+          : (v !== '--' && cap ? `<div class="ovkcap" data-tone="${capTone||'t3'}">${esc(cap)}</div>` : '')}</div>`;
     const W='rgba(96,165,250,.05)', G='rgba(167,139,250,.05)';
+    const wVal = m.waterTodayM3 == null ? '--' : fmt(m.waterTodayM3);
+    const gVal = m.gasTodayM3   == null ? '--' : fmt(m.gasTodayM3);
+    const wDelta = ar ? srow('water').deltaAr : srow('water').deltaEn;
+    const gDelta = ar ? srow('gas').deltaAr   : srow('gas').deltaEn;
     return summaryShell(E, E.t('utilitiesOverview'), '<div class="ovklist">'
       + row(W,'meter','#60A5FA',E.t('kWaterMeters'), fmt(u.waterMeters), '', E.t('wordActive'), 'pos')
-      + row(W,'droplet','#60A5FA',E.t('kWaterConsToday'), fmt(m.waterTodayM3), 'm\u00b3', ar?srow('water').deltaAr:srow('water').deltaEn, 't3', u.waterSparkPath)
+      + row(W,'droplet','#60A5FA',E.t('kWaterConsToday'), wVal, 'm\u00b3', wDelta||'', 't3', wVal !== '--' ? u.waterSparkPath : null)
       + row(G,'meter','#A78BFA',E.t('kGasMeters'), fmt(u.gasMeters), '', E.t('wordActive'), 'pos')
-      + row(G,'flame','#A78BFA',E.t('kGasConsToday'), fmt(m.gasTodayM3), 'm\u00b3', ar?srow('gas').deltaAr:srow('gas').deltaEn, 't3', u.gasSparkPath)
+      + row(G,'flame','#A78BFA',E.t('kGasConsToday'), gVal, 'm\u00b3', gDelta||'', 't3', gVal !== '--' ? u.gasSparkPath : null)
       + '</div>');
   }
 
@@ -484,14 +503,15 @@ window.EKO_C = (function(){
       <span class="pwminix tMonoS cT3"><i>${esc(ar?hc.fromAr:hc.fromEn)}</i><i>${esc(ar?hc.toAr:hc.toEn)}</i></span></div>`;
     };
     const el = E.data.energyLanding;
-    const carbonT = el.mtdKwh * b.co2KgPerKwh / 1000;                 /* derives */
-    const peakPct = Math.round(m.peakTodayMw / p.contractedMw * 100); /* derives */
+    const carbonT = (el.mtdKwh != null) ? el.mtdKwh * b.co2KgPerKwh / 1000 : null;   /* derives */
+    const peakPct = (m.peakTodayMw != null && p.contractedMw) ? Math.round(m.peakTodayMw / p.contractedMw * 100) : null; /* derives */
+    const nd = (v, d2) => v == null ? '--' : fmt(v, d2);  /* null → '--' helper */
     const heroRow = `<div class="pwhero">
-      ${hero(E.t('pwCurrentCons'), E.t('pwAboveChip'), 'warn', fmt(el.currentKw,2), 'kW', E.t('pwBaselineKwCap',{v:fmt(el.baselineKw,1)}), bullet(p.heroCharts.current,'L'))}
-      ${hero(E.t('pwMtd'), E.t('pwLiveCap'), 'ok', fmt(el.mtdKwh,2), 'kWh', E.t('capMainMeters',{time:b.asOf})+' \u00b7 '+E.t('pwFcstEod',{v:fmt(m.todayForecastEodMwh,1)}), spark(p.heroCharts.month))}
+      ${hero(E.t('pwCurrentCons'), el.currentKw != null ? E.t('pwAboveChip') : '', el.currentKw != null ? 'warn' : '', nd(el.currentKw,2), el.currentKw != null ? 'kW' : '', E.t('pwBaselineKwCap',{v:fmt(el.baselineKw,1)}), el.currentKw != null ? bullet(p.heroCharts.current,'L') : '')}
+      ${hero(E.t('pwMtd'), el.mtdKwh != null ? E.t('pwLiveCap') : '', el.mtdKwh != null ? 'ok' : '', nd(el.mtdKwh,2), el.mtdKwh != null ? 'kWh' : '', el.mtdKwh != null ? (E.t('capMainMeters',{time:b.asOf})+' \u00b7 '+E.t('pwFcstEod',{v:nd(m.todayForecastEodMwh,1)})) : E.t('capMainMeters',{time:b.asOf}), el.mtdKwh != null ? spark(p.heroCharts.month) : '')}
       ${hero(E.t('pwPrevMonth'), '', '', fmt(p.prevMonthKwh,2), 'kWh', E.t('pwPrevMonthCap'))}
-      ${hero(E.t('pwCarbon'), '', '', fmt(carbonT,2), 't', E.t('pwCarbonCap',{r:b.co2KgPerKwh}))}
-      ${hero(E.t('pwPeak'), E.t('pwPctLimit',{p:peakPct}), 'crit', fmt(m.peakTodayMw,2), 'MW', E.t('pwContractedMwCap',{v:p.contractedMw}), bullet(p.heroCharts.peak,'P'))}
+      ${hero(E.t('pwCarbon'), '', '', nd(carbonT,2), carbonT != null ? 't' : '', E.t('pwCarbonCap',{r:b.co2KgPerKwh}))}
+      ${hero(E.t('pwPeak'), peakPct != null ? E.t('pwPctLimit',{p:peakPct}) : '', peakPct != null ? 'crit' : '', nd(m.peakTodayMw,2), m.peakTodayMw != null ? 'MW' : '', E.t('pwContractedMwCap',{v:p.contractedMw}), m.peakTodayMw != null ? bullet(p.heroCharts.peak,'P') : '')}
     </div>`;
     /* Distribution-board share (D39): the mock's 6-segment donut (r58,
        stroke 30) with percentage labels around the ring; shares derive. */

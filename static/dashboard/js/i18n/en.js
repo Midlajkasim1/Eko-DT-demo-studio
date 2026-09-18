@@ -403,7 +403,7 @@ window.EKO_I18N.en = {
   "palEmpty": "No matches.",
   "palHint": "Type to search assets and pages",
 
-  "emptyDash": "–",
+  "emptyDash": "--",
   "emptyNoData": "Not measured — no meter on this circuit yet.",
   "stubBody": "This screen is being finalised by the team. Its data contract is already in /js/data — content will land without shell changes.",
 

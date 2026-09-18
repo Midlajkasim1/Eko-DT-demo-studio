@@ -682,7 +682,8 @@
     phGo(el){ E.go(el.dataset.page || 'stub', el.dataset.mod, el.dataset.sub || null); },
     modelFs(){ E.set({ modelFs: !E.state.modelFs, born: E.state.modelFs ? null : 'dlg', mkPop:null }); },
     nfPage(){ E.go('notifications', 'overview', null); },
-    bvaRange(el){ E.set({ bvaRange: el.dataset.v }); },   /* D96 */
+    bvaRange(el){ E.set({ bvaRange: el.dataset.v }); },
+    pwTrendRange(el){ window.EKO.set({ pwTrendRange: el.dataset.v }); },   /* D96 */
     /* Widget maximise (client request): ⛶ opens the widget enlarged in a
        centred dialog — a live snapshot clone, closed by ✕, Esc or the
        backdrop. Charts scale up because they are width-relative SVGs. */
