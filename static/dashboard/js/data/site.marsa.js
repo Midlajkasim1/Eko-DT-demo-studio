@@ -520,8 +520,8 @@ window.EKO_DATA.marsa = {
     "todayM3": null, "avg7M3": null, "mtdM3": null,
     "daily14": [],
     "daily14StartDay": 1,
-    "meterEn": "G-01 · boiler room", "meterAr": "G-01 · غرفة الغلايات", "sourceEn": "live FIN feed", "sourceAr": "موجز FIN المباشر",
-    "tariffAedM3": 2.20,
+    "meterEn": null, "meterAr": null, "sourceEn": null, "sourceAr": null,
+    "tariffAedM3": null,
     "alarms": []
   },
 

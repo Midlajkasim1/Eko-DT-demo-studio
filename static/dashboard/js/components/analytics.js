@@ -595,14 +595,14 @@ window.EKO_A = (function(){
         </div>
         <div class="chx39" style="grid-template-columns:repeat(${Math.max(n,1)},minmax(0,1fr))">${(n ? xrow_labels : ['']).map(function(t){ return `<span>${esc(String(t != null ? t : ''))}</span>`; }).join('')}</div>
         </div></div>
-      <span class="ovkcap">${esc(E.t('gasFoot',{m:d.meter ? d.meter.id : 'G-01', s:src}))}</span></article>`;
+      <span class="ovkcap">${esc(E.t('gasFoot',{m:d.meterEn ? d.meterEn.split(' ')[0] : '--', s:src || '--'}))}</span></article>`;
 
     const dl = (k,v) => `<div class="aprow"><dt>${esc(k)}</dt><dd>${v}</dd></div>`;
     const basis = widget(E, E.t('gasBasis'), '',
-      dl(E.t('gasMeterLbl'), esc(ar?(d.meterAr||d.meterEn):d.meterEn))
-      + dl(E.t('gasSourceLbl'), esc(src))
+      dl(E.t('gasMeterLbl'), esc((ar?(d.meterAr||d.meterEn):d.meterEn) || '--'))
+      + dl(E.t('gasSourceLbl'), esc(src || '--'))
       + dl(E.t('gasTariffLbl'), d.tariffAedM3 == null ? '--' : esc(E.t('gasTariffV',{v:d.tariffAedM3.toFixed(2)}))),
-      E.t('gasFoot',{m:'G-01', s:src}));
+      E.t('gasFoot',{m: d.meterEn ? d.meterEn.split(' ')[0] : '--', s:src || '--'}));
     return `<div class="pwarea" data-pg="gas">
       <div class="pwheadrow"><div><span class="alcardt pgtitle">${esc(E.t('gasHdrT'))}</span>
         <span class="alcardm"> ${esc(E.t('pwSub'))}</span></div></div>
