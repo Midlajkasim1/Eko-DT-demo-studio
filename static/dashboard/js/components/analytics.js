@@ -601,7 +601,7 @@ window.EKO_A = (function(){
     const basis = widget(E, E.t('gasBasis'), '',
       dl(E.t('gasMeterLbl'), esc(ar?(d.meterAr||d.meterEn):d.meterEn))
       + dl(E.t('gasSourceLbl'), esc(src))
-      + dl(E.t('gasTariffLbl'), esc(E.t('gasTariffV',{v:d.tariffAedM3.toFixed(2)}))),
+      + dl(E.t('gasTariffLbl'), d.tariffAedM3 == null ? '--' : esc(E.t('gasTariffV',{v:d.tariffAedM3.toFixed(2)}))),
       E.t('gasFoot',{m:'G-01', s:src}));
     return `<div class="pwarea" data-pg="gas">
       <div class="pwheadrow"><div><span class="alcardt pgtitle">${esc(E.t('gasHdrT'))}</span>
