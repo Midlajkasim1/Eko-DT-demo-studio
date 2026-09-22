@@ -564,6 +564,79 @@
           }
         }
       }
+
+      // ---- GAS page wiring ------------------------------------------------
+      if (site.gas && p.power_history && p.power_history.Total_Gas_Consumption_his) {
+        // Gas meters report cumulative m³ — derive consumption via delta
+        var gRaw = flattenHist(p.power_history.Total_Gas_Consumption_his);
+        var gFlat = [];
+        var gi;
+        for (gi = 1; gi < gRaw.length; gi++) {
+          var gdlt = gRaw[gi].val - gRaw[gi - 1].val;
+          if (!isFinite(gdlt) || gdlt < 0) gdlt = 0;
+          gFlat.push({ y: gRaw[gi].y, m: gRaw[gi].m, d: gRaw[gi].d, h: gRaw[gi].h, val: gdlt });
+        }
+        if (gFlat.length) {
+          var gNow    = nowParts();
+          var gToday  = todayHourly(gFlat);
+          var gHourK  = lastNHours([gFlat], 1);
+          var gWeekK  = lastNWeeks([gFlat], 6);
+          var gMonthK = lastNMonths([gFlat], 6);
+
+          site.gas.hourly  = byHour(gFlat, gHourK);
+          site.gas.todayH  = gToday;
+          site.gas.weekly  = bucket(gFlat, pointWeekKey, gWeekK, "sum");
+          site.gas.monthly = bucket(gFlat, pointMonthKey, gMonthK, "sum");
+          site.gas.trendX  = {
+            hourly:  gHourK.length ? [String(gHourK[gHourK.length - 1].h).padStart(2, "0") + ":00"] : [],
+            today:   hourLabels(gToday.length),
+            weekly:  weekBarLabels(gWeekK),
+            monthly: monthLabels(gMonthK)
+          };
+          site.gas.weekRange = weekSpanLabel(gWeekK);
+
+          // Today total (sum of hourly deltas)
+          var gtSum = 0, gtN = 0;
+          for (gi = 0; gi < gToday.length; gi++) {
+            if (gToday[gi]) { gtSum += gToday[gi]; gtN++; }
+          }
+          if (gtN) site.gas.todayM3 = Math.trunc(gtSum * 100) / 100;
+
+          // 7-day average
+          var gDay7 = [], gdi, gddt;
+          for (gdi = 6; gdi >= 0; gdi--) {
+            gddt = new Date(gNow.y, gNow.m, gNow.d - gdi);
+            gDay7.push({ k: gddt.getFullYear() + "-" + (gddt.getMonth() + 1) + "-" + gddt.getDate(),
+                         y: gddt.getFullYear(), m: gddt.getMonth(), d: gddt.getDate() });
+          }
+          var gLast7 = bucket(gFlat, function(pt){ return pt.y + "-" + (pt.m + 1) + "-" + pt.d; }, gDay7, "sum");
+          var ga7 = 0, gn7 = 0;
+          gLast7.forEach(function(v){ if (v) { ga7 += v; gn7++; } });
+          if (gn7) site.gas.avg7M3 = Math.trunc((ga7 / gn7) * 10) / 10;
+
+          // Month-to-date
+          var gmtdSum = 0;
+          gFlat.forEach(function(pt){
+            if (pt.y === gNow.y && pt.m === gNow.m) gmtdSum += pt.val;
+          });
+          if (gmtdSum > 0) site.gas.mtdM3 = Math.trunc(gmtdSum * 10) / 10;
+
+          // daily14 — last 14 days for the bar chart (replaces mock array)
+          var g14 = [], g14i, g14dt;
+          for (g14i = 13; g14i >= 0; g14i--) {
+            g14dt = new Date(gNow.y, gNow.m, gNow.d - g14i);
+            g14.push({ k: g14dt.getFullYear() + "-" + (g14dt.getMonth() + 1) + "-" + g14dt.getDate(),
+                       y: g14dt.getFullYear(), m: g14dt.getMonth(), d: g14dt.getDate() });
+          }
+          var gDaily14 = bucket(gFlat, function(pt){ return pt.y + "-" + (pt.m + 1) + "-" + pt.d; }, g14, "sum");
+          if (gDaily14.some(function(v){ return v > 0; })) {
+            site.gas.daily14          = gDaily14.map(function(v){ return v || 0; });
+            site.gas.daily14StartDay  = g14[0].d;
+          }
+
+          changed = true;
+        }
+      }
     }
     if (site.power) {
       var boards = ZONE_NAMES.map(function (name, i) {

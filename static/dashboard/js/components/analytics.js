@@ -544,21 +544,59 @@ window.EKO_A = (function(){
       ${hero(E.t('kGasToday'), fmt(d.todayM3), 'm\u00b3', E.t('capToNow',{time:E.data.basis.asOf}).replace(' \u00b7 live','').replace(' \u00b7 \u0645\u0628\u0627\u0634\u0631',''))}
       ${hero(E.t('gasAvg7'), fmt(d.avg7M3), 'm\u00b3', E.t('gasAvg7Cap'))}
       ${hero(E.t('gasMtd'), fmt(d.mtdM3), 'm\u00b3', (ar?(d.meterAr||d.meterEn):d.meterEn).split(' \u00b7')[0])}</div>`;
-    const YMX = 250, step = 100/d.daily14.length;
-    const seg = (k,on)=>`<button class="seg" data-on="${on}" data-act="none">${esc(E.t(k))}</button>`;
-    const segs = `<span class="row segbox msA">${seg('rangeHourly',false)}${seg('rangeToday',true)}${seg('rangeWeekly',false)}${seg('rangeMonthly',false)}</span>`;
-    const bars = d.daily14.map(v=>`<div class="gcol"><span class="gbar" style="height:${(v/YMX*100).toFixed(1)}%"></span></div>`).join('');
-    const xrow = d.daily14.map((v,i)=>`<span style="width:${step.toFixed(2)}%">${d.daily14StartDay+i}</span>`).join('');
-    const grid = [0,20,40,60,80,100].map(y=>`<line x1="0" x2="100" y1="${y}" y2="${y}" stroke="var(--bd1)" stroke-width="1"${y===100?'':' stroke-dasharray="2 3"'} vector-effect="non-scaling-stroke"/>`).join('');
+
+    // --- Live-data chart (toggle-aware) ---
+    const tr = E.state.gsTrendRange || 'today';
+    const liveS = { hourly: d.hourly, today: d.todayH, weekly: d.weekly, monthly: d.monthly }[tr];
+    const useLive = Array.isArray(liveS) && liveS.some(function(v){ return v > 0; });
+    const xLive = (d.trendX && d.trendX[tr]) || [];
+
+    // Fall back to mock daily14 only when live hasn't arrived yet
+    const dv   = useLive ? liveS : (tr === 'today' ? d.daily14 : []);
+    const xrow_labels = useLive ? xLive : (tr === 'today' ? d.daily14.map(function(_,i){ return d.daily14StartDay + i; }) : []);
+
+    const n    = dv.length;
+    const YMX  = n ? Math.max(1, Math.ceil(Math.max.apply(null, dv.filter(function(v){ return v != null; }).concat([0])) * 1.15)) : 250;
+    const step = n ? 100 / n : 100;
+    const bw   = Math.min(6, step * 0.6);
+
+    const seg = (k,v)=>`<button class="seg" data-on="${tr===v}" data-act="gsTrendRange" data-v="${v}">${esc(E.t(k))}</button>`;
+    const segs = `<span class="row segbox msA">${seg('rangeHourly','hourly')}${seg('rangeToday','today')}${seg('rangeWeekly','weekly')}${seg('rangeMonthly','monthly')}</span>`;
+
+    const grid = [0,25,50,75,100].map(y=>`<line x1="0" x2="100" y1="${y}" y2="${y}" stroke="var(--bd1)" stroke-width="1"${y===100?'':' stroke-dasharray="2 3"'} vector-effect="non-scaling-stroke"/>`).join('');
+
+    let gbars = '', ghits = '';
+    dv.forEach(function(v, i){
+      const x  = (i * step + (step - bw) / 2).toFixed(1);
+      const bh = Math.max(0, Number(v) || 0) / YMX * 96;
+      gbars += `<rect x="${x}" y="${(96 - bh).toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="1" fill="url(#gsBarG)"/>`;
+      const lab   = xrow_labels[i] != null ? String(xrow_labels[i]) : String(i + 1);
+      const tipV  = v == null || Number(v) === 0 ? '--' : (v >= 100 ? fmt(v, 0) : fmt(v, 1));
+      ghits += `<span class="chhit39" data-chtip="${encodeURIComponent(JSON.stringify({ t: lab, u: 'm³', rows: [{ c:'#A16207', n: E.t('gasDailyT'), v: tipV }] }))}"></span>`;
+    });
+
+    const gsCap = tr === 'hourly' ? E.t('gasDailySub')
+      : tr === 'weekly'  ? (d.weekRange ? d.weekRange : E.t('gasDailySub'))
+      : tr === 'monthly' ? (xLive.length ? xLive[0] + ' – ' + xLive[xLive.length - 1] : E.t('gasDailySub'))
+      : E.t('gasDailySub');
+
     const src = ar ? d.sourceAr : d.sourceEn;
     const daily = `<article class="pwwidget">
       <div class="pwwh"><span class="alcardt">${esc(E.t('gasDailyT'))}</span>
-        <span class="alcardm">${esc(E.t('gasDailySub'))}</span>${segs}${chrome(E, E.t('gasDailyT'), E.t('gasDailySub'))}</div>
-      <div class="ch39 mh250"><div class="chy39">${[250,200,150,100,50,0].map(v=>`<span>${v}</span>`).join('')}</div>
-        <div class="chplot39"><svg viewBox="0 0 100 100" preserveAspectRatio="none">${grid}</svg>
-          <div class="gbars">${bars}</div></div></div>
-      <div class="wtxrow tMonoS cT3">${xrow}</div>
+        <span class="alcardm">${esc(gsCap)}</span>${segs}${chrome(E, E.t('gasDailyT'), gsCap)}</div>
+      <div class="ch39 mh250"><div class="chy39"><span>${YMX}</span><span>${Math.round(YMX * 0.75)}</span><span>${Math.round(YMX / 2)}</span><span>${Math.round(YMX * 0.25)}</span><span>0</span></div>
+        <div class="chcol39">
+        <div class="chplot39">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+            <defs><linearGradient id="gsBarG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#A16207" stop-opacity="0.9"/><stop offset="100%" stop-color="#78350F" stop-opacity="0.5"/></linearGradient></defs>
+            <line x1="0" x2="100" y1="96" y2="96" stroke="var(--bd1)" stroke-width="1" vector-effect="non-scaling-stroke"/>
+            ${grid}${gbars}</svg>
+          ${n ? `<div class="chhits39">${ghits}</div>` : ''}
+        </div>
+        <div class="chx39" style="grid-template-columns:repeat(${Math.max(n,1)},minmax(0,1fr))">${(n ? xrow_labels : ['']).map(function(t){ return `<span>${esc(String(t != null ? t : ''))}</span>`; }).join('')}</div>
+        </div></div>
       <span class="ovkcap">${esc(E.t('gasFoot',{m:d.meter ? d.meter.id : 'G-01', s:src}))}</span></article>`;
+
     const dl = (k,v) => `<div class="aprow"><dt>${esc(k)}</dt><dd>${v}</dd></div>`;
     const basis = widget(E, E.t('gasBasis'), '',
       dl(E.t('gasMeterLbl'), esc(ar?(d.meterAr||d.meterEn):d.meterEn))

@@ -65,7 +65,7 @@
       bvaRange:'today',   /* D96: baseline-versus-actual window */
       pwTrendRange:'today',
       pwBoard:null,
-      wtTrendRange:'today',
+      wtTrendRange:'today', gsTrendRange:'today',
       anomRange:'24h',
       anomDays:[],
       anomPmus:[],
@@ -691,6 +691,7 @@
     bvaRange(el){ E.set({ bvaRange: el.dataset.v }); },
     pwTrendRange(el){ if(window.EKO_TIP) window.EKO_TIP.hide(); E.set({ pwTrendRange: el.dataset.v }); },
     wtTrendRange(el){ if(window.EKO_TIP) window.EKO_TIP.hide(); E.set({ wtTrendRange: el.dataset.v }); },
+    gsTrendRange(el){ if(window.EKO_TIP) window.EKO_TIP.hide(); E.set({ gsTrendRange: el.dataset.v }); },
     pwBoard(el){
       if(window.EKO_TIP) window.EKO_TIP.hide();
       const v = el.dataset.i;

@@ -517,19 +517,14 @@ window.EKO_DATA.marsa = {
 
   /* Gas page. */
   "gas": {
-    "todayM3": 210, "avg7M3": 213, "mtdM3": 5410,
-    "daily14": [200,215,210,230,221,206,195,226,234,204,214,197,224,210],
-    "daily14StartDay": 11,
-    "meterEn": "G-01 · boiler room", "meterAr": "G-01 · غرفة الغلايات", "sourceEn": "pending confirmation", "sourceAr": "بانتظار التأكيد",
-    "tariffAedM3": 2.20,
-    "alarms": [
-      { "sev": "critical", "tEn": "Kitchen main meter offline", "tAr": "\u0639\u062f\u0627\u062f \u0627\u0644\u0645\u0637\u0628\u062e \u0627\u0644\u0631\u0626\u064a\u0633\u064a \u0645\u062a\u0648\u0642\u0641", "age": "26 h", "locEn": "Kitchen \u00b7 KG-02", "locAr": "\u0627\u0644\u0645\u0637\u0628\u062e \u00b7 KG-02", "noteEn": "no reading for 26 h; the total holds at the last register value", "noteAr": "\u0644\u0627 \u0642\u0631\u0627\u0621\u0629 \u0645\u0646\u0630 26 \u0633\u0627\u0639\u0629\u061b \u0627\u0644\u0625\u062c\u0645\u0627\u0644\u064a \u0645\u062b\u0628\u062a \u0639\u0646\u062f \u0622\u062e\u0631 \u0642\u064a\u0645\u0629" },
-      { "sev": "warning", "tEn": "Boiler plant draw above band", "tAr": "\u0633\u062d\u0628 \u0627\u0644\u063a\u0644\u0627\u064a\u0627\u062a \u0641\u0648\u0642 \u0627\u0644\u0646\u0637\u0627\u0642", "age": "4 h", "locEn": "Boiler room \u00b7 G-01", "locAr": "\u063a\u0631\u0641\u0629 \u0627\u0644\u063a\u0644\u0627\u064a\u0627\u062a \u00b7 G-01", "noteEn": "234 m\u00b3 on the 19th against a 213 m\u00b3 seven-day average", "noteAr": "234 \u0645\u00b3 \u064a\u0648\u0645 19 \u0645\u0642\u0627\u0628\u0644 \u0645\u062a\u0648\u0633\u0637 213 \u0645\u00b3" },
-      { "sev": "warning", "tEn": "Data source not confirmed", "tAr": "\u0645\u0635\u062f\u0631 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u063a\u064a\u0631 \u0645\u0624\u0643\u062f", "age": "2 d", "locEn": "Meter G-01", "locAr": "\u0627\u0644\u0639\u062f\u0627\u062f G-01", "noteEn": "readings accepted provisionally; billing reconciliation stays on hold", "noteAr": "\u0627\u0644\u0642\u0631\u0627\u0621\u0627\u062a \u0645\u0642\u0628\u0648\u0644\u0629 \u0645\u0624\u0642\u062a\u064b\u0627\u061b \u062a\u0633\u0648\u064a\u0629 \u0627\u0644\u0641\u0648\u0627\u062a\u064a\u0631 \u0645\u0639\u0644\u0642\u0629" },
-      { "sev": "watch", "tEn": "Overnight burn above expected", "tAr": "\u062d\u0631\u0642 \u0644\u064a\u0644\u064a \u0641\u0648\u0642 \u0627\u0644\u0645\u062a\u0648\u0642\u0639", "age": "6 h", "locEn": "Boiler room \u00b7 G-01", "locAr": "\u063a\u0631\u0641\u0629 \u0627\u0644\u063a\u0644\u0627\u064a\u0627\u062a \u00b7 G-01", "noteEn": "00:00-06:00 mean 6.4 m\u00b3/h against an expected 4.1-5.2 band", "noteAr": "\u0645\u062a\u0648\u0633\u0637 00:00-06:00 \u0647\u0648 6.4 \u0645\u00b3/\u0633 \u0645\u0642\u0627\u0628\u0644 \u0646\u0637\u0627\u0642 4.1-5.2" },
-      { "sev": "watch", "tEn": "Manifold pressure drift", "tAr": "\u0627\u0646\u062d\u0631\u0627\u0641 \u0636\u063a\u0637 \u0627\u0644\u0645\u062c\u0645\u0639", "age": "3 d", "locEn": "Boiler room \u00b7 PT-01", "locAr": "\u063a\u0631\u0641\u0629 \u0627\u0644\u063a\u0644\u0627\u064a\u0627\u062a \u00b7 PT-01", "noteEn": "reading 12 mbar below the manifold gauge since the 14th", "noteAr": "\u0627\u0644\u0642\u0631\u0627\u0621\u0629 \u0623\u0642\u0644 \u0628\u0640 12 \u0645\u0644\u064a \u0628\u0627\u0631 \u0645\u0646\u0630 \u064a\u0648\u0645 14" }
-    ]
+    "todayM3": null, "avg7M3": null, "mtdM3": null,
+    "daily14": [],
+    "daily14StartDay": 1,
+    "meterEn": null, "meterAr": null, "sourceEn": null, "sourceAr": null,
+    "tariffAedM3": null,
+    "alarms": []
   },
+
 
   /* Spaces. */
   "spaces": {
