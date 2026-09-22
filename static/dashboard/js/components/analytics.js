@@ -234,76 +234,167 @@ window.EKO_A = (function(){
       `<div class="col gap6">${rows}</div>`, E.t('benchFoot')), 'bench');
   }
 
+  function anomNow(){
+    try{
+      const parts = new Intl.DateTimeFormat('en-GB',{ timeZone:'Asia/Dubai', year:'numeric', month:'numeric', day:'numeric', hour:'numeric', hourCycle:'h23' }).formatToParts(new Date());
+      const g = t => parseInt((parts.find(p => p.type===t)||{}).value, 10);
+      let h = g('hour'); if(h===24) h = 0;
+      return { y:g('year'), m:g('month')-1, d:g('day'), h };
+    }catch(e){
+      const n = new Date();
+      return { y:n.getFullYear(), m:n.getMonth(), d:n.getDate(), h:n.getHours() };
+    }
+  }
+  function anomEvidenceSeries(power, range, daySel, pmuIds, pmus){
+    const ids = ['PMU09','PMU04','PMU05','PMU06','PMU07','PMU08'];
+    const hues = ['#4EA3E8','#F0A93B','#45C79A','#E48FC4','#A78BFA','#E06C75'];
+    const want = pmuIds && pmuIds.length ? pmuIds : ids;
+    const now = anomNow();
+    const daySet = daySel && daySel.length ? daySel : null;
+    const wd = p => { const d = new Date(p.y, p.m, p.d).getDay(); return d === 0 ? 7 : d; };
+    const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const keys = [];
+    if(range === '7d'){
+      for(let i=6;i>=0;i--){
+        const dt = new Date(now.y, now.m, now.d - i);
+        keys.push({ id: dt.getFullYear()+'-'+(dt.getMonth()+1)+'-'+dt.getDate(), lab: String(dt.getDate()), title: dt.getDate()+' '+MON[dt.getMonth()] });
+      }
+    } else if(range === '30d'){
+      for(let i=29;i>=0;i--){
+        const dt = new Date(now.y, now.m, now.d - i);
+        const lab = (i===29 || i===0 || dt.getDate()%5===0) ? String(dt.getDate()) : '';
+        keys.push({ id: dt.getFullYear()+'-'+(dt.getMonth()+1)+'-'+dt.getDate(), lab, title: dt.getDate()+' '+MON[dt.getMonth()] });
+      }
+    } else if(range === '6M' || range === '1Y'){
+      const n = range === '6M' ? 6 : 12;
+      for(let i=n-1;i>=0;i--){
+        let m = now.m - i, y = now.y;
+        while(m<0){ m+=12; y-=1; }
+        keys.push({ id: y+'-'+(m+1), lab: MON[m], title: MON[m]+' '+y });
+      }
+    } else {
+      const end = new Date(now.y, now.m, now.d, now.h);
+      for(let i=23;i>=0;i--){
+        const dt = new Date(end.getTime() - i*36e5);
+        const hh = String(dt.getHours()).padStart(2,'0');
+        const lab = (i===23 || i===0 || dt.getHours()%6===0) ? hh : '';
+        keys.push({ id: dt.getFullYear()+'-'+(dt.getMonth()+1)+'-'+dt.getDate()+'-'+dt.getHours(), lab, title: hh+':00' });
+      }
+    }
+    const idx = {};
+    keys.forEach((k,i2) => { idx[k.id] = i2; });
+    const per = want.map((id, pi) => {
+      const flat = (power && power.pmuFlats && power.pmuFlats[id]) || [];
+      const sum = keys.map(() => 0);
+      const n = keys.map(() => 0);
+      (flat||[]).forEach(p => {
+        if(daySet && daySet.indexOf(wd(p))<0) return;
+        let kid;
+        if(range === '6M' || range === '1Y') kid = p.y+'-'+(p.m+1);
+        else if(range === '7d' || range === '30d') kid = p.y+'-'+(p.m+1)+'-'+p.d;
+        else kid = p.y+'-'+(p.m+1)+'-'+p.d+'-'+p.h;
+        const i2 = idx[kid];
+        if(i2 == null) return;
+        sum[i2] += p.val;
+        n[i2] += 1;
+      });
+      const u = (pmus||[]).find(x => x.id === id);
+      const gi = ids.indexOf(id);
+      return {
+        id,
+        n: u ? (u.db ? id+' · '+u.db : id) : id,
+        c: hues[gi >= 0 ? gi : pi] || '#F0A93B',
+        vals: keys.map((_, i2) => n[i2] ? sum[i2]/n[i2] : null)
+      };
+    });
+    const vals = keys.map((_, i2) => {
+      let s = 0, c = 0;
+      per.forEach(row => { if(row.vals[i2] != null){ s += row.vals[i2]; c += 1; } });
+      return c ? s : 0;
+    });
+    const any = per.some(row => row.vals.some(v => v != null));
+    const rawMax = any ? Math.max.apply(null, vals) : 0;
+    const yMax = rawMax > 0 ? Math.max(1, Math.ceil(rawMax)) : 1;
+    return { vals, labels: keys.map(k => k.lab), titles: keys.map(k => k.title), per, yMax, any };
+  }
+
   /* ------------------------------ ANOMALIES -------------------------------- */
   function anomPage(E){
     const d = E.data.anom, ar = E.lang === 'ar';
-    /* D39 — Final-mock layout: six PMU hero tiles (state chip + load bar),
-       evidence + time-of-day stacked on the left, and the PMU MEASUREMENTS
-       rail on the right. No separate anomaly-list card (mock parity). */
-    const pmus = E.data.power.pmus;
-    const maxKw = Math.max(...pmus.map(u=>u.kw));
-    const heroes = pmus.map(u =>
-      `<div class="pwtile" data-tone="${u.tone}"><div class="pwth"><span class="ovklbl">${esc(u.id)}</span>
-          <span class="pmchip" data-tone="${u.tone}">${esc(ar?u.stAr:u.stEn)}</span>${C().ctl(E, u.id, u.db, { topic:'peak' })}</div>
-        <div class="ovkval"><span class="ovknum">${fmt(u.kw)}</span><span class="ovkunit">kW</span></div>
-        <span class="ovkcap">${esc(u.db)} \u00b7 ${u.v.toFixed(1)} V \u00b7 ${u.pf.toFixed(2)} PF</span>
+    const pmus = E.data.power.pmus || [];
+    const nd = (v, d2) => (v == null || !isFinite(Number(v))) ? '--' : fmt(v, d2);
+    const kwVals = pmus.map(u => Number(u.kw)).filter(v => isFinite(v));
+    const maxKw = kwVals.length ? Math.max(...kwVals) : 0;
+    const totKw = kwVals.reduce((s2, v) => s2 + v, 0);
+    const totMw = kwVals.length ? totKw / 1000 : null;
+    const heroes = pmus.map(u => {
+      const bar = maxKw && u.kw != null ? Math.max(0, Math.round(Number(u.kw) / maxKw * 100)) : 0;
+      return `<div class="pwtile"><div class="pwth"><span class="ovklbl">${esc(u.id)}</span>${C().ctl(E, u.id, u.db, { topic:'peak' })}</div>
+        <div class="ovkval"><span class="ovknum">${nd(u.kw)}</span><span class="ovkunit">kW</span></div>
+        <span class="ovkcap">${esc(u.db || '')} \u00b7 ${nd(u.v,1)} V \u00b7 ${nd(u.pf,2)} PF</span>
         <div class="pmubar39"><svg><rect x="0%" y="8" width="100%" height="8" fill="var(--chTrack)"/>
-          <rect x="0%" y="10" width="${Math.round(u.kw/maxKw*100)}%" height="4" rx="2" fill="${u.tone === 'warn' ? 'var(--warn)' : 'var(--chFill)'}"/></svg></div></div>`);
-    const ev = d.evidence, n = ev.actual.length;
-    const ex = i2 => (i2/(n-1)*100), ey = v => (100 - v/ev.yMax*100);
-    const band = ev.expected.map((v,i2)=>`${ex(i2).toFixed(1)},${ey(v*1.15).toFixed(1)}`).join(' ')
-      + ' ' + ev.expected.slice().reverse().map((v,i2)=>`${ex(n-1-i2).toFixed(1)},${ey(v*0.85).toFixed(1)}`).join(' ');
-    const expLine = ev.expected.map((v,i2)=>`${ex(i2).toFixed(1)},${ey(v).toFixed(1)}`).join(' ');
-    const actLine = ev.actual.map((v,i2)=>`${ex(i2).toFixed(1)},${ey(v).toFixed(1)}`).join(' ');
-    const dx = ex(ev.detectFrom).toFixed(1), dw = (ex(ev.detectTo)-ex(ev.detectFrom)).toFixed(1);
+          <rect x="0%" y="10" width="${bar}%" height="4" rx="2" fill="var(--chFill)"/></svg></div></div>`;
+    });
     const chrome2 = tileCtl(E, E.t('anomEvidence'), '');
     const days = ['dayMonday','dayTuesday','dayWednesday','dayThursday','dayFriday','daySaturday','daySunday'];
+    const range = E.state.anomRange || '24h';
+    const daySel = E.state.anomDays || [];
+    const pmuSel = E.state.anomPmus || [];
+    const evSeries = anomEvidenceSeries(E.data.power, range, daySel, pmuSel, pmus);
+    const evPts = evSeries.vals.length > 1
+      ? evSeries.vals.map((v,i2) => `${(i2/(evSeries.vals.length-1)*100).toFixed(2)},${(100 - v/evSeries.yMax*100).toFixed(2)}`).join(' ')
+      : (evSeries.vals.length === 1 ? `50,${(100 - evSeries.vals[0]/evSeries.yMax*100).toFixed(2)}` : '');
+    const evCap = pmuSel.length
+      ? pmuSel.map(id => {
+          const u = pmus.find(x => x.id === id);
+          return u ? (u.db ? u.id + ' · ' + u.db : u.id) : id;
+        }).join('  ·  ')
+      : E.t('showingAllDP');
     const evidence = `<article class="pwwidget">
       <div class="pwwh"><span class="alcardt">${esc(E.t('anomEvidence'))}</span>${chrome2}
-        <span class="segbox row msA">${['24h','7d','30d','6M','1Y'].map((r2,i2)=>`<button class="seg" data-on="${i2===0}" data-act="none">${r2}</button>`).join('')}</span></div>
-      <div class="fchips">${days.map(k=>`<button class="fchip" data-act="none">${esc(E.t(k))}</button>`).join('')}</div>
-      <div class="fchips">${pmus.map(u=>`<button class="fchip fchipB" data-act="none">${esc(u.id)}</button>`).join('')}</div>
-      <div class="fcap">${esc(E.t('showingAllDP'))}</div>
-      <div class="ch39 anch39"><div class="chy39"><span>${ev.yMax}</span><span>${ev.yMid}</span><span>0</span></div>
+        <span class="segbox row msA">${['24h','7d','30d','6M','1Y'].map(r2=>`<button class="seg" data-on="${range===r2}" data-act="anomRange" data-v="${r2}">${r2}</button>`).join('')}</span></div>
+      <div class="fchips">${days.map((k,di)=>`<button class="fchip" data-act="anomDay" data-d="${di+1}" data-on="${daySel.indexOf(di+1)>=0}">${esc(E.t(k))}</button>`).join('')}</div>
+      <div class="fchips">${pmus.map(u=>`<button class="fchip fchipB" data-act="anomPmu" data-id="${esc(u.id)}" data-on="${pmuSel.indexOf(u.id)>=0}">${esc(u.id)}</button>`).join('')}</div>
+      <div class="fcap">${esc(evCap)}</div>
+      <div class="ch39 anch39"><div class="chy39"><span>${evSeries.any?evSeries.yMax:'--'}</span><span>${evSeries.any?Math.round(evSeries.yMax/2):'--'}</span><span>0</span></div>
         <div class="chplot39">
           <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-            <polygon points="${band}" fill="rgba(62,92,138,0.32)"/>
-            <rect x="${dx}" y="0" width="${dw}" height="100" fill="rgba(232,179,65,0.06)" stroke="#E8B341" stroke-width="1" vector-effect="non-scaling-stroke"/>
-            <polyline points="${expLine}" fill="none" stroke="var(--chTx)" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>
-            <polyline points="${actLine}" fill="none" stroke="#F0A93B" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>
-          <span class="extag39" style="left:32%;top:${ey(ev.expected[8]).toFixed(0)}%">${esc(E.t('expectedTag'))}</span>
+            <line x1="0" x2="100" y1="50" y2="50" stroke="var(--bd1)" stroke-width="1" stroke-dasharray="2 3" vector-effect="non-scaling-stroke"/>
+            ${evPts ? `<polyline points="${evPts}" fill="none" stroke="#F0A93B" stroke-width="2" vector-effect="non-scaling-stroke"/>` : ''}
+            ${evSeries.vals.length===1 && evPts ? `<circle cx="50" cy="${(100 - evSeries.vals[0]/evSeries.yMax*100).toFixed(2)}" r="1.6" fill="#F0A93B"/>` : ''}
+          </svg>
+          ${evSeries.vals.length ? `<div class="chhits39">${evSeries.vals.map((_,i2) => {
+            const rows = evSeries.per.map(row => ({
+              c: row.c, n: row.n,
+              v: row.vals[i2] == null ? '--' : (row.vals[i2] >= 100 ? fmt(row.vals[i2], 0) : fmt(row.vals[i2], 1))
+            }));
+            const tot = evSeries.vals[i2];
+            const totTxt = tot >= 100 ? fmt(tot, 0) : fmt(tot, 1);
+            if (rows.length > 1) rows.unshift({ c: '#F0A93B', n: 'Total', v: totTxt });
+            return `<span class="chhit39" data-chtip="${encodeURIComponent(JSON.stringify({ t: evSeries.titles[i2], u: 'kW', rows }))}"></span>`;
+          }).join('')}</div>` : ''}
         </div></div>
-      <div class="chx39"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span></div>
-      <div class="pwlegend">
-        <span><i class="lsw39 lgActual"></i>${esc(E.t('actualW'))}</span>
-        <span><i class="lsw39 lgBand"></i>${esc(E.t('expectedBandW'))}</span>
-        <span><i class="lsw39 lgDetected"></i>${esc(E.t('detectedW'))}</span></div>
-      <span class="ovkcap">${esc(E.t('anomEvidenceFoot'))}</span></article>`;
-    /* Cell tint derives from the deviation size (mock ramp: rgba(78,163,232)
-       at .05 + pct*.005 alpha); >20% carries the amber outline. */
-    const alpha = pct => Math.min(0.24, 0.05 + pct*0.005).toFixed(3);
-    /* D117: the mockup derives the grid from today's date with a stable hash (date, zone, PMU); the fixture keeps that recipe rather than a snapshot */
-    const todNow = new Date(), todDate = d.todGen === 'mock-hash' ? [String(todNow.getDate()).padStart(2,'0'), String(todNow.getMonth()+1).padStart(2,'0'), todNow.getFullYear()].join('/') : d.todDate;
-    const todDev = zi => { const k = ((todNow.getFullYear()*372 + (todNow.getMonth()+1)*31 + todNow.getDate())*7 + zi*29 + 13); return 2 + ((k*2654435761)>>>0) % 37; };
-    const todPct = (pp, zi) => d.todGen === 'mock-hash' ? todDev(zi) : pp.pct;
+      <div class="chx39" style="display:grid;grid-template-columns:repeat(${Math.max(evSeries.labels.length,1)},minmax(0,1fr));padding-inline-start:28px">${evSeries.labels.map(t2=>`<span>${esc(t2)}</span>`).join('')}</div>
+      <span class="ovkcap">${esc(evSeries.any ? E.t('anomEvidenceLive') : E.t('anomEvidenceEmpty'))}</span></article>`;
+    const todNow = new Date();
+    const todDate = [String(todNow.getDate()).padStart(2,'0'), String(todNow.getMonth()+1).padStart(2,'0'), todNow.getFullYear()].join('/');
     const tod = `<article class="pwwidget">
       <div class="pwwh"><span class="alcardt">${esc(E.t('anomTod'))}</span>
         <span class="alcardm msA">${esc(E.t('anomTodCap'))}</span>${chrome2}</div>
       <span class="todate39 tMonoS">${esc(todDate)}</span>
-      ${d.todParts.map((pp, zi) => { const pct = todPct(pp, zi); return `<div class="todrow39">
+      ${(d.todParts||[]).map(pp => `<div class="todrow39">
         <div class="todlab39"><span>${esc(ar?pp.ar:pp.en)}</span><i class="tMonoS">${esc(pp.range)}</i></div>
-        <span class="todcell39" style="background:rgba(78,163,232,${alpha(pct)})"${pct>20?' data-hot="1"':''}>+${pct}%</span></div>`; }).join('')}
-      <span class="ovkcap">${esc(E.t('anomTodFoot'))}</span></article>`;
-    const totMw = pmus.reduce((s2,u)=>s2+u.kw,0)/1000;
+        <span class="todcell39">--</span></div>`).join('')}
+      <span class="ovkcap">${esc(E.t('anomTodEmpty'))}</span></article>`;
     const rail = `<article class="pwwidget">
       <div class="pwwh"><span class="alcardt">${esc(E.t('anomPmuT'))}</span>
-        <span class="alcardm msA">${esc(E.t('anomPmuCap'))}</span>${chrome2}</div>
+        <span class="alcardm msA">${esc(E.t('anomPmuCap',{n:pmus.length}))}</span>${chrome2}</div>
       <div class="pmuhdr39"><span>${esc(E.t('pmuCol0'))}</span><span>${esc(E.t('pmuCol1'))}<small>A</small></span><span>${esc(E.t('pmuCol2'))}<small>V</small></span><span>${esc(E.t('pmuCol3'))}<small>Hz</small></span><span>${esc(E.t('pmuCol4'))}<small>kW</small></span><span>${esc(E.t('pmuCol5'))}<small>kWh</small></span></div>
       <div class="col grow pmurows">${pmus.map(u => `<div class="pmurow39">
-        <span class="pmuid39"><i class="pmudot39" data-tone="${u.tone}"></i>${esc(u.id)}</span>
-        <span>${fmt(u.a,1)}</span><span>${u.v.toFixed(1)}</span><span>${u.hz.toFixed(2)}</span>
-        <span>${fmt(u.kw)}</span><span>${fmt(u.kwh)}</span></div>`).join('')}</div>
-      <span class="ovkcap">${esc(E.t('anomPmuFoot',{mw:fmt(totMw,2)}))}</span></article>`;
+        <span class="pmuid39">${esc(u.id)}</span>
+        <span>${nd(u.a,1)}</span><span>${nd(u.v,1)}</span><span>${nd(u.hz,2)}</span>
+        <span>${nd(u.kw)}</span><span>${nd(u.kwh)}</span></div>`).join('')}</div>
+      <span class="ovkcap">${esc(E.t('anomPmuFoot',{mw:nd(totMw,2)}))}</span></article>`;
     return `<div class="pwarea" data-pg="anom">
       <div class="pwhero cols6">${heroes.join('')}</div>
       <div class="angrid39"><div class="col gap10">${evidence}${tod}</div>${rail}</div></div>`;
@@ -344,88 +435,94 @@ window.EKO_A = (function(){
       <span class="ovkcap">${esc(E.t(footKey))}</span></article>`;
   }
   function waterPage(E){
-    const d = E.data.water, ar = E.lang === 'ar';
-    const pct = Math.round(d.tankVolumeM3/d.tankCapacityM3*100);
-    const autonomy = d.tankVolumeM3/d.meterAvgM3Day;
+    const d = E.data.water || {}, ar = E.lang === 'ar';
+    const nd = (v, d2) => (v == null || !isFinite(Number(v))) ? '--' : fmt(v, d2);
+    const dash = esc(E.t('emptyDash'));
+    const hasFin = Array.isArray(d.todayH) || Array.isArray(d.hourly) || Array.isArray(d.weekly) || Array.isArray(d.monthly);
+    const sumHrs = arr => {
+      if (!Array.isArray(arr) || !arr.some(v => Number(v))) return null;
+      return arr.reduce((s, v) => s + (Number(v) || 0), 0);
+    };
+    const todayVal = hasFin ? sumHrs(d.todayH) : null;
+    const avgVal = hasFin && d.avgDrawM3Day != null && Number(d.avgDrawM3Day) ? d.avgDrawM3Day : null;
     const hero = (lbl, val, u, cap, chart) =>
       `<div class="pwtile"><div class="pwth"><span class="ovklbl">${esc(lbl)}</span>${tileCtl(E, lbl, '')}</div>
         <div class="ovkval"><span class="ovknum">${esc(val)}</span><span class="ovkunit">${esc(u)}</span></div>
         <span class="ovkcap">${esc(cap)}</span>${chart||''}</div>`;
-    const sp = d.sparkToday, mxs = Math.max(...sp)*1.15;
-    const spts = sp.map((v,i)=>`${(i/(sp.length-1)*100).toFixed(1)},${(32-v/mxs*30).toFixed(1)}`).join(' ');
-    const spark = `<div class="pwmini2"><svg viewBox="0 0 100 32" preserveAspectRatio="none" class="wtsp40">
+    const sp = hasFin && Array.isArray(d.sparkToday) ? d.sparkToday : [];
+    const spark = sp.length > 1 ? (() => {
+      const mxs = Math.max.apply(null, sp.map(v => Number(v)||0))*1.15 || 1;
+      const spts = sp.map((v,i)=>`${(i/(sp.length-1)*100).toFixed(1)},${(32-(Number(v)||0)/mxs*30).toFixed(1)}`).join(' ');
+      return `<div class="pwmini2"><svg viewBox="0 0 100 32" preserveAspectRatio="none" class="wtsp40">
       <polyline points="${spts}" fill="none" stroke="#38BDF8" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg></div>`;
-    const tankbar = `<div class="pwmini2"><svg class="wttk40">
-      <rect x="0%" y="10" width="100%" height="8" fill="var(--chTrack2)"/>
-      <rect x="0%" y="12" width="${pct}%" height="4" rx="2" fill="#34D399"/>
-      <line x1="${d.refillThresholdPct}%" x2="${d.refillThresholdPct}%" y1="6" y2="22" stroke="var(--chTx)" stroke-width="1.25"/>
-      <text x="${d.refillThresholdPct}%" y="4" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="11.5" fill="var(--chTx)">${esc(E.t('wtRefill',{p:d.refillThresholdPct}))}</text></svg></div>`;
+    })() : '';
     const heroes = `<div class="pwhero cols4">
-      ${hero(E.t('wtToday'), fmt(d.todayM3), 'm\u00b3', E.t('capMainMeters',{time:E.data.basis.asOf}), spark)}
-      ${hero(E.t('wtAvg'), fmt(d.avgDrawM3Day), E.t('unitM3Day'), E.t('wtAvgCap'))}
-      ${hero(E.t('wtTank'), pct+'%', '', E.t('wtTankCap',{cur:fmt(d.tankVolumeM3,1),cap:fmt(d.tankCapacityM3)}), tankbar)}
-      ${hero(E.t('wtAutonomy'), fmt(autonomy,1), ar?'\u064a\u0648\u0645':'days', E.t('wtAutonomyCap'))}</div>`;
+      ${hero(E.t('wtToday'), nd(todayVal), todayVal!=null?'m\u00b3':'', E.t('capMainMeters',{time:E.data.basis.asOf}), spark)}
+      ${hero(E.t('wtAvg'), nd(avgVal), avgVal!=null?E.t('unitM3Day'):'', E.t('wtAvgCap'))}
+      ${hero(E.t('wtTank'), '--', '', E.t('wtTankCap',{cur:'--',cap:'--'}), '')}
+      ${hero(E.t('wtAutonomy'), '--', '', E.t('wtAutonomyCap'))}</div>`;
     /* daily bars: fixed 0-22 axis; the reset day renders as a hatched slot
        with the \u25f7 glyph (a cumulative meter going backwards is a reset). */
-    const dv = d.daily14, n = dv.length, YMX = 22, step = 100/n, bw = 4;
-    const gi = dv.indexOf(null);
-    let dbars = '';
+    const tr = E.state.wtTrendRange || 'today';
+    const liveS = { hourly: d.hourly, today: d.todayH, weekly: d.weekly, monthly: d.monthly }[tr];
+    const dv = Array.isArray(liveS) ? liveS : [];
+    const n = dv.length;
+    const YMX = n ? Math.max(1, Math.ceil(Math.max.apply(null, dv.filter(v => v != null).concat([0])) * 1.15)) : 1;
+    const step = n ? 100/n : 100, bw = Math.min(6, step * 0.6);
+    const gi = -1;
+    let dbars = '', whits = '';
+    const xLive = (d.trendX && d.trendX[tr]) || [];
     dv.forEach((v,i)=>{
       const x = (i*step + (step-bw)/2).toFixed(1);
-      if(v==null) dbars += `<rect x="${x}" y="18" width="${bw}" height="78" fill="url(#wtHatch)"/>`;
-      else { const bh = v/YMX*96; dbars += `<rect x="${x}" y="${(96-bh).toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="1" fill="url(#wtBarG)"/>`; }
+      const bh = Math.max(0, Number(v)||0)/YMX*96;
+      dbars += `<rect x="${x}" y="${(96-bh).toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="1" fill="url(#wtBarG)"/>`;
+      const lab = xLive[i] || String(i+1);
+      const tipV = v == null || Number(v)===0 ? '--' : (v >= 100 ? fmt(v,0) : fmt(v,1));
+      whits += `<span class="chhit39" data-chtip="${encodeURIComponent(JSON.stringify({ t: lab, u: 'm³', rows: [{ c:'#38BDF8', n: E.t('wtDaily'), v: tipV }] }))}"></span>`;
     });
-    const avgY = (96 - d.meterAvgM3Day/YMX*96).toFixed(1);
-    /* axis labels from the data's start day, month name per language (D122) */
-    const [m0, d0] = String(d.daily14Start || 'Aug 5').split(' '), resetLbl = E.ph(d.resetNoteDay);
-    const xrow = dv.map((v,i)=>{const lbl=E.ph(m0 + ' ' + (+d0 + i));
-      return `<span style="width:${step.toFixed(2)}%">${(i%2===0&&v!=null&&lbl!==resetLbl)?esc(lbl):''}</span>`;}).join('');
-    const seg = (k,on)=>`<button class="seg" data-on="${on}" data-act="none">${esc(E.t(k))}</button>`;
-    const segs = `<span class="row segbox msA">${seg('rangeHourly',false)}${seg('rangeToday',true)}${seg('rangeWeekly',false)}${seg('rangeMonthly',false)}</span>`;
+    const avgY = (tr==='today' && avgVal != null) ? (96 - avgVal/YMX*96).toFixed(1) : null;
+    const todayTo = (tr==='today' && n) ? String(Math.max(0, n-1)).padStart(2,'0')+':00' : (E.data.basis.asOf || '');
+    const wtCap = tr==='hourly' ? E.t('wtDailyCapHourly')
+      : tr==='weekly' ? E.t('wtDailyCapWeekly',{range:d.weekRange||''})
+      : tr==='monthly' ? E.t('wtDailyCapMonthly',{from:(xLive[0]||''),to:(xLive[xLive.length-1]||'')})
+      : E.t('wtDailyCapToday',{t:todayTo});
+    const seg = (k,v)=>`<button class="seg" data-on="${tr===v}" data-act="wtTrendRange" data-v="${v}">${esc(E.t(k))}</button>`;
+    const segs = `<span class="row segbox msA">${seg('rangeHourly','hourly')}${seg('rangeToday','today')}${seg('rangeWeekly','weekly')}${seg('rangeMonthly','monthly')}</span>`;
     const daily = `<article class="pwwidget">
       <div class="pwwh"><span class="alcardt">${esc(E.t('wtDaily'))}</span>
-        <span class="alcardm">${esc(E.t('wtDailyCap'))}</span>${segs}${chrome(E, E.t('wtDaily'), E.t('wtDailyCap'))}</div>
-      <div class="ch39 mh150"><div class="chy39"><span>${YMX}</span><span>${YMX/2}</span><span>0</span></div>
+        <span class="alcardm">${esc(wtCap)}</span>${segs}${chrome(E, E.t('wtDaily'), wtCap)}</div>
+      <div class="ch39 mh150"><div class="chy39"><span>${YMX}</span><span>${Math.round(YMX/2)}</span><span>0</span></div>
+        <div class="chcol39">
         <div class="chplot39">
           <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-            <defs><linearGradient id="wtBarG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#38BDF8" stop-opacity="0.9"/><stop offset="100%" stop-color="#0EA5E9" stop-opacity="0.45"/></linearGradient>
-            <pattern id="wtHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="6" fill="rgba(255,255,255,0.08)"/></pattern></defs>
+            <defs><linearGradient id="wtBarG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#38BDF8" stop-opacity="0.9"/><stop offset="100%" stop-color="#0EA5E9" stop-opacity="0.45"/></linearGradient></defs>
             <line x1="0" x2="100" y1="96" y2="96" stroke="var(--bd1)" stroke-width="1" vector-effect="non-scaling-stroke"/>
-            <line x1="0" x2="100" y1="${avgY}" y2="${avgY}" stroke="var(--chTx)" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>
+            ${avgY!=null?`<line x1="0" x2="100" y1="${avgY}" y2="${avgY}" stroke="var(--chTx)" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>`:''}
             ${dbars}</svg>
-          <span class="wtavgchip">${esc(E.t('wtDailyAvg',{v:d.meterAvgM3Day}))}</span>
-          ${gi>=0?`<span class="wtgap tipU" data-tip="${esc(E.t('wtDailyFoot',{m:d.meter.id}))}" style="left:${(gi*step+step/2).toFixed(1)}%">\u25f7</span>`:''}
+          ${n ? `<div class="chhits39">${whits}</div>` : ''}
+          ${tr==='today' && avgVal!=null?`<span class="wtavgchip">${esc(E.t('wtDailyAvg',{v:avgVal}))}</span>`:''}
+        </div>
+        <div class="chx39" style="grid-template-columns:repeat(${Math.max(n,1)},minmax(0,1fr))">${(n?xLive:['']).map(t2=>`<span>${esc(t2||'')}</span>`).join('')}</div>
         </div></div>
-      <div class="wtxrow tMonoS cT3">${xrow}</div>
-      <span class="ovkcap">${esc(E.t('wtDailyFoot',{m:d.meter.id}))}</span></article>`;
+      <span class="ovkcap">${esc(E.t('wtDailyFoot',{m:d.meter && d.meter.id ? d.meter.id : '--'}))}</span></article>`;
     const dl = (k,v,extra) => `<div class="aprow"><dt>${esc(k)}</dt><dd>${v}${extra||''}</dd></div>`;
     const tank = widget(E, E.t('wtTankSupply'), '',
-      dl(E.t('wtCap'), fmt(d.tankCapacityM3)+' m\u00b3')
-      + dl(E.t('wtVol'), fmt(d.tankVolumeM3,1)+' m\u00b3')
-      + dl(E.t('wtThresh'), d.refillThresholdPct+'% ('+fmt(d.tankCapacityM3*d.refillThresholdPct/100)+' m\u00b3)')
-      + dl(E.t('wtLastRefill'), esc(E.ph(d.lastRefillEn)))
-      + dl(E.t('wtRefills'), String(d.refillsMonth))
-      + dl(E.t('wtSupply'), esc(ar?(d.supplyAr||d.supplyEn):d.supplyEn)));
+      dl(E.t('wtCap'), dash)
+      + dl(E.t('wtVol'), dash)
+      + dl(E.t('wtThresh'), dash)
+      + dl(E.t('wtLastRefill'), dash)
+      + dl(E.t('wtRefills'), dash)
+      + dl(E.t('wtSupply'), dash));
     const leak = widget(E, E.t('wtLeak'), '',
-      dl(E.t('wtLeakEvents'), `<span class="cT3">${esc(E.t('emptyDash'))}</span>`)
-      + `<p class="antext">${esc(E.t('wtLeakPending'))}</p>`
-      + dl(E.t('wtMnf'), `<span class="cT3">${esc(E.t('emptyDash'))}</span>`)
-      + `<p class="antext">${esc(E.t('wtMnfPending',{need:d.leak.nightsNeeded,got:d.leak.nightsCollected}))}</p>
-      <div class="row gap8" style="align-items:center"><span class="lkbar"><span style="width:${(d.leak.nightsCollected/d.leak.nightsNeeded*100).toFixed(0)}%"></span></span>
-        <span class="tMonoS">${d.leak.nightsCollected} / ${d.leak.nightsNeeded}</span></div>`,
+      dl(E.t('wtLeakEvents'), dash)
+      + dl(E.t('wtMnf'), dash),
       E.t('wtLeakFoot'));
-    const mt = d.meter;
-    const upbar = `<svg class="wttk40 mbs4"><rect x="0%" y="12" width="100%" height="6" rx="3" fill="var(--chTrack2)"/>
-      <rect x="0%" y="13.5" width="${mt.uptimePct}%" height="3" rx="1.5" fill="#A78BFA"/>
-      <line x1="${mt.targetPct}%" x2="${mt.targetPct}%" y1="8" y2="22" stroke="var(--chTx)" stroke-width="1.25"/>
-      <text x="${mt.targetPct}%" y="6" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="11.5" fill="var(--chTx)">${esc(E.t('wtTarget',{v:mt.targetPct}))}</text></svg>`;
-    const meter = widget(E, E.t('wtMeter'), mt.id,
-      dl(E.t('wtUptime'), `${fmt(mt.uptimePct,1)}% <span class="uachip" data-sev="warning">${esc(E.t('belowTargetW'))}</span>`)
-      + upbar
-      + dl(E.t('wtIntervals'), esc(E.t('wtIntervalsV',{got:mt.intervalsGot,t:mt.intervalsTotal})))
-      + dl(E.t('wtResets'), `${mt.resetsMonth} \u00b7 ${esc(E.ph(mt.resetDateEn))}`)
-      + dl(E.t('wtLastReading'), esc(mt.lastReadingEn))
-      + dl(E.t('wtSignal'), esc(ar?mt.signalAr:mt.signalEn)),
+    const meter = widget(E, E.t('wtMeter'), dash,
+      dl(E.t('wtUptime'), dash)
+      + dl(E.t('wtIntervals'), dash)
+      + dl(E.t('wtResets'), dash)
+      + dl(E.t('wtLastReading'), dash)
+      + dl(E.t('wtSignal'), dash),
       E.t('wtMeterFoot'));
     return `<div class="pwarea" data-pg="water">
       <div class="pwheadrow"><div><span class="alcardt pgtitle">${esc(E.t('wtHdrT'))}</span>
@@ -433,7 +530,7 @@ window.EKO_A = (function(){
       ${heroes}
       <div class="wtgrid">
         <div class="col gap10">${daily}<div class="wt3grid">${tank}${leak}${meter}</div></div>
-        ${utilAlarmCard(E,'waterAlarmsT',d.alarms,'waterAlarmsFoot')}
+        ${utilAlarmCard(E,'waterAlarmsT',[],'waterAlarmsFoot')}
       </div></div>`;
   }
 

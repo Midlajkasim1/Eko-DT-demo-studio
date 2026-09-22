@@ -267,12 +267,12 @@ window.EKO_DATA.marsa = {
       "peak":    { "bands": [80, 95], "value": 95.2, "crit": true, "noteEn": "125 contracted", "noteAr": "\u0627\u0644\u062a\u0639\u0627\u0642\u062f\u064a 125" }
     },
     "pmus": [
-      { "id": "PMU 1", "db": "DB-L1", "a": 1135.5, "v": 398.4, "hz": 50.01, "kw": 760, "kwh": 9120, "pf": 0.97, "stEn": "healthy", "stAr": "\u0633\u0644\u064a\u0645\u0629", "tone": "ok" },
-      { "id": "PMU 2", "db": "DB-L2", "a": 914.4, "v": 401.2, "hz": 49.98, "kw": 610, "kwh": 7320, "pf": 0.96, "stEn": "healthy", "stAr": "\u0633\u0644\u064a\u0645\u0629", "tone": "ok" },
-      { "id": "PMU 3", "db": "DB-L3", "a": 1360.4, "v": 397.6, "hz": 50.02, "kw": 890, "kwh": 10680, "pf": 0.95, "stEn": "high load", "stAr": "\u062d\u0645\u0644 \u0645\u0631\u062a\u0641\u0639", "tone": "warn" },
-      { "id": "PMU 4", "db": "DB-GF", "a": 744.2, "v": 399.8, "hz": 50.00, "kw": 505, "kwh": 6060, "pf": 0.98, "stEn": "healthy", "stAr": "\u0633\u0644\u064a\u0645\u0629", "tone": "ok" },
-      { "id": "PMU 5", "db": "DB-RF", "a": 596.9, "v": 400.6, "hz": 49.97, "kw": 410, "kwh": 4920, "pf": 0.99, "stEn": "healthy", "stAr": "\u0633\u0644\u064a\u0645\u0629", "tone": "ok" },
-      { "id": "PMU 6", "db": "DB-B1", "a": 743.0, "v": 396.9, "hz": 50.01, "kw": 475, "kwh": 5700, "pf": 0.93, "stEn": "low PF", "stAr": "\u0645\u0639\u0627\u0645\u0644 \u0642\u062f\u0631\u0629 \u0645\u0646\u062e\u0641\u0636", "tone": "warn" }
+      { "id": "PMU09", "db": "MCC 1", "a": null, "v": null, "hz": null, "kw": null, "kwh": null, "pf": null },
+      { "id": "PMU04", "db": "MCC 2", "a": null, "v": null, "hz": null, "kw": null, "kwh": null, "pf": null },
+      { "id": "PMU05", "db": "Kitchen SMDB", "a": null, "v": null, "hz": null, "kw": null, "kwh": null, "pf": null },
+      { "id": "PMU06", "db": "LVFP", "a": null, "v": null, "hz": null, "kw": null, "kwh": null, "pf": null },
+      { "id": "PMU07", "db": "ATS", "a": null, "v": null, "hz": null, "kw": null, "kwh": null, "pf": null },
+      { "id": "PMU08", "db": "Sump pump", "a": null, "v": null, "hz": null, "kw": null, "kwh": null, "pf": null }
     ],
     /* Consumption model sub-view panel (D39, mock-verbatim figures; the
        84.2/119.0 pair is the mock's own drift vs the hero 108.25 - logged). */
@@ -286,7 +286,7 @@ window.EKO_DATA.marsa = {
     },
     "prevMonthKwh": 61204.35,
     "contractedMw": 5.2,
-    "boards": [["DB-L1",760],["DB-L2",610],["DB-L3",890],["DB-GF",505],["DB-RF",410],["DB-B1",475]],
+    "boards": [["MCC 1",0],["MCC 2",0],["Kitchen SMDB",0],["LVFP",0],["ATS",0],["Sump pump",0]],
     "peakAvgKw": 68.8,
     /* D96 — baseline versus actual. baseline null = a gap (model refresh):
        rendered as a gap, named in the caption, never interpolated. No
@@ -503,29 +503,16 @@ window.EKO_DATA.marsa = {
     "daysAr": ["الأربعاء","الخميس","الجمعة","السبت","الأحد","الاثنين","الثلاثاء"]
   },
 
-  /* Water page. Tank card reads THE SAME fields as the hero (Q12): capacity
-     60 m³, volume 48 m³. Autonomy derives: volume / meter daily avg. */
+  /* Water page. Live consumption from FIN; tank/leak/meter stay empty. */
   "water": {
-    "todayM3": 380, "avgDrawM3Day": 370,
-    "tankCapacityM3": 60, "tankVolumeM3": 48, "refillThresholdPct": 25,
-    "meterAvgM3Day": 16.4,
-    /* intraday shape for the hero spark (relative units, mock-measured). */
-    "sparkToday": [10.8,9.7,8.6,8.6,9.7,13,21.8,26.2,24,21.8,20.7,19.6,18.5,18.5,17.4],
-    "daily14": [15,17,16,18,14,13,15,null,16,18,20,17,19,16],
-    "daily14Start": "Aug 5", "resetNoteDay": "Aug 13",
-    "profile": [[0,0.45],[2,0.4],[4,0.42],[6,0.7],[8,1.1],[10,1.25],[12,1.2],[14,1.05]],
-    "profileTypical": [[0,0.5],[2,0.45],[4,0.45],[6,0.65],[8,1.0],[10,1.15],[12,1.1],[14,1.0]],
-    "lastRefillEn": "Aug 15, 09:40", "refillsMonth": 2, "supplyEn": "DEWA mains + tank", "supplyAr": "شبكة DEWA + الخزان",
-    "leak": { "nightsCollected": 6, "nightsNeeded": 14 },
-    "meter": { "id": "W-01", "uptimePct": 94.2, "targetPct": 99, "intervalsGot": 53, "intervalsTotal": 56,
-               "resetsMonth": 1, "resetDateEn": "Aug 13", "lastReadingEn": "14:05", "signalEn": "intermittent", "signalAr": "متقطعة" },
-    "alarms": [
-      { "sev": "critical", "tEn": "Cooling makeup meter offline", "tAr": "\u0639\u062f\u0627\u062f \u0645\u064a\u0627\u0647 \u0627\u0644\u062a\u0639\u0648\u064a\u0636 \u0645\u062a\u0648\u0642\u0641", "age": "26 h", "locEn": "Chiller plant \u00b7 MW-03", "locAr": "\u0645\u062d\u0637\u0629 \u0627\u0644\u062a\u0628\u0631\u064a\u062f \u00b7 MW-03", "noteEn": "no reading for 26 h; consumption held at the last register value", "noteAr": "\u0644\u0627 \u0642\u0631\u0627\u0621\u0629 \u0645\u0646\u0630 26 \u0633\u0627\u0639\u0629\u061b \u0627\u0644\u0627\u0633\u062a\u0647\u0644\u0627\u0643 \u0645\u062b\u0628\u062a \u0639\u0646\u062f \u0622\u062e\u0631 \u0642\u064a\u0645\u0629" },
-      { "sev": "warning", "tEn": "Meter W-01 signal intermittent", "tAr": "\u0625\u0634\u0627\u0631\u0629 \u0627\u0644\u0639\u062f\u0627\u062f W-01 \u0645\u062a\u0642\u0637\u0639\u0629", "age": "2 h", "locEn": "Main inlet", "locAr": "\u0627\u0644\u0645\u062f\u062e\u0644 \u0627\u0644\u0631\u0626\u064a\u0633\u064a", "noteEn": "53 of 56 intervals received today \u00b7 30-day uptime 94.2% against a 99% target", "noteAr": "53 \u0645\u0646 56 \u0641\u062a\u0631\u0629 \u0627\u0633\u062a\u064f\u0644\u0645\u062a \u0627\u0644\u064a\u0648\u0645 \u00b7 \u0627\u0644\u062c\u0627\u0647\u0632\u064a\u0629 94.2% \u0645\u0642\u0627\u0628\u0644 \u0647\u062f\u0641 99%" },
-      { "sev": "warning", "tEn": "Irrigation draw above schedule", "tAr": "\u0633\u062d\u0628 \u0627\u0644\u0631\u064a \u0641\u0648\u0642 \u0627\u0644\u062c\u062f\u0648\u0644", "age": "3 h", "locEn": "Landscape \u00b7 IR-02", "locAr": "\u0627\u0644\u0645\u0633\u0637\u062d\u0627\u062a \u00b7 IR-02", "noteEn": "31 m\u00b3 drawn since 06:00 against a 22 m\u00b3 plan for the same window", "noteAr": "\u0633\u064f\u062d\u0628 31 \u0645\u00b3 \u0645\u0646\u0630 06:00 \u0645\u0642\u0627\u0628\u0644 \u062e\u0637\u0629 22 \u0645\u00b3" },
-      { "sev": "watch", "tEn": "Tank level trending down", "tAr": "\u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u062e\u0632\u0627\u0646 \u064a\u062a\u0631\u0627\u062c\u0639", "age": "5 h", "locEn": "Storage \u00b7 T-01", "locAr": "\u0627\u0644\u062a\u062e\u0632\u064a\u0646 \u00b7 T-01", "noteEn": "48 of 60 m\u00b3 and falling since 09:00; refill threshold at 15 m\u00b3", "noteAr": "48 \u0645\u0646 60 \u0645\u00b3 \u0648\u064a\u0648\u0627\u0635\u0644 \u0627\u0644\u0627\u0646\u062e\u0641\u0627\u0636\u061b \u062d\u062f \u0627\u0644\u062a\u0639\u0628\u0626\u0629 15 \u0645\u00b3" },
-      { "sev": "watch", "tEn": "Night-flow baseline incomplete", "tAr": "\u062e\u0637 \u0623\u0633\u0627\u0633 \u0627\u0644\u062a\u062f\u0641\u0642 \u0627\u0644\u0644\u064a\u0644\u064a \u063a\u064a\u0631 \u0645\u0643\u062a\u0645\u0644", "age": "today", "locEn": "Main inlet", "locAr": "\u0627\u0644\u0645\u062f\u062e\u0644 \u0627\u0644\u0631\u0626\u064a\u0633\u064a", "noteEn": "6 of 14 clean nights collected; leak detection stays inactive until the gate passes", "noteAr": "\u062c\u064f\u0645\u0639\u062a 6 \u0645\u0646 14 \u0644\u064a\u0644\u0629\u061b \u0643\u0634\u0641 \u0627\u0644\u062a\u0633\u0631\u0628 \u0645\u0639\u0637\u0644 \u062d\u062a\u0649 \u0627\u062c\u062a\u064a\u0627\u0632 \u0627\u0644\u0628\u0648\u0627\u0628\u0629" }
-    ]
+    "todayM3": null, "avgDrawM3Day": null,
+    "tankCapacityM3": null, "tankVolumeM3": null, "refillThresholdPct": null,
+    "sparkToday": [],
+    "lastRefillEn": null, "refillsMonth": null, "supplyEn": null, "supplyAr": null,
+    "leak": { "nightsCollected": null, "nightsNeeded": null },
+    "meter": { "id": null, "uptimePct": null, "targetPct": null, "intervalsGot": null, "intervalsTotal": null,
+               "resetsMonth": null, "resetDateEn": null, "lastReadingEn": null, "signalEn": null, "signalAr": null },
+    "alarms": []
   },
 
   /* Gas page. */

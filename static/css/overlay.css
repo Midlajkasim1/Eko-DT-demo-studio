@@ -40,6 +40,10 @@
 .dashboard-native-container #mount > *:not(#vpmain) {
   pointer-events: auto;
 }
+.dashboard-native-container .pwwidget,
+.dashboard-native-container .pwtile {
+  pointer-events: auto;
+}
 .dashboard-native-container #ovp {
   pointer-events: none;
 }

@@ -506,22 +506,62 @@ window.EKO_C = (function(){
     const carbonT = (el.mtdKwh != null) ? el.mtdKwh * b.co2KgPerKwh / 1000 : null;   /* derives */
     const peakPct = (m.peakTodayMw != null && p.contractedMw) ? Math.round(m.peakTodayMw / p.contractedMw * 100) : null; /* derives */
     const nd = (v, d2) => v == null ? '--' : fmt(v, d2);  /* null → '--' helper */
+    const tr = E.state.pwTrendRange || 'today';
+    const sumArr = a => {
+      if (!a || !a.length || a.every(v => v == null)) return null;
+      const s = a.reduce((n, v) => n + (Number(v) || 0), 0);
+      return s === 0 && a.every(v => v == null || Number(v) === 0) ? null : s;
+    };
+    const colAt = (series, i) => {
+      if (!series || !series.length) return null;
+      const vals = series.map(z => z && z[i]);
+      return sumArr(vals);
+    };
+    let heroNow = null, heroPrev = null;
+    if (tr === 'hourly' && p.zoneLast24 && p.zoneLast24[0] && p.zoneLast24[0].length) {
+      const hi = p.zoneLast24[0].length - 1;
+      heroNow = colAt(p.zoneLast24, hi);
+      heroPrev = hi > 0 ? colAt(p.zoneLast24, hi - 1) : null;
+    } else if (tr === 'weekly') {
+      heroNow = sumArr(p.zoneWTD);
+      heroPrev = sumArr(p.zonePrevWeek);
+    } else if (tr === 'monthly') {
+      heroNow = sumArr(p.zoneMTD);
+      heroPrev = sumArr(p.zonePrevMonth);
+    } else {
+      heroNow = (p.zoneHourly && p.zoneHourly[0] && p.zoneHourly[0].length)
+        ? sumArr(p.zoneHourly.map(z => (z || []).reduce((a, v) => a + (Number(v) || 0), 0)))
+        : null;
+      heroPrev = sumArr(p.zoneYesterday);
+    }
     const heroRow = `<div class="pwhero">
       ${hero(E.t('pwCurrentCons'), el.currentKw != null ? E.t('pwAboveChip') : '', el.currentKw != null ? 'warn' : '', nd(el.currentKw,2), el.currentKw != null ? 'kW' : '', E.t('pwBaselineKwCap',{v:fmt(el.baselineKw,1)}), el.currentKw != null ? bullet(p.heroCharts.current,'L') : '')}
-      ${hero(E.t('pwMtd'), el.mtdKwh != null ? E.t('pwLiveCap') : '', el.mtdKwh != null ? 'ok' : '', nd(el.mtdKwh,2), el.mtdKwh != null ? 'kWh' : '', el.mtdKwh != null ? (E.t('capMainMeters',{time:b.asOf})+' \u00b7 '+E.t('pwFcstEod',{v:nd(m.todayForecastEodMwh,1)})) : E.t('capMainMeters',{time:b.asOf}), el.mtdKwh != null ? spark(p.heroCharts.month) : '')}
-      ${hero(E.t('pwPrevMonth'), '', '', fmt(p.prevMonthKwh,2), 'kWh', E.t('pwPrevMonthCap'))}
+      ${hero(E.t('pwHeroNow.'+tr), '', '', nd(heroNow, Math.abs(heroNow||0)>=100?0:1), heroNow != null ? 'kWh' : '', E.t('pwHeroNowCap.'+tr))}
+      ${hero(E.t('pwHeroPrev.'+tr), '', '', nd(heroPrev, Math.abs(heroPrev||0)>=100?0:1), heroPrev != null ? 'kWh' : '', E.t('pwHeroPrevCap.'+tr))}
       ${hero(E.t('pwCarbon'), '', '', nd(carbonT,2), carbonT != null ? 't' : '', E.t('pwCarbonCap',{r:b.co2KgPerKwh}))}
       ${hero(E.t('pwPeak'), peakPct != null ? E.t('pwPctLimit',{p:peakPct}) : '', peakPct != null ? 'crit' : '', nd(m.peakTodayMw,2), m.peakTodayMw != null ? 'MW' : '', E.t('pwContractedMwCap',{v:p.contractedMw}), m.peakTodayMw != null ? bullet(p.heroCharts.peak,'P') : '')}
     </div>`;
-    /* Distribution-board share (D39): the mock's 6-segment donut (r58,
-       stroke 30) with percentage labels around the ring; shares derive. */
-    const totKw = p.boards.reduce((a,x)=>a+x[1],0);
-    const DON = ['#2DD4BF','#60A5FA','#F5C542','#F08A24','#E4564A','#818CF8'];
+    const zhAll = { hourly: p.zoneLast24, today: p.zoneHourly, weekly: p.zoneWeekly, monthly: p.zoneMonthly };
+    const lastVal = z => (z && z.length) ? Number(z[z.length-1])||0 : 0;
+    const sumVal = z => (z||[]).reduce((a,v)=>a+(Number(v)||0),0);
+    const boardNames = (p.zones && p.zones.length) ? p.zones : p.boards.map(x=>x[0]);
+    const boardLoads = tr === 'monthly' && p.zoneMTD ? p.zoneMTD
+      : tr === 'weekly' && p.zoneWTD ? p.zoneWTD
+      : tr === 'today' && zhAll.today && zhAll.today[0] && zhAll.today[0].length ? zhAll.today.map(sumVal)
+      : tr === 'hourly' && zhAll.hourly && zhAll.hourly[0] && zhAll.hourly[0].length ? zhAll.hourly.map(lastVal)
+      : (p.zoneLast24 && p.zoneLast24[0] && p.zoneLast24[0].length ? p.zoneLast24.map(lastVal)
+        : p.boards.map(x => Number(x[1])||0));
+    const boards = boardNames.map((name,i2) => [name, boardLoads[i2] == null ? null : boardLoads[i2]]);
+    const totKwh = boards.reduce((a,x)=>a+Math.max(0, Number(x[1])||0),0);
+    const dbEmpty = boards.every(x => x[1] == null || Number(x[1]) === 0);
+    const hues = p.zoneHues && p.zoneHues.length ? p.zoneHues : ['#4EA3E8','#F0A93B','#45C79A','#E48FC4','#A78BFA','#E06C75'];
+    const dbWhen = E.t('pwDbWhen.'+tr);
+    const dbTot = dbEmpty ? '--' : (totKwh >= 100 ? fmt(totKwh,0) : fmt(totKwh,1));
     const C2 = 2*Math.PI*58;
     let cum = 0;
-    const dsegs = p.boards.map((x,i2)=>{
-      const f = x[1]/totKw;
-      const s2 = { c: DON[i2],
+    const dsegs = boards.map((x,i2)=>{
+      const f = totKwh > 0 ? Math.max(0, Number(x[1])||0)/totKwh : 0;
+      const s2 = { c: hues[i2] || '#94A3B8',
         dash: `${(f*C2).toFixed(2)} ${(C2-f*C2).toFixed(2)}`, off: (-cum*C2).toFixed(2) };
       const aMid = (cum + f/2)*2*Math.PI - Math.PI/2;
       s2.lx = (50 + 36*Math.cos(aMid)).toFixed(2);
@@ -532,64 +572,134 @@ window.EKO_C = (function(){
     });
     const share = `<article class="pwwidget">
       <div class="pwwh"><span class="alcardt">${esc(E.t('pwDbShare'))}</span>
-        <span class="alcardm">${esc(E.t('pwDbShareCap',{mw:fmt(totKw/1000,2)}))}</span>${window.EKO_A.chrome(E)}</div>
+        <span class="alcardm">${esc(E.t('pwDbShareCap',{when:dbWhen,v:dbTot}))}</span>${window.EKO_A.chrome(E)}</div>
       <div class="dnwrap"><svg viewBox="0 0 160 160" aria-hidden="true">
         ${dsegs.map(s2=>`<circle cx="80" cy="80" r="58" fill="none" stroke="${s2.c}" stroke-width="30" stroke-dasharray="${s2.dash}" stroke-dashoffset="${s2.off}" transform="rotate(-90 80 80)"/>`).join('')}</svg>
-        ${dsegs.map(s2=>`<span class="dnlbl" style="left:${s2.lx}%;top:${s2.ly}%">${s2.pct}%</span>`).join('')}</div>
-      <div class="dnleg">${p.boards.map((x,i2)=>`<span class="dnlegit"><i style="background:${DON[i2]}"></i>${esc(x[0])}</span>`).join('')}</div></article>`;
-    const totalMax = Math.max(...p.boards.map(x=>x[1]));
+        ${dbEmpty ? '' : dsegs.map(s2=>`<span class="dnlbl" style="left:${s2.lx}%;top:${s2.ly}%">${s2.pct}%</span>`).join('')}</div>
+      <div class="dnleg">${boards.map((x,i2)=>`<span class="dnlegit"><i style="background:${hues[i2]}"></i>${esc(x[0])}</span>`).join('')}</div></article>`;
+    const totalMax = Math.max(0, ...boards.map(x=>Math.max(0, Number(x[1])||0)));
     const db = `<article class="pwwidget">
       <div class="pwwh"><span class="alcardt">${esc(E.t('pwDb'))}</span>
-        <span class="alcardm">${esc(E.t('pwDbSub',{n:p.boards.length,mw:fmt(totKw/1000,2)}))}</span>${window.EKO_A.chrome(E)}</div>
-      <div class="dblist grow">${p.boards.map(x =>
-        `<button class="dbrow" data-act="none"><span class="dbid">${esc(x[0])}</span>
-          <span class="dbbar"><span style="width:${(x[1]/totalMax*100).toFixed(1)}%"></span></span>
-          <span class="dbkw">${fmt(x[1])} kW</span>${icon('chevR',12)}</button>`).join('')}</div></article>`;
-    /* Energy trend (D39): stacked kWh bars on the mock's fixed 0-120 axis. */
-    const zh = p.zoneHourly, hours = zh[0].length, YMAX = 120;
-    const step = 100/hours, bw = step*0.6;
-    let bars = '';
+        <span class="alcardm">${esc(E.t('pwDbSub',{n:boards.length,v:dbTot,when:dbWhen}))}</span>${window.EKO_A.chrome(E)}</div>
+      <div class="dblist grow">${boards.map((x,i2) =>
+        `<button class="dbrow" data-act="pwBoard" data-i="${i2}" data-on="${String(E.state.pwBoard)===String(i2)}"><span class="dbid">${esc(x[0])}</span>
+          <span class="dbbar"><span style="width:${totalMax?((Math.max(0, Number(x[1])||0)/totalMax*100).toFixed(1)):0}%;background:${hues[i2]}"></span></span>
+          <span class="dbkw">${x[1]==null||(dbEmpty&&Number(x[1])===0)?'--':((Number(x[1])>=100?fmt(x[1],0):fmt(Number(x[1]),1))+' kWh')}</span>${icon('chevR',12)}</button>`).join('')}</div></article>`;
+    let zh = (zhAll[tr] && zhAll[tr][0]) ? zhAll[tr] : [[]];
+    let zhHues = hues;
+    let zhNames = boardNames;
+    const boardIdx = E.state.pwBoard == null || E.state.pwBoard === '' ? -1 : Number(E.state.pwBoard);
+    if (boardIdx >= 0 && zh[boardIdx]) {
+      zh = [zh[boardIdx]];
+      zhHues = [hues[boardIdx] || '#4EA3E8'];
+      zhNames = [boardNames[boardIdx]];
+    }
+    const hours = (zh[0] && zh[0].length) || 0;
+    let stackMax = 0;
+    for(let h2=0;h2<hours;h2++){
+      let s = 0; zh.forEach(z => { s += Number(z[h2]) || 0; });
+      if(s > stackMax) stackMax = s;
+    }
+    const YMAX = Math.max(stackMax, 1);
+    const step = hours ? 100/hours : 100, bw = step*0.6;
+    const xLabels = (p.trendX && p.trendX[tr] && p.trendX[tr].length)
+      ? p.trendX[tr]
+      : (tr==='weekly' || tr==='monthly'
+        ? (zh[0]||[]).map((_,i2)=>String(i2+1))
+        : Array.from({length:hours},(_,i2)=>(i2%2===0)?String(i2).padStart(2,'0'):''));
+    const zoneName = i2 => zhNames[i2] || (ar ? (p.zonesAr[i2]||p.zones[i2]) : p.zones[i2]);
+    const nv = (v, d2) => v >= 100 ? fmt(v, 0) : fmt(v, d2 == null ? 1 : d2);
+    const chtipAttr = payload => encodeURIComponent(JSON.stringify(payload));
+    const hitCell = (label, unit, rows) =>
+      `<span class="chhit39" data-chtip="${chtipAttr({ t: label, u: unit, rows })}"></span>`;
+    let bars = '', hits = '';
     for(let h2=0;h2<hours;h2++){
       let y0 = 100;
+      const rows = [];
       zh.forEach((z,zi) => {
-        const bh = z[h2]/YMAX*100; y0 -= bh;
-        bars += `<rect x="${(h2*step+step*0.2).toFixed(2)}" y="${y0.toFixed(2)}" width="${bw.toFixed(2)}" height="${bh.toFixed(2)}" fill="${p.zoneHues[zi]}"${zi===zh.length-1?' rx="0.6"':''}/>`;
+        const val = Number(z[h2])||0;
+        const bh = val/YMAX*100; y0 -= bh;
+        bars += `<rect x="${(h2*step+step*0.2).toFixed(2)}" y="${y0.toFixed(2)}" width="${bw.toFixed(2)}" height="${Math.max(0,bh).toFixed(2)}" fill="${zhHues[zi]}"${zi===zh.length-1?' rx="0.6"':''}/>`;
+        rows.push({ c: zhHues[zi], n: zoneName(zi), v: nv(val) });
       });
+      hits += hitCell(xLabels[h2] || '', 'kWh', rows);
     }
     const grid39 = [0,25,50,75,100].map(y=>`<line x1="0" x2="100" y1="${y}" y2="${y}" stroke="var(--bd1)" stroke-width="1"${y===100?'':' stroke-dasharray="2 3"'} vector-effect="non-scaling-stroke"/>`).join('');
-    const seg = (k,on) => `<button class="seg" data-on="${on}" data-act="none">${esc(E.t(k))}</button>`;
-    const xh = Array.from({length:Math.ceil(hours/2)},(_,i2)=>String(i2*2).padStart(2,'0'));
+    const yTicks = [YMAX, YMAX*0.75, YMAX*0.5, YMAX*0.25, 0].map(v => v >= 10 ? Math.round(v) : (Math.round(v*10)/10));
+    const seg = (k,v) => `<button class="seg" data-on="${tr===v}" data-act="pwTrendRange" data-v="${v}">${esc(E.t(k))}</button>`;
+    const xAxis = n => {
+      const cols = Math.max(n, xLabels.length, 1);
+      const labs = Array.from({length: cols}, (_,i2) => xLabels[i2] || '');
+      return `<div class="chx39" style="grid-template-columns:repeat(${cols},minmax(0,1fr))">${labs.map(t2=>`<span>${esc(t2)}</span>`).join('')}</div>`;
+    };
+    const todayTo = (tr==='today' && hours) ? String(Math.max(0, hours-1)).padStart(2,'0')+':00' : (b.asOf || '');
+    const weekRange = p.weekRange || ((xLabels[0] || '') + (xLabels.length ? '–' + xLabels[xLabels.length - 1] : ''));
+    const enCap0 = tr==='hourly' ? E.t('pwEnSubHourly')
+      : tr==='weekly' ? E.t('pwEnSubWeekly',{range:weekRange})
+      : tr==='monthly' ? E.t('pwEnSubMonthly',{from:xLabels[0]||'',to:xLabels[xLabels.length-1]||''})
+      : E.t('pwEnSub',{t:todayTo});
+    const enCap = boardIdx >= 0 && zhNames[0] ? zhNames[0] + ' · ' + enCap0 : enCap0;
+    const pkCap = tr==='hourly' ? E.t('pwPeakSubHourly')
+      : tr==='weekly' ? E.t('pwPeakSubWeekly',{range:weekRange})
+      : tr==='monthly' ? E.t('pwPeakSubMonthly',{from:xLabels[0]||'',to:xLabels[xLabels.length-1]||''})
+      : E.t('pwPeakSub',{t:todayTo});
     const entrend = `<article class="pwwidget">
       <div class="pwwh"><span class="alcardt">${esc(E.t('pwEnTrend'))}</span>
-        <span class="alcardm">${esc(E.t('pwEnSub',{t:b.asOf}))}</span>
-        <span class="row segbox msA">${seg('rangeHourly',false)}${seg('rangeToday',true)}${seg('rangeWeekly',false)}${seg('rangeMonthly',false)}</span>${window.EKO_A.chrome(E)}</div>
-      <div class="ch39"><div class="chy39">${[120,90,60,30,0].map(v=>`<span>${v}</span>`).join('')}</div>
-        <div class="chplot39"><svg viewBox="0 0 100 100" preserveAspectRatio="none">${grid39}${bars}</svg></div></div>
-      <div class="chx39">${xh.map(t2=>`<span>${t2}</span>`).join('')}</div>
-      <div class="pwlegend">${p.zones.map((z,i2)=>`<span><i class="zdot" style="background:${p.zoneHues[i2]}"></i>${esc(ar?(p.zonesAr[i2]||z):z)}</span>`).join('')}</div></article>`;
-    /* Peak demand trend (D39): fixed 0-140 axis, over-contract red band,
-       dashed average line, gradient area under the curve. */
-    const ps = p.peakSeries, PMAX = 140, n3 = ps.length;
+        <span class="alcardm">${esc(enCap)}</span>
+        <span class="row segbox msA">${seg('rangeHourly','hourly')}${seg('rangeToday','today')}${seg('rangeWeekly','weekly')}${seg('rangeMonthly','monthly')}</span>${window.EKO_A.chrome(E)}</div>
+      <div class="ch39"><div class="chy39">${yTicks.map(v=>`<span>${v}</span>`).join('')}</div>
+        <div class="chcol39">
+          <div class="chplot39"><svg viewBox="0 0 100 100" preserveAspectRatio="none">${grid39}${bars}</svg>
+            ${hours ? `<div class="chhits39">${hits}</div>` : ''}</div>
+          ${xAxis(hours)}</div></div>
+      <div class="pwlegend">${zhNames.map((z,i2)=>`<span><i class="zdot" style="background:${zhHues[i2]}"></i>${esc(z)}</span>`).join('')}</div></article>`;
+    const psAll = { hourly: p.peakLast24, today: p.peakSeries, weekly: p.peakWeekly, monthly: p.peakMonthly };
+    const ps = (psAll[tr] && psAll[tr].length) ? psAll[tr] : [];
+    const n3 = ps.length;
+    const peakAvg = n3 ? ps.reduce((a2,v)=>a2+(Number(v)||0),0)/n3 : 0;
+    const livePeak = n3 ? Math.max(...ps.map(v=>Number(v)||0)) : 0;
+    const contract = m.contractedKw;
+    const niceMax = v => {
+      if(!(v > 0)) return 1;
+      const mag = Math.pow(10, Math.floor(Math.log10(v)));
+      const n = v / mag;
+      const nice = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
+      return nice * mag;
+    };
+    const PMAX = niceMax(Math.max(contract || 0, livePeak) * 1.15);
     const pty = v => (100 - v/PMAX*100);
-    const pts3 = ps.map((v,i2)=>`${(i2/(n3-1)*100).toFixed(2)},${pty(v).toFixed(2)}`).join(' ');
-    const yC = pty(m.contractedKw), yA = pty(p.peakAvgKw);
+    const xAt = i2 => n3 ? ((i2 + 0.5) / n3 * 100) : 0;
+    const pts3 = n3 < 2 ? '' : ps.map((v,i2)=>`${xAt(i2).toFixed(2)},${pty(v).toFixed(2)}`).join(' ');
+    const yC = contract != null ? pty(contract) : 0;
+    const yA = pty(peakAvg);
+    let pkHits = '';
+    for(let i2=0;i2<n3;i2++){
+      const label = xLabels[i2] || '';
+      const val = nv(Number(ps[i2])||0);
+      pkHits += hitCell(label, 'kW', [{ c: '#4EA3E8', n: E.t('pwPeak'), v: val }]);
+    }
+    const pTicks = [PMAX, PMAX*0.75, PMAX*0.5, PMAX*0.25, 0].map(v => v >= 10 ? Math.round(v) : (Math.round(v*10)/10));
     const peak = `<article class="pwwidget">
       <div class="pwwh"><span class="alcardt">${esc(E.t('pwPeakTrend'))}</span>
-        <span class="alcardm">${esc(E.t('pwPeakSub'))}</span>${window.EKO_A.chrome(E)}</div>
-      <div class="ch39"><div class="chy39">${[140,105,70,35,0].map(v=>`<span>${v}</span>`).join('')}</div>
+        <span class="alcardm">${esc(pkCap)}</span>${window.EKO_A.chrome(E)}</div>
+      <div class="ch39"><div class="chy39">${pTicks.map(v=>`<span>${v}</span>`).join('')}</div>
+        <div class="chcol39">
         <div class="chplot39">
           <svg viewBox="0 0 100 100" preserveAspectRatio="none">
             <defs><linearGradient id="pwpkG" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="#4EA3E8" stop-opacity="0.25"/><stop offset="100%" stop-color="#4EA3E8" stop-opacity="0"/></linearGradient></defs>
             ${grid39}
-            <rect x="0" y="0" width="100" height="${yC.toFixed(2)}" fill="rgba(214,69,69,0.12)"/>
-            <line x1="0" x2="100" y1="${yA.toFixed(2)}" y2="${yA.toFixed(2)}" stroke="var(--chTx)" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>
-            <polygon points="0,100 ${pts3} 100,100" fill="url(#pwpkG)"/>
-            <polyline points="${pts3}" fill="none" stroke="#4EA3E8" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>
-          <span class="pkband39">${esc(E.t('pwContractedLine',{v:m.contractedKw}))}</span>
-          <span class="pkavg39" style="top:${yA.toFixed(1)}%">${esc(E.t('pwAvgLine',{v:fmt(p.peakAvgKw,1)}))}</span>
-        </div></div>
-      <div class="chx39">${['00:00','04:00','08:00','12:00'].map(t2=>`<span>${t2}</span>`).join('')}</div>
+            ${contract != null ? `<rect x="0" y="0" width="100" height="${Math.max(0,yC).toFixed(2)}" fill="rgba(214,69,69,0.12)"/>` : ''}
+            ${n3 ? `<line x1="0" x2="100" y1="${yA.toFixed(2)}" y2="${yA.toFixed(2)}" stroke="var(--chTx)" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>` : ''}
+            ${pts3 ? `<polygon points="0,100 ${pts3} 100,100" fill="url(#pwpkG)"/>
+            <polyline points="${pts3}" fill="none" stroke="#4EA3E8" stroke-width="2" vector-effect="non-scaling-stroke"/>` : ''}
+            ${n3===1 ? `<circle cx="${xAt(0).toFixed(2)}" cy="${pty(ps[0]).toFixed(2)}" r="1.8" fill="#4EA3E8"/>` : ''}
+            </svg>
+          ${n3 ? `<div class="chhits39">${pkHits}</div>` : ''}
+          ${contract != null ? `<span class="pkband39">${esc(E.t('pwContractedLine',{v:fmt(contract, contract>=10?0:1)}))}</span>` : ''}
+          ${n3 ? `<span class="pkavg39" style="top:${yA.toFixed(1)}%">${esc(E.t('pwAvgLine',{v:fmt(peakAvg,1)}))}</span>` : ''}
+        </div>
+        ${xAxis(Math.max(n3, hours))}</div></div>
       <span class="ovkcap">${esc(E.t('pwPenalty'))}</span></article>`;
     return `<div class="pwarea" data-pg="power">
       <div class="pwheadrow">

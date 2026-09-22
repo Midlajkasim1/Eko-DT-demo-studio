@@ -42,6 +42,7 @@ AUDIT_REPORT.md
 fix.js
 map_export.md
 /EKO development
+/tools
 
 # Local verification fixtures, served from public/ by the dev server only
 /public/project.json

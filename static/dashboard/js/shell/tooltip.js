@@ -41,7 +41,45 @@ window.EKO_TIP = (function(){
   }
   function fill(el){
     const L = layer();
-    L.textContent = el.dataset.tip;
+    L.replaceChildren();
+    L.classList.remove('chtip');
+    const chart = el.getAttribute('data-chtip');
+    if(chart){
+      try{
+        let raw = chart;
+        try{ raw = decodeURIComponent(chart); }catch(e){}
+        if(raw.indexOf('&quot;') !== -1){
+          const ta = document.createElement('textarea');
+          ta.innerHTML = raw;
+          raw = ta.value;
+        }
+        const d = JSON.parse(raw);
+        if(d && Array.isArray(d.rows)){
+          L.classList.add('chtip');
+          const h = document.createElement('div');
+          h.className = 'chtiph';
+          h.textContent = d.t || '';
+          L.appendChild(h);
+          d.rows.forEach(row => {
+            const r = document.createElement('div');
+            r.className = 'chtiprow';
+            const dot = document.createElement('i');
+            dot.className = 'chtipdot';
+            if(row.c) dot.style.background = row.c;
+            const n = document.createElement('span');
+            n.className = 'chtipn';
+            n.textContent = row.n || '';
+            const v = document.createElement('span');
+            v.className = 'chtipv';
+            v.textContent = (row.v || '') + (d.u ? ' ' + d.u : '');
+            r.append(dot, n, v);
+            L.appendChild(r);
+          });
+          return;
+        }
+      }catch(e){}
+    }
+    L.textContent = el.dataset.tip || '';
     if(el.dataset.kbd){
       const k = document.createElement('span');
       k.className = 'kbd tipkbd'; k.textContent = el.dataset.kbd; L.appendChild(k);
@@ -59,7 +97,13 @@ window.EKO_TIP = (function(){
     const rtl = (window.DASHBOARD_ROOT||document.documentElement).dir === 'rtl';
     const at = cur.dataset.tipat;
     let x, y, pos;
-    if(at === 'start' || at === 'end'){
+    if((at === 'cursor' || cur.hasAttribute('data-chtip')) && lastX >= 0 && lastY >= 0){
+      x = lastX + GAP;
+      y = lastY + GAP;
+      pos = 'below';
+      if(x + w > rr.right - PAD){ x = lastX - GAP - w; pos = 'left'; }
+      if(y + h > rr.bottom - PAD){ y = lastY - GAP - h; pos = 'above'; }
+    } else if(at === 'start' || at === 'end'){
       let leftOf = (at === 'start') !== rtl;                 /* logical → physical */
       x = leftOf ? r.left - GAP - w : r.right + GAP;
       if(leftOf && x < rr.left + PAD){ leftOf = false; x = r.right + GAP; }
@@ -76,21 +120,93 @@ window.EKO_TIP = (function(){
     }
     x = Math.max(rr.left + PAD, Math.min(x, rr.right - w - PAD));
     y = Math.max(rr.top + PAD, Math.min(y, rr.bottom - h - PAD));
-    L.style.transform = 'translate(' + Math.round(x - rr.left) + 'px,' + Math.round(y - rr.top) + 'px)';
+    L.style.transform = 'none';
+    L.style.left = Math.round(x) + 'px';
+    L.style.top = Math.round(y) + 'px';
     L.dataset.pos = pos;
     return true;
   }
   /* One frame loop while visible: follows a moving trigger (a panel that is
      animating) and survives re-renders by re-attaching under the pointer. */
+  function isHit(el){
+    return !!(el && el.classList && el.classList.contains('chhit39'));
+  }
+  function hitFrom(n){
+    return (n && n.closest) ? n.closest('.chhit39') : null;
+  }
+  function hideChartTips(){
+    document.querySelectorAll('.chtipbox').forEach(b => { b.style.display = 'none'; });
+    if(box && box.classList.contains('chtip')){
+      box.hidden = true;
+      box.classList.remove('chtip');
+    }
+  }
+  function plotBox(plot){
+    let L = plot.querySelector(':scope > .chtipbox');
+    if(!L){
+      L = document.createElement('div');
+      L.className = 'chtipbox';
+      plot.appendChild(L);
+    }
+    L.style.cssText = 'position:absolute;left:0;top:0;z-index:8;pointer-events:none;display:none;flex-direction:column;gap:6px;min-width:188px;max-width:240px;padding:10px 12px;background:var(--s2,#fff);border:1px solid var(--bd2,rgba(15,23,42,.12));border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.14);font:12px/1.35 var(--fB,sans-serif);color:var(--t1,#0f172a)';
+    return L;
+  }
+  function showInPlot(hit, ev){
+    const plot = hit.closest('.chplot39');
+    if(!plot) return;
+    const d = (function(){
+      const chart = hit.getAttribute('data-chtip');
+      if(!chart) return null;
+      try{
+        let raw = chart;
+        try{ raw = decodeURIComponent(chart); }catch(e){}
+        const parsed = JSON.parse(raw);
+        return (parsed && parsed.rows) ? parsed : null;
+      }catch(e){ return null; }
+    })();
+    if(!d) return;
+    document.querySelectorAll('.chtipbox').forEach(b => { if(!plot.contains(b)) b.style.display = 'none'; });
+    const L = plotBox(plot);
+    L.replaceChildren();
+    const title = document.createElement('div');
+    title.textContent = d.t || '';
+    title.style.cssText = 'font-weight:600;letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px';
+    L.appendChild(title);
+    d.rows.forEach(row => {
+      const r = document.createElement('div');
+      const isTot = row.n === 'Total';
+      r.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0' + (isTot ? ';padding-bottom:6px;margin-bottom:2px;border-bottom:1px solid var(--bd1,rgba(15,23,42,.1));font-weight:600' : '');
+      const dot = document.createElement('i');
+      dot.style.cssText = 'width:8px;height:8px;border-radius:2px;flex:none;background:' + (row.c || '#94A3B8');
+      const n = document.createElement('span');
+      n.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t2,#475569)';
+      n.textContent = row.n || '';
+      const v = document.createElement('span');
+      v.style.cssText = 'flex:none;font-family:ui-monospace,monospace;font-variant-numeric:tabular-nums';
+      v.textContent = (row.v || '') + (d.u ? ' ' + d.u : '');
+      r.append(dot, n, v);
+      L.appendChild(r);
+    });
+    L.style.display = 'flex';
+    const pr = plot.getBoundingClientRect();
+    const w = L.offsetWidth, h = L.offsetHeight;
+    let x = ev.clientX - pr.left + GAP;
+    let y = ev.clientY - pr.top + GAP;
+    if(x + w > pr.width - 8) x = ev.clientX - pr.left - GAP - w;
+    if(y + h > pr.height - 8) y = ev.clientY - pr.top - GAP - h;
+    x = Math.max(8, Math.min(x, Math.max(8, pr.width - w - 8)));
+    y = Math.max(8, Math.min(y, Math.max(8, pr.height - h - 8)));
+    L.style.left = Math.round(x) + 'px';
+    L.style.top = Math.round(y) + 'px';
+  }
   function loop(){
     raf = 0;
     if(!cur) return;
-    if(!cur.isConnected || !place()){
-      const under = (mode === 'hover' && lastX >= 0) ? document.elementFromPoint(lastX, lastY) : null;
-      const t = closest(under);
-      if(t && eligible(t)){ cur = t; fill(t); if(!place()){ hide(); return; } }
-      else { hide(); return; }
+    if(isHit(cur)){
+      if(!cur.isConnected) hideChartTips();
+      return;
     }
+    if(!cur.isConnected || !place()){ hide(); return; }
     raf = requestAnimationFrame(loop);
   }
   function show(el, m){
@@ -100,7 +216,7 @@ window.EKO_TIP = (function(){
     cur = el; mode = m || 'hover';
     fill(el);
     L.hidden = false;
-    L.dataset.born = '0'; void L.offsetWidth; L.dataset.born = '1';     /* replay the fade */
+    L.dataset.born = '0'; void L.offsetWidth; L.dataset.born = '1';
     if(!place()){ hide(); return; }
     if(!raf) raf = requestAnimationFrame(loop);
   }
@@ -109,15 +225,33 @@ window.EKO_TIP = (function(){
     if(raf){ cancelAnimationFrame(raf); raf = 0; }
     cur = null; mode = null;
     if(box) box.hidden = true;
+    hideChartTips();
   }
   function cancelHold(){ clearTimeout(hold); hold = null; holdEl = null; }
 
   function init(app){
     E = app;
     layer();
+    function trackChart(ev){
+      if(ev.pointerType === 'touch') return false;
+      lastX = ev.clientX; lastY = ev.clientY;
+      const hit = hitFrom(ev.target);
+      if(hit){
+        if(box){ box.hidden = true; box.classList.remove('chtip'); }
+        cur = null;
+        showInPlot(hit, ev);
+        return true;
+      }
+      hideChartTips();
+      return false;
+    }
+    window.addEventListener('pointermove', trackChart, true);
+    window.addEventListener('pointerover', trackChart, true);
     /* hover (mouse / pen) */
     document.addEventListener('pointerover', ev => {
       if(ev.pointerType === 'touch') return;
+      if(hitFrom(ev.target)) return;
+      lastX = ev.clientX; lastY = ev.clientY;
       const t = closest(ev.target);
       if(!t || t === cur) return;
       clearTimeout(timer);
@@ -125,8 +259,12 @@ window.EKO_TIP = (function(){
     }, true);
     document.addEventListener('pointerout', ev => {
       if(ev.pointerType === 'touch') return;
+      if(isHit(cur)) return;
       const t = closest(ev.target);
-      if(!t) return;
+      if(!t){
+        if(cur && mode === 'hover') hide();
+        return;
+      }
       if(ev.relatedTarget && t.contains(ev.relatedTarget)) return;
       if(t === mute) mute = null;
       if(timer){ clearTimeout(timer); timer = null; }
@@ -138,7 +276,8 @@ window.EKO_TIP = (function(){
         return;
       }
       lastX = ev.clientX; lastY = ev.clientY;
-      if(cur || timer) return;
+      if(hitFrom(ev.target) || isHit(cur)) return;
+      if(timer) return;
       /* engines that deliver no boundary events for disabled controls */
       const t = closest(document.elementFromPoint(lastX, lastY));
       if(t && t !== mute) timer = setTimeout(() => show(t, 'hover'), HOVER_MS);

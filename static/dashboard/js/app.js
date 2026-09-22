@@ -63,6 +63,12 @@
       report: null, rp: { intent:null, text:'' }, rpBusy:false, rpHubQ:'', rpHubF:'all', rpHubRemoved:false, askHint:null,   /* D88–D92 */
       modelFs:false,   /* D94: the full-screen model mode of the stacked shell */
       bvaRange:'today',   /* D96: baseline-versus-actual window */
+      pwTrendRange:'today',
+      pwBoard:null,
+      wtTrendRange:'today',
+      anomRange:'24h',
+      anomDays:[],
+      anomPmus:[],
       pfView:'table', pfMap:null, pfCard:null, pfCovKey:null, pfFrom:false, estateVer:0, estateFixture:'demo',   /* D103: the portfolio layer */
       pfPeriod:'mtd', pfSite:null,   /* D104: the estate period (independent of the site window) and the site detail */
       wall:false, wallOpt:null, wallIdx:0   /* D106: the control-room display context */
@@ -683,7 +689,28 @@
     modelFs(){ E.set({ modelFs: !E.state.modelFs, born: E.state.modelFs ? null : 'dlg', mkPop:null }); },
     nfPage(){ E.go('notifications', 'overview', null); },
     bvaRange(el){ E.set({ bvaRange: el.dataset.v }); },
-    pwTrendRange(el){ window.EKO.set({ pwTrendRange: el.dataset.v }); },   /* D96 */
+    pwTrendRange(el){ if(window.EKO_TIP) window.EKO_TIP.hide(); E.set({ pwTrendRange: el.dataset.v }); },
+    wtTrendRange(el){ if(window.EKO_TIP) window.EKO_TIP.hide(); E.set({ wtTrendRange: el.dataset.v }); },
+    pwBoard(el){
+      if(window.EKO_TIP) window.EKO_TIP.hide();
+      const v = el.dataset.i;
+      E.set({ pwBoard: String(E.state.pwBoard) === String(v) ? null : v });
+    },
+    anomRange(el){ E.set({ anomRange: el.dataset.v }); },
+    anomDay(el){
+      const v = Number(el.dataset.d);
+      const cur = (E.state.anomDays || []).slice();
+      const i = cur.indexOf(v);
+      if (i >= 0) cur.splice(i, 1); else cur.push(v);
+      E.set({ anomDays: cur });
+    },
+    anomPmu(el){
+      const v = el.dataset.id;
+      const cur = (E.state.anomPmus || []).slice();
+      const i = cur.indexOf(v);
+      if (i >= 0) cur.splice(i, 1); else cur.push(v);
+      E.set({ anomPmus: cur });
+    },
     /* Widget maximise (client request): ⛶ opens the widget enlarged in a
        centred dialog — a live snapshot clone, closed by ✕, Esc or the
        backdrop. Charts scale up because they are width-relative SVGs. */
