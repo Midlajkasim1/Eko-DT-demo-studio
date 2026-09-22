@@ -541,9 +541,9 @@ window.EKO_A = (function(){
       <div class="ovkval"><span class="ovknum">${esc(v)}</span><span class="ovkunit">${esc(u)}</span></div>
       <span class="ovkcap">${esc(cap)}</span></div>`;
     const heroes = `<div class="pwhero cols3">
-      ${hero(E.t('kGasToday'), fmt(d.todayM3), 'm\u00b3', E.t('capToNow',{time:E.data.basis.asOf}).replace(' \u00b7 live','').replace(' \u00b7 \u0645\u0628\u0627\u0634\u0631',''))}
-      ${hero(E.t('gasAvg7'), fmt(d.avg7M3), 'm\u00b3', E.t('gasAvg7Cap'))}
-      ${hero(E.t('gasMtd'), fmt(d.mtdM3), 'm\u00b3', (ar?(d.meterAr||d.meterEn):d.meterEn).split(' \u00b7')[0])}</div>`;
+      ${hero(E.t('kGasToday'), d.todayM3 == null ? '--' : fmt(d.todayM3), 'm\u00b3', E.t('capToNow',{time:E.data.basis.asOf}).replace(' \u00b7 live','').replace(' \u00b7 \u0645\u0628\u0627\u0634\u0631',''))}
+      ${hero(E.t('gasAvg7'), d.avg7M3 == null ? '--' : fmt(d.avg7M3), 'm\u00b3', E.t('gasAvg7Cap'))}
+      ${hero(E.t('gasMtd'), d.mtdM3 == null ? '--' : fmt(d.mtdM3), 'm\u00b3', (ar?(d.meterAr||d.meterEn):d.meterEn) ? (ar?(d.meterAr||d.meterEn):d.meterEn).split(' \u00b7')[0] : '')}</div>`;
 
     // --- Live-data chart (toggle-aware) ---
     const tr = E.state.gsTrendRange || 'today';
