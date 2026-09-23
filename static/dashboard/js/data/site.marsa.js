@@ -423,11 +423,11 @@ window.EKO_DATA.marsa = {
     "groups": [
       { "id": "hvac", "hue": "#C56A6A", "sysKey": ["HVAC"], "labelEn": "HVAC & Mechanical", "labelAr": "التكييف والميكانيكا",
         "cards": [
-          { "kind": "stat", "labelEn": "OVERALL HEALTH", "labelAr": "\u0627\u0644\u062d\u0627\u0644\u0629 \u0627\u0644\u0639\u0627\u0645\u0629", "v": "96.4", "u": "%", "capEn": "Healthy", "capAr": "\u0633\u0644\u064a\u0645", "tone": "ok" },
-          { "kind": "stat", "wash": "warn", "labelEn": "HVAC EQUIPMENT", "labelAr": "معدات التكييف", "v": "88 / 92", "u": "", "capEn": "Total: 92", "capAr": "الإجمالي: 92", "chipEn": "4 inactive", "chipAr": "4 غير نشطة", "tone": "warn" },
-          { "kind": "gauge", "subOnly": true, "labelEn": "TEMPERATURE DEVIATION INDEX", "labelAr": "مؤشر انحراف الحرارة", "val": 2.2, "min": 0, "max": 10, "u": "°C", "wordEn": "Warning", "wordAr": "تحذير", "tone": "warn", "ramp": "risk" },
-          { "kind": "gauge", "subOnly": true, "labelEn": "ENERGY PERFORMANCE RATIO", "labelAr": "نسبة أداء الطاقة", "val": 0.87, "min": 0, "max": 2, "u": "", "wordEn": "Healthy", "wordAr": "سليم", "tone": "ok", "ramp": "risk" },
-          { "kind": "gauge", "subOnly": true, "labelEn": "COMFORT ENERGY INDEX", "labelAr": "مؤشر طاقة الراحة", "val": 66.04, "min": 0, "max": 100, "u": "", "wordEn": "Good", "wordAr": "جيد", "tone": "ok" }
+          { "kind": "stat", "labelEn": "OVERALL HEALTH", "labelAr": "\u0627\u0644\u062d\u0627\u0644\u0629 \u0627\u0644\u0639\u0627\u0645\u0629", "v": null, "u": "%", "capEn": null, "capAr": null, "tone": "ok" },
+          { "kind": "stat", "labelEn": "HVAC EQUIPMENT", "labelAr": "معدات التكييف", "v": null, "u": "", "capEn": null, "capAr": null, "chipEn": null, "chipAr": null, "tone": "ok" },
+          { "kind": "stat", "subOnly": true, "labelEn": "TEMPERATURE DEVIATION INDEX", "labelAr": "مؤشر انحراف الحرارة", "v": null, "u": "°C", "capEn": null, "capAr": null, "tone": "ok" },
+          { "kind": "stat", "subOnly": true, "labelEn": "ENERGY PERFORMANCE RATIO", "labelAr": "نسبة أداء الطاقة", "v": null, "u": "", "capEn": null, "capAr": null, "tone": "ok" },
+          { "kind": "stat", "subOnly": true, "labelEn": "COMFORT ENERGY INDEX", "labelAr": "مؤشر طاقة الراحة", "v": null, "u": "", "capEn": null, "capAr": null, "tone": "ok" }
           ] },
       { "id": "electrical", "hue": "#C2955A", "sysKey": ["Electrical"], "labelEn": "Electrical", "labelAr": "الكهرباء",
         "cards": [

@@ -164,10 +164,13 @@ window.EKO_A = (function(){
     const alarms = E.data.alarms.filter(a => g.sysKey.includes(a.sys));
     const lbl = c => ar ? c.labelAr : c.labelEn;
     const word = c => (ar ? c.wordAr : c.wordEn) || '';
-    const heroes = g.cards.filter(c => c.kind === 'stat' || c.kind === 'gauge').map(c =>
-      c.kind === 'stat'
-        ? heroTile(E, lbl(c), c.v, c.u, (ar?c.capAr:c.capEn)||'', c.chipEn?(ar?c.chipAr:c.chipEn):null, c.tone==='warn'?'warn':'ok')
-        : heroTile(E, lbl(c), String(c.val), c.u, '', word(c), c.tone==='warn'?'warn':'pos'));   /* D99: the word is a verdict */
+    const heroes = g.cards.filter(c => c.kind === 'stat' || c.kind === 'gauge').map(c => {
+      const v = c.kind === 'stat' ? (c.v == null ? '--' : String(c.v)) : (c.val == null ? '--' : String(c.val));
+      const cap = (ar ? c.capAr : c.capEn) || '';
+      const chip = c.chipEn ? (ar ? c.chipAr : c.chipEn) : null;
+      const chipTone = c.tone === 'warn' ? 'warn' : 'ok';
+      return heroTile(E, lbl(c), v, c.u, cap, chip, chipTone);
+    });
     const widgets = [];
     g.cards.forEach(c => {
       if(c.kind === 'donut'){

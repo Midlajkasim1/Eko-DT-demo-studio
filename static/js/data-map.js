@@ -130,7 +130,7 @@
     var perf = asNum(p.energy_performance);
     if (perf != null) set(el, "performancePct", perf);
     
-    // Wire live endpoints to the Systems HVAC & Mechanical gauges
+    // Wire live endpoints to the Systems HVAC & Mechanical stat cards
     if (site.systems && site.systems.groups) {
       var hvacGrp = site.systems.groups.find(function(g) { return g.id === "hvac"; });
       if (hvacGrp && hvacGrp.cards) {
@@ -139,13 +139,22 @@
         var comfIdx = asNum(p.comfort_compliance);
         hvacGrp.cards.forEach(function(c) {
           if (c.labelEn === "TEMPERATURE DEVIATION INDEX" && tempDev != null) {
-            set(c, "val", Math.trunc(tempDev * 10) / 10);
+            set(c, "v", String(Math.trunc(tempDev * 10) / 10));
+            set(c, "capEn", tempDev > 2 ? "Warning" : "Normal");
+            set(c, "capAr", tempDev > 2 ? "تحذير" : "طبيعي");
+            set(c, "tone", tempDev > 2 ? "warn" : "ok");
           }
           if (c.labelEn === "ENERGY PERFORMANCE RATIO" && enPerf != null) {
-            set(c, "val", Math.trunc(enPerf * 100) / 100);
+            set(c, "v", String(Math.trunc(enPerf * 100) / 100));
+            set(c, "capEn", enPerf < 1.2 ? "Healthy" : "Above target");
+            set(c, "capAr", enPerf < 1.2 ? "سليم" : "فوق الهدف");
+            set(c, "tone", enPerf < 1.2 ? "ok" : "warn");
           }
           if (c.labelEn === "COMFORT ENERGY INDEX" && comfIdx != null) {
-            set(c, "val", Math.trunc(comfIdx * 100) / 100);
+            set(c, "v", String(Math.trunc(comfIdx * 100) / 100));
+            set(c, "capEn", comfIdx >= 60 ? "Good" : comfIdx >= 40 ? "Fair" : "Poor");
+            set(c, "capAr", comfIdx >= 60 ? "جيد" : comfIdx >= 40 ? "مقبول" : "ضعيف");
+            set(c, "tone", comfIdx >= 60 ? "ok" : "warn");
           }
         });
       }
@@ -866,6 +875,37 @@
     });
 
     site.assets = newAssets;
+
+    // Dynamically update the HVAC Equipment and Overall Health cards from live data
+    if (site.systems && site.systems.groups) {
+      var hvacGrp = site.systems.groups.find(function(g) { return g.id === "hvac"; });
+      if (hvacGrp && hvacGrp.cards) {
+        var hvacAssets = newAssets.filter(function(a) { return a.sys === "hvac" || a.sys === "vent"; });
+        var hvacTotal = hvacAssets.length;
+        var hvacAlarm = hvacAssets.filter(function(a) { return a.st === "alarm"; }).length;
+        var hvacActive = hvacTotal - hvacAlarm;
+        var healthPct = hvacTotal > 0 ? Math.round((hvacActive / hvacTotal) * 1000) / 10 : null;
+        var inactiveCount = hvacAlarm;
+
+        hvacGrp.cards.forEach(function(c) {
+          if (c.labelEn === "OVERALL HEALTH" && healthPct != null) {
+            c.v = String(healthPct);
+            c.capEn = healthPct >= 95 ? "Healthy" : healthPct >= 80 ? "Fair" : "Critical";
+            c.capAr = healthPct >= 95 ? "سليم" : healthPct >= 80 ? "مقبول" : "حرج";
+            c.tone = healthPct >= 95 ? "ok" : "warn";
+          }
+          if (c.labelEn === "HVAC EQUIPMENT" && hvacTotal > 0) {
+            c.v = hvacActive + " / " + hvacTotal;
+            c.capEn = "Total: " + hvacTotal;
+            c.capAr = "الإجمالي: " + hvacTotal;
+            c.chipEn = inactiveCount > 0 ? inactiveCount + " inactive" : null;
+            c.chipAr = inactiveCount > 0 ? inactiveCount + " غير نشطة" : null;
+            c.tone = inactiveCount > 0 ? "warn" : "ok";
+          }
+        });
+      }
+    }
+
     paint();
   }
 window.addEventListener('dashboard-data', function (e) {
