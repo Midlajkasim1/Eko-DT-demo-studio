@@ -652,7 +652,7 @@ window.EKO_A = (function(){
     return C().summaryShell(E, E.t('spacesOverview'), '<div class="ovklist">'
       + row(E.t('spComfort'), fmt(d.comfortPct,1), '%', E.t('spComfortCap'))
       + row(E.t('spOccupied'), fmt(d.occupiedPct), '%', ar?d.occPeakAr:d.occPeakEn)
-      + row(E.t('spIeq'), fmt(d.ieq), '', ar?d.ieqCapAr:d.ieqCapEn)
+      + row(E.t('spIeq'), fmt(d.ieq, 2), '', ar?d.ieqCapAr:d.ieqCapEn)
       + '</div>');
   }
   function assetsSummary(E){

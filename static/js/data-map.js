@@ -123,8 +123,8 @@
       if (site.spaces) {
         set(site.spaces, "ieq", iaq);
         var q = iaq >= 80 ? "good" : iaq >= 60 ? "moderate" : "poor";
-        set(site.spaces, "ieqCapEn", q + " · based on FIN IAQ index");
-        set(site.spaces, "ieqCapAr", "مؤشر جودة هواء · " + q);
+        set(site.spaces, "ieqCapEn", q + " · CO\u2082 within limits");
+        set(site.spaces, "ieqCapAr", "جيد · CO\u2082 ضمن الحدود");
       }
     }
     var comfort = asNum(p.comfort_compliance);
