@@ -54,7 +54,7 @@ window.EKO_A = (function(){
         : `<span class="scdot" data-tone="${wash}"></span>`;
       const headFix = `<div class="ovkhead">${dotEl}<span class="ovklbl">${esc(ar?c.labelAr:c.labelEn)}</span>
         ${chip?`<span class="pwchip msA" data-tone="${c.tone}">${esc(chip)}</span>`:''}</div>`;
-      return `<div class="syscard" data-span="4" data-wash="${wash}">${headFix}
+      return `<div class="syscard" data-span="${c.span || 4}" data-wash="${wash}">${headFix}
         <div class="scrow"><span class="scval lg">${esc(sv)}${c.u&&sv!=='--'?`<span class="ovkunit">${esc(c.u)}</span>`:''}</span>
         <span class="ovkcap msA" data-tone="${c.tone==='ok'?'pos':c.tone==='warn'?'warn':'t3'}">${esc(capStr)}</span></div></div>`;
     }
