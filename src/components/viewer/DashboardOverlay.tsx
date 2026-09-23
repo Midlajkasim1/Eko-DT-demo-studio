@@ -76,7 +76,6 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
         models.forEach(m => {
           // If keyword is 'all', show all. Otherwise, check if originalFileName contains the keyword.
           const isVisible = keyword === 'all' || m.originalFileName.toLowerCase().includes(keyword.toLowerCase())
-          console.log(`[IsolateModel] Model: ${m.originalFileName} | Keyword: ${keyword} | Visible: ${isVisible}`)
           useModelStore.getState().setModelVisibility(m.modelId, isVisible)
           
           if (engine) {
