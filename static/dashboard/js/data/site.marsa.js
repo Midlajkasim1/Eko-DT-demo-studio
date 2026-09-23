@@ -177,41 +177,41 @@ window.EKO_DATA.marsa = {
   "energyLanding": {
     "performancePct": null, "perfSpark": [], "perfDeltaEn": null, "perfDeltaAr": null,
     "perfWordEn": null, "perfWordAr": null,
-    "currentKw": null, "baselineKw": 96.1,
+    "currentKw": null, "baselineKw": null,
     "mtdKwh": null,
     "overnightDeviationPct": null,
     "sumGauges": [
-      { "labelEn": "ENERGY DEVIATION", "labelAr": "\u0627\u0646\u062d\u0631\u0627\u0641 \u0627\u0644\u0637\u0627\u0642\u0629", "val": 1.4, "max": 100, "u": "%", "wordEn": "Healthy", "wordAr": "\u0633\u0644\u064a\u0645", "tone": "ok" },
-      { "labelEn": "LOAD FACTOR", "labelAr": "\u0645\u0639\u0627\u0645\u0644 \u0627\u0644\u062d\u0645\u0644", "val": 66.83, "max": 100, "u": "%", "wordEn": "Acceptable", "wordAr": "\u0645\u0642\u0628\u0648\u0644", "tone": "ok" }
+      { "key": "enDev", "labelEn": "ENERGY DEVIATION", "labelAr": "\u0627\u0646\u062d\u0631\u0627\u0641 \u0627\u0644\u0637\u0627\u0642\u0629", "val": null, "max": 100, "u": "%", "wordEn": null, "wordAr": null, "tone": "ok" },
+      { "key": "loadFactor", "labelEn": "LOAD FACTOR", "labelAr": "\u0645\u0639\u0627\u0645\u0644 \u0627\u0644\u062d\u0645\u0644", "val": null, "max": 100, "u": "%", "wordEn": null, "wordAr": null, "tone": "ok" }
     ],
-    "wasteTotalKwh": 6593.51,
+    "wasteTotalKwh": null,
     "kpis": [
       { "key": "overnight", "labelEn": "Overnight / Idle Load", "labelAr": "حمل الليل / الخمول",
-        "sharePct": 6.05, "gaugeVal": 37.6, "gaugeMax": 100, "stateEn": "Warning", "stateAr": "تحذير", "tone": "warn",
-        "wasteKwh": 3661.16, "tipEn": "Schedule pumps, lighting, and HVAC during off-hours.",
+        "sharePct": null, "gaugeVal": null, "gaugeMax": 100, "stateEn": null, "stateAr": null, "tone": "ok",
+        "wasteKwh": null, "tipEn": "Schedule pumps, lighting, and HVAC during off-hours.",
         "tipAr": "جدولة المضخات والإنارة والتكييف خارج ساعات التشغيل." },
       { "key": "epr", "labelEn": "HVAC / EPR", "labelAr": "التكييف / EPR",
-        "sharePct": 4.09, "gaugeVal": 0.9, "gaugeMax": 2, "stateEn": "Healthy", "stateAr": "سليم", "tone": "ok",
-        "wasteKwh": 2475.87, "tipEn": "Timely FDD maintenance saves energy and extends equipment life.",
+        "sharePct": null, "gaugeVal": null, "gaugeMax": 2, "stateEn": null, "stateAr": null, "tone": "ok",
+        "wasteKwh": null, "tipEn": "Timely FDD maintenance saves energy and extends equipment life.",
         "tipAr": "صيانة FDD في وقتها توفر الطاقة وتطيل عمر المعدات." },
       { "key": "pf", "labelEn": "Power Factor", "labelAr": "معامل القدرة",
-        "sharePct": 0.59, "gaugeVal": 1.0, "gaugeMax": 1, "stateEn": "Healthy / Excellent", "stateAr": "سليم / ممتاز", "tone": "ok",
-        "wasteKwh": 355.66, "tipEn": "Ensure capacitor banks operate correctly to maintain power factor.",
+        "sharePct": null, "gaugeVal": null, "gaugeMax": 1, "stateEn": null, "stateAr": null, "tone": "ok",
+        "wasteKwh": null, "tipEn": "Ensure capacitor banks operate correctly to maintain power factor.",
         "tipAr": "تأكد من عمل بنوك المكثفات للحفاظ على معامل القدرة." },
       { "key": "imbalance", "labelEn": "Load Imbalance", "labelAr": "عدم اتزان الأحمال",
-        "sharePct": 0.17, "gaugeVal": 5.5, "gaugeMax": 30, "stateEn": "Healthy", "stateAr": "سليم", "tone": "ok",
-        "wasteKwh": 100.82, "tipEn": "Regular phase balancing and equipment check.",
+        "sharePct": null, "gaugeVal": null, "gaugeMax": 30, "stateEn": null, "stateAr": null, "tone": "ok",
+        "wasteKwh": null, "tipEn": "Regular phase balancing and equipment check.",
         "tipAr": "موازنة الأطوار وفحص المعدات دوريًا." }
     ],
     "topOpps": [
-      { "titleEn": "Overnight / idle load", "titleAr": "حمل الليل / الخمول", "aed": 459.84 },
-      { "titleEn": "HVAC faults", "titleAr": "أعطال التكييف", "aed": 501.71 },
-      { "titleEn": "Power factor", "titleAr": "معامل القدرة", "aed": 21.15 } ],
+      { "titleEn": "Overnight / idle load", "titleAr": "حمل الليل / الخمول", "aed": null },
+      { "titleEn": "HVAC faults", "titleAr": "أعطال التكييف", "aed": null },
+      { "titleEn": "Power factor", "titleAr": "معامل القدرة", "aed": null } ],
     "modules": [
-      { "label": "subPower", "pageId": "power", "sub": "power", "headEn": "3.65 MW now", "headAr": "3.65 م.و الآن" },
-      { "label": "subBench", "pageId": "bench", "sub": "bench", "headEn": "HVAC 46 Wh/m²", "headAr": "التكييف 46 و.س/م²" },
-      { "label": "subAnom", "pageId": "anom", "sub": "anom", "headEn": "1 active anomaly", "headAr": "شذوذ واحد نشط" },
-      { "label": "subFcst", "pageId": "fcst", "sub": "fcst", "headEn": "1,190 MWh month end", "headAr": "1,190 م.و.س نهاية الشهر" } ]
+      { "label": "subPower", "pageId": "power", "sub": "power", "headEn": null, "headAr": null },
+      { "label": "subBench", "pageId": "bench", "sub": "bench", "headEn": null, "headAr": null },
+      { "label": "subAnom", "pageId": "anom", "sub": "anom", "headEn": null, "headAr": null },
+      { "label": "subFcst", "pageId": "fcst", "sub": "fcst", "headEn": null, "headAr": null } ]
   },
 
   /* ------------------------------------------------------------------------

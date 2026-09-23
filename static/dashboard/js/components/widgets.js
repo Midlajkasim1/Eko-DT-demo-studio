@@ -234,23 +234,15 @@ window.EKO_C = (function(){
        the 124x78 dial with the readout ROW below it — value left, status
        word right — so the dial ticks never collide with the readout. */
     const gaugeRow = (lbl, val, mx, u, word, tone) => {
-      /* Energy dial (D38, Final mock): NOT the ramp gauge — a plain track
-         with ONE tone-coloured arc (state colour), a needle and a hub, and
-         no tick labels. When val is null show '--' placeholder, no dial. */
+      /* Clean stat row without SVG gauge, matching Overall Health styling */
+      const dotTone = (tone === 'warn' || tone === 'crit') ? 'warn' : 'ok';
       if (val == null) {
-        return `<div class="ovk ovkDark"><div class="ovkhead"><span class="scdot" data-tone="${tone==='warn'?'warn':'ok'}"></span><span class="ovklbl">${esc(lbl)}</span>${ctl(E, lbl, '')}</div>
+        return `<div class="ovk ovkDark"><div class="ovkhead"><span class="scdot" data-tone="${dotTone}"></span><span class="ovklbl">${esc(lbl)}</span>${ctl(E, lbl, '')}</div>
           <div class="ovkval"><span class="ovknum">--</span></div></div>`;
       }
-      const g = ekoGauge(val, 0, mx, 'risk');
-      const arcC = tone==='warn' ? '#E08A2E' : '#4EA36B';
-      return `<div class="ovk ovkDark"><div class="ovkhead"><span class="scdot" data-tone="${tone==='warn'?'warn':'ok'}"></span><span class="ovklbl">${esc(lbl)}</span>${ctl(E, lbl, '')}</div>
-        <div class="ovgauge"><svg viewBox="0 0 124 78" width="124" height="78">
-          <path d="${g.track}" stroke="var(--bd1)" stroke-width="9" fill="none"/>
-          ${g.hasFill?`<path d="${g.fillArc}" stroke="${arcC}" stroke-width="9" fill="none"/>`:''}
-          <line x1="62" y1="66" x2="${g.nx}" y2="${g.ny}" stroke="var(--t1)" stroke-width="3" stroke-linecap="round"/>
-          <circle cx="62" cy="66" r="5" fill="var(--s3)" stroke="var(--bd2)" stroke-width="1.5"/></svg></div>
-        <div class="scrow"><span class="tMonoS fw6">${esc(String(val))}${esc(u)}</span>
-          <span class="ovkcap msA" data-tone="${tone==='warn'?'warn':'pos'}">${esc(word)}</span></div></div>`;
+      return `<div class="ovk ovkDark"><div class="ovkhead"><span class="scdot" data-tone="${dotTone}"></span><span class="ovklbl">${esc(lbl)}</span>${ctl(E, lbl, '')}</div>
+        <div class="ovkval"><span class="ovknum">${esc(String(val))}</span>${u ? `<span class="ovkunit">${esc(u)}</span>` : ''}</div>
+        ${word ? `<div class="scrow"><span class="ovkcap msA" data-tone="${dotTone==='warn'?'warn':'pos'}">${esc(word)}</span></div>` : ''}</div>`;
     };
     const hasSpark = Array.isArray(d.perfSpark) && d.perfSpark.length >= 2;
     const mn = hasSpark ? Math.min(...d.perfSpark) : 0;

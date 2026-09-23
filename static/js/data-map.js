@@ -128,7 +128,33 @@
     var mtd = asNum(p.current_month);
     if (mtd != null) set(el, "mtdKwh", mtd);
     var perf = asNum(p.energy_performance);
-    if (perf != null) set(el, "performancePct", perf);
+    if (perf != null && perf >= 0 && perf <= 500) {
+      set(el, "performancePct", perf);
+    } else {
+      el.performancePct = null;
+    }
+    
+    // Wire live endpoints to Energy Landing summary cards
+    if (el) {
+      var rawOvernight = asNum(p.after_hours_load);
+      var rawEnDev = asNum(p.energy_deviation);
+      
+      var overnight = (rawOvernight != null && rawOvernight >= 0 && rawOvernight <= 100) ? rawOvernight : null;
+      var enDev = (rawEnDev != null && rawEnDev >= -100 && rawEnDev <= 100) ? rawEnDev : null;
+      
+      set(el, "overnightDeviationPct", overnight);
+      
+      if (el.sumGauges) {
+        el.sumGauges.forEach(function(g) {
+          if (g.key === "enDev" && enDev != null) {
+            set(g, "val", Math.trunc(enDev * 10) / 10);
+            set(g, "wordEn", Math.abs(enDev) <= 5 ? "Healthy" : "Deviation");
+            set(g, "wordAr", Math.abs(enDev) <= 5 ? "سليم" : "انحراف");
+            set(g, "tone", Math.abs(enDev) <= 5 ? "ok" : "warn");
+          }
+        });
+      }
+    }
     
     // Wire live endpoints to the Systems HVAC & Mechanical stat cards
     // Sanity-checked: reject any value outside a physically plausible range → stays null → shows '--'
