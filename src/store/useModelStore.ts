@@ -9,6 +9,7 @@ interface ModelState {
   removeModel: (modelId: string) => void
   clearModels: () => void
   toggleVisibility: (modelId: string) => void
+  setModelVisibility: (modelId: string, visible: boolean) => void
   setActiveModelId: (modelId: string | null) => void
   updateModelTransform: (modelId: string, transform: { position?: [number, number, number], rotation?: [number, number, number], scale?: [number, number, number] }) => void
   modelsLoadedInEngine: Record<string, boolean>
@@ -38,6 +39,9 @@ export const useModelStore = create<ModelState>((set) => ({
   clearModels: () => set({ models: [], modelVisibility: {}, modelsLoadedInEngine: {}, activeModelId: null }),
   toggleVisibility: (modelId) => set((state) => ({
     modelVisibility: { ...state.modelVisibility, [modelId]: !state.modelVisibility[modelId] }
+  })),
+  setModelVisibility: (modelId, visible) => set((state) => ({
+    modelVisibility: { ...state.modelVisibility, [modelId]: visible }
   })),
   setActiveModelId: (modelId) => set({ activeModelId: modelId }),
   updateModelTransform: (modelId, transform) => set((state) => ({

@@ -158,19 +158,20 @@
       const targetModule = module ?? this.state.module;
       const targetSub = sub ?? null;
       
-      // Map navigation to viewer layer isolation
+      // Map navigation to whole-model isolation
       let targetLayer = 'all';
+      let modelKeyword = 'all';
       if (targetModule === 'systems') {
-        if (targetSub === 'hvac') targetLayer = 'mech';
-        else if (targetSub === 'electrical') targetLayer = 'elec';
+        if (targetSub === 'hvac' || targetSub === 'electrical') {
+          targetLayer = targetSub === 'hvac' ? 'mech' : 'elec';
+          modelKeyword = 'ME-M3';
+        }
       }
       if (this.state.dock) this.state.dock.layer = targetLayer;
       
-      if (window.EKO_APP && window.EKO_APP.engine && window.EKO_APP.engine.capabilities && window.EKO_APP.engine.capabilities.layers) {
-        ['all','arch','elec','int','mech','str'].forEach(l => {
-           window.EKO_APP.engine.setLayerVisibility(l, l === targetLayer || targetLayer === 'all');
-        });
-      }
+      window.dispatchEvent(new CustomEvent('dashboard-event', {
+        detail: { action: 'isolateModel', keyword: modelKeyword }
+      }));
 
       this.set({ born: this.state.born || 'nav',
                  pageId, module: targetModule, sub: targetSub,
@@ -879,11 +880,13 @@
       const layer = el.dataset.v;
       E.state.dock.layer = layer; 
       E.state.dock.bloom = null; 
-      if (E.engine && E.engine.capabilities && E.engine.capabilities.layers) {
-        ['all','arch','elec','int','mech','str'].forEach(l => {
-           E.engine.setLayerVisibility(l, l === layer || layer === 'all');
-        });
-      }
+      
+      let modelKeyword = 'all';
+      if (layer === 'mech' || layer === 'elec') modelKeyword = 'ME-M3';
+      
+      window.dispatchEvent(new CustomEvent('dashboard-event', {
+        detail: { action: 'isolateModel', keyword: modelKeyword }
+      }));
       render(); 
     },
     setStyle(el){ E.state.dock.style = el.dataset.v; E.state.dock.bloom = null; render(); },   /* D72: every choice closes */

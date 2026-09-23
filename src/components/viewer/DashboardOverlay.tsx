@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useProjectStore } from '@/store/useProjectStore'
 import { useAppStore } from '@/store/useAppStore'
+import { useModelStore } from '@/store/useModelStore'
 import type { ProjectApiSettings } from '@/types'
 
 interface DashboardOverlayProps {
@@ -64,6 +65,14 @@ export function DashboardOverlay({ visible }: DashboardOverlayProps) {
         }
       } else if (customEvent.detail?.action === 'setXrayColor') {
         useAppStore.getState().setLightingParams({ xrayColor: customEvent.detail.color })
+      } else if (customEvent.detail?.action === 'isolateModel') {
+        const { keyword } = customEvent.detail
+        const models = useModelStore.getState().models
+        models.forEach(m => {
+          // If keyword is 'all', show all. Otherwise, check if modelId contains the keyword.
+          const visible = keyword === 'all' || m.modelId.toLowerCase().includes(keyword.toLowerCase())
+          useModelStore.getState().setModelVisibility(m.modelId, visible)
+        })
       }
     }
     window.addEventListener('dashboard-event', handler)
