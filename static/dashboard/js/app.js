@@ -155,8 +155,25 @@
       if(gate){ this.set({ born:'dlg', teaserKey: gate, dlg:'teaser', mobMore:false }); return; }
       if(pageId !== this.state.pageId) this.state._prev = { pageId: this.state.pageId, module: this.state.module, sub: this.state.sub };
       if(window.EKO_SURF) window.EKO_SURF.closeAll();          /* R4 (D67) */
+      const targetModule = module ?? this.state.module;
+      const targetSub = sub ?? null;
+      
+      // Map navigation to viewer layer isolation
+      let targetLayer = 'all';
+      if (targetModule === 'systems') {
+        if (targetSub === 'hvac') targetLayer = 'mech';
+        else if (targetSub === 'electrical') targetLayer = 'elec';
+      }
+      if (this.state.dock) this.state.dock.layer = targetLayer;
+      
+      if (window.EKO_APP && window.EKO_APP.engine && window.EKO_APP.engine.capabilities && window.EKO_APP.engine.capabilities.layers) {
+        ['all','arch','elec','int','mech','str'].forEach(l => {
+           window.EKO_APP.engine.setLayerVisibility(l, l === targetLayer || targetLayer === 'all');
+        });
+      }
+
       this.set({ born: this.state.born || 'nav',
-                 pageId, module: module ?? this.state.module, sub: sub ?? null,
+                 pageId, module: targetModule, sub: targetSub,
                  mkPop: null, dlg: null, mobMore: false, modelFs: false });
     }
   };
@@ -858,7 +875,17 @@
       if(d.bloom && d.bloom !== prev) E.state.born = 'bloom';
       render(); },
     setLevel(el){ E.state.dock.level = el.dataset.v; E.state.dock.bloom = null; render(); },
-    setLayer(el){ E.state.dock.layer = el.dataset.v; E.state.dock.bloom = null; render(); },
+    setLayer(el){ 
+      const layer = el.dataset.v;
+      E.state.dock.layer = layer; 
+      E.state.dock.bloom = null; 
+      if (E.engine && E.engine.capabilities && E.engine.capabilities.layers) {
+        ['all','arch','elec','int','mech','str'].forEach(l => {
+           E.engine.setLayerVisibility(l, l === layer || layer === 'all');
+        });
+      }
+      render(); 
+    },
     setStyle(el){ E.state.dock.style = el.dataset.v; E.state.dock.bloom = null; render(); },   /* D72: every choice closes */
     /* D88–D91: reports — build → narrate → freeze → store → notify → preview */
     async rpRun(spec){ if(E.state.rpBusy) return; E.set({ rpBusy:true });
