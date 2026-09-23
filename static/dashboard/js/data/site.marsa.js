@@ -341,7 +341,7 @@ window.EKO_DATA.marsa = {
     { "id": "G-01", "nameEn": "Boiler room gas", "nameAr": "غاز غرفة الغلايات", "domain": "gas", "unit": "m³", "last": 210, "lastAt": "14:00", "receivedMin": 4, "quality": "unconfirmed", "sinceEn": "2 d", "sinceAr": "يومان", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 100, "targetPct": 99, "sparkUnit": "m³/d", "spark7": [200, 215, 210, 230, 221, 206, 210] },
     { "id": "KG-02", "nameEn": "Kitchen main gas", "nameAr": "غاز المطبخ الرئيسي", "domain": "gas", "unit": "m³", "last": 48, "lastAt": "12:00", "receivedMin": 1560, "quality": "offline", "sinceEn": "yesterday 12:00", "sinceAr": "أمس 12:00", "sinceAgeH": 26, "intervalsGot": 0, "intervalsTotal": 56, "uptimePct": 0, "targetPct": 99, "sparkUnit": "m³/d", "spark7": [46, 49, 47, 50, 48, 48, null] }
   ],
-  "registerTotal": 1240,
+  "registerTotal": null,
   "assets": [
     { "id": "CH-2", "sys": "hvac", "crit": "A", "wtyEnd": "2027-03-31", "tags": ["critical-plant"],        "st": "alarm", "alarms": ["al-ch2","al-cop"], "floor": "L3",  "zone": "Plant room", "zoneAr": "غرفة المحطة",    "typeEn": "Water-cooled chiller", "typeAr": "مبرد بتبريد مائي", "level": "Level 3", "levelAr": "الطابق 3", "wos": 2, "wost": "prog", "make": "Carrier 30XV", "serial": "CX-88412", "svc": "12 Aug", "cafm": "HEX-4401",
       "trend7": { "point": "Condenser approach", "unit": "K", "vals": [1.3, 1.2, 1.4, 1.9, 2.0, 2.0, 2.1] }, "params": [["Condenser approach","derived · FDD","+2.1 K · 11 d"],["COP","derived","4.1"],["Load","BMS","61 %"],["CHW supply","sensor CHWS-02","6.6 °C"]],
@@ -412,7 +412,7 @@ window.EKO_DATA.marsa = {
     "water": { "headEn": "--", "headAr": "--" },
     "gas":   { "headEn": "--", "headAr": "--" },
     "heat":  { "headEn": "zones by consumption · L1 Kitchen highest", "headAr": "المناطق حسب الاستهلاك · مطبخ L1 الأعلى" },
-    "reg":   { "headEn": "1,240 assets", "headAr": "1,240 أصلًا" }
+    "reg":   { "headEn": "--", "headAr": "--" }
   },
 
   /* ------------------------------------------------------------------------

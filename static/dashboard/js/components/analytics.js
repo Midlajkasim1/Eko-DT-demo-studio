@@ -663,7 +663,7 @@ window.EKO_A = (function(){
       <div class="ovkcap">${esc(cap)}</div></div>`;
     return C().summaryShell(E, E.t('assetsOverview'), '<div class="ovklist">'
       + row(E.t('asRegistered'), fmt(E.data.registerTotal), E.t('asRegisteredCap'))
-      + row(E.t('asWos'), '380', E.t('asWosCap'))
+      + row(E.t('asWos'), '--', E.t('asWosCap'))
       + row(E.t('asInAlarm'), String(inAlarm.length), E.t('asInAlarmCap',{n:critAssets.length,first:critAssets[0]?critAssets[0].id:'—'}), true)
       + '</div>');
   }

@@ -967,6 +967,12 @@
     });
 
     site.assets = newAssets;
+    site.registerTotal = newAssets.length;
+    
+    if (site.landing && site.landing.reg) {
+      set(site.landing.reg, "headEn", newAssets.length + " assets");
+      set(site.landing.reg, "headAr", newAssets.length + " أصلًا");
+    }
 
     // Dynamically update the HVAC Equipment and Overall Health cards from live data
     if (site.systems && site.systems.groups) {
