@@ -10,7 +10,7 @@ window.EKO_C = (function(){
 
   const esc = s => String(s ?? '').replace(/[&<>"']/g,
     c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const fmt = (n, d=0) => Number(n).toLocaleString('en-US',
+  const fmt = (n, d=0) => n == null ? '--' : Number(n).toLocaleString('en-US',
     { minimumFractionDigits: d, maximumFractionDigits: d });
 
   /* ------------------------------- icon set ------------------------------- */

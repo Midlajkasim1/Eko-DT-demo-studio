@@ -411,7 +411,7 @@ window.EKO_DATA.marsa = {
   "landing": {
     "water": { "headEn": "--", "headAr": "--" },
     "gas":   { "headEn": "--", "headAr": "--" },
-    "heat":  { "headEn": "zones by consumption · L1 Kitchen highest", "headAr": "المناطق حسب الاستهلاك · مطبخ L1 الأعلى" },
+    "heat":  { "headEn": "--", "headAr": "--" },
     "reg":   { "headEn": "--", "headAr": "--" }
   },
 
@@ -528,8 +528,8 @@ window.EKO_DATA.marsa = {
 
   /* Spaces. */
   "spaces": {
-    "comfortPct": 97.2, "occupiedPct": 68, "occPeakEn": "peak 14:00–16:00", "occPeakAr": "الذروة 14:00–16:00",
-    "ieq": 88, "ieqCapEn": "good · CO₂ within limits", "ieqCapAr": "جيد · CO₂ ضمن الحدود"
+    "comfortPct": null, "occupiedPct": null, "occPeakEn": null, "occPeakAr": null,
+    "ieq": null, "ieqCapEn": null, "ieqCapAr": null
   },
 
   /* Heat map: one zone list carries BOTH modes. rect = model overlay tile

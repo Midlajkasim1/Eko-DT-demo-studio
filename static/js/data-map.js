@@ -118,9 +118,23 @@
     var peak = asNum(p.peak_demand);
     if (peak != null) set(m, "peakTodayMw", toMw(peak));
     var iaq = asNum(p.iaq_index);
-    if (iaq != null) set(m, "iaq", iaq);
+    if (iaq != null) {
+      set(m, "iaq", iaq);
+      if (site.spaces) {
+        set(site.spaces, "ieq", iaq);
+        var q = iaq >= 80 ? "good" : iaq >= 60 ? "moderate" : "poor";
+        set(site.spaces, "ieqCapEn", q + " · based on FIN IAQ index");
+        set(site.spaces, "ieqCapAr", "مؤشر جودة هواء · " + q);
+      }
+    }
     var comfort = asNum(p.comfort_compliance);
-    if (comfort != null) set(m, "comfortIndex", comfort);
+    if (comfort != null) {
+      set(m, "comfortIndex", comfort);
+      if (site.spaces) {
+        set(site.spaces, "comfortPct", comfort);
+        set(site.spaces, "spComfortCap", "within target band");
+      }
+    }
     var water = asNum(p.total_water);
     if (water != null) {
       set(m, "waterTodayM3", water);

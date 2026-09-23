@@ -647,7 +647,7 @@ window.EKO_A = (function(){
   function spacesSummary(E){
     const d = E.data.spaces, ar = E.lang === 'ar';
     const row = (lbl,v,u,cap) => `<div class="ovk"><div class="ovkhead"><span class="ovklbl">${esc(lbl)}</span></div>
-      <div class="ovkval"><span class="ovknum">${esc(v)}</span><span class="ovkunit">${esc(u)}</span></div>
+      <div class="ovkval"><span class="ovknum">${esc(v)}</span><span class="ovkunit">${v === '--' ? '' : esc(u)}</span></div>
       <div class="ovkcap">${esc(cap)}</div></div>`;
     return C().summaryShell(E, E.t('spacesOverview'), '<div class="ovklist">'
       + row(E.t('spComfort'), fmt(d.comfortPct,1), '%', E.t('spComfortCap'))
