@@ -130,6 +130,27 @@
     var perf = asNum(p.energy_performance);
     if (perf != null) set(el, "performancePct", perf);
     
+    // Wire live endpoints to the Systems HVAC & Mechanical gauges
+    if (site.systems && site.systems.groups) {
+      var hvacGrp = site.systems.groups.find(function(g) { return g.id === "hvac"; });
+      if (hvacGrp && hvacGrp.cards) {
+        var tempDev = asNum(p.temp_deviation);
+        var enPerf = asNum(p.energy_performance);
+        var comfIdx = asNum(p.comfort_compliance);
+        hvacGrp.cards.forEach(function(c) {
+          if (c.labelEn === "TEMPERATURE DEVIATION INDEX" && tempDev != null) {
+            set(c, "val", Math.trunc(tempDev * 10) / 10);
+          }
+          if (c.labelEn === "ENERGY PERFORMANCE RATIO" && enPerf != null) {
+            set(c, "val", Math.trunc(enPerf * 100) / 100);
+          }
+          if (c.labelEn === "COMFORT ENERGY INDEX" && comfIdx != null) {
+            set(c, "val", Math.trunc(comfIdx * 100) / 100);
+          }
+        });
+      }
+    }
+    
     if (p.power_history) {
       function extractDaily(histId) {
         var hist = p.power_history[histId];
