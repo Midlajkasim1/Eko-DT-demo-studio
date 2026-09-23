@@ -122,9 +122,21 @@
     var comfort = asNum(p.comfort_compliance);
     if (comfort != null) set(m, "comfortIndex", comfort);
     var water = asNum(p.total_water);
-    if (water != null) set(m, "waterTodayM3", water);
+    if (water != null) {
+      set(m, "waterTodayM3", water);
+      if (site.landing && site.landing.water) {
+        set(site.landing.water, "headEn", Math.round(water) + " m³ today");
+        set(site.landing.water, "headAr", Math.round(water) + " م³ اليوم");
+      }
+    }
     var gas = asNum(p.total_gas);
-    if (gas != null) set(m, "gasTodayM3", gas);
+    if (gas != null) {
+      set(m, "gasTodayM3", gas);
+      if (site.landing && site.landing.gas) {
+        set(site.landing.gas, "headEn", Math.round(gas) + " m³ today");
+        set(site.landing.gas, "headAr", Math.round(gas) + " م³ اليوم");
+      }
+    }
     var mtd = asNum(p.current_month);
     if (mtd != null) set(el, "mtdKwh", mtd);
     var perf = asNum(p.energy_performance);

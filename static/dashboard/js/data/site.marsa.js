@@ -409,8 +409,8 @@ window.EKO_DATA.marsa = {
 
   /* Module-highlight row headlines (module landing panels). */
   "landing": {
-    "water": { "headEn": "380 m³ today · to 14:00", "headAr": "380 م³ اليوم · حتى 14:00" },
-    "gas":   { "headEn": "210 m³ today · meter G-01", "headAr": "210 م³ اليوم · عداد G-01" },
+    "water": { "headEn": "--", "headAr": "--" },
+    "gas":   { "headEn": "--", "headAr": "--" },
     "heat":  { "headEn": "zones by consumption · L1 Kitchen highest", "headAr": "المناطق حسب الاستهلاك · مطبخ L1 الأعلى" },
     "reg":   { "headEn": "1,240 assets", "headAr": "1,240 أصلًا" }
   },
