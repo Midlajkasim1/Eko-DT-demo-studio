@@ -272,7 +272,23 @@
       var gsSpark = extractDaily("Total_Gas_Consumption_his");
       if (site.summary) { applySparkAndDelta(site.summary[2], gsSpark); changed = true; }
       
-      if (el) set(el, "perfSpark", enSpark);
+      if (el && enSpark.length > 0) {
+        set(el, "perfSpark", enSpark);
+        if (enSpark.length >= 2) {
+          var last = enSpark[enSpark.length - 1];
+          var prevSum = 0;
+          for (var i = 0; i < enSpark.length - 1; i++) prevSum += enSpark[i];
+          var typical = prevSum / (enSpark.length - 1);
+          if (typical > 0) {
+            var pct = Math.round(((last - typical) / typical) * 100);
+            var sign = pct > 0 ? "+" : "";
+            set(el, "perfDeltaEn", sign + pct + "% vs 7d avg");
+            set(el, "perfDeltaAr", sign + pct + "% عن متوسط 7 أيام");
+            set(el, "perfWordEn", pct <= 5 ? "Excellent" : "Check Load");
+            set(el, "perfWordAr", pct <= 5 ? "ممتاز" : "فحص الحمل");
+          }
+        }
+      }
 
       var MONTH_I = {
         january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
