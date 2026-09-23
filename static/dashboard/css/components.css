@@ -1711,6 +1711,7 @@
   flex-direction:column;
   --ovw:var(--spOvp,352px);
   width:auto;
+  min-width:var(--ovw,352px);
   z-index:11
 }
 
@@ -3832,6 +3833,7 @@
   border-radius:10px;
   padding:9px 10px;
   min-width:0;
+  min-height:72px;
   overflow:hidden;
   display:flex;
   flex-direction:column;
