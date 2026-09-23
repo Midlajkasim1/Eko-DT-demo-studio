@@ -174,7 +174,8 @@ window.EKO_A = (function(){
     const alarms = E.data.alarms.filter(a => g.sysKey.includes(a.sys));
     const lbl = c => ar ? c.labelAr : c.labelEn;
     const word = c => (ar ? c.wordAr : c.wordEn) || '';
-    const heroes = g.cards.filter(c => c.kind === 'stat' || c.kind === 'gauge').map(c => {
+    // Only non-subOnly stat/gauge cards become hero tiles at the top
+    const heroes = g.cards.filter(c => (c.kind === 'stat' || c.kind === 'gauge') && !c.subOnly).map(c => {
       const v = c.kind === 'stat' ? (c.v == null ? '--' : String(c.v)) : (c.val == null ? '--' : String(c.val));
       const cap = (ar ? c.capAr : c.capEn) || '';
       const chip = c.chipEn ? (ar ? c.chipAr : c.chipEn) : null;
@@ -183,6 +184,21 @@ window.EKO_A = (function(){
     });
     const widgets = [];
     g.cards.forEach(c => {
+      // subOnly stat cards → rendered as full-width widget boxes (same look as Overall Health)
+      if(c.kind === 'stat' && c.subOnly){
+        const sv = c.v == null ? '--' : String(c.v);
+        const cap = (ar ? c.capAr : c.capEn) || '';
+        const chip = c.chipEn ? (ar ? c.chipAr : c.chipEn) : null;
+        const wash = (c.tone === 'warn' || c.tone === 'crit') ? 'warn' : 'ok';
+        const dotEl = `<span class="scdot" data-tone="${wash}"></span>`;
+        const headW = `<div class="ovkhead">${dotEl}<span class="ovklbl">${esc(lbl(c))}</span>
+          ${chip?`<span class="pwchip msA" data-tone="${c.tone}">${esc(chip)}</span>`:''}</div>`;
+        widgets.push(`<div class="pwwidget">
+          ${headW}
+          <div class="scrow"><span class="scval lg">${esc(sv)}${c.u&&sv!=='--'?`<span class="ovkunit">${esc(c.u)}</span>`:''}</span>
+          <span class="ovkcap msA" data-tone="${c.tone==='ok'?'pos':c.tone==='warn'?'warn':'t3'}">${esc(cap)}</span></div>
+        </div>`);
+      }
       if(c.kind === 'donut'){
         const d = ekoDonut(c.pct);
         widgets.push(widget(E, lbl(c), '', `<div class="row gap10">
@@ -214,6 +230,7 @@ window.EKO_A = (function(){
       alarms.length ? `<div class="allist">${alarmRows(E, alarms)}</div>`
                     : `<p class="alempty">${esc(E.t('allClear'))}</p>`));
     return page(E, heroes, `<div class="pwgrid">${widgets.join('')}</div>`, 'sys');
+
   }
 
   /* Locked top-level modules (D27): every top level opens a summary page —

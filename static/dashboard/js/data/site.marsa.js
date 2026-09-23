@@ -425,18 +425,18 @@ window.EKO_DATA.marsa = {
         "cards": [
           { "kind": "stat", "labelEn": "OVERALL HEALTH", "labelAr": "\u0627\u0644\u062d\u0627\u0644\u0629 \u0627\u0644\u0639\u0627\u0645\u0629", "v": null, "u": "%", "capEn": null, "capAr": null, "tone": "ok" },
           { "kind": "stat", "labelEn": "HVAC EQUIPMENT", "labelAr": "معدات التكييف", "v": null, "u": "", "capEn": null, "capAr": null, "chipEn": null, "chipAr": null, "tone": "ok" },
-          { "kind": "stat", "span": 2, "subOnly": true, "labelEn": "TEMPERATURE DEVIATION INDEX", "labelAr": "مؤشر انحراف الحرارة", "v": null, "u": "°C", "capEn": null, "capAr": null, "tone": "ok" },
-          { "kind": "stat", "span": 2, "subOnly": true, "labelEn": "ENERGY PERFORMANCE RATIO", "labelAr": "نسبة أداء الطاقة", "v": null, "u": "", "capEn": null, "capAr": null, "tone": "ok" },
-          { "kind": "stat", "span": 2, "subOnly": true, "labelEn": "COMFORT ENERGY INDEX", "labelAr": "مؤشر طاقة الراحة", "v": null, "u": "", "capEn": null, "capAr": null, "tone": "ok" }
+          { "kind": "stat", "subOnly": true, "labelEn": "TEMPERATURE DEVIATION INDEX", "labelAr": "مؤشر انحراف الحرارة", "v": null, "u": "°C", "capEn": null, "capAr": null, "tone": "ok" },
+          { "kind": "stat", "subOnly": true, "labelEn": "ENERGY PERFORMANCE RATIO", "labelAr": "نسبة أداء الطاقة", "v": null, "u": "", "capEn": null, "capAr": null, "tone": "ok" },
+          { "kind": "stat", "subOnly": true, "labelEn": "COMFORT ENERGY INDEX", "labelAr": "مؤشر طاقة الراحة", "v": null, "u": "", "capEn": null, "capAr": null, "tone": "ok" }
           ] },
       { "id": "electrical", "hue": "#C2955A", "sysKey": ["Electrical"], "labelEn": "Electrical", "labelAr": "الكهرباء",
         "cards": [
           { "kind": "stat", "labelEn": "OVERALL HEALTH", "labelAr": "\u0627\u0644\u062d\u0627\u0644\u0629 \u0627\u0644\u0639\u0627\u0645\u0629", "v": null, "u": "%", "capEn": null, "capAr": null, "tone": "ok" },
           { "kind": "stat", "labelEn": "ELECTRICAL EQUIPMENT", "labelAr": "المعدات الكهربائية", "v": null, "u": "", "capEn": null, "capAr": null, "chipEn": null, "chipAr": null, "tone": "ok" } ,
-          { "kind": "stat", "span": 2, "subOnly": true, "labelEn": "ENERGY DEVIATION", "labelAr": "انحراف الطاقة", "v": null, "u": "%", "capEn": null, "capAr": null, "tone": "ok" },
-          { "kind": "stat", "span": 2, "subOnly": true, "labelEn": "LOAD IMBALANCE INDEX", "labelAr": "مؤشر عدم اتزان الأحمال", "v": null, "u": "%", "capEn": null, "capAr": null, "tone": "ok" },
-          { "kind": "stat", "span": 2, "subOnly": true, "labelEn": "LOAD FACTOR", "labelAr": "معامل الحمل", "v": null, "u": "%", "capEn": null, "capAr": null, "tone": "ok" },
-          { "kind": "stat", "span": 2, "subOnly": true, "labelEn": "PEAK DEMAND", "labelAr": "ذروة الطلب", "v": null, "u": "kW", "capEn": null, "capAr": null, "tone": "ok" } ] },
+          { "kind": "stat", "subOnly": true, "labelEn": "ENERGY DEVIATION", "labelAr": "انحراف الطاقة", "v": null, "u": "%", "capEn": null, "capAr": null, "tone": "ok" },
+          { "kind": "stat", "subOnly": true, "labelEn": "LOAD IMBALANCE INDEX", "labelAr": "مؤشر عدم اتزان الأحمال", "v": null, "u": "%", "capEn": null, "capAr": null, "tone": "ok" },
+          { "kind": "stat", "subOnly": true, "labelEn": "LOAD FACTOR", "labelAr": "معامل الحمل", "v": null, "u": "%", "capEn": null, "capAr": null, "tone": "ok" },
+          { "kind": "stat", "subOnly": true, "labelEn": "PEAK DEMAND", "labelAr": "ذروة الطلب", "v": null, "u": "kW", "capEn": null, "capAr": null, "tone": "ok" } ] },
       { "id": "life", "hue": "#5FA8D3", "sysKey": ["Life safety"], "labelEn": "Life & Safety", "labelAr": "السلامة",
         "cards": [
           { "kind": "stat", "labelEn": "OVERALL HEALTH", "labelAr": "\u0627\u0644\u062d\u0627\u0644\u0629 \u0627\u0644\u0639\u0627\u0645\u0629", "v": "97.3", "u": "%", "capEn": "Healthy", "capAr": "\u0633\u0644\u064a\u0645", "tone": "ok" },
