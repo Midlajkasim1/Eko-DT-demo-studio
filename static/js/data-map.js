@@ -171,6 +171,33 @@
       }
     }
     
+    // Wire live endpoints to the Systems Electrical stat cards
+    if (site.systems && site.systems.groups) {
+      var elecGrp = site.systems.groups.find(function(g) { return g.id === "electrical"; });
+      if (elecGrp && elecGrp.cards) {
+        var rawEnDev = asNum(p.energy_deviation);
+        var rawPeak  = asNum(p.peak_demand);
+        // Plausible ranges
+        var enDev = (rawEnDev != null && rawEnDev >= -100 && rawEnDev <= 100) ? rawEnDev : null;
+        var peakD = (rawPeak  != null && rawPeak >= 0) ? rawPeak : null;
+        
+        elecGrp.cards.forEach(function(c) {
+          if (c.labelEn === "ENERGY DEVIATION" && enDev != null) {
+            set(c, "v", String(Math.trunc(enDev * 10) / 10));
+            set(c, "capEn", Math.abs(enDev) <= 5 ? "Healthy" : "Deviation");
+            set(c, "capAr", Math.abs(enDev) <= 5 ? "سليم" : "انحراف");
+            set(c, "tone", Math.abs(enDev) <= 5 ? "ok" : "warn");
+          }
+          if (c.labelEn === "PEAK DEMAND" && peakD != null) {
+            set(c, "v", String(Math.trunc(peakD * 10) / 10));
+            set(c, "capEn", "Recorded");
+            set(c, "capAr", "مسجل");
+            set(c, "tone", "ok");
+          }
+        });
+      }
+    }
+    
     if (p.power_history) {
       function extractDaily(histId) {
         var hist = p.power_history[histId];
@@ -912,6 +939,33 @@
             c.chipEn = inactiveCount > 0 ? inactiveCount + " inactive" : null;
             c.chipAr = inactiveCount > 0 ? inactiveCount + " غير نشطة" : null;
             c.tone = inactiveCount > 0 ? "warn" : "ok";
+          }
+        });
+      }
+      
+      var elecGrp = site.systems.groups.find(function(g) { return g.id === "electrical"; });
+      if (elecGrp && elecGrp.cards) {
+        var elecAssets = newAssets.filter(function(a) { return a.sys === "elec"; });
+        var elecTotal = elecAssets.length;
+        var elecAlarm = elecAssets.filter(function(a) { return a.st === "alarm"; }).length;
+        var elecActive = elecTotal - elecAlarm;
+        var elecHealthPct = elecTotal > 0 ? Math.round((elecActive / elecTotal) * 1000) / 10 : null;
+        var elecInactiveCount = elecAlarm;
+
+        elecGrp.cards.forEach(function(c) {
+          if (c.labelEn === "OVERALL HEALTH" && elecHealthPct != null) {
+            c.v = String(elecHealthPct);
+            c.capEn = elecHealthPct >= 95 ? "Healthy" : elecHealthPct >= 80 ? "Fair" : "Critical";
+            c.capAr = elecHealthPct >= 95 ? "سليم" : elecHealthPct >= 80 ? "مقبول" : "حرج";
+            c.tone = elecHealthPct >= 95 ? "ok" : "warn";
+          }
+          if (c.labelEn === "ELECTRICAL EQUIPMENT" && elecTotal > 0) {
+            c.v = elecActive + " / " + elecTotal;
+            c.capEn = "Total: " + elecTotal;
+            c.capAr = "الإجمالي: " + elecTotal;
+            c.chipEn = elecInactiveCount > 0 ? elecInactiveCount + " inactive" : null;
+            c.chipAr = elecInactiveCount > 0 ? elecInactiveCount + " غير نشطة" : null;
+            c.tone = elecInactiveCount > 0 ? "warn" : "ok";
           }
         });
       }
