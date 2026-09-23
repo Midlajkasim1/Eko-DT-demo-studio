@@ -286,9 +286,9 @@ window.EKO_C = (function(){
     const wDelta = ar ? srow('water').deltaAr : srow('water').deltaEn;
     const gDelta = ar ? srow('gas').deltaAr   : srow('gas').deltaEn;
     return summaryShell(E, E.t('utilitiesOverview'), '<div class="ovklist">'
-      + row(W,'meter','#60A5FA',E.t('kWaterMeters'), fmt(u.waterMeters), '', E.t('wordActive'), 'pos')
+      + row(W,'meter','#60A5FA',E.t('kWaterMeters'), fmt(u.waterMeters), '', u.waterMeters != null ? E.t('wordActive') : '', 'pos')
       + row(W,'droplet','#60A5FA',E.t('kWaterConsToday'), wVal, 'm\u00b3', wDelta||'', 't3', wVal !== '--' ? u.waterSparkPath : null)
-      + row(G,'meter','#A78BFA',E.t('kGasMeters'), fmt(u.gasMeters), '', E.t('wordActive'), 'pos')
+      + row(G,'meter','#A78BFA',E.t('kGasMeters'), fmt(u.gasMeters), '', u.gasMeters != null ? E.t('wordActive') : '', 'pos')
       + row(G,'flame','#A78BFA',E.t('kGasConsToday'), gVal, 'm\u00b3', gDelta||'', 't3', gVal !== '--' ? u.gasSparkPath : null)
       + '</div>');
   }

@@ -217,9 +217,9 @@ window.EKO_DATA.marsa = {
   /* ------------------------------------------------------------------------
      POWER analytics page.
      ------------------------------------------------------------------------ */
-  "utilLanding": { "waterMeters": 3, "gasMeters": 2,
-    "waterSparkPath": "M0,15 C12,14 20,12 30,11 C42,10 50,12 60,11 C72,10 84,9 100,10",
-    "gasSparkPath": "M0,16 L14,16 L18,12 L30,12 L34,15 L48,15 L52,9 L66,9 L70,13 L84,13 L88,11 L100,11",
+  "utilLanding": { "waterMeters": null, "gasMeters": null,
+    "waterSparkPath": null,
+    "gasSparkPath": null,
     "chips": [ { "id": "W-01", "x": 50, "y": 70 }, { "id": "G-01", "x": 57.5, "y": 65 } ] },
 
   /* Signed-in user + site capability flags (D43). Marsa carries control as a
