@@ -131,30 +131,41 @@
     if (perf != null) set(el, "performancePct", perf);
     
     // Wire live endpoints to the Systems HVAC & Mechanical stat cards
+    // Sanity-checked: reject any value outside a physically plausible range → stays null → shows '--'
     if (site.systems && site.systems.groups) {
       var hvacGrp = site.systems.groups.find(function(g) { return g.id === "hvac"; });
       if (hvacGrp && hvacGrp.cards) {
-        var tempDev = asNum(p.temp_deviation);
-        var enPerf = asNum(p.energy_performance);
-        var comfIdx = asNum(p.comfort_compliance);
+        var rawTempDev  = asNum(p.temp_deviation);
+        var rawEnPerf   = asNum(p.energy_performance);
+        var rawComfIdx  = asNum(p.comfort_compliance);
+        // Plausible ranges — anything outside is treated as null (raw FIN KPI calc artifact)
+        var tempDev  = (rawTempDev  != null && rawTempDev  >= 0 && rawTempDev  <= 50)  ? rawTempDev  : null;
+        var enPerf   = (rawEnPerf   != null && rawEnPerf   >= 0 && rawEnPerf   <= 5)   ? rawEnPerf   : null;
+        var comfIdx  = (rawComfIdx  != null && rawComfIdx  >= 0 && rawComfIdx  <= 100) ? rawComfIdx  : null;
         hvacGrp.cards.forEach(function(c) {
-          if (c.labelEn === "TEMPERATURE DEVIATION INDEX" && tempDev != null) {
-            set(c, "v", String(Math.trunc(tempDev * 10) / 10));
-            set(c, "capEn", tempDev > 2 ? "Warning" : "Normal");
-            set(c, "capAr", tempDev > 2 ? "تحذير" : "طبيعي");
-            set(c, "tone", tempDev > 2 ? "warn" : "ok");
+          if (c.labelEn === "TEMPERATURE DEVIATION INDEX") {
+            if (tempDev != null) {
+              set(c, "v", String(Math.trunc(tempDev * 10) / 10));
+              set(c, "capEn", tempDev > 2 ? "Warning" : "Normal");
+              set(c, "capAr", tempDev > 2 ? "تحذير" : "طبيعي");
+              set(c, "tone", tempDev > 2 ? "warn" : "ok");
+            }
           }
-          if (c.labelEn === "ENERGY PERFORMANCE RATIO" && enPerf != null) {
-            set(c, "v", String(Math.trunc(enPerf * 100) / 100));
-            set(c, "capEn", enPerf < 1.2 ? "Healthy" : "Above target");
-            set(c, "capAr", enPerf < 1.2 ? "سليم" : "فوق الهدف");
-            set(c, "tone", enPerf < 1.2 ? "ok" : "warn");
+          if (c.labelEn === "ENERGY PERFORMANCE RATIO") {
+            if (enPerf != null) {
+              set(c, "v", String(Math.trunc(enPerf * 100) / 100));
+              set(c, "capEn", enPerf < 1.2 ? "Healthy" : "Above target");
+              set(c, "capAr", enPerf < 1.2 ? "سليم" : "فوق الهدف");
+              set(c, "tone", enPerf < 1.2 ? "ok" : "warn");
+            }
           }
-          if (c.labelEn === "COMFORT ENERGY INDEX" && comfIdx != null) {
-            set(c, "v", String(Math.trunc(comfIdx * 100) / 100));
-            set(c, "capEn", comfIdx >= 60 ? "Good" : comfIdx >= 40 ? "Fair" : "Poor");
-            set(c, "capAr", comfIdx >= 60 ? "جيد" : comfIdx >= 40 ? "مقبول" : "ضعيف");
-            set(c, "tone", comfIdx >= 60 ? "ok" : "warn");
+          if (c.labelEn === "COMFORT ENERGY INDEX") {
+            if (comfIdx != null) {
+              set(c, "v", String(Math.trunc(comfIdx * 100) / 100));
+              set(c, "capEn", comfIdx >= 60 ? "Good" : comfIdx >= 40 ? "Fair" : "Poor");
+              set(c, "capAr", comfIdx >= 60 ? "جيد" : comfIdx >= 40 ? "مقبول" : "ضعيف");
+              set(c, "tone", comfIdx >= 60 ? "ok" : "warn");
+            }
           }
         });
       }

@@ -44,10 +44,20 @@ window.EKO_A = (function(){
       : `<span class="scdot" data-tone="${wash}"></span>`;
     const head = `<div class="ovkhead">${dot}<span class="ovklbl">${esc(ar?c.labelAr:c.labelEn)}</span>
       ${c.chipEn?`<span class="pwchip msA" data-tone="${c.tone}">${esc(ar?c.chipAr:c.chipEn)}</span>`:''}</div>`;
-    if(c.kind === 'stat')
-      return `<div class="syscard" data-span="4" data-wash="${wash}">${head}
-        <div class="scrow"><span class="scval lg">${esc(c.v)}${c.u?`<span class="ovkunit">${esc(c.u)}</span>`:''}</span>
-        <span class="ovkcap msA" data-tone="${c.tone==='ok'?'pos':c.tone==='warn'?'warn':'t3'}">${esc((ar?c.capAr:c.capEn)||'')}</span></div></div>`;
+    if(c.kind === 'stat'){
+      const sv = c.v == null ? '--' : String(c.v);
+      const chip = c.chipEn ? (ar?c.chipAr:c.chipEn) : null;
+      const capStr = (ar?c.capAr:c.capEn) || '';
+      const dotTone = (c.chipEn && g && g.hue) ? null : wash;
+      const dotEl = (c.chipEn && g && g.hue)
+        ? `<span class="scdot" style="background:${g.hue}"></span>`
+        : `<span class="scdot" data-tone="${wash}"></span>`;
+      const headFix = `<div class="ovkhead">${dotEl}<span class="ovklbl">${esc(ar?c.labelAr:c.labelEn)}</span>
+        ${chip?`<span class="pwchip msA" data-tone="${c.tone}">${esc(chip)}</span>`:''}</div>`;
+      return `<div class="syscard" data-span="4" data-wash="${wash}">${headFix}
+        <div class="scrow"><span class="scval lg">${esc(sv)}${c.u&&sv!=='--'?`<span class="ovkunit">${esc(c.u)}</span>`:''}</span>
+        <span class="ovkcap msA" data-tone="${c.tone==='ok'?'pos':c.tone==='warn'?'warn':'t3'}">${esc(capStr)}</span></div></div>`;
+    }
     if(c.kind === 'gauge'){
       const g = ekoGauge(c.val, c.min, c.max, c.ramp);
       return `<div class="syscard" data-span="2" ${c.tall?'data-tall="1"':''} data-wash="${wash}">${head}
