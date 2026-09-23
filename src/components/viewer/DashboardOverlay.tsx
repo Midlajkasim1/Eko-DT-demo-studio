@@ -4,8 +4,11 @@ import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
 import type { ProjectApiSettings } from '@/types'
 
+import type { FragmentsEngine } from '@/lib/fragmentsEngine'
+
 interface DashboardOverlayProps {
   visible: boolean
+  engineRef?: React.MutableRefObject<FragmentsEngine | null>
 }
 
 function loadScripts(scripts: HTMLScriptElement[], signal: { mounted: boolean }) {
@@ -32,7 +35,7 @@ function loadScripts(scripts: HTMLScriptElement[], signal: { mounted: boolean })
   })), Promise.resolve())
 }
 
-export function DashboardOverlay({ visible }: DashboardOverlayProps) {
+export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const currentProject = useProjectStore(s => s.currentProject)
   const templateId = useAppStore(s => s.templateId)
@@ -68,10 +71,25 @@ export function DashboardOverlay({ visible }: DashboardOverlayProps) {
       } else if (customEvent.detail?.action === 'isolateModel') {
         const { keyword } = customEvent.detail
         const models = useModelStore.getState().models
+        const engine = engineRef?.current
+        
         models.forEach(m => {
           // If keyword is 'all', show all. Otherwise, check if modelId contains the keyword.
-          const visible = keyword === 'all' || m.modelId.toLowerCase().includes(keyword.toLowerCase())
-          useModelStore.getState().setModelVisibility(m.modelId, visible)
+          const isVisible = keyword === 'all' || m.modelId.toLowerCase().includes(keyword.toLowerCase())
+          useModelStore.getState().setModelVisibility(m.modelId, isVisible)
+          
+          if (engine) {
+            let object3D = null
+            if (m.type === 'glb') {
+              object3D = engine.world.scene.three.children.find((c: any) => c.userData?.modelId === m.modelId)
+            } else {
+              const fragModel = engine.fragments.models.list.get(m.modelId)
+              object3D = fragModel?.object
+            }
+            if (object3D) {
+              object3D.visible = isVisible
+            }
+          }
         })
       }
     }

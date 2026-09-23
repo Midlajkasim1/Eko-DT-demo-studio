@@ -523,7 +523,7 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
 
       {/* Dashboard Overlay */}
       {step === 'viewing' && (
-        <DashboardOverlay visible={dashboardVisible} />
+        <DashboardOverlay visible={dashboardVisible} engineRef={engineRef} />
       )}
 
       {/* Orientation Cube (ViewCube) */}
