@@ -984,8 +984,8 @@
     site.registerTotal = newAssets.length;
     
     if (site.landing && site.landing.reg) {
-      set(site.landing.reg, "headEn", newAssets.length + " assets");
-      set(site.landing.reg, "headAr", newAssets.length + " أصلًا");
+      site.landing.reg.headEn = newAssets.length + " assets";
+      site.landing.reg.headAr = newAssets.length + " أصلًا";
     }
 
     // Dynamically update the HVAC Equipment and Overall Health cards from live data
@@ -1006,13 +1006,19 @@
             c.capAr = healthPct >= 95 ? "سليم" : healthPct >= 80 ? "مقبول" : "حرج";
             c.tone = healthPct >= 95 ? "ok" : "warn";
           }
-          if (c.labelEn === "HVAC EQUIPMENT" && hvacTotal > 0) {
-            c.v = hvacActive + " / " + hvacTotal;
-            c.capEn = "Total: " + hvacTotal;
-            c.capAr = "الإجمالي: " + hvacTotal;
-            c.chipEn = inactiveCount > 0 ? inactiveCount + " inactive" : null;
-            c.chipAr = inactiveCount > 0 ? inactiveCount + " غير نشطة" : null;
-            c.tone = inactiveCount > 0 ? "warn" : "ok";
+          if (c.labelEn === "HVAC EQUIPMENT") {
+            if (hvacTotal > 0) {
+              c.v = hvacActive + " / " + hvacTotal;
+              c.capEn = "Total: " + hvacTotal;
+              c.capAr = "الإجمالي: " + hvacTotal;
+              c.chipEn = inactiveCount > 0 ? inactiveCount + " inactive" : null;
+              c.chipAr = inactiveCount > 0 ? inactiveCount + " غير نشطة" : null;
+              c.tone = inactiveCount > 0 ? "warn" : "ok";
+            } else {
+              c.capEn = "No equipment from FIN";
+              c.capAr = "لا توجد معدات من FIN";
+              c.tone = "warn";
+            }
           }
         });
       }
@@ -1033,13 +1039,19 @@
             c.capAr = elecHealthPct >= 95 ? "سليم" : elecHealthPct >= 80 ? "مقبول" : "حرج";
             c.tone = elecHealthPct >= 95 ? "ok" : "warn";
           }
-          if (c.labelEn === "ELECTRICAL EQUIPMENT" && elecTotal > 0) {
-            c.v = elecActive + " / " + elecTotal;
-            c.capEn = "Total: " + elecTotal;
-            c.capAr = "الإجمالي: " + elecTotal;
-            c.chipEn = elecInactiveCount > 0 ? elecInactiveCount + " inactive" : null;
-            c.chipAr = elecInactiveCount > 0 ? elecInactiveCount + " غير نشطة" : null;
-            c.tone = elecInactiveCount > 0 ? "warn" : "ok";
+          if (c.labelEn === "ELECTRICAL EQUIPMENT") {
+            if (elecTotal > 0) {
+              c.v = elecActive + " / " + elecTotal;
+              c.capEn = "Total: " + elecTotal;
+              c.capAr = "الإجمالي: " + elecTotal;
+              c.chipEn = elecInactiveCount > 0 ? elecInactiveCount + " inactive" : null;
+              c.chipAr = elecInactiveCount > 0 ? elecInactiveCount + " غير نشطة" : null;
+              c.tone = elecInactiveCount > 0 ? "warn" : "ok";
+            } else {
+              c.capEn = "No equipment from FIN";
+              c.capAr = "لا توجد معدات من FIN";
+              c.tone = "warn";
+            }
           }
         });
       }
