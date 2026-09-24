@@ -214,7 +214,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
     const projectPoint = (point: { x: number; y: number; z?: number; bimId?: string; asset?: string; alarm?: string }) => {
       if (!engine?.world?.camera?.three) return null
       const camera = engine.world.camera.three
-      camera.updateMatrixWorld()
+      camera.updateMatrixWorld(true)
       camera.updateProjectionMatrix()
 
       let worldVec: THREE.Vector3 | null = null
@@ -241,14 +241,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
 
       if (!worldVec) return null
 
-      const canvas = engine.world.renderer.three.domElement
-      const cr = canvas.getBoundingClientRect()
-      
-      const host = document.getElementById('enginehost')
-      const hr = host ? host.getBoundingClientRect() : cr
-      
-      if (cr.width < 2 || cr.height < 2) return { x: 0, y: 0, visible: false }
-
+      // Project world vector to NDC
       const v = worldVec.clone()
       v.project(camera)
 
@@ -258,18 +251,51 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       const inFront = cameraDir.dot(toPoint) > 0
       const inFrustum = inFront && v.z < 1.0 && v.z > -1.0
 
-      // Map NDC [-1, 1] to the exact dimensions of the WebGL canvas
-      const pixelX = (v.x * 0.5 + 0.5) * cr.width
-      const pixelY = (-v.y * 0.5 + 0.5) * cr.height
-      
-      // viewer.js positions markers using: left = (p.x + hr.left - layer.left)
-      // So our returned p.x must be relative to the top-left of 'enginehost' (hr).
-      const screenX = pixelX + cr.left - hr.left
-      const screenY = pixelY + cr.top - hr.top
-      
-      const on = inFrustum
+      // Use the renderer's logical size (CSS pixels, matches camera aspect ratio)
+      // NOT canvas.clientWidth which may not match three's internal size
+      const renderer = engine.world.renderer.three
+      const rendSize = new THREE.Vector2()
+      renderer.getSize(rendSize)  // returns pixels in drawing buffer coords
+      const pr = renderer.getPixelRatio()
+      // Convert to CSS pixel size
+      const cssW = rendSize.x / pr
+      const cssH = rendSize.y / pr
 
-      return { x: screenX, y: screenY, visible: on }
+      // Map NDC [-1,1] to CSS pixel space within the renderer's viewport
+      const pixelX = (v.x * 0.5 + 0.5) * cssW
+      const pixelY = (-v.y * 0.5 + 0.5) * cssH
+
+      // Now figure out where the canvas is on screen vs where #enginehost is.
+      // The markers live in .mklayer which has inset:0 inside #enginehost.
+      // viewer.js does: left = (p.x + hr.left - lr.left) ≈ p.x  (since lr≈hr)
+      // So p.x must already be in enginehost-local pixel space.
+      const canvas = renderer.domElement
+      const cr = canvas.getBoundingClientRect()
+      const host = document.getElementById('enginehost')
+      const hr = host ? host.getBoundingClientRect() : cr
+
+      // Offset canvas-pixel coords into enginehost-local coords
+      const screenX = pixelX + (cr.left - hr.left)
+      const screenY = pixelY + (cr.top - hr.top)
+
+      // Debug (throttled — once every 2 seconds)
+      const now = Date.now()
+      if (!(projectPoint as any)._dbgT || now - (projectPoint as any)._dbgT > 2000) {
+        (projectPoint as any)._dbgT = now
+        console.log('[DashboardOverlay] projectPoint debug', {
+          bimId: point.bimId, asset: point.asset,
+          worldVec: worldVec?.toArray().map(n => n.toFixed(2)),
+          ndc: [v.x.toFixed(3), v.y.toFixed(3), v.z.toFixed(3)],
+          rendererCSS: { cssW, cssH },
+          canvasRect: { left: cr.left.toFixed(0), top: cr.top.toFixed(0), w: cr.width.toFixed(0), h: cr.height.toFixed(0) },
+          enginehostRect: { left: hr.left.toFixed(0), top: hr.top.toFixed(0), w: hr.width.toFixed(0), h: hr.height.toFixed(0) },
+          pixelXY: [pixelX.toFixed(1), pixelY.toFixed(1)],
+          screenXY: [screenX.toFixed(1), screenY.toFixed(1)],
+          inFrustum
+        })
+      }
+
+      return { x: screenX, y: screenY, visible: inFrustum }
     }
 
     const flyToAsset = async (assetIdOrBimId: string) => {
