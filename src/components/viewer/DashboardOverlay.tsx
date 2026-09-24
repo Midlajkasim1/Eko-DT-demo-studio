@@ -160,7 +160,9 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       let updatedAny = false
 
       for (const asset of assets) {
-        const mappedId = ASSET_BIM_MAPPING[asset.id]?.bimId
+        let normId = asset.id || ''
+        if (normId.startsWith('ast-')) normId = normId.substring(4)
+        const mappedId = ASSET_BIM_MAPPING[normId]?.bimId || ASSET_BIM_MAPPING[asset.id]?.bimId
         const bimId = mappedId || asset.bimId
         if (bimId) {
           asset.bimId = bimId
@@ -179,7 +181,9 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       for (const alarm of alarms) {
         let bimId = alarm.bimId
         if (!bimId && alarm.asset) {
-          bimId = assetNameToBimId.get(alarm.asset) || ASSET_BIM_MAPPING[alarm.asset]?.bimId
+          let normId = alarm.asset
+          if (normId.startsWith('ast-')) normId = normId.substring(4)
+          bimId = assetNameToBimId.get(alarm.asset) || assetNameToBimId.get(normId) || ASSET_BIM_MAPPING[normId]?.bimId || ASSET_BIM_MAPPING[alarm.asset]?.bimId
           if (bimId) alarm.bimId = bimId
         }
         if (bimId) {
