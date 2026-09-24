@@ -228,9 +228,13 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
 
       if (!worldVec) return null
 
+      const canvas = engine.world.renderer.three.domElement
+      const cr = canvas.getBoundingClientRect()
+      
       const host = document.getElementById('enginehost')
-      const hr = host ? host.getBoundingClientRect() : engine.world.renderer.three.domElement.getBoundingClientRect()
-      if (hr.width < 2 || hr.height < 2) return { x: 0, y: 0, visible: false }
+      const hr = host ? host.getBoundingClientRect() : cr
+      
+      if (cr.width < 2 || cr.height < 2) return { x: 0, y: 0, visible: false }
 
       const v = worldVec.clone()
       v.project(camera)
@@ -241,9 +245,16 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       const inFront = cameraDir.dot(toPoint) > 0
       const inFrustum = inFront && v.z < 1.0 && v.z > -1.0
 
-      const screenX = (v.x * 0.5 + 0.5) * hr.width
-      const screenY = (-v.y * 0.5 + 0.5) * hr.height
-      const on = inFrustum && screenX >= 0 && screenX <= hr.width && screenY >= 0 && screenY <= hr.height
+      // Map NDC [-1, 1] to the exact dimensions of the WebGL canvas
+      const pixelX = (v.x * 0.5 + 0.5) * cr.width
+      const pixelY = (-v.y * 0.5 + 0.5) * cr.height
+      
+      // viewer.js positions markers using: left = (p.x + hr.left - layer.left)
+      // So our returned p.x must be relative to the top-left of 'enginehost' (hr).
+      const screenX = pixelX + cr.left - hr.left
+      const screenY = pixelY + cr.top - hr.top
+      
+      const on = inFrustum
 
       return { x: screenX, y: screenY, visible: on }
     }
