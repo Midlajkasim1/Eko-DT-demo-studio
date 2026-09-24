@@ -1036,6 +1036,8 @@
 
     if (window.EKO_HOST_ENGINE && typeof window.EKO_HOST_ENGINE.resolveAllAssetPositions === 'function') {
       window.EKO_HOST_ENGINE.resolveAllAssetPositions();
+    } else if (window.EKO_HOST_ENGINE && typeof window.EKO_HOST_ENGINE.applyStatusColors === 'function') {
+      window.EKO_HOST_ENGINE.applyStatusColors();
     }
 
     // Dynamically update the HVAC Equipment and Overall Health cards from live data

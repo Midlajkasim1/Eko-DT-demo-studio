@@ -54,8 +54,10 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
 
     const bimIdWorldPos = new Map<string, THREE.Vector3>()
     const bimIdBox = new Map<string, THREE.Box3>()
+    const bimIdLocalModel = new Map<string, { model: any; localId: number }>()
     const assetNameToBimId = new Map<string, string>()
     const highlightedItems: { model: any; localId: number }[] = []
+    const statusColoredItems: { model: any; localId: number }[] = []
 
     const resolveBimId = async (bimId: string): Promise<THREE.Vector3 | null> => {
       if (!engine?.fragments?.models?.list) {
@@ -72,6 +74,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
             if (localIds && localIds[0] != null) {
               const localId = localIds[0]
               console.log(`[DashboardOverlay] resolveBimId(${bimId}): Found localId ${localId}`)
+              bimIdLocalModel.set(bimId, { model: m, localId })
               let box: THREE.Box3 | null = null
               if (typeof m.getMergedBox === 'function') {
                 box = await m.getMergedBox([localId])
@@ -103,8 +106,38 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       return null
     }
 
+    const clearStatusColors = async () => {
+      while (statusColoredItems.length > 0) {
+        const item = statusColoredItems.pop()
+        if (item && typeof item.model.resetColor === 'function') {
+          try { await item.model.resetColor([item.localId]) } catch {}
+        }
+      }
+    }
+
+    const applyStatusColors = async () => {
+      const eko = (window as any).EKO
+      const assets: any[] = eko?.data?.assets || []
+      await clearStatusColors()
+      for (const asset of assets) {
+        if (!asset.bimId) continue
+        const cached = bimIdLocalModel.get(asset.bimId)
+        if (!cached) continue
+        const { model: m, localId } = cached
+        if (typeof m.setColor !== 'function') continue
+        try {
+          const isAlarm = asset.st === 'alarm' || (asset.alarms && asset.alarms.length > 0)
+          const color = isAlarm ? new THREE.Color(0xef4444) : new THREE.Color(0x22c55e)
+          await m.setColor([localId], color)
+          statusColoredItems.push({ model: m, localId })
+          console.log(`[DashboardOverlay] Colored ${asset.id} -> ${isAlarm ? 'RED' : 'GREEN'}`)
+        } catch (e) {
+          console.warn(`[DashboardOverlay] setColor failed for ${asset.id}:`, e)
+        }
+      }
+    }
+
     const resolveAllAssetPositions = async () => {
-      console.log('[DashboardOverlay] resolveAllAssetPositions called')
       const eko = (window as any).EKO
       if (!eko?.data) {
         console.warn('[DashboardOverlay] No EKO.data found')
@@ -121,7 +154,6 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
         if (asset.bimId) {
           assetNameToBimId.set(asset.id, asset.bimId)
           const pos = await resolveBimId(asset.bimId)
-          console.log(`[DashboardOverlay] Asset ${asset.id} bimId ${asset.bimId} resolved to:`, pos)
           if (pos) {
             asset.x = pos.x
             asset.y = pos.y
@@ -140,7 +172,6 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
         }
         if (bimId) {
           const pos = await resolveBimId(bimId)
-          console.log(`[DashboardOverlay] Alarm for asset ${alarm.asset} bimId ${bimId} resolved to:`, pos)
           if (pos) {
             alarm.x = pos.x
             alarm.y = pos.y
@@ -152,7 +183,8 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       }
 
       if (updatedAny) {
-        console.log('[DashboardOverlay] Positions updated, triggering schedulePosition')
+        console.log('[DashboardOverlay] Positions updated, applying status colors + triggering position')
+        await applyStatusColors()
         if (typeof (window as any).EKO_V?.schedulePosition === 'function') {
           (window as any).EKO_V.schedulePosition(eko)
         }
@@ -253,6 +285,17 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
         bimId = assetNameToBimId.get(assetIdOrBimId)!
       }
 
+      // Use cached localId if available
+      const cached = bimIdLocalModel.get(bimId)
+      if (cached && typeof cached.model.setColor === 'function') {
+        try {
+          await cached.model.setColor([cached.localId], new THREE.Color(0xfbbf24)) // amber highlight
+          highlightedItems.push({ model: cached.model, localId: cached.localId })
+          return true
+        } catch {}
+      }
+
+      // Fallback: look up model
       for (const [, model] of engine.fragments.models.list.entries()) {
         try {
           const m = model as any
@@ -261,7 +304,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
             if (localIds && localIds[0] != null) {
               const localId = localIds[0]
               if (typeof m.setColor === 'function') {
-                await m.setColor([localId], new THREE.Color(0xff8800))
+                await m.setColor([localId], new THREE.Color(0xfbbf24))
                 highlightedItems.push({ model: m, localId })
                 return true
               }
@@ -272,13 +315,34 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       return false
     }
 
+    /* When un-highlighting, restore the status color (green/red) rather than
+       full reset, so the color coding of the building stays intact */
     const clearHighlight = async () => {
+      const eko = (window as any).EKO
+      const assets: any[] = eko?.data?.assets || []
       while (highlightedItems.length > 0) {
         const item = highlightedItems.pop()
-        if (item && typeof item.model.resetColor === 'function') {
-          try {
-            await item.model.resetColor([item.localId])
-          } catch {}
+        if (!item) continue
+        // Find the bimId for this localId to know what status color to restore
+        let restoredBimId: string | null = null
+        for (const [bid, cached] of bimIdLocalModel.entries()) {
+          if (cached.model === item.model && cached.localId === item.localId) {
+            restoredBimId = bid
+            break
+          }
+        }
+        if (restoredBimId) {
+          const asset = assets.find((a: any) => a.bimId === restoredBimId)
+          if (asset && typeof item.model.setColor === 'function') {
+            try {
+              const isAlarm = asset.st === 'alarm' || (asset.alarms && asset.alarms.length > 0)
+              await item.model.setColor([item.localId], isAlarm ? new THREE.Color(0xef4444) : new THREE.Color(0x22c55e))
+            } catch {}
+            continue
+          }
+        }
+        if (typeof item.model.resetColor === 'function') {
+          try { await item.model.resetColor([item.localId]) } catch {}
         }
       }
     }
@@ -286,6 +350,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
     ;(window as any).EKO_HOST_ENGINE = {
       projectPoint,
       resolveAllAssetPositions,
+      applyStatusColors,
       flyToAsset,
       highlightAsset,
       clearHighlight,
