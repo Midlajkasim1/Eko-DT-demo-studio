@@ -18,22 +18,32 @@ window.EKO_V = (function(){
      A point with no cache (first paint, new marker) stays hidden until then. */
   const lastProj = {};
   let lastSig = '';                 /* page + host size the cache was made for */
-  const projKey = (x, y) => x + ',' + y;
+  const projKey = (x, y, id) => (id ? id + ':' : '') + x + ',' + y;
   const hostSig = E => { const h = document.getElementById('enginehost'); if(!h) return '';
     const r = h.getBoundingClientRect(); return E.state.pageId + ':' + Math.round(r.width) + 'x' + Math.round(r.height); };
   /* valid only for a re-render of the SAME page with the SAME host box — a
      route change or a resize always waits for a fresh projection */
   let cacheOK = false;
-  const cachedStyle = (x, y) => { const c = cacheOK && lastProj[projKey(x, y)];
+  const cachedStyle = (x, y, id) => { const c = cacheOK && lastProj[projKey(x, y, id)];
     return c ? ` style="left:${c.left};top:${c.top}${c.on ? '' : ';display:none'}"` : ''; };
-  const allCached = pts => cacheOK && pts.length > 0 && pts.every(p => lastProj[projKey(p.x, p.y)]);
+  const allCached = pts => cacheOK && pts.length > 0 && pts.every(p => lastProj[projKey(p.x, p.y, p.id)]);
 
   function markers(E){
     cacheOK = lastSig !== '' && hostSig(E) === lastSig;
     if(!E.state.markersOn) return '<div class="mklayer"></div>';
     /* alert-centre display filter (D30); only LOCATED alarms get a marker —
        an alarm without a world position has nothing to point at (D64) */
-    const list = E.visAlarms().filter(a => isFinite(+a.x) && isFinite(+a.y));
+    const list = E.visAlarms().filter(a => (isFinite(+a.x) && isFinite(+a.y)) || a.bimId);
+    // Auto-cluster multiple alarms on same asset or location
+    const posCounts = {};
+    list.forEach(a => {
+      const k = a.bimId || a.asset || (Math.round(a.x) + ',' + Math.round(a.y));
+      posCounts[k] = (posCounts[k] || 0) + 1;
+    });
+    list.forEach(a => {
+      const k = a.bimId || a.asset || (Math.round(a.x) + ',' + Math.round(a.y));
+      if (posCounts[k] > 1) a.clu = true;
+    });
     const clu = list.filter(a => a.clu);
     const rest = list.filter(a => !a.clu);
     let out = rest.map(a => marker(E,a)).join('');
@@ -41,13 +51,13 @@ window.EKO_V = (function(){
     if(clu.length > 1){
       const worst = clu.find(p=>p.sev==='critical') || clu[0];
       pts.push(worst);
-      out += `<button class="mk mkclu" data-x="${worst.x}" data-y="${worst.y}"${cachedStyle(worst.x, worst.y)} data-act="mkClu" data-alarm="${worst.id}" data-n="${clu.length}"
+      out += `<button class="mk mkclu" data-x="${worst.x}" data-y="${worst.y}" data-z="${worst.z || ''}" data-bimid="${worst.bimId || ''}" data-asset="${worst.asset || ''}"${cachedStyle(worst.x, worst.y, worst.id)} data-act="mkClu" data-alarm="${worst.id}" data-n="${clu.length}"
         aria-label="${C().esc(E.t('alarmsN', { n: clu.length }))}" data-tip="${C().esc(E.t('cluTip',{n:clu.length}))}">${clu.length}</button>`;
     } else { out += clu.map(a => marker(E,a)).join(''); pts.push(...clu); }
     return `<div class="mklayer"${allCached(pts) ? ' data-proj="1"' : ''}>${out}</div>`;
   }
   const marker = (E,a) =>
-    `<button class="mk" data-x="${a.x}" data-y="${a.y}" data-act="mkOpen" data-alarm="${a.id}"${cachedStyle(a.x, a.y)}
+    `<button class="mk" data-x="${a.x}" data-y="${a.y}" data-z="${a.z || ''}" data-bimid="${a.bimId || ''}" data-asset="${a.asset || ''}" data-act="mkOpen" data-alarm="${a.id}"${cachedStyle(a.x, a.y, a.id)}
        data-pulse="${E.state.mkPulse===a.id?1:0}" aria-label="${C().esc(a.asset)}" data-tip="${C().esc(a.asset)}">
        ${C().sevGlyph(a.sev, !!a.ack, 16, true)}</button>`;
   const chipLayer = (chips) =>
@@ -73,12 +83,19 @@ window.EKO_V = (function(){
     const sig = hostSig(E);
     if(sig !== lastSig){ for(const k in lastProj) delete lastProj[k]; lastSig = sig; }
     const project = (el, lr) => {
-      const p = E.engine.worldToScreen({ x:+el.dataset.x, y:+el.dataset.y });
+      const p = E.engine.worldToScreen({
+        x: +el.dataset.x,
+        y: +el.dataset.y,
+        z: el.dataset.z ? +el.dataset.z : undefined,
+        bimId: el.dataset.bimid,
+        asset: el.dataset.asset,
+        alarm: el.dataset.alarm
+      });
       const on = p.visible && p.x >= 0 && p.x <= hr.width && p.y >= 0 && p.y <= hr.height;
       const left = (p.x + hr.left - lr.left).toFixed(1) + 'px', top = (p.y + hr.top - lr.top).toFixed(1) + 'px';
       el.style.left = left; el.style.top = top;
       el.style.display = on ? '' : 'none';
-      lastProj[projKey(+el.dataset.x, +el.dataset.y)] = { left, top, on };
+      lastProj[projKey(+el.dataset.x, +el.dataset.y, el.dataset.alarm)] = { left, top, on };
     };
     const layer = document.querySelector('.mklayer');
     const lr = layer && layer.getBoundingClientRect();
@@ -104,7 +121,14 @@ window.EKO_V = (function(){
        so no inline coordinates there. */
     const pop = document.querySelector('.mkpop[data-x]');
     if(pop && window.innerWidth >= 768){
-      const p = E.engine.worldToScreen({ x:+pop.dataset.x, y:+pop.dataset.y });
+      const p = E.engine.worldToScreen({
+        x: +pop.dataset.x,
+        y: +pop.dataset.y,
+        z: pop.dataset.z ? +pop.dataset.z : undefined,
+        bimId: pop.dataset.bimid,
+        asset: pop.dataset.asset,
+        alarm: pop.dataset.alarm
+      });
       const inView = p.visible && p.x >= 0 && p.x <= hr.width && p.y >= 0 && p.y <= hr.height;
       if(!inView){ if(E.state.mkPop){ E.state.mkPop = null; E.set({}); } return; }   /* D128: the marker left the view — the popup goes with it */
       const par = (pop.offsetParent || host).getBoundingClientRect();
@@ -136,7 +160,7 @@ window.EKO_V = (function(){
     const l = E.alarmLines(a, false);
     const woDone = E.state.woRaised[a.asset];
     const n = E.state.mkPopN || 0;
-    return `<div class="mkpop mzglass col gap8" data-x="${a.x}" data-y="${a.y}" data-born="${E.state.born==='pop'?1:0}" role="dialog" aria-label="${esc(name + ' ' + a.asset)}">
+    return `<div class="mkpop mzglass col gap8" data-x="${a.x}" data-y="${a.y}" data-z="${a.z || ''}" data-bimid="${a.bimId || ''}" data-asset="${a.asset || ''}" data-alarm="${a.id}" data-born="${E.state.born==='pop'?1:0}" role="dialog" aria-label="${esc(name + ' ' + a.asset)}">
       <div class="draghandle"></div>
       <div class="row gap8 aiC"><span class="statchip" data-sev="${esc(a.sev)}">${esc(t('rpSev.' + a.sev))}</span>${a.ack ? `<span class="tCap">${esc(t('ackedShort'))}</span>` : ''}<span class="grow"></span>
         <button class="iconbtn icon26" data-act="mkClose" aria-label="${esc(t('close'))}">${C().icon('x',12)}</button></div>

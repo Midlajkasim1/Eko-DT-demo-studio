@@ -19,8 +19,8 @@
         levels: false,
         layers: false,
         viewpoints: false,
-        picking: false,
-        isolate: false,
+        picking: true,
+        isolate: true,
         orbit: true
       },
 
@@ -33,7 +33,13 @@
       onReady: on('ready'),
       onError: on('error'),
 
-      flyTo: noop,
+      fireCameraChange: function () { fire('camera'); },
+
+      flyTo: function (assetId) {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.flyToAsset) {
+          window.EKO_HOST_ENGINE.flyToAsset(assetId);
+        }
+      },
       resetView: noop,
       cameraMoved: function () { return false; },
       saveViewpoint: function () { return { id: 'vp-host' }; },
@@ -60,10 +66,22 @@
       cancelMeasure: noop,
       onMeasureResult: on('measure'),
 
-      highlightAsset: noop,
-      clearHighlight: noop,
+      highlightAsset: function (id) {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.highlightAsset) {
+          window.EKO_HOST_ENGINE.highlightAsset(id);
+        }
+      },
+      clearHighlight: function () {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.clearHighlight) {
+          window.EKO_HOST_ENGINE.clearHighlight();
+        }
+      },
       setMarkers: function (list) { markers = list || []; },
       worldToScreen: function (point) {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.projectPoint) {
+          var p = window.EKO_HOST_ENGINE.projectPoint(point);
+          if (p) return p;
+        }
         if (!host || !point) return { x: 0, y: 0, visible: false };
         var r = host.getBoundingClientRect();
         var x = Number(point.x);

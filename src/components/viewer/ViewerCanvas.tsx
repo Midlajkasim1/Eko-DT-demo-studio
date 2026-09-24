@@ -503,6 +503,19 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
              category: resolvedCategory
            });
          }
+      } else {
+         const expressId = parseInt(hitExpressId, 10) || 0;
+         const fragModel = engine.fragments.models.list.get(hitModelId) as any;
+         if (fragModel && typeof fragModel.getGuidsByLocalIds === 'function') {
+           fragModel.getGuidsByLocalIds([expressId]).then((guids: (string | null)[]) => {
+             const guid = guids && guids[0];
+             if (guid) {
+               window.dispatchEvent(new CustomEvent('viewer-command', {
+                 detail: { action: 'openAssetByBimId', bimId: guid, expressId }
+               }));
+             }
+           }).catch(() => {});
+         }
       }
     }
   }, [pickerActive, materialPickerActive])

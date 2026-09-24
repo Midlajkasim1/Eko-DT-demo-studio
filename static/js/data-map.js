@@ -36,13 +36,19 @@
   function mapAlarm(a, i) {
     var src = a.source || '';
     var msg = a.message || src;
+    var asset = assetId(src);
+    var site = window.EKO_DATA && window.EKO_DATA.marsa;
+    var matchedAsset = (site && site.assets || []).find(function(as) {
+      return namesMatch(as.id, asset) || namesMatch(as.id, src);
+    });
     return {
       id: 'fin-' + i + '-' + String(a.occurred || '').replace(/\W/g, '').slice(0, 16),
       fam: 'sys',
-      asset: assetId(src),
+      asset: matchedAsset ? matchedAsset.id : asset,
+      bimId: matchedAsset ? matchedAsset.bimId : null,
       sev: sev(a.severity),
       cat: a.diagnosed ? 'fdd' : 'sys',
-      sys: src || 'FIN',
+      sys: src || 'System',
       ack: null,
       ageH: ageH(a.occurred),
       locEn: src,
@@ -63,8 +69,11 @@
     site.alarms = payload.alarms.map(mapAlarm);
     if (Array.isArray(site.assets)) {
       site.assets.forEach(function (asset) {
-        asset.alarms = site.alarms.filter(function (a) { return a.asset === asset.id; }).map(function (a) { return a.id; });
+        asset.alarms = site.alarms.filter(function (a) { return namesMatch(a.asset, asset.id) || (asset.bimId && a.bimId === asset.bimId); }).map(function (a) { return a.id; });
       });
+    }
+    if (window.EKO_HOST_ENGINE && typeof window.EKO_HOST_ENGINE.resolveAllAssetPositions === 'function') {
+      window.EKO_HOST_ENGINE.resolveAllAssetPositions();
     }
     paint();
   }
@@ -988,6 +997,47 @@
       site.landing.reg.headAr = newAssets.length + " أصلًا";
     }
 
+    // Link assets to alarms and ensure inAlarm assets have alarms with bimId
+    newAssets.forEach(function(asset) {
+      if (asset.st === 'alarm') {
+        var hasAlarm = (site.alarms || []).some(function(al) {
+          return namesMatch(al.asset, asset.id) || (asset.bimId && al.bimId === asset.bimId);
+        });
+        if (!hasAlarm) {
+          if (!site.alarms) site.alarms = [];
+          site.alarms.push({
+            id: 'al-live-' + asset.id.toLowerCase().replace(/\W/g, '-'),
+            fam: asset.sys || 'hvac',
+            asset: asset.id,
+            bimId: asset.bimId,
+            sev: 'high',
+            cat: 'sys',
+            sys: asset.sys === 'elec' ? 'Electrical' : 'HVAC',
+            ack: null,
+            ageH: 0.5,
+            locEn: (asset.typeEn || 'Equipment') + ' · ' + (asset.floor || 'Level'),
+            locAr: (asset.typeAr || 'معدات') + ' · ' + (asset.floor || 'الطابق'),
+            plainEn: 'Abnormal condition reported from BMS',
+            plainAr: 'حالة غير طبيعية من نظام إدارة المبنى',
+            techEn: 'Fault status active',
+            techAr: 'حالة العطل نشطة',
+            impactAedMo: null,
+            raised: 'Live',
+            lifecycle: []
+          });
+        }
+      }
+      (site.alarms || []).forEach(function(al) {
+        if (namesMatch(al.asset, asset.id)) {
+          al.bimId = al.bimId || asset.bimId;
+        }
+      });
+    });
+
+    if (window.EKO_HOST_ENGINE && typeof window.EKO_HOST_ENGINE.resolveAllAssetPositions === 'function') {
+      window.EKO_HOST_ENGINE.resolveAllAssetPositions();
+    }
+
     // Dynamically update the HVAC Equipment and Overall Health cards from live data
     if (site.systems && site.systems.groups) {
       var hvacGrp = site.systems.groups.find(function(g) { return g.id === "hvac"; });
@@ -1015,8 +1065,8 @@
               c.chipAr = inactiveCount > 0 ? inactiveCount + " غير نشطة" : null;
               c.tone = inactiveCount > 0 ? "warn" : "ok";
             } else {
-              c.capEn = "No equipment from FIN";
-              c.capAr = "لا توجد معدات من FIN";
+              c.capEn = "No equipment connected";
+              c.capAr = "لا توجد معدات متصلة";
               c.tone = "warn";
             }
           }
@@ -1048,8 +1098,8 @@
               c.chipAr = elecInactiveCount > 0 ? elecInactiveCount + " غير نشطة" : null;
               c.tone = elecInactiveCount > 0 ? "warn" : "ok";
             } else {
-              c.capEn = "No equipment from FIN";
-              c.capAr = "لا توجد معدات من FIN";
+              c.capEn = "No equipment connected";
+              c.capAr = "لا توجد معدات متصلة";
               c.tone = "warn";
             }
           }

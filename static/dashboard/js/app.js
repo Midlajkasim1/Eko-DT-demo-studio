@@ -828,8 +828,22 @@
       E.state.triageOpen[g] = E.state.triageOpen[g] === false; render(); },
 
     /* Asset journey: any entry point opens the ONE docked panel. */
-    openAsset(el){ E.set({ born: E.state.assetSel?null:'asset', assetSel: el.dataset.asset, apTab: E.state.apTab||'alarms', mkPop:null }); },
-    closeAsset(){ E.set({ assetSel: null }); },
+    openAsset(el){
+      const assetId = el.dataset.asset;
+      E.set({ born: E.state.assetSel?null:'asset', assetSel: assetId, apTab: E.state.apTab||'alarms', mkPop:null });
+      if (E.engine && typeof E.engine.flyTo === 'function') {
+        E.engine.flyTo(assetId);
+      }
+      if (E.engine && typeof E.engine.highlightAsset === 'function') {
+        E.engine.highlightAsset(assetId);
+      }
+    },
+    closeAsset(){
+      E.set({ assetSel: null });
+      if (E.engine && typeof E.engine.clearHighlight === 'function') {
+        E.engine.clearHighlight();
+      }
+    },
     apTab(el){ E.set({ apTab: el.dataset.v }); },
     alAll(){ E.set({ alAll: !E.state.alAll }); },
     resetLayout(){ E.set({ rlAsk:true }); },
@@ -1144,8 +1158,15 @@
   if(window.EKO_FB) window.EKO_FB.init(E);
   if(window.EKO_SURF) window.EKO_SURF.init(E);
   if(window.EKO_PWA) window.EKO_PWA.init(E);
-  if(matchMedia) matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', () => {
-    if(E.state.themeMode === 'auto'){ applyTheme(); render(); } });
+  window.addEventListener('viewer-command', ev => {
+    const d = ev.detail || {};
+    if (d.action === 'openAssetByBimId' && d.bimId) {
+      const found = (E.data.assets || []).find(a => a.bimId === d.bimId);
+      if (found) {
+        ACTS.openAsset({ dataset: { asset: found.id } });
+      }
+    }
+  });
 
   /* Live resize: marker projection and chart geometry are computed at render
      time, so crossing a breakpoint by dragging the window must re-render. */

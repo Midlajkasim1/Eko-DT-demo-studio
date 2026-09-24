@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import * as THREE from 'three'
 import { useProjectStore } from '@/store/useProjectStore'
 import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
@@ -48,6 +49,258 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
   }, [templateId, xrayColor])
 
   useEffect(() => {
+    const engine = engineRef?.current
+    if (!engine) return
+
+    const bimIdWorldPos = new Map<string, THREE.Vector3>()
+    const bimIdBox = new Map<string, THREE.Box3>()
+    const assetNameToBimId = new Map<string, string>()
+    const highlightedItems: { model: any; localId: number }[] = []
+
+    const resolveBimId = async (bimId: string): Promise<THREE.Vector3 | null> => {
+      if (!engine?.fragments?.models?.list) return null
+      if (bimIdWorldPos.has(bimId)) return bimIdWorldPos.get(bimId)!
+
+      for (const [, model] of engine.fragments.models.list.entries()) {
+        try {
+          const m = model as any
+          if (typeof m.getLocalIdsByGuids === 'function') {
+            const localIds = await m.getLocalIdsByGuids([bimId])
+            if (localIds && localIds[0] != null) {
+              const localId = localIds[0]
+              let box: THREE.Box3 | null = null
+              if (typeof m.getMergedBox === 'function') {
+                box = await m.getMergedBox([localId])
+              }
+              if (box && !box.isEmpty()) {
+                const worldBox = box.clone().applyMatrix4(m.object.matrixWorld)
+                const center = new THREE.Vector3()
+                worldBox.getCenter(center)
+                bimIdWorldPos.set(bimId, center)
+                bimIdBox.set(bimId, worldBox)
+                return center
+              } else if (typeof m.getPositions === 'function') {
+                const posArr = await m.getPositions([localId])
+                if (posArr && posArr[0]) {
+                  const pos = posArr[0].clone().applyMatrix4(m.object.matrixWorld)
+                  bimIdWorldPos.set(bimId, pos)
+                  return pos
+                }
+              }
+            }
+          }
+        } catch {
+          // ignore lookup error
+        }
+      }
+      return null
+    }
+
+    const resolveAllAssetPositions = async () => {
+      const eko = (window as any).EKO
+      if (!eko?.data) return
+      const assets: any[] = eko.data.assets || []
+      const alarms: any[] = eko.data.alarms || []
+
+      let updatedAny = false
+
+      for (const asset of assets) {
+        if (asset.bimId) {
+          assetNameToBimId.set(asset.id, asset.bimId)
+          const pos = await resolveBimId(asset.bimId)
+          if (pos) {
+            asset.x = pos.x
+            asset.y = pos.y
+            asset.z = pos.z
+            asset.world = { x: pos.x, y: pos.y, z: pos.z }
+            updatedAny = true
+          }
+        }
+      }
+
+      for (const alarm of alarms) {
+        let bimId = alarm.bimId
+        if (!bimId && alarm.asset) {
+          bimId = assetNameToBimId.get(alarm.asset)
+          if (bimId) alarm.bimId = bimId
+        }
+        if (bimId) {
+          const pos = await resolveBimId(bimId)
+          if (pos) {
+            alarm.x = pos.x
+            alarm.y = pos.y
+            alarm.z = pos.z
+            alarm.world = { x: pos.x, y: pos.y, z: pos.z }
+            updatedAny = true
+          }
+        }
+      }
+
+      if (updatedAny) {
+        if (typeof (window as any).EKO_V?.schedulePosition === 'function') {
+          (window as any).EKO_V.schedulePosition(eko)
+        }
+        if (typeof eko.set === 'function') {
+          eko.set({})
+        }
+      }
+    }
+
+    const projectPoint = (point: { x: number; y: number; z?: number; bimId?: string; asset?: string; alarm?: string }) => {
+      if (!engine?.world?.camera?.three) return null
+      const camera = engine.world.camera.three
+
+      let worldVec: THREE.Vector3 | null = null
+
+      if (point.bimId && bimIdWorldPos.has(point.bimId)) {
+        worldVec = bimIdWorldPos.get(point.bimId)!
+      } else if (point.asset && assetNameToBimId.has(point.asset)) {
+        const bId = assetNameToBimId.get(point.asset)!
+        if (bimIdWorldPos.has(bId)) worldVec = bimIdWorldPos.get(bId)!
+      } else if (point.alarm) {
+        const eko = (window as any).EKO
+        const al = eko?.data?.alarms?.find((a: any) => a.id === point.alarm)
+        if (al?.bimId && bimIdWorldPos.has(al.bimId)) {
+          worldVec = bimIdWorldPos.get(al.bimId)!
+        }
+      }
+
+      if (!worldVec && isFinite(point.x) && isFinite(point.y) && point.z != null && isFinite(point.z) && point.z !== 0) {
+        worldVec = new THREE.Vector3(point.x, point.y, point.z)
+      }
+
+      if (!worldVec) return null
+
+      const host = document.getElementById('enginehost')
+      const hr = host ? host.getBoundingClientRect() : engine.world.renderer.three.domElement.getBoundingClientRect()
+      if (hr.width < 2 || hr.height < 2) return { x: 0, y: 0, visible: false }
+
+      const v = worldVec.clone()
+      v.project(camera)
+
+      const cameraDir = new THREE.Vector3()
+      camera.getWorldDirection(cameraDir)
+      const toPoint = worldVec.clone().sub(camera.position)
+      const inFront = cameraDir.dot(toPoint) > 0
+      const inFrustum = inFront && v.z < 1.0 && v.z > -1.0
+
+      const screenX = (v.x * 0.5 + 0.5) * hr.width
+      const screenY = (-v.y * 0.5 + 0.5) * hr.height
+      const on = inFrustum && screenX >= 0 && screenX <= hr.width && screenY >= 0 && screenY <= hr.height
+
+      return { x: screenX, y: screenY, visible: on }
+    }
+
+    const flyToAsset = async (assetIdOrBimId: string) => {
+      if (!engine?.world?.camera?.controls) return false
+      let bimId = assetIdOrBimId
+      if (assetNameToBimId.has(assetIdOrBimId)) {
+        bimId = assetNameToBimId.get(assetIdOrBimId)!
+      }
+
+      if (bimIdBox.has(bimId)) {
+        const box = bimIdBox.get(bimId)!
+        await engine.world.camera.controls.fitToBox(box, true)
+        return true
+      }
+
+      for (const [, model] of engine.fragments.models.list.entries()) {
+        try {
+          const m = model as any
+          if (typeof m.getLocalIdsByGuids === 'function') {
+            const localIds = await m.getLocalIdsByGuids([bimId])
+            if (localIds && localIds[0] != null) {
+              const localId = localIds[0]
+              if (typeof m.getMergedBox === 'function') {
+                const box = await m.getMergedBox([localId])
+                if (box && !box.isEmpty()) {
+                  const worldBox = box.clone().applyMatrix4(m.object.matrixWorld)
+                  bimIdBox.set(bimId, worldBox)
+                  await engine.world.camera.controls.fitToBox(worldBox, true)
+                  return true
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+      return false
+    }
+
+    const highlightAsset = async (assetIdOrBimId: string) => {
+      await clearHighlight()
+      if (!engine) return false
+      let bimId = assetIdOrBimId
+      if (assetNameToBimId.has(assetIdOrBimId)) {
+        bimId = assetNameToBimId.get(assetIdOrBimId)!
+      }
+
+      for (const [, model] of engine.fragments.models.list.entries()) {
+        try {
+          const m = model as any
+          if (typeof m.getLocalIdsByGuids === 'function') {
+            const localIds = await m.getLocalIdsByGuids([bimId])
+            if (localIds && localIds[0] != null) {
+              const localId = localIds[0]
+              if (typeof m.setColor === 'function') {
+                await m.setColor([localId], new THREE.Color(0xff8800))
+                highlightedItems.push({ model: m, localId })
+                return true
+              }
+            }
+          }
+        } catch {}
+      }
+      return false
+    }
+
+    const clearHighlight = async () => {
+      while (highlightedItems.length > 0) {
+        const item = highlightedItems.pop()
+        if (item && typeof item.model.resetColor === 'function') {
+          try {
+            await item.model.resetColor([item.localId])
+          } catch {}
+        }
+      }
+    }
+
+    ;(window as any).EKO_HOST_ENGINE = {
+      projectPoint,
+      resolveAllAssetPositions,
+      flyToAsset,
+      highlightAsset,
+      clearHighlight,
+      resolveBimId
+    }
+
+    const onCameraUpdate = () => {
+      const eko = (window as any).EKO
+      if (eko?.engine && typeof eko.engine.fireCameraChange === 'function') {
+        eko.engine.fireCameraChange()
+      } else if (eko && typeof (window as any).EKO_V?.position === 'function') {
+        (window as any).EKO_V.position(eko)
+      }
+    }
+
+    if (engine.world?.camera?.controls) {
+      engine.world.camera.controls.addEventListener('update', onCameraUpdate)
+    }
+
+    const timer1 = setTimeout(() => { resolveAllAssetPositions() }, 1000)
+    const timer2 = setTimeout(() => { resolveAllAssetPositions() }, 3000)
+
+    return () => {
+      if (engine.world?.camera?.controls) {
+        engine.world.camera.controls.removeEventListener('update', onCameraUpdate)
+      }
+      clearTimeout(timer1)
+      clearTimeout(timer2)
+      delete (window as any).EKO_HOST_ENGINE
+    }
+  }, [engineRef?.current])
+
+  useEffect(() => {
     if (!visible) return
     const signal = { mounted: true }
     const handler = (e: Event) => {
@@ -91,6 +344,14 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
             }
           }
         })
+      } else if (customEvent.detail?.action === 'resolveAssets') {
+        (window as any).EKO_HOST_ENGINE?.resolveAllAssetPositions?.()
+      } else if (customEvent.detail?.action === 'flyToAsset') {
+        (window as any).EKO_HOST_ENGINE?.flyToAsset?.(customEvent.detail.assetId)
+      } else if (customEvent.detail?.action === 'highlightAsset') {
+        (window as any).EKO_HOST_ENGINE?.highlightAsset?.(customEvent.detail.assetId)
+      } else if (customEvent.detail?.action === 'clearHighlight') {
+        (window as any).EKO_HOST_ENGINE?.clearHighlight?.()
       }
     }
     window.addEventListener('dashboard-event', handler)
