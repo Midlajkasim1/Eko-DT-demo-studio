@@ -67,7 +67,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       }
       if (bimIdWorldPos.has(bimId)) return bimIdWorldPos.get(bimId)!
 
-      for (const [, model] of engine.fragments.models.list.entries()) {
+      for (const [modelId, model] of engine.fragments.models.list.entries()) {
         try {
           const m = model as any
           if (typeof m.getLocalIdsByGuids === 'function') {
@@ -78,7 +78,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
 
               // Use official BoundingBoxer for correct world coordinates
               const bboxer = engine.components.get(OBC.BoundingBoxer)
-              const map: Record<string, Set<number>> = { [m.uuid]: new Set([localId]) }
+              const map: Record<string, Set<number>> = { [modelId]: new Set([localId]) }
               const center = await bboxer.getCenter(map)
               if (center) {
                 bimIdWorldPos.set(bimId, center)
