@@ -282,17 +282,19 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       const now = Date.now()
       if (!(projectPoint as any)._dbgT || now - (projectPoint as any)._dbgT > 2000) {
         (projectPoint as any)._dbgT = now
-        console.log('[DashboardOverlay] projectPoint debug', {
-          bimId: point.bimId, asset: point.asset,
-          worldVec: worldVec?.toArray().map(n => n.toFixed(2)),
-          ndc: [v.x.toFixed(3), v.y.toFixed(3), v.z.toFixed(3)],
-          rendererCSS: { cssW, cssH },
-          canvasRect: { left: cr.left.toFixed(0), top: cr.top.toFixed(0), w: cr.width.toFixed(0), h: cr.height.toFixed(0) },
-          enginehostRect: { left: hr.left.toFixed(0), top: hr.top.toFixed(0), w: hr.width.toFixed(0), h: hr.height.toFixed(0) },
-          pixelXY: [pixelX.toFixed(1), pixelY.toFixed(1)],
-          screenXY: [screenX.toFixed(1), screenY.toFixed(1)],
-          inFrustum
-        })
+        const wv = worldVec?.toArray().map(n => n.toFixed(2)).join(',')
+        console.log(
+          `[DashboardOverlay] projectPoint DEBUG` +
+          ` bimId=${point.bimId} asset=${point.asset}` +
+          ` world=[${wv}]` +
+          ` ndc=[${v.x.toFixed(3)},${v.y.toFixed(3)},${v.z.toFixed(3)}]` +
+          ` rendCSS=${cssW.toFixed(0)}x${cssH.toFixed(0)}` +
+          ` canvas=left:${cr.left.toFixed(0)},top:${cr.top.toFixed(0)},w:${cr.width.toFixed(0)},h:${cr.height.toFixed(0)}` +
+          ` enginehost=left:${hr.left.toFixed(0)},top:${hr.top.toFixed(0)},w:${hr.width.toFixed(0)},h:${hr.height.toFixed(0)}` +
+          ` pixel=[${pixelX.toFixed(1)},${pixelY.toFixed(1)}]` +
+          ` screen=[${screenX.toFixed(1)},${screenY.toFixed(1)}]` +
+          ` frustum=${inFrustum}`
+        )
       }
 
       return { x: screenX, y: screenY, visible: inFrustum }

@@ -91,7 +91,7 @@ window.EKO_V = (function(){
         asset: el.dataset.asset,
         alarm: el.dataset.alarm
       });
-      console.log(`[viewer] project alarm=${el.dataset.alarm} bimId=${el.dataset.bimid} -> p:`, p)
+      console.log(`[viewer] project alarm=${el.dataset.alarm} bimId=${el.dataset.bimid} -> p: x=${p.x?.toFixed(1)} y=${p.y?.toFixed(1)} visible=${p.visible} hr.w=${hr.width.toFixed(0)} hr.l=${hr.left.toFixed(0)} lr.l=${lr ? lr.left.toFixed(0) : 'n/a'}`)
       const on = p.visible && p.x >= 0 && p.x <= hr.width && p.y >= 0 && p.y <= hr.height;
       const left = (p.x + hr.left - lr.left).toFixed(1) + 'px', top = (p.y + hr.top - lr.top).toFixed(1) + 'px';
       el.style.left = left; el.style.top = top;
