@@ -4,6 +4,7 @@ import * as OBC from '@thatopen/components'
 import { useProjectStore } from '@/store/useProjectStore'
 import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
+import { UNREAL_BIM_MAPPING } from '@/constants/unrealBimMapping'
 import type { ProjectApiSettings } from '@/types'
 
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
@@ -152,9 +153,12 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       let updatedAny = false
 
       for (const asset of assets) {
-        if (asset.bimId) {
-          assetNameToBimId.set(asset.id, asset.bimId)
-          const pos = await resolveBimId(asset.bimId)
+        const mappedId = UNREAL_BIM_MAPPING[asset.id]?.bimId
+        const bimId = mappedId || asset.bimId
+        if (bimId) {
+          asset.bimId = bimId // Update the object so data-map and UI know the real ID
+          assetNameToBimId.set(asset.id, bimId)
+          const pos = await resolveBimId(bimId)
           if (pos) {
             asset.x = pos.x
             asset.y = pos.y
@@ -168,7 +172,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       for (const alarm of alarms) {
         let bimId = alarm.bimId
         if (!bimId && alarm.asset) {
-          bimId = assetNameToBimId.get(alarm.asset)
+          bimId = assetNameToBimId.get(alarm.asset) || UNREAL_BIM_MAPPING[alarm.asset]?.bimId
           if (bimId) alarm.bimId = bimId
         }
         if (bimId) {
