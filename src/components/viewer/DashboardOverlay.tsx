@@ -4,7 +4,7 @@ import * as OBC from '@thatopen/components'
 import { useProjectStore } from '@/store/useProjectStore'
 import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
-import { UNREAL_BIM_MAPPING } from '@/constants/unrealBimMapping'
+import { ASSET_BIM_MAPPING } from '@/constants/assetBimMapping'
 import type { ProjectApiSettings } from '@/types'
 
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
@@ -82,7 +82,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
                 box = await m.getMergedBox([localId])
               }
               if (box && !box.isEmpty()) {
-                const worldBox = box.clone().applyMatrix4(m.object.matrixWorld)
+                const worldBox = box.clone()
                 const center = new THREE.Vector3()
                 worldBox.getCenter(center)
                 bimIdWorldPos.set(bimId, center)
@@ -91,7 +91,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
               } else if (typeof m.getPositions === 'function') {
                 const posArr = await m.getPositions([localId])
                 if (posArr && posArr[0]) {
-                  const pos = posArr[0].clone().applyMatrix4(m.object.matrixWorld)
+                  const pos = posArr[0].clone()
                   bimIdWorldPos.set(bimId, pos)
                   return pos
                 }
@@ -153,7 +153,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       let updatedAny = false
 
       for (const asset of assets) {
-        const mappedId = UNREAL_BIM_MAPPING[asset.id]?.bimId
+        const mappedId = ASSET_BIM_MAPPING[asset.id]?.bimId
         const bimId = mappedId || asset.bimId
         if (bimId) {
           asset.bimId = bimId // Update the object so data-map and UI know the real ID
@@ -172,7 +172,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       for (const alarm of alarms) {
         let bimId = alarm.bimId
         if (!bimId && alarm.asset) {
-          bimId = assetNameToBimId.get(alarm.asset) || UNREAL_BIM_MAPPING[alarm.asset]?.bimId
+          bimId = assetNameToBimId.get(alarm.asset) || ASSET_BIM_MAPPING[alarm.asset]?.bimId
           if (bimId) alarm.bimId = bimId
         }
         if (bimId) {
@@ -271,7 +271,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
               if (typeof m.getMergedBox === 'function') {
                 const box = await m.getMergedBox([localId])
                 if (box && !box.isEmpty()) {
-                  const worldBox = box.clone().applyMatrix4(m.object.matrixWorld)
+                  const worldBox = box.clone()
                   bimIdBox.set(bimId, worldBox)
                   await engine.world.camera.controls.fitToBox(worldBox, true)
                   return true
