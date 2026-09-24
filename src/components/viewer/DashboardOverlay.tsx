@@ -55,6 +55,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
     if (!engine) return
 
     const bimIdWorldPos = new Map<string, THREE.Vector3>()
+    const bimIdLocalCenter = new Map<string, THREE.Vector3>() // caches the un-transformed center
     const bimIdBox = new Map<string, THREE.Box3>()
     const bimIdLocalModel = new Map<string, { model: any; localId: number }>()
     const assetNameToBimId = new Map<string, string>()
@@ -66,7 +67,13 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
         console.warn(`[DashboardOverlay] resolveBimId(${bimId}): No models list`)
         return null
       }
-      if (bimIdWorldPos.has(bimId)) return bimIdWorldPos.get(bimId)!
+      
+      if (bimIdLocalModel.has(bimId) && bimIdLocalCenter.has(bimId)) {
+        const { model } = bimIdLocalModel.get(bimId)!
+        const localCenter = bimIdLocalCenter.get(bimId)!
+        const center = localCenter.clone().applyMatrix4(model.object.matrixWorld)
+        return center
+      }
 
       for (const [modelId, model] of engine.fragments.models.list.entries()) {
         try {
@@ -85,18 +92,25 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
                 const worldBox = box.clone()
                 const center = new THREE.Vector3()
                 worldBox.getCenter(center)
-                bimIdWorldPos.set(bimId, center)
+                
+                // Cache the LOCAL center so we can sync it synchronously later
+                const inverseMatrix = m.object.matrixWorld.clone().invert()
+                const localCenter = center.clone().applyMatrix4(inverseMatrix)
+                bimIdLocalCenter.set(bimId, localCenter)
+                
                 bimIdBox.set(bimId, worldBox)
                 return center
               } else if (typeof m.getPositions === 'function') {
                 const posArr = await m.getPositions([localId])
                 if (posArr && posArr[0]) {
                   const pos = posArr[0].clone()
-                  bimIdWorldPos.set(bimId, pos)
+                  
+                  const inverseMatrix = m.object.matrixWorld.clone().invert()
+                  const localCenter = pos.clone().applyMatrix4(inverseMatrix)
+                  bimIdLocalCenter.set(bimId, localCenter)
+                  
                   return pos
                 }
-              } else {
-                console.warn(`[DashboardOverlay] resolveBimId(${bimId}): found localId but no getMergedBox/getPositions`)
               }
             }
           }
@@ -104,7 +118,6 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
           console.error(`[DashboardOverlay] resolveBimId(${bimId}): Error during lookup:`, e)
         }
       }
-      console.log(`[DashboardOverlay] resolveBimId(${bimId}): Not found in any model`)
       return null
     }
 
@@ -132,7 +145,6 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
           const color = isAlarm ? new THREE.Color(0xef4444) : new THREE.Color(0x22c55e)
           await m.setColor([localId], color)
           statusColoredItems.push({ model: m, localId })
-          console.log(`[DashboardOverlay] Colored ${asset.id} -> ${isAlarm ? 'RED' : 'GREEN'}`)
         } catch (e) {
           console.warn(`[DashboardOverlay] setColor failed for ${asset.id}:`, e)
         }
@@ -141,14 +153,9 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
 
     const resolveAllAssetPositions = async () => {
       const eko = (window as any).EKO
-      if (!eko?.data) {
-        console.warn('[DashboardOverlay] No EKO.data found')
-        return
-      }
+      if (!eko?.data) return
       const assets: any[] = eko.data.assets || []
       const alarms: any[] = eko.data.alarms || []
-
-      console.log(`[DashboardOverlay] Checking ${assets.length} assets and ${alarms.length} alarms for bimId`)
 
       let updatedAny = false
 
@@ -156,7 +163,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
         const mappedId = ASSET_BIM_MAPPING[asset.id]?.bimId
         const bimId = mappedId || asset.bimId
         if (bimId) {
-          asset.bimId = bimId // Update the object so data-map and UI know the real ID
+          asset.bimId = bimId
           assetNameToBimId.set(asset.id, bimId)
           const pos = await resolveBimId(bimId)
           if (pos) {
@@ -188,17 +195,20 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       }
 
       if (updatedAny) {
-        console.log('[DashboardOverlay] Positions updated, applying status colors + triggering position')
         await applyStatusColors()
         if (typeof (window as any).EKO_V?.schedulePosition === 'function') {
           (window as any).EKO_V.schedulePosition(eko)
         }
-        if (typeof eko.set === 'function') {
-          eko.set({})
-        }
-      } else {
-        console.log('[DashboardOverlay] No positions updated')
       }
+    }
+
+    const getFreshWorldVec = (bimId: string) => {
+      if (bimIdLocalModel.has(bimId) && bimIdLocalCenter.has(bimId)) {
+        const { model } = bimIdLocalModel.get(bimId)!
+        const localCenter = bimIdLocalCenter.get(bimId)!
+        return localCenter.clone().applyMatrix4(model.object.matrixWorld)
+      }
+      return null
     }
 
     const projectPoint = (point: { x: number; y: number; z?: number; bimId?: string; asset?: string; alarm?: string }) => {
@@ -209,19 +219,22 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
 
       let worldVec: THREE.Vector3 | null = null
 
-      if (point.bimId && bimIdWorldPos.has(point.bimId)) {
-        worldVec = bimIdWorldPos.get(point.bimId)!
-      } else if (point.asset && assetNameToBimId.has(point.asset)) {
+      if (point.bimId) {
+        worldVec = getFreshWorldVec(point.bimId)
+      }
+      if (!worldVec && point.asset && assetNameToBimId.has(point.asset)) {
         const bId = assetNameToBimId.get(point.asset)!
-        if (bimIdWorldPos.has(bId)) worldVec = bimIdWorldPos.get(bId)!
-      } else if (point.alarm) {
+        worldVec = getFreshWorldVec(bId)
+      }
+      if (!worldVec && point.alarm) {
         const eko = (window as any).EKO
         const al = eko?.data?.alarms?.find((a: any) => a.id === point.alarm)
-        if (al?.bimId && bimIdWorldPos.has(al.bimId)) {
-          worldVec = bimIdWorldPos.get(al.bimId)!
+        if (al?.bimId) {
+          worldVec = getFreshWorldVec(al.bimId)
         }
       }
 
+      // Fallback to static coordinates if the dynamic model check failed
       if (!worldVec && isFinite(point.x) && isFinite(point.y) && point.z != null && isFinite(point.z) && point.z !== 0) {
         worldVec = new THREE.Vector3(point.x, point.y, point.z)
       }
