@@ -76,20 +76,26 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
               const localId = localIds[0]
               bimIdLocalModel.set(bimId, { model: m, localId })
 
-              // Use official BoundingBoxer for correct world coordinates
-              const bboxer = engine.components.get(OBC.BoundingBoxer)
-              const map: Record<string, Set<number>> = { [modelId]: new Set([localId]) }
-              const center = await bboxer.getCenter(map)
-              if (center) {
+              let box: THREE.Box3 | null = null
+              if (typeof m.getMergedBox === 'function') {
+                box = await m.getMergedBox([localId])
+              }
+              if (box && !box.isEmpty()) {
+                const worldBox = box.clone().applyMatrix4(m.object.matrixWorld)
+                const center = new THREE.Vector3()
+                worldBox.getCenter(center)
                 bimIdWorldPos.set(bimId, center)
-                // Also calculate box for fitToBox
-                bboxer.list.clear()
-                await bboxer.addFromModelIdMap(map)
-                const box = bboxer.get()
-                if (box && !box.isEmpty()) {
-                  bimIdBox.set(bimId, box.clone())
-                }
+                bimIdBox.set(bimId, worldBox)
                 return center
+              } else if (typeof m.getPositions === 'function') {
+                const posArr = await m.getPositions([localId])
+                if (posArr && posArr[0]) {
+                  const pos = posArr[0].clone().applyMatrix4(m.object.matrixWorld)
+                  bimIdWorldPos.set(bimId, pos)
+                  return pos
+                }
+              } else {
+                console.warn(`[DashboardOverlay] resolveBimId(${bimId}): found localId but no getMergedBox/getPositions`)
               }
             }
           }
