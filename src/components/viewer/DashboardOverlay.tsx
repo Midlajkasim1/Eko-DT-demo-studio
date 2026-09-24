@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
+import * as OBC from '@thatopen/components'
 import { useProjectStore } from '@/store/useProjectStore'
 import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
@@ -73,28 +74,22 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
             const localIds = await m.getLocalIdsByGuids([bimId])
             if (localIds && localIds[0] != null) {
               const localId = localIds[0]
-              console.log(`[DashboardOverlay] resolveBimId(${bimId}): Found localId ${localId}`)
               bimIdLocalModel.set(bimId, { model: m, localId })
-              let box: THREE.Box3 | null = null
-              if (typeof m.getMergedBox === 'function') {
-                box = await m.getMergedBox([localId])
-              }
-              if (box && !box.isEmpty()) {
-                const worldBox = box.clone().applyMatrix4(m.object.matrixWorld)
-                const center = new THREE.Vector3()
-                worldBox.getCenter(center)
+
+              // Use official BoundingBoxer for correct world coordinates
+              const bboxer = engine.components.get(OBC.BoundingBoxer)
+              const map: Record<string, Set<number>> = { [m.uuid]: new Set([localId]) }
+              const center = await bboxer.getCenter(map)
+              if (center) {
                 bimIdWorldPos.set(bimId, center)
-                bimIdBox.set(bimId, worldBox)
-                return center
-              } else if (typeof m.getPositions === 'function') {
-                const posArr = await m.getPositions([localId])
-                if (posArr && posArr[0]) {
-                  const pos = posArr[0].clone().applyMatrix4(m.object.matrixWorld)
-                  bimIdWorldPos.set(bimId, pos)
-                  return pos
+                // Also calculate box for fitToBox
+                bboxer.list.clear()
+                await bboxer.addFromModelIdMap(map)
+                const box = bboxer.get()
+                if (box && !box.isEmpty()) {
+                  bimIdBox.set(bimId, box.clone())
                 }
-              } else {
-                console.warn(`[DashboardOverlay] resolveBimId(${bimId}): found localId but no getMergedBox/getPositions`)
+                return center
               }
             }
           }
@@ -199,6 +194,8 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
     const projectPoint = (point: { x: number; y: number; z?: number; bimId?: string; asset?: string; alarm?: string }) => {
       if (!engine?.world?.camera?.three) return null
       const camera = engine.world.camera.three
+      camera.updateMatrixWorld()
+      camera.updateProjectionMatrix()
 
       let worldVec: THREE.Vector3 | null = null
 
