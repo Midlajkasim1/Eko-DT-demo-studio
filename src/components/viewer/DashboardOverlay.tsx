@@ -58,7 +58,10 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
     const highlightedItems: { model: any; localId: number }[] = []
 
     const resolveBimId = async (bimId: string): Promise<THREE.Vector3 | null> => {
-      if (!engine?.fragments?.models?.list) return null
+      if (!engine?.fragments?.models?.list) {
+        console.warn(`[DashboardOverlay] resolveBimId(${bimId}): No models list`)
+        return null
+      }
       if (bimIdWorldPos.has(bimId)) return bimIdWorldPos.get(bimId)!
 
       for (const [, model] of engine.fragments.models.list.entries()) {
@@ -68,6 +71,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
             const localIds = await m.getLocalIdsByGuids([bimId])
             if (localIds && localIds[0] != null) {
               const localId = localIds[0]
+              console.log(`[DashboardOverlay] resolveBimId(${bimId}): Found localId ${localId}`)
               let box: THREE.Box3 | null = null
               if (typeof m.getMergedBox === 'function') {
                 box = await m.getMergedBox([localId])
@@ -86,21 +90,30 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
                   bimIdWorldPos.set(bimId, pos)
                   return pos
                 }
+              } else {
+                console.warn(`[DashboardOverlay] resolveBimId(${bimId}): found localId but no getMergedBox/getPositions`)
               }
             }
           }
-        } catch {
-          // ignore lookup error
+        } catch (e) {
+          console.error(`[DashboardOverlay] resolveBimId(${bimId}): Error during lookup:`, e)
         }
       }
+      console.log(`[DashboardOverlay] resolveBimId(${bimId}): Not found in any model`)
       return null
     }
 
     const resolveAllAssetPositions = async () => {
+      console.log('[DashboardOverlay] resolveAllAssetPositions called')
       const eko = (window as any).EKO
-      if (!eko?.data) return
+      if (!eko?.data) {
+        console.warn('[DashboardOverlay] No EKO.data found')
+        return
+      }
       const assets: any[] = eko.data.assets || []
       const alarms: any[] = eko.data.alarms || []
+
+      console.log(`[DashboardOverlay] Checking ${assets.length} assets and ${alarms.length} alarms for bimId`)
 
       let updatedAny = false
 
@@ -108,6 +121,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
         if (asset.bimId) {
           assetNameToBimId.set(asset.id, asset.bimId)
           const pos = await resolveBimId(asset.bimId)
+          console.log(`[DashboardOverlay] Asset ${asset.id} bimId ${asset.bimId} resolved to:`, pos)
           if (pos) {
             asset.x = pos.x
             asset.y = pos.y
@@ -126,6 +140,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
         }
         if (bimId) {
           const pos = await resolveBimId(bimId)
+          console.log(`[DashboardOverlay] Alarm for asset ${alarm.asset} bimId ${bimId} resolved to:`, pos)
           if (pos) {
             alarm.x = pos.x
             alarm.y = pos.y
@@ -137,12 +152,15 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       }
 
       if (updatedAny) {
+        console.log('[DashboardOverlay] Positions updated, triggering schedulePosition')
         if (typeof (window as any).EKO_V?.schedulePosition === 'function') {
           (window as any).EKO_V.schedulePosition(eko)
         }
         if (typeof eko.set === 'function') {
           eko.set({})
         }
+      } else {
+        console.log('[DashboardOverlay] No positions updated')
       }
     }
 
