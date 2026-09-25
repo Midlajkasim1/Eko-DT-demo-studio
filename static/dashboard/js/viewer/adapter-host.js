@@ -40,7 +40,9 @@
           window.EKO_HOST_ENGINE.flyToAsset(assetId);
         }
       },
-      resetView: noop,
+      resetView: function () {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.resetView) window.EKO_HOST_ENGINE.resetView();
+      },
       cameraMoved: function () { return false; },
       saveViewpoint: function () { return { id: 'vp-host' }; },
       loadViewpoint: noop,

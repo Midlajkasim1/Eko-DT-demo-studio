@@ -18,7 +18,9 @@ window.EKO_V = (function(){
      A point with no cache (first paint, new marker) stays hidden until then. */
   const lastProj = {};
   let lastSig = '';                 /* page + host size the cache was made for */
-  const projKey = (x, y, id) => (id ? id + ':' : '') + x + ',' + y;
+  /* Markers cache by their data-key (alarm id, or as:<asset> for equipment
+     dots — neither has a meaningful x/y on the live model); chips by x,y. */
+  const projKey = (x, y, key) => key ? 'k:' + key : (+x) + ',' + (+y);
   const hostSig = E => { const h = document.getElementById('enginehost'); if(!h) return '';
     const r = h.getBoundingClientRect(); return E.state.pageId + ':' + Math.round(r.width) + 'x' + Math.round(r.height); };
   /* valid only for a re-render of the SAME page with the SAME host box — a
@@ -26,40 +28,66 @@ window.EKO_V = (function(){
   let cacheOK = false;
   const cachedStyle = (x, y, id) => { const c = cacheOK && lastProj[projKey(x, y, id)];
     return c ? ` style="left:${c.left};top:${c.top}${c.on ? '' : ';display:none'}"` : ''; };
-  const allCached = pts => cacheOK && pts.length > 0 && pts.every(p => lastProj[projKey(p.x, p.y, p.id)]);
+  const allCached = pts => cacheOK && pts.length > 0 && pts.every(p => lastProj[projKey(p.x, p.y, p.key)]);
+  /* IFC GUID of an asset via the host 3D engine; null when the equipment is
+     not in the model or no host engine is attached */
+  const guidOf = assetId => { const HE = window.EKO_HOST_ENGINE;
+    return HE && HE.bimIdFor && assetId ? HE.bimIdFor(assetId) : null; };
+  const SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
+  /* A marker's inline position: its cached one, or — when the rest of the
+     layer is cached — hidden on its own until position() places it, so a new
+     marker never makes the whole layer blink. */
+  const mkStyle = (x, y, key) => cachedStyle(x, y, key) || (cacheOK ? ' style="display:none"' : '');
+  /* Is this marker the selected equipment (E.state.paint)? Compared by model
+     element, so rows sharing one element all read as selected. */
+  const isSel = (E, assetId, g) => { const p = E.state.paint; return !!p && (p === assetId || (!!g && guidOf(p) === g)); };
 
   function markers(E){
     cacheOK = lastSig !== '' && hostSig(E) === lastSig;
     if(!E.state.markersOn) return '<div class="mklayer"></div>';
     /* alert-centre display filter (D30); only LOCATED alarms get a marker —
        an alarm without a world position has nothing to point at (D64) */
-    const list = E.visAlarms().filter(a => (isFinite(+a.x) && isFinite(+a.y)) || a.bimId);
-    // Auto-cluster multiple alarms on same asset or location
-    const posCounts = {};
-    list.forEach(a => {
-      const k = a.bimId || a.asset || (Math.round(a.x) + ',' + Math.round(a.y));
-      posCounts[k] = (posCounts[k] || 0) + 1;
+    const list = E.visAlarms().filter(a => (isFinite(+a.x) && isFinite(+a.y)) || a.bimId || guidOf(a.asset));
+    /* Alarms on the same equipment (or the same spot) collapse into ONE
+       cluster badge that opens the worst of them. */
+    const where = a => guidOf(a.asset) || a.bimId || a.asset || (Math.round(a.x) + ',' + Math.round(a.y));
+    const groups = new Map();
+    list.forEach(a => { const k = where(a); if(!groups.has(k)) groups.set(k, []); groups.get(k).push(a); });
+    let out = '';
+    const pts = [];
+    groups.forEach((g, loc) => {
+      if(g.length === 1){ out += marker(E, g[0], loc); pts.push({ key: g[0].id }); return; }
+      const worst = g.slice().sort((p, q) => (SEV_RANK[p.sev] ?? 9) - (SEV_RANK[q.sev] ?? 9))[0];
+      pts.push({ key: worst.id });
+      out += `<button class="mk mkclu" data-key="${C().esc(worst.id)}" data-x="${worst.x}" data-y="${worst.y}" data-z="${worst.z || ''}" data-bimid="${guidOf(worst.asset) || worst.bimId || ''}" data-asset="${C().esc(worst.asset || '')}"${mkStyle(worst.x, worst.y, worst.id)} data-act="mkClu" data-alarm="${worst.id}" data-n="${g.length}" data-sel="${isSel(E, worst.asset, loc) ? 1 : 0}"
+        aria-label="${C().esc(E.t('alarmsN', { n: g.length }))}" data-tip="${C().esc(E.t('cluTip',{n:g.length}))}">${g.length}</button>`;
     });
-    list.forEach(a => {
-      const k = a.bimId || a.asset || (Math.round(a.x) + ',' + Math.round(a.y));
-      if (posCounts[k] > 1) a.clu = true;
+    /* Every piece of equipment located in the 3D model gets a status dot
+       (green healthy, red in alarm) unless an alarm marker already sits on it.
+       Several register rows can share one model element: one dot each. */
+    const seen = new Set();
+    (E.data.assets || []).forEach(s => {
+      const g = guidOf(s.id);
+      if(!g || groups.has(g) || seen.has(g)) return;
+      seen.add(g);
+      out += assetMarker(E, s, g);
+      pts.push({ key: 'as:' + s.id });
     });
-    const clu = list.filter(a => a.clu);
-    const rest = list.filter(a => !a.clu);
-    let out = rest.map(a => marker(E,a)).join('');
-    const pts = rest.slice();
-    if(clu.length > 1){
-      const worst = clu.find(p=>p.sev==='critical') || clu[0];
-      pts.push(worst);
-      out += `<button class="mk mkclu" data-x="${worst.x}" data-y="${worst.y}" data-z="${worst.z || ''}" data-bimid="${worst.bimId || ''}" data-asset="${worst.asset || ''}"${cachedStyle(worst.x, worst.y, worst.id)} data-act="mkClu" data-alarm="${worst.id}" data-n="${clu.length}"
-        aria-label="${C().esc(E.t('alarmsN', { n: clu.length }))}" data-tip="${C().esc(E.t('cluTip',{n:clu.length}))}">${clu.length}</button>`;
-    } else { out += clu.map(a => marker(E,a)).join(''); pts.push(...clu); }
-    return `<div class="mklayer"${allCached(pts) ? ' data-proj="1"' : ''}>${out}</div>`;
+    return `<div class="mklayer"${cacheOK && pts.length ? ' data-proj="1"' : ''}>${out}</div>`;
   }
-  const marker = (E,a) =>
-    `<button class="mk" data-x="${a.x}" data-y="${a.y}" data-z="${a.z || ''}" data-bimid="${a.bimId || ''}" data-asset="${a.asset || ''}" data-act="mkOpen" data-alarm="${a.id}"${cachedStyle(a.x, a.y, a.id)}
-       data-pulse="${E.state.mkPulse===a.id?1:0}" aria-label="${C().esc(a.asset)}" data-tip="${C().esc(a.asset)}">
+  const marker = (E, a, where) =>
+    `<button class="mk" data-key="${C().esc(a.id)}" data-x="${a.x}" data-y="${a.y}" data-z="${a.z || ''}" data-bimid="${guidOf(a.asset) || a.bimId || ''}" data-asset="${C().esc(a.asset || '')}" data-act="mkOpen" data-alarm="${a.id}"${mkStyle(a.x, a.y, a.id)}
+       data-sel="${isSel(E, a.asset, where) ? 1 : 0}" data-pulse="${E.state.mkPulse===a.id?1:0}" aria-label="${C().esc(a.asset)}" data-tip="${C().esc(a.asset)}">
        ${C().sevGlyph(a.sev, !!a.ack, 16, true)}</button>`;
+  const assetMarker = (E, s, g) => {
+    const esc = C().esc, name = E.lang === 'ar' ? (s.typeAr || s.typeEn) : s.typeEn;
+    const tip = name ? name + ' · ' + s.id : s.id, key = 'as:' + s.id, sel = isSel(E, s.id, g);
+    /* the same alarm rule the engine paints the model with, so dot and model agree */
+    const HE = window.EKO_HOST_ENGINE, alarm = HE && HE.isAlarmed ? HE.isAlarmed(g) : s.st === 'alarm';
+    return `<button class="mk mkasset" data-key="${esc(key)}" data-bimid="${esc(g)}" data-asset="${esc(s.id)}" data-act="mkAsset"${mkStyle(null, null, key)}
+       data-st="${alarm ? 'alarm' : 'ok'}" data-sel="${sel ? 1 : 0}" aria-pressed="${sel}"
+       aria-label="${esc(tip)}" data-tip="${esc(tip)}"><i aria-hidden="true"></i></button>`;
+  };
   const chipLayer = (chips) =>
     `<div class="pmulayer"${allCached(chips) ? ' data-proj="1"' : ''}>${chips.map(pc =>
       `<span class="pmuchip" data-x="${pc.x}" data-y="${pc.y}"${cachedStyle(pc.x, pc.y)}>${C().esc(pc.id)}</span>`).join('')}</div>`;
@@ -91,12 +119,11 @@ window.EKO_V = (function(){
         asset: el.dataset.asset,
         alarm: el.dataset.alarm
       });
-      console.log(`[viewer] project alarm=${el.dataset.alarm} bimId=${el.dataset.bimid} -> p: x=${p.x?.toFixed(1)} y=${p.y?.toFixed(1)} visible=${p.visible} hr.w=${hr.width.toFixed(0)} hr.l=${hr.left.toFixed(0)} lr.l=${lr ? lr.left.toFixed(0) : 'n/a'}`)
       const on = p.visible && p.x >= 0 && p.x <= hr.width && p.y >= 0 && p.y <= hr.height;
       const left = (p.x + hr.left - lr.left).toFixed(1) + 'px', top = (p.y + hr.top - lr.top).toFixed(1) + 'px';
       el.style.left = left; el.style.top = top;
       el.style.display = on ? '' : 'none';
-      lastProj[projKey(+el.dataset.x, +el.dataset.y, el.dataset.alarm)] = { left, top, on };
+      lastProj[projKey(el.dataset.x, el.dataset.y, el.dataset.key)] = { left, top, on };
     };
     const layer = document.querySelector('.mklayer');
     const lr = layer && layer.getBoundingClientRect();
@@ -152,7 +179,9 @@ window.EKO_V = (function(){
      asset panel. Severity chip · plain asset name with its code · the alarm's
      two lines · impact where known · Details (primary) · Create work order. */
   function mkPop(E){
-    const a = E.state.mkPop && E.alarm(E.state.mkPop);
+    const key = E.state.mkPop;
+    if(typeof key === 'string' && key.indexOf('asset:') === 0) return assetPop(E, key.slice(6));
+    const a = key && E.alarm(key);
     if(!a) return '';
     const t = E.t.bind(E), esc = C().esc, ar = E.lang === 'ar';
     const asset = (E.data.assets || []).find(x => x.id === a.asset) || {};
@@ -174,6 +203,38 @@ window.EKO_V = (function(){
         ${woDone || (E.state.woPhase||{})[a.asset]
           ? C().woBtn(E, a.asset)
           : `<button class="btnG btnSm" data-act="cwo" data-asset="${esc(a.asset)}">${esc(t('cwo'))}</button>`}
+      </div></div>`;
+  }
+
+  /* The same popup for an equipment dot (no alarm marker on it): status,
+     name and code, a few live readings, then Details / Create work order.
+     Opened as mkPop = "asset:<id>", so every path that closes the alarm
+     popup (click-away, Escape, swipe, route change) closes this one too. */
+  function assetPop(E, id){
+    const s = (E.data.assets || []).find(x => x.id === id);
+    if(!s) return '';
+    const t = E.t.bind(E), esc = C().esc, ar = E.lang === 'ar';
+    const g = guidOf(id), HE = window.EKO_HOST_ENGINE;
+    const alarm = HE && HE.isAlarmed && g ? HE.isAlarmed(g) : s.st === 'alarm';
+    const name = ar ? (s.typeAr || s.typeEn || id) : (s.typeEn || id);
+    const where = [ar ? (s.levelAr || s.level) : s.level, ar ? (s.zoneAr || s.zone) : s.zone].filter(Boolean).join(' · ');
+    const params = (s.params || []).slice(0, 3);
+    /* register rows that share this model element (the mapping points several at one element) */
+    const also = g ? (E.data.assets || []).filter(x => x.id !== id && guidOf(x.id) === g).map(x => x.id) : [];
+    const woDone = E.state.woRaised[id];
+    return `<div class="mkpop mzglass col gap8" data-x="" data-y="" data-z="" data-bimid="${esc(g || '')}" data-asset="${esc(id)}" data-born="${E.state.born==='pop'?1:0}" role="dialog" aria-label="${esc(name + ' ' + id)}">
+      <div class="draghandle"></div>
+      <div class="row gap8 aiC"><span class="statchip" data-sev="${alarm ? 'high' : 'ok'}">${esc(t(alarm ? 'mkEqAlarm' : 'stNormal'))}</span><span class="grow"></span>
+        <button class="iconbtn icon26" data-act="mkClose" aria-label="${esc(t('close'))}">${C().icon('x',12)}</button></div>
+      <div class="col"><b class="mkname">${esc(name)}</b><span class="tMonoS mkcode">${esc(id)}${where ? ` · ${esc(where)}` : ''}</span></div>
+      ${alarm ? '' : `<span class="mkwhat">${esc(t('wall.noAlarms'))}</span>`}
+      ${params.length ? `<div class="mkparams">${params.map(p => `<span class="tCap mkplbl" data-tip="${esc(E.ph(p[0]))}" data-tipif="trunc">${esc(E.ph(p[0]))}</span><span class="tMonoS mkpval">${esc(p[2])}</span>`).join('')}</div>` : ''}
+      ${also.length ? `<span class="tCap">${esc(also.join(', '))}</span>` : ''}
+      <div class="row gap6 mkacts">
+        <button class="btnP btnSm" data-act="openAsset" data-asset="${esc(id)}">${esc(t('details'))}</button>
+        ${woDone || (E.state.woPhase||{})[id]
+          ? C().woBtn(E, id)
+          : `<button class="btnG btnSm" data-act="cwo" data-asset="${esc(id)}">${esc(t('cwo'))}</button>`}
       </div></div>`;
   }
 

@@ -46,7 +46,7 @@
       assetSel: null, apTab: 'alarms',
       dock: { tool: 'select', bloom: null, style: 'default', tone: 'blue',
               level: 'ALL', layer: 'all', alerts: 'all', minimap: false },
-      mkPop: null, mkPopN: 0, mkPulse: null, radial: null, vbarMin: ls.get('eko-vbar') === 'min',   /* D73 */
+      mkPop: null, mkPopN: 0, mkPulse: null, paint: null, radial: null, vbarMin: ls.get('eko-vbar') === 'min',   /* D73 */
       ovpMin: ls.get('eko-ovp') === 'min', panMin: ls.get('eko-pan') === 'min', regMin: ls.get('eko-reg') === 'min',   /* D128: the register's model strip */
       /* `born` marks the element a state change just opened, so entry
          animations play once on open — not on every re-render. render()
@@ -684,6 +684,7 @@
     if(window.EKO_SURF) window.EKO_SURF.afterRender();          /* R5 (D67) */
     if(window.EKO_MAP && document.querySelector('.pfcard')) window.EKO_MAP.after();   /* D122: keep the marker card inside the map box */
     if(window.EKO_AI) window.EKO_AI.after();                     /* D132: the conversation panel's geometry and scroll */
+    syncPaint();
   }
   function clock(){
     const el = $('clock'); if(!el) return;
@@ -695,6 +696,26 @@
   /* ------------------------------- actions --------------------------------- */
   /* D75: every transient message goes through the ONE feedback toast */
   function toast(msg, tone, action){ if(window.EKO_FB) window.EKO_FB.toast({ text: msg, tone: tone || 'info', action }); }
+  /* The SELECTED equipment (E.state.paint, an asset id) is coloured on the
+     model — green healthy, red in alarm. Set by a marker tap or Locate in 3D;
+     a second tap on its marker, closing its popup or closing the asset panel
+     clears it and takes the camera home. render() keeps the model in step. */
+  let painted = null;
+  function syncPaint(){
+    const want = E.state.paint || null;
+    if(want === painted || !E.engine) return;
+    painted = want;
+    if(want){ if(typeof E.engine.highlightAsset === 'function') E.engine.highlightAsset(want); }
+    else if(typeof E.engine.clearHighlight === 'function') E.engine.clearHighlight();
+  }
+  /* select + fly to it; or, when it is already selected, deselect + home */
+  function selectEquipment(assetId, patch){
+    if(E.state.paint && E.state.paint === assetId){ E.set({ mkPop: null, mkPopN: 0, paint: null }); goHome(); return false; }
+    E.set(Object.assign({}, patch, { paint: assetId }));
+    if(typeof E.engine.flyTo === 'function') E.engine.flyTo(assetId);
+    return true;
+  }
+  function goHome(){ if(E.engine && typeof E.engine.resetView === 'function') E.engine.resetView(); }
 
   const ACTS = {
     goMod(el){ const m = E.nav.modules.find(x=>x.id===el.dataset.mod);
@@ -830,20 +851,9 @@
     /* Asset journey: any entry point opens the ONE docked panel. */
     openAsset(el){
       const assetId = el.dataset.asset;
-      E.set({ born: E.state.assetSel?null:'asset', assetSel: assetId, apTab: E.state.apTab||'alarms', mkPop:null });
-      if (E.engine && typeof E.engine.flyTo === 'function') {
-        E.engine.flyTo(assetId);
-      }
-      if (E.engine && typeof E.engine.highlightAsset === 'function') {
-        E.engine.highlightAsset(assetId);
-      }
+      E.set({ born: E.state.assetSel?null:'asset', assetSel: assetId, apTab: E.state.apTab||'alarms', mkPop:null });   /* the camera stays put: Locate in 3D moves it */
     },
-    closeAsset(){
-      E.set({ assetSel: null });
-      if (E.engine && typeof E.engine.clearHighlight === 'function') {
-        E.engine.clearHighlight();
-      }
-    },
+    closeAsset(){ E.set({ assetSel: null, paint: null }); goHome(); },   /* closing the panel is back to the home view */
     apTab(el){ E.set({ apTab: el.dataset.v }); },
     alAll(){ E.set({ alAll: !E.state.alAll }); },
     resetLayout(){ E.set({ rlAsk:true }); },
@@ -864,7 +874,7 @@
       const a = E.data.alarms.find(x => x.asset === id);
       if(!document.getElementById('vpmain'))
         E.state.pageId = 'marsa-overview', E.state.module = 'overview', E.state.sub = null;
-      E.state.mkPulse = a ? a.id : null; render();
+      E.state.mkPulse = a ? a.id : null; E.state.paint = id; render();   /* located equipment is coloured like a marker tap */
       E.engine.flyTo(id);
       setTimeout(() => { E.state.mkPulse = null; render(); }, 2200); },
 
@@ -965,8 +975,12 @@
        the open popup's own marker closes it. A cluster shows its worst alarm
        with the count. */
     mkOpen(el){ const al = E.alarm(el.dataset.alarm); if(!al) return;
-      if(E.state.mkPop === al.id){ E.set({ mkPop:null, mkPopN:0 }); return; }
-      E.set({ born:'pop', mkPop: al.id, mkPopN: 0 }); },
+      selectEquipment(al.asset, { born:'pop', mkPop: al.id, mkPopN: 0 }); },
+    /* An equipment dot: selects that equipment (coloured green or red on the
+       model, camera flies to it) and opens its popup; a second tap deselects
+       and goes home. */
+    mkAsset(el){ const id = el.dataset.asset; if(!id) return;
+      selectEquipment(id, { born:'pop', mkPop: 'asset:' + id, mkPopN: 0 }); },
     mkToggle(){ const on = !E.state.markersOn; ss.set('eko-mk', on ? '1' : '0'); E.set({ markersOn: on }); },
     ackAlarm(el, ev){ ev.stopPropagation(); if(window.EKO_PWA) window.EKO_PWA.haptic('ack');
       const a = E.alarm(el.dataset.alarm);
@@ -993,9 +1007,8 @@
       const newer = E.events().filter(e=>e.ageH<cur-.01);
       E.set({ histAge: newer.length ? newer.sort((a,b)=>b.ageH-a.ageH)[0].ageH : null }); },
     mkClu(el){ const al = (el && el.dataset.alarm && E.alarm(el.dataset.alarm)) || E.data.alarms.find(x=>x.sev==='critical') || E.data.alarms[0];
-      if(E.state.mkPop === al.id){ E.set({ mkPop:null, mkPopN:0 }); return; }
-      E.set({ born:'pop', mkPop: al.id, mkPopN: +((el && el.dataset.n) || 0) }); },
-    mkClose(){ E.set({ mkPop: null, mkPopN: 0 }); },
+      selectEquipment(al.asset, { born:'pop', mkPop: al.id, mkPopN: +((el && el.dataset.n) || 0) }); },
+    mkClose(){ E.set({ mkPop: null, mkPopN: 0, paint: null }); goHome(); },
 
     /* Timeline. */
     tlScrub(el, ev){ const r = el.getBoundingClientRect();

@@ -118,6 +118,7 @@ window.EKO_I18N.ar = {
   "thWos": "أوامر",
   "thWoState": "حالة الأمر",
   "stNormal": "طبيعي",
+  "mkEqAlarm": "في حالة إنذار",
   "stStale": "بيانات قديمة",
   "chipStale": "قديمة · {h} س",
   "chipAlarm": "تنبيه واحد · {sev}",

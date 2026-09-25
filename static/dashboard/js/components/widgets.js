@@ -856,12 +856,22 @@ window.EKO_C = (function(){
      the data contract, site flag and role permit). LIVE PARAMETERS persists
      above every tab. Desktop has no footer; the PHONE SHEET keeps a sticky
      footer (intentional responsive divergence, logged). */
+  /* The minimum the panel needs, built from the alarms that name the asset */
+  function alarmAsAsset(E, id){
+    const als = (E.data.alarms || []).filter(a => a.asset === id);
+    if(!als.length) return null;
+    const a = als[0];
+    return { id, st:'alarm', alarms: als.map(x => x.id), params: [], activity: [],
+      typeEn: a.locEn ? String(a.locEn).split(' · ')[0] : '', typeAr: a.locAr ? String(a.locAr).split(' · ')[0] : '',
+      level: '', levelAr: '', zone: '', zoneAr: '' };
+  }
   function assetPanel(E){
     const id = E.state.assetSel;
     if(!id) return '';
-    const r = E.data.assets.find(a => a.id === id) || (window.EKO_MT && window.EKO_MT.meterAsAsset(E, id));   /* D96: a meter row opens here too */
+    const r = E.data.assets.find(a => a.id === id) || (window.EKO_MT && window.EKO_MT.meterAsAsset(E, id))   /* D96: a meter row opens here too */
+      || alarmAsAsset(E, id);   /* an alarm's equipment the register does not list yet */
     if(!r) return '';
-    const als = (r.alarms||[]).map(x=>E.alarm(x));
+    const als = (r.alarms||[]).map(x=>E.alarm(x)).filter(Boolean);   /* a refresh can retire an alarm id the row still lists */
     const worst = als[0];
     const t = E.t.bind(E), arL = E.lang === 'ar';
     const ctl = window.EKO_CTL && window.EKO_CTL.showsControl(E, r);

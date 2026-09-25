@@ -120,6 +120,7 @@ window.EKO_I18N.en = {
   "thWos": "WOs",
   "thWoState": "WO state",
   "stNormal": "Normal",
+  "mkEqAlarm": "In alarm",
   "stStale": "Stale",
   "chipStale": "stale · {h}h",
   "chipAlarm": "1 alarm · {sev}",
