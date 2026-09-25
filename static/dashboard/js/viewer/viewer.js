@@ -263,62 +263,127 @@ window.EKO_V = (function(){
      control in the alarm surfaces). */
   const caption = E => `<div id="vpcaption">${C().esc((E.lang==='ar'?E.data.nameAr:E.data.nameEn).toUpperCase())} · ${C().esc(E.t('capLiveModel'))}</div>`;
 
-  /* Timeline scrub bar — reference anatomy: 56px glass bar, LIVE/HISTORY
-     segs, prev/next event, metric segs, slider with curve + event dots. */
+  /* A moment on the app's one clock (the browser's): "HH:MM" today, the
+     weekday within the week ("Tue 14:00"), the date beyond ("13 Sep 14:00"). */
+  function clockLabel(E, ms){
+    const d = new Date(ms), now = new Date();
+    const hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    const day0 = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const days = Math.round((day0(now) - day0(d)) / 864e5);
+    if(days === 0) return hm;
+    const loc = E.lang === 'ar' ? 'ar-AE-u-nu-latn' : 'en-GB';
+    return d.toLocaleDateString(loc, days > 0 && days < 7 ? { weekday: 'short' } : { day: 'numeric', month: 'short' }) + ' ' + hm;
+  }
+
+  /* Timeline strip (D145 / D168 anatomy): LIVE / HISTORY, previous and next
+     event, the metric modes, the window, then the curve with the alarm
+     markers over a clock axis, and a caption under it all.
+     The curve is the site's load as HOURLY AVERAGES in kW: data-map.js builds
+     timeline24 from the meters, each hour with its real start; the standalone
+     demo draws the fixture's load24hMw. AED/h and kg CO2/h are the same curve
+     through the site's tariff and emission-factor records (kW × AED/kWh =
+     AED/h); a mode whose record is missing (rate not above zero, or no record
+     id) is not offered, and a remembered choice of it falls back to kW. The
+     window rolls and ends now; 3 d and Custom need the history feed (D31). */
   function timeline(E){
-    const t = E.t.bind(E);
-    /* Range selector (D31): 6 h and Day render from the 24 h feed; 3 d and
-       Custom need a history feed the fixtures do not carry, so they render
-       disabled with an honest tooltip (same rule as the capability dock). */
+    const t = E.t.bind(E), esc = C().esc, fmt = C().fmt;
     const range = E.state.tlRange === '6h' ? 6 : 24;
-    const src = E.data.load24hMw;
-    const series = range === 24 ? src : src.slice(-Math.max(2, Math.round(src.length * range / 24)));
-    const tr = ekoTrend(series, 480, 26);
-    const asOfH = parseInt((E.data.basis.asOf || '14:00'), 10) || 14;
-    const step = range === 24 ? 6 : 2;
-    const labels = [];
-    for(let h = (range === 24 ? 0 : asOfH - range); h <= (range === 24 ? 12 : asOfH); h += step)
-      labels.push(String((h + 24) % 24).padStart(2, '0') + ':00');
-    const axis = `<span class="tlaxis" aria-hidden="true">${labels.map(l =>
-      `<i>${l}</i>`).join('')}</span>`;
     const cur = E.state.histAge;
+    const H = 36e5, end = Date.now(), start = end - range * H;
+    const live = E.data.timeline24;
+    const hourly = live && Array.isArray(live.kw)
+      ? live.kw.map((v, i) => ({ t: live.start + i * live.stepMs, v }))
+      : window.DASHBOARD_OVERLAY ? []          /* live mode, history not in yet: no stand-in curve */
+      : (E.data.load24hMw || []).map((mw, i, a) => ({ t: Math.floor(end / H) * H - (a.length - 1 - i) * H, v: mw * 1000 }));
+    /* each hour drawn at its middle (never past now); hours wholly before the window are left out */
+    const pts = hourly.filter(p => p.t + H > start)
+      .map(p => ({ x: (Math.max(start, Math.min(p.t + H / 2, end)) - start) / (end - start), v: p.v }));
+    const vals = pts.filter(p => p.v != null).map(p => p.v);
+    /* today's peak (the highest hour of Peak_Demand_his): a point above the
+       curve when its hour is in the window, the scale widened to hold it */
+    const peak = vals.length && live && live.peak && live.peak.v != null ? live.peak : null;
+    const peakIn = !!peak && peak.t + H > start && peak.t <= end;
+    const lo = vals.length ? Math.min(...vals) : 0, hi = vals.length ? Math.max(...vals, peakIn ? peak.v : -Infinity) : 0;
+    const Y = v => hi > lo ? 24 - (v - lo) / (hi - lo) * 22 : 13;
+    let line = '', pen = false;                        /* an unreported hour breaks the line */
+    pts.forEach(p => { if(p.v == null){ pen = false; return; }
+      line += (pen ? 'L' : 'M') + (p.x * 480).toFixed(1) + ',' + Y(p.v).toFixed(1); pen = true; });
+
+    const b = E.data.basis || {};
+    const MODES = {
+      kwh: { lbl: 'kW', rate: 1 },
+      aed: b.aedPerKwh > 0 && b.tariffId ? { lbl: 'AED', rate: b.aedPerKwh, prov: b.tariffStatus === 'provisional',
+        basis: t('basisTariff', { r: fmt(b.aedPerKwh, 2), id: [b.tariffId, b.tariffVersion].filter(Boolean).join(' ') }) } : null,
+      co2: b.co2KgPerKwh > 0 && b.co2FactorId ? { lbl: 'CO2', rate: b.co2KgPerKwh, prov: b.co2FactorStatus === 'provisional',
+        basis: t('basisEmission', { r: fmt(b.co2KgPerKwh, 2), id: b.co2FactorId }) } : null
+    };
+    const mk = MODES[E.state.tlMetric] ? E.state.tlMetric : 'kwh', M = MODES[mk];
+    const unit = t('tlUnit.' + mk), sc = v => fmt(v * M.rate);
+
+    /* the axis: the clock hours inside the window at their true positions,
+       every 6 h on Day and every 2 h on 6 h */
+    const every = range === 24 ? 6 : 2, ticks = [];
+    for(const tk = new Date(start - start % 6e4); ; ){
+      tk.setMinutes(60, 0, 0);                         /* the next whole hour */
+      if(tk.getTime() > end) break;
+      if(tk.getHours() % every) continue;
+      const x = (tk.getTime() - start) / (end - start) * 100;
+      ticks.push(`<i style="left:${x.toFixed(2)}%"${x < 4 ? ' data-edge="s"' : x > 96 ? ' data-edge="e"' : ''}>${String(tk.getHours()).padStart(2, '0')}:00</i>`);
+    }
+    const axis = `<span class="tlaxis" aria-hidden="true">${ticks.join('')}</span>`;
+
+    /* a marker is when an alarm was RAISED, not a point on the curve */
     const evs = E.events().filter(a => a.ageH <= range).map(a => {
+      const when = a.raisedAt ? clockLabel(E, a.raisedAt) : E.ph(a.raised);
       return `<button class="scrubev tipU" style="left:${(1-a.ageH/range)*100}%"
         data-act="tlEvent" data-age="${a.ageH}"
-        data-tip="${C().esc(E.t('tlEventTip',{time:E.ph(a.raised),what:a.asset}))}"
-        aria-label="${C().esc(a.asset)}">${C().sevGlyph(a.sev, !!a.ack, 9, true)}</button>`;
+        data-tip="${esc(t('tlEventTip',{time:when,what:eqName(E, a.asset)}))}"
+        aria-label="${esc(a.asset)}">${C().sevGlyph(a.sev, !!a.ack, 9, true)}</button>`;
     }).join('');
+
+    /* the caption: what the curve is (and, in AED / CO2, the record it went
+       through), and the curve's range in the mode's unit */
+    const capL = t('tlHourly') + (M.basis ? ' · ' + M.basis + (M.prov ? ' · ' + t('basisProv') : '') : '');
+    const capR = t('tlScale', { lo: sc(Math.min(...vals)), hi: sc(Math.max(...vals)), u: unit });
+    const hh = ms => String(new Date(ms).getHours()).padStart(2, '0') + ':00';
+    const capP = peak ? t('tlPeak', { v: sc(peak.v), u: unit, from: hh(peak.t), to: hh(peak.t + H) }) : '';
+    const peakDot = peakIn ? `<span class="tlpeak tipU" style="left:${((Math.max(start, Math.min(peak.t + H / 2, end)) - start) / (end - start) * 100).toFixed(2)}%;top:${(4 + Y(peak.v) / 26 * 24).toFixed(1)}px" data-tip="${esc(capP)}" aria-label="${esc(capP)}"></span>` : '';
+    /* no history in the window: a plain strip, no caption */
+    const cap = !vals.length ? '' : `<span class="tlcap"><span class="tlcapL">${esc(capL)}</span><span class="tlcapR">${esc(capR)}</span>${capP ? `<span class="tlcapP">${esc(capP)}</span>` : ''}</span>`;
+    let curVal = '';                                   /* in history: that hour's value */
+    if(cur != null){ const ct = end - cur * H, hp = hourly.find(p => ct >= p.t && ct < p.t + H);
+      if(hp && hp.v != null) curVal = ' · ' + sc(hp.v) + ' ' + unit; }
+
     const seg = (lbl, on, act, v, extra) =>
-      `<button class="seg" data-on="${on}" data-act="${act}" ${v?`data-v="${v}"`:''}>${extra||''}${C().esc(lbl)}</button>`;
+      `<button class="seg" data-on="${on}" data-act="${act}" ${v?`data-v="${v}"`:''}>${extra||''}${esc(lbl)}</button>`;
     const stale = !!E.state.stale && cur == null;   /* D121: the timeline shows its last-known window, marked stale */
-    return `<div class="scrubbar" role="group" aria-label="${C().esc(t('history'))}" data-stale="${stale ? 1 : 0}">
+    return `<div class="scrubbar" role="group" aria-label="${esc(t('history'))}" data-stale="${stale ? 1 : 0}"${!vals.length ? '' : ` data-cap="${capP ? 2 : 1}"`}>
       <div class="row gap8 flexnone">
         <div class="segbox row" role="group">
           ${seg(t(E.state.offline ? 'liveOffline' : E.state.degraded ? 'liveDegraded' : 'segLive'), cur==null, 'tlLive', '', '<span class="livedot"></span>')}
           ${seg(t('segHistory'), cur!=null, 'tlHist')}
         </div>
-        <button class="iconbtn icon26 tipU dirx" data-act="tlPrev" data-tip="${C().esc(t('prevEvent'))}" aria-label="${C().esc(t('prevEvent'))}">${C().icon('chevL',13,2)}</button>
-        <button class="iconbtn icon26 tipU dirx" data-act="tlNext" data-tip="${C().esc(t('nextEvent'))}" aria-label="${C().esc(t('nextEvent'))}" ${cur==null?'disabled':''}>${C().icon('chevR',13,2)}</button>
-        <div class="segbox row" role="group" aria-label="${C().esc(t('tlMetricKwh'))}">
-          ${seg('kWh', E.state.tlMetric==='kwh', 'tlMetric', 'kwh')}
-          ${seg('AED', E.state.tlMetric==='aed', 'tlMetric', 'aed')}
-          ${seg('CO2', E.state.tlMetric==='co2', 'tlMetric', 'co2')}
+        <button class="iconbtn icon26 tipU dirx" data-act="tlPrev" data-tip="${esc(t('prevEvent'))}" aria-label="${esc(t('prevEvent'))}">${C().icon('chevL',13,2)}</button>
+        <button class="iconbtn icon26 tipU dirx" data-act="tlNext" data-tip="${esc(t('nextEvent'))}" aria-label="${esc(t('nextEvent'))}" ${cur==null?'disabled':''}>${C().icon('chevR',13,2)}</button>
+        <div class="segbox row" role="group" aria-label="${esc(t('tlMetricKwh'))}">
+          ${Object.keys(MODES).filter(k => MODES[k]).map(k => seg(MODES[k].lbl, mk === k, 'tlMetric', k)).join('')}
         </div>
-        <select class="tlsel" data-chg="tlRangeSel" aria-label="${C().esc(t('history'))}" data-tip="${C().esc(t('tlNeedsHist'))}">
-          <option value="6h" ${range===6?'selected':''}>${C().esc(t('tlR6h'))}</option>
-          <option value="day" ${range===24?'selected':''}>${C().esc(t('tlRDay'))}</option>
-          <option disabled>${C().esc(t('tlR3d'))}</option>
-          <option disabled>${C().esc(t('tlRCustom'))}</option>
+        <select class="tlsel" data-chg="tlRangeSel" aria-label="${esc(t('history'))}" data-tip="${esc(t('tlNeedsHist'))}">
+          <option value="6h" ${range===6?'selected':''}>${esc(t('tlR6h'))}</option>
+          <option value="day" ${range===24?'selected':''}>${esc(t('tlRDay'))}</option>
+          <option disabled>${esc(t('tlR3d'))}</option>
+          <option disabled>${esc(t('tlRCustom'))}</option>
         </select>
       </div>
-      <div class="scrubtrack" data-act="tlScrub" role="slider" aria-label="${C().esc(t('history'))}"
+      <div class="scrubtrack" data-act="tlScrub" role="slider" aria-label="${esc(t('history'))}"
         aria-valuemin="0" aria-valuemax="${range}" aria-valuenow="${cur==null?0:Math.round(cur)}" tabindex="0">
         <svg viewBox="0 0 480 26" preserveAspectRatio="none">
-          <path d="${tr.line}" fill="none" stroke="var(--acc)" stroke-width="1.2" opacity=".8"/></svg>
-        ${evs}${axis}
+          <path d="${line}" fill="none" stroke="var(--acc)" stroke-width="1.2" opacity=".8"/></svg>
+        ${peakDot}${evs}${axis}
         ${cur!=null?`<span class="scrubcur" style="left:${(1-Math.min(cur,range)/range)*100}%"></span>`:''}
       </div>
-      <span class="tMonoS flexnone${stale ? ' tlstale' : ''}" style="color:${cur==null && !stale?'var(--posTx)':'var(--warnTx)'}" ${stale ? `data-tip="${C().esc(E.state.offline ? t('pwaOffline',{t:E.state.offlineSince||''}) : t('pwaDegraded',{t:E.state.degradedSince||'', src:E.state.degradedSrc||''}))}"` : ''}>${C().esc(cur==null ? (stale ? t('tlLastKnown',{t:E.state.offlineSince||E.state.degradedSince||E.hhmmAgo(0)}) : t('tlLiveAt',{t:E.hhmmAgo(0)})) : E.hhmmAgo(cur))}</span>
+      <span class="tMonoS flexnone${stale ? ' tlstale' : ''}" style="color:${cur==null && !stale?'var(--posTx)':'var(--warnTx)'}" ${stale ? `data-tip="${esc(E.state.offline ? t('pwaOffline',{t:E.state.offlineSince||''}) : t('pwaDegraded',{t:E.state.degradedSince||'', src:E.state.degradedSrc||''}))}"` : ''}>${esc(cur==null ? (stale ? t('tlLastKnown',{t:E.state.offlineSince||E.state.degradedSince||E.hhmmAgo(0)}) : t('tlLiveAt',{t:E.hhmmAgo(0)})) : E.hhmmAgo(cur) + curVal)}</span>
+      ${cap}
     </div>`;
   }
 

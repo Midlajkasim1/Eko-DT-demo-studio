@@ -59,6 +59,7 @@
       techAr: msg,
       impactAedMo: null,
       raised: raised(a.occurred),
+      raisedAt: (function () { var d = parseWhen(a.occurred); return d ? d.getTime() : null; })(),   /* the one stored time; labels derive from it */
       lifecycle: []
     };
   }
@@ -589,6 +590,42 @@
         var hourKeys = lastNHours(allFlats, 1);
         site.power.zoneLast24 = flats.map(function (f) { return byHour(f, hourKeys); });
         site.power.peakLast24 = byHour(peakFlat, hourKeys);
+        /* The viewer timeline: the site's load per clock hour over the last
+           25 hours, oldest first, as the hourly average in kW. The zone meters
+           report the energy used in each hour, and a kWh used over one hour is
+           a 1 kW average, so their sum is the site's hourly-average load. Each
+           hour keeps its real start (start + i × stepMs); an hour no meter has
+           reported (the current one, usually) is null: a gap, never a dip to
+           zero. AED/h and kg CO2/h derive from it at render. */
+        var tlKeys = lastNHours(allFlats, 25);
+        var tlSeen = {};
+        flats.forEach(function (f) { f.forEach(function (pt) { tlSeen[pt.y + "-" + (pt.m + 1) + "-" + pt.d + "-" + pt.h] = 1; }); });
+        var tlZones = flats.map(function (f) { return byHour(f, tlKeys); });
+        var tlNow = Date.now();
+        site.timeline24 = {
+          /* the site clock (Dubai) is a whole-hour offset from UTC, so its
+             hours start where UTC hours do */
+          start: Math.floor(tlNow / 36e5) * 36e5 - (tlKeys.length - 1) * 36e5,
+          stepMs: 36e5,
+          asOf: tlNow,
+          kw: tlKeys.map(function (hk, i) {
+            if (!tlSeen[hk.k]) return null;
+            var sum = 0;
+            tlZones.forEach(function (z) { sum += z[i] || 0; });
+            return Math.trunc(sum * 100) / 100;
+          })
+        };
+        /* Today's peak demand for the timeline: the highest Peak_Demand_his
+           value today (kW) and the clock hour it fell in. The curve is hourly,
+           so the hour is as precise as the strip needs. */
+        var tlToday = nowParts(), tlPk = null;
+        peakFlat.forEach(function (pt) {
+          if (pt.y !== tlToday.y || pt.m !== tlToday.m || pt.d !== tlToday.d) return;
+          if (!tlPk || pt.val > tlPk.val) tlPk = pt;
+        });
+        site.timeline24.peak = tlPk
+          ? { v: Math.trunc(tlPk.val * 100) / 100, t: Math.floor(tlNow / 36e5) * 36e5 - (tlToday.h - tlPk.h) * 36e5 }
+          : null;
         var weekKeys = lastNWeeks(allFlats, 6);
         var monthKeys = lastNMonths(allFlats, 6);
         site.power.zoneWeekly = flats.map(function (f) { return bucket(f, pointWeekKey, weekKeys, "sum"); });
@@ -1023,6 +1060,7 @@
             techAr: 'حالة العطل نشطة',
             impactAedMo: null,
             raised: 'Live',
+            untimed: true,   /* no alarm record, so no time it was raised: kept off the timeline */
             lifecycle: []
           });
         }

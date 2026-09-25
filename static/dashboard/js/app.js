@@ -137,9 +137,11 @@
       return this.data.alarms.filter(a =>
         !hid.has(a.sev) && (this.state.showAcked || !a.ack));
     },
-    /* Timeline events derive from the alarm list: everything younger than 24 h. */
+    /* Timeline events derive from the alarm list: everything younger than 24 h
+       that carries the time it was raised (an equipment fault with no alarm
+       record has none, so it has no place on a timeline). */
     events(){
-      return this.visAlarms().filter(a => a.ageH <= 24)
+      return this.visAlarms().filter(a => a.ageH <= 24 && !a.untimed)
         .slice().sort((a,b) => a.ageH - b.ageH);
     },
     hhmmAgo(age){

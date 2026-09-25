@@ -270,3 +270,86 @@
   min-width: 0;
   text-align: end;
 }
+/* Timeline strip (D168 anatomy). The clock axis puts each hour at its true
+   position. With history, a caption runs along the bottom: one line (what
+   the curve is, and its range), or two with today's peak; the toolbar keeps
+   its 16 px above the taller strip and the summary panel ends above it.
+   Without history the strip stays plain, with no caption. */
+.dashboard-native-container .scrubbar .tlaxis {
+  display: block;
+  height: 14px;
+}
+.dashboard-native-container .scrubbar .tlaxis i {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.dashboard-native-container .scrubbar .tlaxis i[data-edge="s"] { transform: none; }
+.dashboard-native-container .scrubbar .tlaxis i[data-edge="e"] { transform: translateX(-100%); }
+.dashboard-native-container .scrubbar[data-cap] {
+  height: 76px;
+  padding-block: 6px 24px;
+}
+.dashboard-native-container .scrubbar[data-cap="2"] {
+  height: 88px;
+  padding-block-end: 36px;
+}
+.dashboard-native-container .scrubbar[data-cap] .scrubev { top: 0; }
+.dashboard-native-container .scrubbar[data-cap] .scrubtrack svg { top: 4px; height: 24px; }
+.dashboard-native-container .scrubbar[data-cap] .scrubcur { top: 0; bottom: 12px; }
+.dashboard-native-container .scrubbar[data-cap] .tlaxis {
+  top: 30px;
+  bottom: auto;
+}
+.dashboard-native-container .scrubbar .tlpeak {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--chrome-bg);
+  border: 1.5px solid var(--acc);
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
+.dashboard-native-container .scrubbar .tlcap {
+  position: absolute;
+  inset-inline: 10px;
+  bottom: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 12px;
+  row-gap: 2px;
+  font-size: var(--txCapSz);
+  line-height: 1.2;
+  color: var(--t3);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.dashboard-native-container .scrubbar .tlcapL {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dashboard-native-container .scrubbar :is(.tlcapR, .tlcapP) {
+  grid-column: 2;
+  text-align: end;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--t2);
+}
+.dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="1"]) #vbottom { bottom: 104px; }
+.dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="2"]) #vbottom { bottom: 116px; }
+.dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="1"]) > #ovp:not([data-min="1"]) .ovpad {
+  padding-block-end: calc(var(--ovFade) - 16px);
+}
+.dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="2"]) > #ovp:not([data-min="1"]) .ovpad {
+  padding-block-end: calc(var(--ovFade) - 4px);
+}
+@media (min-width: 1024px) {
+  .dashboard-native-container[data-short="1"] #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="1"]) > #ovp:not([data-min="1"]) {
+    bottom: calc(var(--vtBar) + 76px + 44px);
+  }
+  .dashboard-native-container[data-short="1"] #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="2"]) > #ovp:not([data-min="1"]) {
+    bottom: calc(var(--vtBar) + 88px + 44px);
+  }
+}
