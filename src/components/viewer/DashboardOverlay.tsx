@@ -159,6 +159,59 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
 
     const refresh = () => { void engine.fragments.update(true) }
 
+    /* A see-through "ghost" of the selected equipment drawn over everything,
+       so it stays visible behind walls, pipes and slabs: a translucent fill
+       plus its edges, in the same green/red as the element itself. */
+    const ghostFill = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.3, depthTest: false, depthWrite: false })
+    const ghostEdge = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.95, depthTest: false, depthWrite: false })
+    let ghost: { group: THREE.Group; model: any } | null = null
+    const tintGhost = (alarm: boolean) => {
+      ghostFill.color.copy(alarm ? ALARM : HEALTHY)
+      ghostEdge.color.copy(alarm ? ALARM : HEALTHY)
+    }
+    const removeGhost = () => {
+      if (!ghost) return
+      ghost.group.removeFromParent()
+      ghost.group.traverse((o: any) => o.geometry?.dispose())
+      ghost = null
+    }
+    // Follows the model's live transform and its visibility (model isolation)
+    const syncGhost = () => {
+      if (!ghost) return
+      ghost.group.matrix.copy(ghost.model.object.matrixWorld)
+      ghost.group.matrixWorldNeedsUpdate = true
+      ghost.group.visible = ghost.model.object.visible !== false
+    }
+    const buildGhost = async (entry: Located, bimId: string, seq: number) => {
+      let meshes: any[][] = []
+      try { meshes = await entry.model.getItemsGeometry([entry.localId]) } catch { return }
+      if (seq !== highlightSeq || colored?.bimId !== bimId) return   // a newer selection won
+      const group = new THREE.Group()
+      group.matrixAutoUpdate = false
+      for (const item of meshes || []) {
+        for (const g of item || []) {
+          if (!g?.positions || !g.indices) continue
+          const geom = new THREE.BufferGeometry()
+          geom.setAttribute('position', new THREE.Float32BufferAttribute(g.positions, 3))
+          geom.setIndex(Array.from(g.indices as ArrayLike<number>))
+          const t = g.transform instanceof THREE.Matrix4 ? g.transform
+            : new THREE.Matrix4().fromArray(g.transform?.elements ?? g.transform ?? new THREE.Matrix4().elements)
+          const fill = new THREE.Mesh(geom, ghostFill)
+          const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom, 25), ghostEdge)
+          fill.renderOrder = 999      // after every other transparent object
+          edges.renderOrder = 1000
+          fill.applyMatrix4(t)
+          edges.applyMatrix4(t)
+          group.add(fill, edges)
+        }
+      }
+      if (!group.children.length) return
+      removeGhost()
+      ghost = { group, model: entry.model }
+      syncGhost()
+      engine.world.scene.three.add(group)
+    }
+
     /* Gives the element back the colour it had before we painted it */
     const restore = async (c: NonNullable<typeof colored>) => {
       const entry = located.get(c.bimId)
@@ -178,6 +231,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       const entry = located.get(c.bimId)
       if (alarm === c.alarm || !entry) return
       c.alarm = alarm
+      tintGhost(alarm)
       try { await entry.model.setColor([entry.localId], alarm ? ALARM : HEALTHY) } catch {}
       refresh()
     }
@@ -255,6 +309,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
 
     const clearHighlight = async () => {
       highlightSeq++                      // cancels a highlight still in flight
+      removeGhost()
       const c = colored
       colored = null
       if (!c) return
@@ -271,6 +326,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       if (colored && colored.bimId === bimId) { await syncColour(); return true }
       const prev = colored
       colored = null
+      removeGhost()
       if (prev) await restore(prev)
       const entry = bimId ? await locate(bimId) : null
       if (seq !== highlightSeq) return false
@@ -290,7 +346,10 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       }
       if (seq !== highlightSeq && colored?.bimId !== bimId) await restore({ bimId, alarm, prev: before })
       refresh()
-      return seq === highlightSeq
+      if (seq !== highlightSeq) return false
+      tintGhost(alarm)
+      await buildGhost(entry, bimId, seq)
+      return true
     }
 
     /* Moves the camera only; colouring follows the dashboard's selection. */
@@ -328,6 +387,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
     }
     const controls = engine.world?.camera?.controls
     controls?.addEventListener('update', onCameraUpdate)
+    engine.world?.renderer?.onBeforeUpdate?.add(syncGhost)
 
     // Models can finish loading well after the dashboard: retry until located.
     // Any change to the loaded models forgets the "not found" answers and
@@ -351,8 +411,12 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
 
     return () => {
       controls?.removeEventListener('update', onCameraUpdate)
+      engine.world?.renderer?.onBeforeUpdate?.remove(syncGhost)
       clearInterval(resolveTimer)
       void clearHighlight()
+      removeGhost()
+      ghostFill.dispose()
+      ghostEdge.dispose()
       delete (window as any).EKO_HOST_ENGINE
     }
   }, [engineRef?.current])
