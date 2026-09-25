@@ -206,11 +206,22 @@ window.EKO_TIP = (function(){
       if(!cur.isConnected) hideChartTips();
       return;
     }
-    if(!cur.isConnected || !place()){ hide(); return; }
+    if((!cur.isConnected && !reattach()) || !place()){ hide(); return; }
     raf = requestAnimationFrame(loop);
+  }
+  /* A re-render (live data refreshes every few seconds) replaces the hovered
+     trigger: carry on with the [data-tip] now under the pointer, if any. */
+  const underPointer = () => lastX >= 0 ? closest(document.elementFromPoint(lastX, lastY)) : null;
+  function reattach(){
+    if(mode !== 'hover') return false;
+    const t = underPointer();
+    if(!t || t === mute || !eligible(t)) return false;
+    cur = t; fill(t);
+    return true;
   }
   function show(el, m){
     clearTimeout(timer); timer = null;
+    if(el && !el.isConnected && (m || 'hover') === 'hover') el = underPointer();   /* re-rendered during the hover delay */
     if(!eligible(el) || el === mute) return;
     const L = layer();
     cur = el; mode = m || 'hover';

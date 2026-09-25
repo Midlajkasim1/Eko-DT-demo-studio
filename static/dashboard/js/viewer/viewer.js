@@ -47,6 +47,11 @@ window.EKO_V = (function(){
   /* Is this marker the selected equipment (E.state.paint)? Compared by model
      element, so rows sharing one element all read as selected. */
   const isSel = (E, assetId, g) => { const p = E.state.paint; return !!p && (p === assetId || (!!g && guidOf(p) === g)); };
+  /* Every marker's tooltip names its equipment the same way: type · code
+     ("FCU · FCU-ANC09-FF-01"), or the code alone when the type is unknown. */
+  const eqName = (E, id) => { const s = (E.data.assets || []).find(x => x.id === id);
+    const type = s && (E.lang === 'ar' ? (s.typeAr || s.typeEn) : s.typeEn);
+    return type ? type + ' · ' + id : String(id || ''); };
 
   function markers(E){
     cacheOK = lastSig !== '' && hostSig(E) === lastSig;
@@ -66,7 +71,7 @@ window.EKO_V = (function(){
       const worst = g.slice().sort((p, q) => (SEV_RANK[p.sev] ?? 9) - (SEV_RANK[q.sev] ?? 9))[0];
       pts.push({ key: worst.id });
       out += `<button class="mk mkclu" data-key="${C().esc(worst.id)}" data-x="${worst.x}" data-y="${worst.y}" data-z="${worst.z || ''}" data-bimid="${guidOf(worst.asset) || worst.bimId || ''}" data-asset="${C().esc(worst.asset || '')}"${mkStyle(worst.x, worst.y, worst.id)} data-act="mkClu" data-alarm="${worst.id}" data-n="${g.length}" data-sel="${isSel(E, worst.asset, loc) ? 1 : 0}"
-        aria-label="${C().esc(E.t('alarmsN', { n: g.length }))}" data-tip="${C().esc(E.t('cluTip',{n:g.length}))}">${g.length}</button>`;
+        aria-label="${C().esc(E.t('alarmsN', { n: g.length }))}" data-tip="${C().esc(eqName(E, worst.asset) + ' · ' + E.t('cluTip',{n:g.length}))}">${g.length}</button>`;
     });
     /* Every piece of equipment located in the 3D model gets a status dot
        (green healthy, red in alarm) unless an alarm marker already sits on it.
@@ -83,11 +88,10 @@ window.EKO_V = (function(){
   }
   const marker = (E, a, where) =>
     `<button class="mk" data-key="${C().esc(a.id)}" data-x="${a.x}" data-y="${a.y}" data-z="${a.z || ''}" data-bimid="${guidOf(a.asset) || a.bimId || ''}" data-asset="${C().esc(a.asset || '')}" data-act="mkOpen" data-alarm="${a.id}"${mkStyle(a.x, a.y, a.id)}
-       data-sel="${isSel(E, a.asset, where) ? 1 : 0}" data-pulse="${E.state.mkPulse===a.id?1:0}" aria-label="${C().esc(a.asset)}" data-tip="${C().esc(a.asset)}">
+       data-sel="${isSel(E, a.asset, where) ? 1 : 0}" data-pulse="${E.state.mkPulse===a.id?1:0}" aria-label="${C().esc(a.asset)}" data-tip="${C().esc(eqName(E, a.asset))}">
        ${C().sevGlyph(a.sev, !!a.ack, 16, true)}</button>`;
   const assetMarker = (E, s, g) => {
-    const esc = C().esc, name = E.lang === 'ar' ? (s.typeAr || s.typeEn) : s.typeEn;
-    const tip = name ? name + ' · ' + s.id : s.id, key = 'as:' + s.id, sel = isSel(E, s.id, g);
+    const esc = C().esc, tip = eqName(E, s.id), key = 'as:' + s.id, sel = isSel(E, s.id, g);
     /* the same alarm rule the engine paints the model with, so dot and model agree */
     const HE = window.EKO_HOST_ENGINE, alarm = HE && HE.isAlarmed ? HE.isAlarmed(g) : s.st === 'alarm';
     return `<button class="mk mkasset" data-key="${esc(key)}" data-bimid="${esc(g)}" data-asset="${esc(s.id)}" data-act="mkAsset"${mkStyle(null, null, key)}
