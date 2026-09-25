@@ -271,17 +271,21 @@
   text-align: end;
 }
 /* Timeline strip (D168 anatomy). The clock axis puts each hour at its true
-   position. With history, a caption runs along the bottom: one line (what
-   the curve is, and its range), or two with today's peak; the toolbar keeps
-   its 16 px above the taller strip and the summary panel ends above it.
-   Without history the strip stays plain, with no caption. */
+   position, measured from the top so its labels always sit inside the strip.
+   A caption runs along the bottom in every mode: one line (what the curve
+   is, and its range once there is history), or two with today's peak; the
+   toolbar keeps its 16 px above the taller strip and the summary panel ends
+   above it. */
 .dashboard-native-container .scrubbar .tlaxis {
   display: block;
-  height: 14px;
+  top: 40px;
+  bottom: auto;
+  height: 12px;
 }
 .dashboard-native-container .scrubbar .tlaxis i {
   position: absolute;
   top: 0;
+  line-height: 12px;
   transform: translateX(-50%);
   white-space: nowrap;
 }

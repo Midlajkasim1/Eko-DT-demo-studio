@@ -341,23 +341,23 @@ window.EKO_V = (function(){
         aria-label="${esc(a.asset)}">${C().sevGlyph(a.sev, !!a.ack, 9, true)}</button>`;
     }).join('');
 
-    /* the caption: what the curve is (and, in AED / CO2, the record it went
-       through), and the curve's range in the mode's unit */
+    /* the caption, in every mode: what the curve is (and, in AED / CO2, the
+       record it went through), then the curve's range, or "No meter reading"
+       when the window has none; today's peak joins it on a second line */
     const capL = t('tlHourly') + (M.basis ? ' · ' + M.basis + (M.prov ? ' · ' + t('basisProv') : '') : '');
-    const capR = t('tlScale', { lo: sc(Math.min(...vals)), hi: sc(Math.max(...vals)), u: unit });
+    const capR = vals.length ? t('tlScale', { lo: sc(Math.min(...vals)), hi: sc(Math.max(...vals)), u: unit }) : t('tlNoReading');
     const hh = ms => String(new Date(ms).getHours()).padStart(2, '0') + ':00';
     const capP = peak ? t('tlPeak', { v: sc(peak.v), u: unit, from: hh(peak.t), to: hh(peak.t + H) }) : '';
     const peakDot = peakIn ? `<span class="tlpeak tipU" style="left:${((Math.max(start, Math.min(peak.t + H / 2, end)) - start) / (end - start) * 100).toFixed(2)}%;top:${(4 + Y(peak.v) / 26 * 24).toFixed(1)}px" data-tip="${esc(capP)}" aria-label="${esc(capP)}"></span>` : '';
-    /* no history in the window: a plain strip, no caption */
-    const cap = !vals.length ? '' : `<span class="tlcap"><span class="tlcapL">${esc(capL)}</span><span class="tlcapR">${esc(capR)}</span>${capP ? `<span class="tlcapP">${esc(capP)}</span>` : ''}</span>`;
-    let curVal = '';                                   /* in history: that hour's value */
+    const cap = `<span class="tlcap"><span class="tlcapL">${esc(capL)}</span><span class="tlcapR">${esc(capR)}</span>${capP ? `<span class="tlcapP">${esc(capP)}</span>` : ''}</span>`;
+    let curVal = '';                                   /* in history: that hour's value, or that it has none */
     if(cur != null){ const ct = end - cur * H, hp = hourly.find(p => ct >= p.t && ct < p.t + H);
-      if(hp && hp.v != null) curVal = ' · ' + sc(hp.v) + ' ' + unit; }
+      curVal = ' · ' + (hp && hp.v != null ? sc(hp.v) + ' ' + unit : t('tlNoReading')); }
 
     const seg = (lbl, on, act, v, extra) =>
       `<button class="seg" data-on="${on}" data-act="${act}" ${v?`data-v="${v}"`:''}>${extra||''}${esc(lbl)}</button>`;
     const stale = !!E.state.stale && cur == null;   /* D121: the timeline shows its last-known window, marked stale */
-    return `<div class="scrubbar" role="group" aria-label="${esc(t('history'))}" data-stale="${stale ? 1 : 0}"${!vals.length ? '' : ` data-cap="${capP ? 2 : 1}"`}>
+    return `<div class="scrubbar" role="group" aria-label="${esc(t('history'))}" data-stale="${stale ? 1 : 0}" data-cap="${capP ? 2 : 1}">
       <div class="row gap8 flexnone">
         <div class="segbox row" role="group">
           ${seg(t(E.state.offline ? 'liveOffline' : E.state.degraded ? 'liveDegraded' : 'segLive'), cur==null, 'tlLive', '', '<span class="livedot"></span>')}

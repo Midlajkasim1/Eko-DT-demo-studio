@@ -172,6 +172,7 @@ window.EKO_I18N.en = {
   "tlHistBanner": "Viewing history — {time}",
   "tlEventTip": "{time} · {what}",
   "tlHourly": "Hourly average",
+  "tlNoReading": "No meter reading",
   "tlScale": "{lo}–{hi} {u}",
   "tlPeak": "Peak {v} {u}, {from}–{to}",
   "tlUnit.kwh": "kW",

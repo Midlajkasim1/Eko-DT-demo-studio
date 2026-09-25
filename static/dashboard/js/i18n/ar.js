@@ -174,6 +174,7 @@ window.EKO_I18N.ar = {
   "tlHistBanner": "عرض السجل — {time}",
   "tlEventTip": "{time} · {what}",
   "tlHourly": "متوسط الساعة",
+  "tlNoReading": "لا توجد قراءة عداد",
   "tlScale": "{lo}–{hi} {u}",
   "tlPeak": "الذروة {v} {u}، {from}–{to}",
   "tlUnit.kwh": "ك.و",
