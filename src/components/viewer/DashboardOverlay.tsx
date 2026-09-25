@@ -65,9 +65,8 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
     const located = new Map<string, Located>()
     const pending = new Map<string, Promise<Located | null>>()
     const missing = new Set<string>()           // answered "not in any model" by every model
-    /* The one equipment coloured on the model, the state it was painted for,
-       and the colour it had before (a material override) to give back. */
-    let colored: { bimId: string; alarm: boolean; prev: THREE.Color | null } | null = null
+    /* The one highlighted equipment and the state it was drawn for */
+    let colored: { bimId: string; alarm: boolean } | null = null
     let highlightSeq = 0
 
     /* IFC GlobalIds are 22 chars of [0-9A-Za-z_$]. FIN hands out point refs
@@ -157,23 +156,76 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
         || (data.assets || []).some((a: any) => onThis(a.id) && a.st === 'alarm')
     }
 
-    const refresh = () => { void engine.fragments.update(true) }
-
-    /* A see-through "ghost" of the selected equipment drawn over everything,
-       so it stays visible behind walls, pipes and slabs: a translucent fill
-       plus its edges, in the same green/red as the element itself. */
-    const ghostFill = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.3, depthTest: false, depthWrite: false })
-    const ghostEdge = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.95, depthTest: false, depthWrite: false })
+    /* The selected equipment's highlight: a see-through, shaded volume with its
+       edges, green or red. It lives in a scene of its own that is drawn AFTER
+       the viewer style has finished the picture, so no style (its lights,
+       occlusion, ink, grade, tone mapping, x-ray) changes how it looks, and
+       with the depth cleared first it shows through walls, pipes and slabs.
+       The model's own materials are left alone. */
+    const overlay = new THREE.Scene()
+    // The nearest surface only: a depth-only pass, then the fill and edges on it
+    const ghostDepth = new THREE.MeshBasicMaterial({
+      colorWrite: false, side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+    })
+    // Flat-shaded towards the camera (face normals from screen derivatives), so
+    // the shape reads the same whatever lights the style has
+    const ghostFill = new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: new THREE.Color() }, uOpacity: { value: 0.6 } },
+      vertexShader: /* glsl */ `
+        #include <common>
+        #include <logdepthbuf_pars_vertex>
+        #include <clipping_planes_pars_vertex>
+        varying vec3 vView;
+        void main() {
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          vView = -mvPosition.xyz;
+          gl_Position = projectionMatrix * mvPosition;
+          #include <logdepthbuf_vertex>
+          #include <clipping_planes_vertex>
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform vec3 uColor;
+        uniform float uOpacity;
+        varying vec3 vView;
+        #include <common>
+        #include <logdepthbuf_pars_fragment>
+        #include <clipping_planes_pars_fragment>
+        void main() {
+          #include <clipping_planes_fragment>
+          #include <logdepthbuf_fragment>
+          vec3 n = normalize(cross(dFdx(vView), dFdy(vView)));
+          float facing = abs(dot(n, normalize(vView)));
+          gl_FragColor = vec4(uColor * (0.55 + 0.45 * facing), uOpacity);
+          #include <colorspace_fragment>
+        }`,
+      transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, clipping: true,
+    })
+    const ghostEdge = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false })
     let ghost: { group: THREE.Group; model: any } | null = null
     const tintGhost = (alarm: boolean) => {
-      ghostFill.color.copy(alarm ? ALARM : HEALTHY)
-      ghostEdge.color.copy(alarm ? ALARM : HEALTHY)
+      const c = alarm ? ALARM : HEALTHY
+      ghostFill.uniforms.uColor.value.copy(c)
+      ghostEdge.color.copy(c).multiplyScalar(0.45)   // a darker line of the same hue reads on light and dark styles
     }
     const removeGhost = () => {
       if (!ghost) return
       ghost.group.removeFromParent()
       ghost.group.traverse((o: any) => o.geometry?.dispose())
       ghost = null
+    }
+    // Runs after every frame the viewer draws, whichever style drew it
+    const drawGhost = () => {
+      if (!ghost || !ghost.group.visible) return
+      const renderer = engine.world?.renderer?.three
+      const camera = engine.world?.camera?.three
+      if (!renderer || !camera) return
+      const autoClear = renderer.autoClear
+      renderer.autoClear = false
+      renderer.setRenderTarget(null)
+      renderer.clearDepth()
+      renderer.render(overlay, camera)
+      renderer.autoClear = autoClear
     }
     // Follows the model's live transform and its visibility (model isolation)
     const syncGhost = () => {
@@ -196,44 +248,31 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
           geom.setIndex(Array.from(g.indices as ArrayLike<number>))
           const t = g.transform instanceof THREE.Matrix4 ? g.transform
             : new THREE.Matrix4().fromArray(g.transform?.elements ?? g.transform ?? new THREE.Matrix4().elements)
+          const depth = new THREE.Mesh(geom, ghostDepth)
           const fill = new THREE.Mesh(geom, ghostFill)
           const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom, 25), ghostEdge)
-          fill.renderOrder = 999      // after every other transparent object
-          edges.renderOrder = 1000
-          fill.applyMatrix4(t)
-          edges.applyMatrix4(t)
-          group.add(fill, edges)
+          depth.renderOrder = 0
+          fill.renderOrder = 1
+          edges.renderOrder = 2
+          for (const o of [depth, fill, edges]) o.applyMatrix4(t)
+          group.add(depth, fill, edges)
         }
       }
       if (!group.children.length) return
       removeGhost()
       ghost = { group, model: entry.model }
       syncGhost()
-      engine.world.scene.three.add(group)
+      overlay.add(group)
     }
 
-    /* Gives the element back the colour it had before we painted it */
-    const restore = async (c: NonNullable<typeof colored>) => {
-      const entry = located.get(c.bimId)
-      if (!entry) return
-      try {
-        if (c.prev) await entry.model.setColor([entry.localId], c.prev)
-        else await entry.model.resetColor([entry.localId])
-      } catch {}
-    }
-
-    /* Keeps the coloured equipment in step with live alarm state, without
-       re-painting (and growing the worker's material list) when nothing changed. */
-    const syncColour = async () => {
+    /* Keeps the highlight in step with live alarm state (green <-> red) */
+    const syncColour = () => {
       const c = colored
       if (!c) return
       const alarm = isAlarmed(c.bimId)
-      const entry = located.get(c.bimId)
-      if (alarm === c.alarm || !entry) return
+      if (alarm === c.alarm) return
       c.alarm = alarm
       tintGhost(alarm)
-      try { await entry.model.setColor([entry.localId], alarm ? ALARM : HEALTHY) } catch {}
-      refresh()
     }
 
     /* Stamps asset/alarm objects with their IFC GUID and locates them in the
@@ -256,7 +295,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
         if (await locate(bimId)) any = true
       }
       if (any) repositionMarkers()
-      await syncColour()
+      syncColour()
     }
 
     /* Canvas + host rects, read once per synchronous projection pass (viewer.js
@@ -309,47 +348,25 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
 
     const clearHighlight = async () => {
       highlightSeq++                      // cancels a highlight still in flight
-      removeGhost()
-      const c = colored
       colored = null
-      if (!c) return
-      await restore(c)
-      refresh()
+      removeGhost()
     }
 
-    /* Colours ONE piece of equipment (the selected one): red if it has an
-       active alarm, green if healthy. The previous one gets its own colour
-       back. Rapid clicks: only the latest one wins. */
+    /* Highlights ONE piece of equipment (the selected one): red if it has an
+       active alarm, green if healthy. Rapid clicks: only the latest one wins. */
     const highlightAsset = async (assetIdOrBimId: string) => {
       const seq = ++highlightSeq
       const bimId = toBimId(assetIdOrBimId)
-      if (colored && colored.bimId === bimId) { await syncColour(); return true }
-      const prev = colored
+      if (colored && colored.bimId === bimId && ghost) { syncColour(); return true }
       colored = null
       removeGhost()
-      if (prev) await restore(prev)
       const entry = bimId ? await locate(bimId) : null
-      if (seq !== highlightSeq) return false
-      if (!bimId || !entry || typeof entry.model.setColor !== 'function') { refresh(); return false }
-      let before: THREE.Color | null = null
-      try {
-        const [def] = await entry.model.getHighlight([entry.localId])
-        if (def?.color) before = new THREE.Color().copy(def.color)
-      } catch {}
-      if (seq !== highlightSeq) return false
+      if (seq !== highlightSeq || !bimId || !entry) return false
       const alarm = isAlarmed(bimId)
-      colored = { bimId, alarm, prev: before }      // claim first so a newer click restores it
-      try {
-        await entry.model.setColor([entry.localId], alarm ? ALARM : HEALTHY)
-      } catch (e) {
-        console.warn(`[DashboardOverlay] setColor failed for ${bimId}:`, e)
-      }
-      if (seq !== highlightSeq && colored?.bimId !== bimId) await restore({ bimId, alarm, prev: before })
-      refresh()
-      if (seq !== highlightSeq) return false
+      colored = { bimId, alarm }
       tintGhost(alarm)
       await buildGhost(entry, bimId, seq)
-      return true
+      return seq === highlightSeq && !!ghost
     }
 
     /* Moves the camera only; colouring follows the dashboard's selection. */
@@ -366,7 +383,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       projectPoint,
       resolveAllAssetPositions,
       // data-map.js calls this on refresh: keep the selected equipment's colour current
-      applyStatusColors: () => { void syncColour() },
+      applyStatusColors: () => { syncColour() },
       flyToAsset,
       highlightAsset,
       clearHighlight,
@@ -388,6 +405,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
     const controls = engine.world?.camera?.controls
     controls?.addEventListener('update', onCameraUpdate)
     engine.world?.renderer?.onBeforeUpdate?.add(syncGhost)
+    engine.world?.renderer?.onAfterUpdate?.add(drawGhost)
 
     // Models can finish loading well after the dashboard: retry until located.
     // Any change to the loaded models forgets the "not found" answers and
@@ -412,9 +430,11 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
     return () => {
       controls?.removeEventListener('update', onCameraUpdate)
       engine.world?.renderer?.onBeforeUpdate?.remove(syncGhost)
+      engine.world?.renderer?.onAfterUpdate?.remove(drawGhost)
       clearInterval(resolveTimer)
       void clearHighlight()
       removeGhost()
+      ghostDepth.dispose()
       ghostFill.dispose()
       ghostEdge.dispose()
       delete (window as any).EKO_HOST_ENGINE
