@@ -38,6 +38,12 @@ window.EKO_V = (function(){
      layer is cached — hidden on its own until position() places it, so a new
      marker never makes the whole layer blink. */
   const mkStyle = (x, y, key) => cachedStyle(x, y, key) || (cacheOK ? ' style="display:none"' : '');
+  /* The popup's last placement, keyed by what it shows: a re-render (every
+     live-data refresh) emits it in place, so an open popup never blinks out
+     for the two frames until position() confirms it. */
+  let lastPop = null;
+  const popPlaced = E => lastPop && lastPop.key === E.state.mkPop && lastSig !== '' && hostSig(E) === lastSig
+    ? ` style="left:${lastPop.left};top:${lastPop.top}" data-placed="1"` : '';
   /* Is this marker the selected equipment (E.state.paint)? Compared by model
      element, so rows sharing one element all read as selected. */
   const isSel = (E, assetId, g) => { const p = E.state.paint; return !!p && (p === assetId || (!!g && guidOf(p) === g)); };
@@ -158,7 +164,7 @@ window.EKO_V = (function(){
         alarm: pop.dataset.alarm
       });
       const inView = p.visible && p.x >= 0 && p.x <= hr.width && p.y >= 0 && p.y <= hr.height;
-      if(!inView){ if(E.state.mkPop){ E.state.mkPop = null; E.set({}); } return; }   /* D128: the marker left the view — the popup goes with it */
+      if(!inView){ delete pop.dataset.placed; lastPop = null; return; }   /* the marker left the view: the popup waits, hidden, and returns with it */
       const par = (pop.offsetParent || host).getBoundingClientRect();
       const mx = p.x + hr.left - par.left, my = p.y + hr.top - par.top;   /* the marker in the popup's own frame */
       const W = par.width, H = par.height, pw = pop.offsetWidth, ph = pop.offsetHeight, GAP = 18, PAD = 8, MK = 12;
@@ -171,6 +177,7 @@ window.EKO_V = (function(){
       if(covers()){ top = my + GAP; if(top + ph > H - PAD) top = my - GAP - ph; if(top < PAD) top = PAD; }
       pop.style.left = left.toFixed(1) + 'px'; pop.style.top = top.toFixed(1) + 'px';
       pop.dataset.placed = '1';
+      lastPop = { key: E.state.mkPop, left: pop.style.left, top: pop.style.top };
     }
   }
 
@@ -190,7 +197,7 @@ window.EKO_V = (function(){
     const l = E.alarmLines(a, false);
     const woDone = E.state.woRaised[a.asset];
     const n = E.state.mkPopN || 0;
-    return `<div class="mkpop mzglass col gap8" data-x="${a.x}" data-y="${a.y}" data-z="${a.z || ''}" data-bimid="${a.bimId || ''}" data-asset="${a.asset || ''}" data-alarm="${a.id}" data-born="${E.state.born==='pop'?1:0}" role="dialog" aria-label="${esc(name + ' ' + a.asset)}">
+    return `<div class="mkpop mzglass col gap8" data-x="${a.x}" data-y="${a.y}" data-z="${a.z || ''}" data-bimid="${a.bimId || ''}" data-asset="${a.asset || ''}" data-alarm="${a.id}" data-born="${E.state.born==='pop'?1:0}"${popPlaced(E)} role="dialog" aria-label="${esc(name + ' ' + a.asset)}">
       <div class="draghandle"></div>
       <div class="row gap8 aiC"><span class="statchip" data-sev="${esc(a.sev)}">${esc(t('rpSev.' + a.sev))}</span>${a.ack ? `<span class="tCap">${esc(t('ackedShort'))}</span>` : ''}<span class="grow"></span>
         <button class="iconbtn icon26" data-act="mkClose" aria-label="${esc(t('close'))}">${C().icon('x',12)}</button></div>
@@ -222,7 +229,7 @@ window.EKO_V = (function(){
     /* register rows that share this model element (the mapping points several at one element) */
     const also = g ? (E.data.assets || []).filter(x => x.id !== id && guidOf(x.id) === g).map(x => x.id) : [];
     const woDone = E.state.woRaised[id];
-    return `<div class="mkpop mzglass col gap8" data-x="" data-y="" data-z="" data-bimid="${esc(g || '')}" data-asset="${esc(id)}" data-born="${E.state.born==='pop'?1:0}" role="dialog" aria-label="${esc(name + ' ' + id)}">
+    return `<div class="mkpop mzglass col gap8" data-x="" data-y="" data-z="" data-bimid="${esc(g || '')}" data-asset="${esc(id)}" data-born="${E.state.born==='pop'?1:0}"${popPlaced(E)} role="dialog" aria-label="${esc(name + ' ' + id)}">
       <div class="draghandle"></div>
       <div class="row gap8 aiC"><span class="statchip" data-sev="${alarm ? 'high' : 'ok'}">${esc(t(alarm ? 'mkEqAlarm' : 'stNormal'))}</span><span class="grow"></span>
         <button class="iconbtn icon26" data-act="mkClose" aria-label="${esc(t('close'))}">${C().icon('x',12)}</button></div>

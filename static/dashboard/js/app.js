@@ -716,6 +716,10 @@
     return true;
   }
   function goHome(){ if(E.engine && typeof E.engine.resetView === 'function') E.engine.resetView(); }
+  /* Nothing selected: no popup, no equipment colour, no asset panel, no locate
+     pulse. Reset uses it, and so does the host's orientation-cube home button. */
+  const NO_SEL = { mkPop: null, mkPopN: 0, mkPulse: null, paint: null, assetSel: null };
+  E.clearSelection = () => E.set(NO_SEL);
 
   const ACTS = {
     goMod(el){ const m = E.nav.modules.find(x=>x.id===el.dataset.mod);
@@ -888,9 +892,11 @@
       const prev = d.bloom;
       E.state.radial = null;
       if(k === 'closeMore'){ d.bloom = null; render(); return; }
+      /* Reset is everything back to how the viewer opens: camera, floor, style,
+         layers, and the selection too (popup, equipment colour, asset panel). */
       if(k === 'reset'){ E.engine.resetView();
-        E.set({ dock:{ tool:'select', bloom:null, style:'default', tone:'blue',
-        level:'ALL', layer:'all', alerts:'all', minimap:false }, mkPop:null, histAge:null, measureResult:null }); return; }
+        E.set(Object.assign({ dock:{ tool:'select', bloom:null, style:'default', tone:'blue',
+        level:'ALL', layer:'all', alerts:'all', minimap:false }, histAge:null, measureResult:null }, NO_SEL)); return; }
       if(!def) return;
       if(def.kind === 'tool'){ d.tool = k; d.bloom = null; }
       else if(def.kind === 'toggle'){ d.minimap = !d.minimap; d.bloom = null; if(d.minimap) E.state.born = 'bloom'; }
@@ -1008,7 +1014,7 @@
       E.set({ histAge: newer.length ? newer.sort((a,b)=>b.ageH-a.ageH)[0].ageH : null }); },
     mkClu(el){ const al = (el && el.dataset.alarm && E.alarm(el.dataset.alarm)) || E.data.alarms.find(x=>x.sev==='critical') || E.data.alarms[0];
       selectEquipment(al.asset, { born:'pop', mkPop: al.id, mkPopN: +((el && el.dataset.n) || 0) }); },
-    mkClose(){ E.set({ mkPop: null, mkPopN: 0, paint: null }); goHome(); },
+    mkClose(){ E.set({ mkPop: null, mkPopN: 0 }); },
 
     /* Timeline. */
     tlScrub(el, ev){ const r = el.getBoundingClientRect();

@@ -167,6 +167,8 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
           e.stopPropagation()
           if (isDragging) return
           resetCameraToHome(engineRef.current)
+          // Home also drops the dashboard's selection (popup, equipment colour, asset panel)
+          if (dashboardVisible) (window as any).EKO?.clearSelection?.()
         }}
         style={{
           position: 'absolute',

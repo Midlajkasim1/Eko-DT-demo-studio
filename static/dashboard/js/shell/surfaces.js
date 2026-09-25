@@ -145,7 +145,6 @@ window.EKO_SURF = (function(){
       if(!(t instanceof Element)) return;
       if(E.state.dock.bloom && !t.closest('.mzfly, #vbar, .vsheet, .vfab')){ E.state.dock.bloom = null; E.set({}); }
       else if(E.state.radial && !t.closest('.vradial')){ E.state.radial = null; E.set({}); }
-      else if(E.state.mkPop && !t.closest('.mkpop, .mk')){ E.state.mkPop = null; E.state.mkPopN = 0; E.set({}); }   /* D128: the canvas (or anything else) closes the marker popup */
     }, true);
   }
 

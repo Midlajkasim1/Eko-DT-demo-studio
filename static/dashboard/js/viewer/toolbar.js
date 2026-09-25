@@ -40,7 +40,8 @@ window.EKO_VT = (function(){
     return items;
   }
   const cameraMoved = E => !!(E.engine && E.engine.cameraMoved && E.engine.cameraMoved());
-  const resetList = E => viewState(E).map(i => i.text).concat(cameraMoved(E) ? [E.t('camMoved')] : []);
+  const selected = E => !!(E.state.paint || E.state.mkPop || E.state.assetSel);
+  const resetList = E => viewState(E).map(i => i.text).concat(cameraMoved(E) ? [E.t('camMoved')] : [], selected(E) ? [E.t('resetSel')] : []);
 
   /* ------------------------------ tool state ------------------------------ */
   function state(E, def){
