@@ -10445,6 +10445,51 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   padding-block-start:var(--staleBand)
 }
 
+/* Once the strip is a row in the shell, the padding would open a second gap. */
+.dashboard-native-container:has(#statusband > :is(.pwastale, .pwaupdate)) #shellmain {
+  padding-block-start:0
+}
+
+.dashboard-native-container #statusband {
+  flex:none;
+  width:100%;
+  min-width:0
+}
+
+.dashboard-native-container #statusband:empty,
+.dashboard-native-container[data-wall="1"] #statusband {
+  display:none
+}
+
+.dashboard-native-container #statusband :is(.pwastale, .pwaupdate) {
+  position:static;
+  inset:auto;
+  z-index:auto;
+  width:100%;
+  min-height:0;
+  flex-wrap:wrap;
+  line-height:1.35;
+  text-align:center;
+  background-color:var(--chrome-bg)
+}
+
+.dashboard-native-container #statusband :is(.pwastale, .pwaupdate) > span {
+  min-width:0
+}
+
+.dashboard-native-container #statusband .pwastale {
+  background-image:linear-gradient(var(--warnT), var(--warnT))
+}
+
+.dashboard-native-container #statusband .pwastale.pwadeg,
+.dashboard-native-container #statusband .pwaupdate {
+  background-image:linear-gradient(var(--infT), var(--infT))
+}
+
+.dashboard-native-container #statusband .pwastale.pwaok {
+  background-image:linear-gradient(var(--posT), var(--posT))
+}
+
 @media (max-width:1023px) {
   .dashboard-native-container {
     overflow:hidden

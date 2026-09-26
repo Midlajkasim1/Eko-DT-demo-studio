@@ -515,6 +515,11 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
           } else {
             const link = el.cloneNode() as HTMLLinkElement
             link.className = 'dt-dashboard-injected'
+            try {
+              const url = new URL(link.href, window.location.href)
+              url.searchParams.set('v', Date.now().toString())
+              link.href = url.toString()
+            } catch { /* keep the original href */ }
             document.head.appendChild(link)
           }
         })

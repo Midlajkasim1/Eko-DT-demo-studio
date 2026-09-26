@@ -582,6 +582,25 @@
 
   /* -------------------------------- render --------------------------------- */
   const $ = id => document.getElementById(id);
+  /* The live/offline strip is built with the overlays, then parked in the
+     shell column under the top bar. Left in #overlays it is position:fixed
+     against the viewport and covers the model sidebar and the dashboard. */
+  function placeStatusBand(){
+    const app = $('app');
+    const shell = $('shellmain');
+    if(!app || !shell) return;
+    let slot = $('statusband');
+    if(!slot){
+      slot = document.createElement('div');
+      slot.id = 'statusband';
+      app.insertBefore(slot, shell);
+    }
+    slot.replaceChildren(...document.querySelectorAll('#overlays > .pwastale, #overlays > .pwaupdate'));
+  }
+  function paintOverlays(){
+    $('overlays').innerHTML = overlays();
+    placeStatusBand();
+  }
   let keptHost = null;   /* live #enginehost, re-adopted across renders so the
                             scene never re-mounts (no image flash on clicks) */
   /* D86: markup is rebuilt on every state change, which would reset every
@@ -602,6 +621,7 @@
       $('mount').innerHTML = window.EKO_WALL.render(E);
       const freshW = document.getElementById('enginehost'); if(freshW && keptHost) freshW.replaceWith(keptHost);
       $('topbar').innerHTML = ''; $('ekonav').innerHTML = ''; $('mobtabs').innerHTML = ''; $('overlays').innerHTML = '';
+      const band = $('statusband'); if(band) band.replaceChildren();
       if(document.getElementById('enginehost')) window.EKO_V.mountEngine(E);
       window.EKO_WALL.mount();
       if (window.syncWallHole) {
@@ -632,7 +652,7 @@
     const fresh = document.getElementById('enginehost');
     if(fresh && keptHost) fresh.replaceWith(keptHost);
     $('mobtabs').innerHTML = mobtabs();
-    $('overlays').innerHTML = overlays();
+    paintOverlays();
     if(document.getElementById('enginehost')) window.EKO_V.mountEngine(E);
     clock();
     const pal = $('palin'); if(pal){ pal.focus(); pal.setSelectionRange(pal.value.length, pal.value.length); }
@@ -1059,7 +1079,7 @@
       box.querySelectorAll('.hpsec').forEach(s => { s.hidden = !!q && ![...s.querySelectorAll('.hprow')].some(r => !r.hidden); });
       return; }
     if(ev.target.id === 'palin'){ E.state.palQ = ev.target.value; E.state.palSel = 0;
-      $('overlays').innerHTML = overlays();
+      paintOverlays();
       const pal = $('palin'); pal.focus(); pal.setSelectionRange(pal.value.length, pal.value.length); }
     if(ev.target.matches('.rphubq')){ E.state.rpHubQ = ev.target.value;          /* D92 */
       const lib = document.querySelector('.rplib'); if(lib) lib.outerHTML = window.EKO_RV.library(E); return; }
@@ -1101,8 +1121,8 @@
     if(ev.target.id === 'palin'){
       if(ev.key === 'Escape'){ ev.preventDefault(); if(window.EKO_SURF) window.EKO_SURF.escape(); return; }
       const n = (E._palHits||[]).length;
-      if(ev.key === 'ArrowDown'){ E.state.palSel = Math.min(n-1, E.state.palSel+1); $('overlays').innerHTML = overlays(); ev.preventDefault(); }
-      if(ev.key === 'ArrowUp'){ E.state.palSel = Math.max(0, E.state.palSel-1); $('overlays').innerHTML = overlays(); ev.preventDefault(); }
+      if(ev.key === 'ArrowDown'){ E.state.palSel = Math.min(n-1, E.state.palSel+1); paintOverlays(); ev.preventDefault(); }
+      if(ev.key === 'ArrowUp'){ E.state.palSel = Math.max(0, E.state.palSel-1); paintOverlays(); ev.preventDefault(); }
       if(ev.key === 'Enter'){ ev.preventDefault(); const h = E._palHits[E.state.palSel];   /* D121: preventDefault, or the opener that regains focus is activated by the same key and reopens the palette */
         if(h) ACTS.palGo({ dataset:{ i:String(E.state.palSel) } }); }
       return;

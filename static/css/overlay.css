@@ -36,6 +36,7 @@
 .dashboard-native-container .scrubbar,
 .dashboard-native-container .minimap,
 .dashboard-native-container .histbanner,
+.dashboard-native-container #statusband,
 .dashboard-native-container #overlays > *,
 .dashboard-native-container #mount > *:not(#vpmain) {
   pointer-events: auto;
@@ -123,6 +124,14 @@
 }
 .dashboard-native-container #overlays {
   position: absolute;
+}
+/* A status strip that has not been parked yet must still stay inside the
+   dashboard, under its top bar, instead of covering the model sidebar. */
+.dashboard-native-container #overlays > :is(.pwastale, .pwaupdate) {
+  position: absolute;
+  top: calc(52px + env(safe-area-inset-top));
+  inset-inline: 0;
+  width: auto;
 }
 .dashboard-native-container .dlg,
 .dashboard-native-container .dlgdrop,
