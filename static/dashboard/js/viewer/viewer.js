@@ -201,6 +201,7 @@ window.EKO_V = (function(){
   function mkPop(E){
     const key = E.state.mkPop;
     if(typeof key === 'string' && key.indexOf('asset:') === 0) return assetPop(E, key.slice(6));
+    if(typeof key === 'string' && key.indexOf('el:') === 0) return elementPop(E, key.slice(3));
     const a = key && E.alarm(key);
     if(!a) return '';
     const t = E.t.bind(E), esc = C().esc, ar = E.lang === 'ar';
@@ -224,6 +225,23 @@ window.EKO_V = (function(){
           ? C().woBtn(E, a.asset)
           : `<button class="btnG btnSm" data-act="cwo" data-asset="${esc(a.asset)}">${esc(t('cwo'))}</button>`}
       </div></div>`;
+  }
+
+  /* A click on the model with Select armed, for an element that is not in
+     the register. Same card as a marker: what it is, then its name. */
+  function elementPop(E, bimId){
+    const el = E.state.pickEl && E.state.pickEl.bimId === bimId ? E.state.pickEl : { bimId, name:'', type:'', category:'' };
+    const t = E.t.bind(E), esc = C().esc;
+    const cls = String(el.category || '').replace(/^IFC/i, '').replace(/([a-z])([A-Z])/g, '$1 $2').trim();
+    const name = el.name || cls || bimId;
+    const sub = [cls && cls !== name ? cls : '', el.type || ''].filter(Boolean).join(' · ');
+    return `<div class="mkpop mzglass col gap8" data-x="" data-y="" data-z="" data-bimid="${esc(bimId)}" data-born="${E.state.born==='pop'?1:0}"${popPlaced(E)} role="dialog" aria-label="${esc(name)}">
+      <div class="draghandle"></div>
+      <div class="row gap8 aiC"><span class="statchip" data-sev="medium">${esc(cls || t('stNormal'))}</span><span class="grow"></span>
+        <button class="iconbtn icon26" data-act="mkClose" aria-label="${esc(t('close'))}">${C().icon('x',12)}</button></div>
+      <div class="col"><b class="mkname">${esc(name)}</b>${sub ? `<span class="tMonoS mkcode">${esc(sub)}</span>` : ''}</div>
+      <span class="mkwhat">${esc(bimId)}</span>
+    </div>`;
   }
 
   /* The same popup for an equipment dot (no alarm marker on it): status,

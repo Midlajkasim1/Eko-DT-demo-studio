@@ -310,7 +310,10 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
   }, [selectedMaterialElement, materialPickerActive, engineRef]);
 
   const handleCanvasClick = useCallback(async (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!pickerActive && !materialPickerActive) return
+    // The dashboard Select tool is the resting tool. A click on the model
+    // then opens the same card a marker tap does.
+    const selectArmed = dashboardVisible && (window as any).EKO?.state?.dock?.tool === 'select'
+    if (!pickerActive && !materialPickerActive && !selectArmed) return
     const engine = engineRef.current
     if (!engine) return
     const container = containerRef.current
@@ -503,22 +506,38 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
              category: resolvedCategory
            });
          }
-      } else {
-         const expressId = parseInt(hitExpressId, 10) || 0;
+      } else if (selectArmed) {
+         const localId = parseInt(hitExpressId, 10) || 0;
          const fragModel = engine.fragments.models.list.get(hitModelId) as any;
-         if (fragModel && typeof fragModel.getGuidsByLocalIds === 'function') {
-           fragModel.getGuidsByLocalIds([expressId]).then((guids: (string | null)[]) => {
-             const guid = guids && guids[0];
-             if (guid) {
-               window.dispatchEvent(new CustomEvent('viewer-command', {
-                 detail: { action: 'openAssetByBimId', bimId: guid, expressId }
-               }));
-             }
-           }).catch(() => {});
-         }
+         if (!fragModel || typeof fragModel.getGuidsByLocalIds !== 'function') return;
+         try {
+           const guids = await fragModel.getGuidsByLocalIds([localId]);
+           const guid = guids && guids[0];
+           if (!guid) return;
+           let name = '', type = '', category = '';
+           if (typeof fragModel.getItemsData === 'function') {
+             const rows = await fragModel.getItemsData([localId]);
+             const row = rows && rows[0];
+             const text = (keys: string[]) => {
+               if (!row) return '';
+               for (const k of keys) {
+                 const v = row[k];
+                 const raw = v && typeof v === 'object' && 'value' in v ? v.value : v;
+                 if (raw != null && raw !== '') return String(raw);
+               }
+               return '';
+             };
+             name = text(['Name', 'LongName']);
+             type = text(['ObjectType', 'PredefinedType', 'Tag']);
+             category = text(['_category', 'category']);
+           }
+           window.dispatchEvent(new CustomEvent('viewer-command', {
+             detail: { action: 'openAssetByBimId', bimId: guid, expressId: localId, name, type, category }
+           }));
+         } catch { /* a miss is not a selection */ }
       }
     }
-  }, [pickerActive, materialPickerActive])
+  }, [pickerActive, materialPickerActive, dashboardVisible])
 
   return (
     <div className="viewer-canvas-wrapper">

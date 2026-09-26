@@ -59,6 +59,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
 
     const HEALTHY = new THREE.Color(0x22c55e)
     const ALARM = new THREE.Color(0xef4444)
+    const AMBER = new THREE.Color(0xf59e0b)
 
     /* One entry per located BIM element. The box is kept in the model's LOCAL
        space and re-transformed by the live matrixWorld on every use, so a model
@@ -74,7 +75,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     let indexProven = false
     let barrenPasses = 0
     /* The one highlighted equipment and the state it was drawn for */
-    let colored: { bimId: string; alarm: boolean } | null = null
+    let colored: { bimId: string; tone: 'alarm' | 'healthy' | 'amber' } | null = null
     let highlightSeq = 0
 
     /* IFC GlobalIds are 22 chars of [0-9A-Za-z_$]. FIN hands out point refs
@@ -221,8 +222,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     })
     const ghostEdge = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false })
     let ghost: { group: THREE.Group; model: any } | null = null
-    const tintGhost = (alarm: boolean) => {
-      const c = alarm ? ALARM : HEALTHY
+    const tintGhost = (tone: 'alarm' | 'healthy' | 'amber') => {
+      const c = tone === 'alarm' ? ALARM : tone === 'amber' ? AMBER : HEALTHY
       ghostFill.uniforms.uColor.value.copy(c)
       ghostEdge.color.copy(c).multiplyScalar(0.45)   // a darker line of the same hue reads on light and dark styles
     }
@@ -283,14 +284,25 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       overlay.add(group)
     }
 
-    /* Keeps the highlight in step with live alarm state (green <-> red) */
+    /* Equipment is green or red. Anything else stays amber. */
+    const isEquipment = (asked: string, bimId: string) => {
+      if (mappedList.some(m => m.id === asked || m.bimId === bimId)) return true
+      const assets: any[] = (window as any).EKO?.data?.assets || []
+      return assets.some(a => a.id === asked || bimIdFor(a.id) === bimId)
+    }
+    const toneFor = (asked: string, bimId: string): 'alarm' | 'healthy' | 'amber' => {
+      if (!isEquipment(asked, bimId)) return 'amber'
+      return isAlarmed(bimId) ? 'alarm' : 'healthy'
+    }
+
+    /* Keeps an equipment highlight in step with live alarm state (green <-> red) */
     const syncColour = () => {
       const c = colored
-      if (!c) return
-      const alarm = isAlarmed(c.bimId)
-      if (alarm === c.alarm) return
-      c.alarm = alarm
-      tintGhost(alarm)
+      if (!c || c.tone === 'amber') return
+      const tone = isAlarmed(c.bimId) ? 'alarm' : 'healthy'
+      if (tone === c.tone) return
+      c.tone = tone
+      tintGhost(tone)
     }
 
     /* Stamps asset/alarm objects with their IFC GUID and locates them in the
@@ -370,8 +382,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       removeGhost()
     }
 
-    /* Highlights ONE piece of equipment (the selected one): red if it has an
-       active alarm, green if healthy. Rapid clicks: only the latest one wins. */
+    /* Equipment is red in alarm and green when healthy. Any other object
+       is amber. Rapid clicks: only the latest one wins. */
     const highlightAsset = async (assetIdOrBimId: string) => {
       const seq = ++highlightSeq
       const bimId = toBimId(assetIdOrBimId)
@@ -380,9 +392,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       removeGhost()
       const entry = bimId ? await locate(bimId) : null
       if (seq !== highlightSeq || !bimId || !entry) return false
-      const alarm = isAlarmed(bimId)
-      colored = { bimId, alarm }
-      tintGhost(alarm)
+      const tone = toneFor(assetIdOrBimId, bimId)
+      colored = { bimId, tone }
+      tintGhost(tone)
       await buildGhost(entry, bimId, seq)
       return seq === highlightSeq && !!ghost
     }

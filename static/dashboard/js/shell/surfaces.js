@@ -121,8 +121,8 @@ window.EKO_SURF = (function(){
       if(top === 'pal' && E.state.palQ){ E.state.palQ = ''; E.state.palSel = 0; E.set({}); return 'cleared'; }
       byId[top].close(); E.set({}); return top;
     }
-    /* D69: with nothing open, Escape returns an armed viewer tool to Select */
-    if(E.state.dock && E.state.dock.tool !== 'select'){ E.state.dock.tool = 'select'; E.set({}); return 'select'; }
+    /* With nothing open, Escape puts the viewer tool down. Select starts off. */
+    if(E.state.dock && E.state.dock.tool){ E.state.dock.tool = null; E.set({}); return 'tool'; }
     if(E.state.modelFs){ E.set({ modelFs:false }); return 'model'; }       /* D94: a mode, not a surface */
     if(PAGES.includes(E.state.pageId)){ back(); return 'back'; }
     if(E.state.histAge != null){ E.set({ histAge:null }); return 'live'; }   /* a mode, not a surface */

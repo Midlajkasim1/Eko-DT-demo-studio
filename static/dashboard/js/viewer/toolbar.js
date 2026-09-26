@@ -3,7 +3,7 @@
    bar + FAB + More sheet, the radial accelerator and the canvas gestures.
    Everything is read from js/layouts/tools.js; labels from i18n; the engine
    is reached only through the viewer API. Direct manipulation is the
-   default: Select is armed on load and after Reset, a single click on an
+   default: Select starts off and Reset turns it off, a single click on an
    alarmed asset opens its panel, a double-click (or double-tap) frames the
    spot, drag / two-finger / wheel / pinch move the camera with no tool
    armed, a long-press or right-click opens the radial (an accelerator —

@@ -44,7 +44,7 @@
       alarmF: { sev: new Set(), sys: new Set() },
       triageOpen: {},
       assetSel: null, apTab: 'alarms',
-      dock: { tool: 'select', bloom: null, style: 'default', tone: 'blue',
+      dock: { tool: null, bloom: null, style: 'default', tone: 'blue',
               level: 'ALL', layer: 'all', alerts: 'all', minimap: false },
       mkPop: null, mkPopN: 0, mkPulse: null, paint: null, radial: null, vbarMin: ls.get('eko-vbar') === 'min',   /* D73 */
       ovpMin: ls.get('eko-ovp') === 'min', panMin: ls.get('eko-pan') === 'min', regMin: ls.get('eko-reg') === 'min',   /* D128: the register's model strip */
@@ -917,10 +917,10 @@
       /* Reset is everything back to how the viewer opens: camera, floor, style,
          layers, and the selection too (popup, equipment colour, asset panel). */
       if(k === 'reset'){ E.engine.resetView();
-        E.set(Object.assign({ dock:{ tool:'select', bloom:null, style:'default', tone:'blue',
+        E.set(Object.assign({ dock:{ tool:null, bloom:null, style:'default', tone:'blue',
         level:'ALL', layer:'all', alerts:'all', minimap:false }, histAge:null, measureResult:null }, NO_SEL)); return; }
       if(!def) return;
-      if(def.kind === 'tool'){ d.tool = k; d.bloom = null; }
+      if(def.kind === 'tool'){ d.tool = (k === 'select' && d.tool === 'select') ? null : k; d.bloom = null; }
       else if(def.kind === 'toggle'){ d.minimap = !d.minimap; d.bloom = null; if(d.minimap) E.state.born = 'bloom'; }
       else if(def.kind === 'more'){ const inMore = ['more','layers','style'].includes(d.bloom);
         d.bloom = (el.classList && el.classList.contains && el.classList.contains('vmback')) ? 'more' : (inMore ? null : 'more'); }
@@ -1202,10 +1202,16 @@
   window.addEventListener('viewer-command', ev => {
     const d = ev.detail || {};
     if (d.action === 'openAssetByBimId' && d.bimId) {
-      const found = (E.data.assets || []).find(a => a.bimId === d.bimId);
-      if (found) {
-        ACTS.openAsset({ dataset: { asset: found.id } });
-      }
+      if (E.state.dock && E.state.dock.tool !== 'select') return;
+      const HE = window.EKO_HOST_ENGINE;
+      const assets = E.data.assets || [];
+      const found = assets.find(a => a.bimId === d.bimId || (HE && HE.bimIdFor && HE.bimIdFor(a.id) === d.bimId));
+      const mapped = !found && HE && HE.listMapped ? HE.listMapped().find(m => m.bimId === d.bimId) : null;
+      const id = found ? found.id : (mapped ? mapped.id : null);
+      if (id) { selectEquipment(id, { born:'pop', mkPop: 'asset:' + id, mkPopN: 0 }); return; }
+      /* Not in the register: the same card, filled from the element itself. */
+      E.state.pickEl = { bimId: d.bimId, name: d.name || '', type: d.type || '', category: d.category || '' };
+      selectEquipment(d.bimId, { born:'pop', mkPop: 'el:' + d.bimId, mkPopN: 0 });
     }
   });
 
