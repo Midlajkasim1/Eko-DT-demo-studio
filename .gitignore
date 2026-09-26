@@ -26,8 +26,9 @@ dist-ssr
 
 backend/__pycache__/
 CLAUDE.md
-/docs/*
-!/docs/VIEW_TEMPLATES.md
+*.md
+*.pdf
+/docs/
 /Project
 /unrealaddnoc
 /uniqube_temp
