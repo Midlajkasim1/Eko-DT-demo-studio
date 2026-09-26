@@ -27,6 +27,8 @@ dist-ssr
 backend/__pycache__/
 CLAUDE.md
 *.md
+!README.md
+!backend/README.md
 *.pdf
 /docs/
 /Project
