@@ -360,9 +360,12 @@ window.EKO_V = (function(){
     const capP = peak ? t('tlPeak', { v: sc(peak.v), u: unit, from: hh(peak.t), to: hh(peak.t + H) }) : '';
     const peakDot = peakIn ? `<span class="tlpeak tipU" style="left:${((Math.max(start, Math.min(peak.t + H / 2, end)) - start) / (end - start) * 100).toFixed(2)}%;top:${(4 + Y(peak.v) / 26 * 24).toFixed(1)}px" data-tip="${esc(capP)}" aria-label="${esc(capP)}"></span>` : '';
     const cap = `<span class="tlcap"><span class="tlcapL">${esc(capL)}</span><span class="tlcapR">${esc(capR)}</span>${capP ? `<span class="tlcapP">${esc(capP)}</span>` : ''}</span>`;
-    let curVal = '';                                   /* in history: that hour's value, or that it has none */
+    let curVal = '';                                   /* in history: that hour's value when it has one */
     if(cur != null){ const ct = end - cur * H, hp = hourly.find(p => ct >= p.t && ct < p.t + H);
-      curVal = ' · ' + (hp && hp.v != null ? sc(hp.v) + ' ' + unit : t('tlNoReading')); }
+      if(hp && hp.v != null) curVal = ' · ' + sc(hp.v) + ' ' + unit;
+      /* an empty hour inside a window that does have readings; the caption already
+         says so when the whole window is empty */
+      else if(vals.length) curVal = ' · ' + t('tlNoReading'); }
 
     const seg = (lbl, on, act, v, extra) =>
       `<button class="seg" data-on="${on}" data-act="${act}" ${v?`data-v="${v}"`:''}>${extra||''}${esc(lbl)}</button>`;
