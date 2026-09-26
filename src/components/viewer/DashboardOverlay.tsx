@@ -13,6 +13,8 @@ import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 interface DashboardOverlayProps {
   visible: boolean
   engineRef?: React.MutableRefObject<FragmentsEngine | null>
+  /** Flips true once the fragments engine exists. A ref write does not re-render. */
+  engineReady?: boolean
 }
 
 function loadScripts(scripts: HTMLScriptElement[], signal: { mounted: boolean }) {
@@ -39,7 +41,7 @@ function loadScripts(scripts: HTMLScriptElement[], signal: { mounted: boolean })
   })), Promise.resolve())
 }
 
-export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) {
+export function DashboardOverlay({ visible, engineRef, engineReady = false }: DashboardOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const currentProject = useProjectStore(s => s.currentProject)
   const templateId = useAppStore(s => s.templateId)
@@ -53,7 +55,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
 
   useEffect(() => {
     const engine = engineRef?.current
-    if (!engine) return
+    if (!engine || !engineReady) return
 
     const HEALTHY = new THREE.Color(0x22c55e)
     const ALARM = new THREE.Color(0xef4444)
@@ -65,6 +67,12 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
     const located = new Map<string, Located>()
     const pending = new Map<string, Promise<Located | null>>()
     const missing = new Set<string>()           // answered "not in any model" by every model
+    /* A null answer before the worker has indexed GUIDs is not a real miss.
+       The exported viewer asks immediately, while models are still loading.
+       Cache a miss only after one GUID has been found, or after several
+       quiet passes with a stable model list. */
+    let indexProven = false
+    let barrenPasses = 0
     /* The one highlighted equipment and the state it was drawn for */
     let colored: { bimId: string; alarm: boolean } | null = null
     let highlightSeq = 0
@@ -73,14 +81,23 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
        ("@p:site:r:…") in the same bimId field; those are not in the model. */
     const isGuid = (id: unknown): id is string => typeof id === 'string' && /^[0-9A-Za-z_$]{22}$/.test(id)
     const normAssetId = (id: string) => (id.startsWith('ast-') ? id.substring(4) : id)
+    /* FIN names differ from the mapping keys by spaces and dashes ("FCU ANC09 GF 02"). */
+    const fold = (id: string) => normAssetId(id).toUpperCase().replace(/[^A-Z0-9]/g, '')
+    const mappedByFold = new Map<string, string>()
+    const mappedList: { id: string; bimId: string }[] = []
+    for (const [id, rec] of Object.entries(ASSET_BIM_MAPPING)) {
+      if (!rec.bimId || !isGuid(rec.bimId)) continue
+      mappedByFold.set(fold(id), rec.bimId)
+      mappedList.push({ id, bimId: rec.bimId })
+    }
 
     /* Asset id (with or without the ast- prefix) -> IFC GUID, or null.
        The curated mapping wins over whatever id the live feed carries. */
     const bimIdFor = (assetId?: string | null): string | null => {
       if (!assetId) return null
       const norm = normAssetId(assetId)
-      const mapped = ASSET_BIM_MAPPING[norm]?.bimId || ASSET_BIM_MAPPING[assetId]?.bimId
-      if (mapped) return mapped
+      const mapped = ASSET_BIM_MAPPING[norm]?.bimId || ASSET_BIM_MAPPING[assetId]?.bimId || mappedByFold.get(fold(assetId))
+      if (mapped && isGuid(mapped)) return mapped
       const assets: any[] = (window as any).EKO?.data?.assets || []
       const asset = assets.find(a => a.id === assetId || normAssetId(a.id || '') === norm)
       return isGuid(asset?.bimId) ? asset.bimId : null
@@ -113,6 +130,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
             const localBox = worldBox.clone().applyMatrix4(m.object.matrixWorld.clone().invert())
             const entry = { model: m, localId, localBox }
             located.set(bimId, entry)
+            indexProven = true
             return entry
           } catch (e) {
             // A model that is still registering with the worker rejects:
@@ -120,7 +138,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
             failed = true
           }
         }
-        if (!failed) missing.add(bimId)
+        if (!failed && (indexProven || barrenPasses >= 8)) missing.add(bimId)
         return null
       })().finally(() => pending.delete(bimId))
       pending.set(bimId, job)
@@ -390,6 +408,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       resetView: () => resetCameraToHome(engine),
       bimIdFor,
       isAlarmed,
+      listMapped: () => mappedList.map(m => ({ id: m.id, bimId: m.bimId })),
     }
     // The dashboard may have rendered before the bridge existed: redraw so the
     // equipment markers (which need bimIdFor) appear.
@@ -420,8 +439,12 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       if (sig !== modelsSig) {
         modelsSig = sig
         missing.clear()
+        indexProven = false
+        barrenPasses = 0
         const alive = new Set(live)
         for (const [id, e] of located) if (!alive.has(e.model)) located.delete(id)
+      } else if (live.length && !indexProven) {
+        barrenPasses++
       }
       void resolveAllAssetPositions()
     }, 3000)
@@ -439,7 +462,7 @@ export function DashboardOverlay({ visible, engineRef }: DashboardOverlayProps) 
       ghostEdge.dispose()
       delete (window as any).EKO_HOST_ENGINE
     }
-  }, [engineRef?.current])
+  }, [engineReady])
 
   useEffect(() => {
     if (!visible) return

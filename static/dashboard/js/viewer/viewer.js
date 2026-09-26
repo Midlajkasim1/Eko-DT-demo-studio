@@ -84,6 +84,15 @@ window.EKO_V = (function(){
       out += assetMarker(E, s, g);
       pts.push({ key: 'as:' + s.id });
     });
+    /* Mapped equipment that the live list did not name (the standalone export
+       never receives an equipment payload) still gets its dot. */
+    const mapped = window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.listMapped ? window.EKO_HOST_ENGINE.listMapped() : [];
+    mapped.forEach(m => {
+      if(!m || !m.bimId || seen.has(m.bimId) || groups.has(m.bimId)) return;
+      seen.add(m.bimId);
+      out += assetMarker(E, { id: m.id, st: 'ok' }, m.bimId);
+      pts.push({ key: 'as:' + m.id });
+    });
     return `<div class="mklayer"${cacheOK && pts.length ? ' data-proj="1"' : ''}>${out}</div>`;
   }
   const marker = (E, a, where) =>
@@ -222,10 +231,11 @@ window.EKO_V = (function(){
      Opened as mkPop = "asset:<id>", so every path that closes the alarm
      popup (click-away, Escape, swipe, route change) closes this one too. */
   function assetPop(E, id){
-    const s = (E.data.assets || []).find(x => x.id === id);
+    const g0 = guidOf(id);
+    const s = (E.data.assets || []).find(x => x.id === id) || (g0 ? { id, st: 'ok', typeEn: id, params: [] } : null);
     if(!s) return '';
     const t = E.t.bind(E), esc = C().esc, ar = E.lang === 'ar';
-    const g = guidOf(id), HE = window.EKO_HOST_ENGINE;
+    const g = g0, HE = window.EKO_HOST_ENGINE;
     const alarm = HE && HE.isAlarmed && g ? HE.isAlarmed(g) : s.st === 'alarm';
     const name = ar ? (s.typeAr || s.typeEn || id) : (s.typeEn || id);
     const where = [ar ? (s.levelAr || s.level) : s.level, ar ? (s.zoneAr || s.zone) : s.zone].filter(Boolean).join(' · ');
