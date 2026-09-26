@@ -742,6 +742,13 @@
      pulse. Reset uses it, and so does the host's orientation-cube home button. */
   const NO_SEL = { mkPop: null, mkPopN: 0, mkPulse: null, paint: null, assetSel: null };
   E.clearSelection = () => E.set(NO_SEL);
+  /* close=true dismisses the floor menu (a pick). The stepper leaves it open. */
+  function showLevel(id, close){
+    E.state.dock.level = id;
+    if(close) E.state.dock.bloom = null;
+    if(E.engine && typeof E.engine.isolateLevel === 'function') E.engine.isolateLevel(id);
+    render();
+  }
 
   const ACTS = {
     goMod(el){ const m = E.nav.modules.find(x=>x.id===el.dataset.mod);
@@ -917,6 +924,7 @@
       /* Reset is everything back to how the viewer opens: camera, floor, style,
          layers, and the selection too (popup, equipment colour, asset panel). */
       if(k === 'reset'){ E.engine.resetView();
+        if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
         E.set(Object.assign({ dock:{ tool:null, bloom:null, style:'default', tone:'blue',
         level:'ALL', layer:'all', alerts:'all', minimap:false }, histAge:null, measureResult:null }, NO_SEL)); return; }
       if(!def) return;
@@ -927,7 +935,7 @@
       else if(def.kind === 'bloom'){ d.bloom = d.bloom === k ? null : k; }
       if(d.bloom && d.bloom !== prev) E.state.born = 'bloom';
       render(); },
-    setLevel(el){ E.state.dock.level = el.dataset.v; E.state.dock.bloom = null; render(); },
+    setLevel(el){ showLevel(el.dataset.v, true); },
     setLayer(el){ 
       const layer = el.dataset.v;
       E.state.dock.layer = layer; 
@@ -980,13 +988,13 @@
     /* D73: the bar collapses to one icon and back; persists like the nav */
     vbarTgl(){ E.state.vbarMin = !E.state.vbarMin; E.state.dock.bloom = null; ls.set('eko-vbar', E.state.vbarMin ? 'min' : 'full'); render(); },
     /* D72: floor stepper — levels are listed top to bottom in site data */
-    lvlStep(el){ const lv = E.data.viewer.levels, d = E.state.dock;
+    lvlStep(el){ const lv = window.EKO_VT.levelsOf(E), d = E.state.dock;
       const i = lv.indexOf(d.level);
       let n;
-      if(d.level === 'ALL') n = el.dataset.v === 'up' ? Math.max(0, lv.indexOf('GF')) : lv.length - 1;
+      if(d.level === 'ALL'){ const g = lv.findIndex(x => /ground/i.test(x)); n = el.dataset.v === 'up' ? (g >= 0 ? g : 0) : lv.length - 1; }
       else n = el.dataset.v === 'up' ? i - 1 : i + 1;
       if(n < 0 || n >= lv.length) return;
-      d.level = lv[n]; render(); },
+      showLevel(lv[n], false); },
     setTone(el){
       E.state.dock.tone = el.dataset.v;
       if (window.StudioViewer && window.StudioViewer.setXrayColor) window.StudioViewer.setXrayColor(el.dataset.v);

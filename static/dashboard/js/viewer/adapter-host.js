@@ -16,7 +16,7 @@
         style: true,
         sectionPlane: false,
         measure: false,
-        levels: false,
+        levels: true,
         layers: false,
         viewpoints: false,
         picking: true,
@@ -56,8 +56,16 @@
       setAssetColor: noop,
       clearAssetColors: noop,
 
-      isolateLevel: noop,
-      showAllLevels: noop,
+      isolateLevel: function (levelId) {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.isolateLevel) {
+          window.EKO_HOST_ENGINE.isolateLevel(levelId);
+        }
+      },
+      showAllLevels: function () {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.isolateLevel) {
+          window.EKO_HOST_ENGINE.isolateLevel('ALL');
+        }
+      },
       setLayerVisibility: noop,
 
       setSectionPlane: noop,

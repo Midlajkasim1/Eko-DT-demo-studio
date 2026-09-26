@@ -85,6 +85,34 @@ window.EKO_TIP = (function(){
       k.className = 'kbd tipkbd'; k.textContent = el.dataset.kbd; L.appendChild(k);
     }
   }
+  /* The box left/top are resolved against. Fixed tips use the viewport unless
+     an ancestor (transform, filter, contain) has become their containing
+     block. Absolute tips use their offset parent — the dashboard pane when
+     the viewer sits beside the model sidebar. */
+  function tipLocal(el, x, y){
+    const pos = getComputedStyle(el).position;
+    let host = null;
+    if(pos === 'fixed'){
+      let n = el.parentElement;
+      while(n && n !== document.body && n !== document.documentElement){
+        const s = getComputedStyle(n);
+        const traps = (s.transform && s.transform !== 'none')
+          || (s.filter && s.filter !== 'none')
+          || (s.perspective && s.perspective !== 'none')
+          || (s.backdropFilter && s.backdropFilter !== 'none')
+          || (s.contain && /paint|layout|strict|content/.test(s.contain))
+          || (s.willChange && /transform|filter|perspective/.test(s.willChange));
+        if(traps){ host = n; break; }
+        n = n.parentElement;
+      }
+    } else host = el.offsetParent;
+    if(!host || !host.getBoundingClientRect) return { x:x, y:y };
+    const r = host.getBoundingClientRect();
+    return {
+      x: x - r.left - (host.clientLeft || 0) + (host.scrollLeft || 0),
+      y: y - r.top - (host.clientTop || 0) + (host.scrollTop || 0)
+    };
+  }
   /* Geometry: viewport-clamped, flipped when the preferred side has no room. */
   function place(){
     if(!cur || !cur.isConnected) return false;
@@ -120,9 +148,13 @@ window.EKO_TIP = (function(){
     }
     x = Math.max(rr.left + PAD, Math.min(x, rr.right - w - PAD));
     y = Math.max(rr.top + PAD, Math.min(y, rr.bottom - h - PAD));
+    /* x/y are viewport coordinates. Outside focus mode the tip is positioned
+       inside the dashboard pane, whose origin is not the window's, so a raw
+       viewport left/top lands the tip on the timeline. */
+    const local = tipLocal(L, x, y);
     L.style.transform = 'none';
-    L.style.left = Math.round(x) + 'px';
-    L.style.top = Math.round(y) + 'px';
+    L.style.left = Math.round(local.x) + 'px';
+    L.style.top = Math.round(local.y) + 'px';
     L.dataset.pos = pos;
     return true;
   }

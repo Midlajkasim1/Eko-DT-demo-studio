@@ -152,14 +152,15 @@ window.EKO_VT = (function(){
     const back = phone() ? `<button class="mzopt vmback mzfan" data-act="vtool" data-v="more">${C().icon('chevL', 12)}<span class="grow taS">${C().esc(t('dockTools'))}</span></button>` : '';
     if(which === 'levels'){
       /* Searchable, grouped picker with a floor stepper (D72): scales to
-         any storey count. Groups derive from the level code. */
-      const lv = E.data.viewer.levels;
-      const grpOf = l => /^roof/i.test(l) ? 'lvlGroupRoof' : /^B\d/i.test(l) ? 'lvlGroupBasement' : /^GF$/i.test(l) ? 'lvlGroupGround' : 'lvlGroupLevels';
+         any storey count. The live model supplies the names; the fixture
+         list is only there before a model is loaded. */
+      const lv = levelsOf(E);
+      const grpOf = l => /roof/i.test(l) ? 'lvlGroupRoof' : /basement/i.test(l) ? 'lvlGroupBasement' : /ground/i.test(l) ? 'lvlGroupGround' : 'lvlGroupLevels';
       const groups = [];
       lv.forEach(l => { const g = grpOf(l); let G = groups.find(x => x.k === g); if(!G){ G = { k:g, items:[] }; groups.push(G); } G.items.push(l); });
       const i = lv.indexOf(d.level);
       const rows = groups.map(G => `<span class="mzflyT vpgrp">${C().esc(t(G.k))}</span>` +
-        G.items.map(l => `<button class="mzopt mzfan vprow" data-act="setLevel" data-v="${C().esc(l)}" data-on="${d.level === l}" data-q="${C().esc((l + ' ' + levelName(E, l)).toLowerCase())}">${C().esc(levelName(E, l))}<span class="tCap msA">${C().esc(l)}</span></button>`).join('')).join('');
+        G.items.map(l => `<button class="mzopt mzfan vprow" data-act="setLevel" data-v="${C().esc(l)}" data-on="${d.level === l}" data-q="${C().esc(levelName(E, l).toLowerCase())}">${C().esc(levelName(E, l))}</button>`).join('')).join('');
       return `<div class="vpick"><div class="row gap6 vphead">${title('dockLevels')}<span class="grow"></span>
           <button class="iconbtn icon26" data-act="lvlStep" data-v="up" data-tip="${C().esc(t('lvlUp'))}" aria-label="${C().esc(t('lvlUp'))}" ${i <= 0 && d.level !== 'ALL' ? 'disabled' : ''}>${C().icon('chevR2', 13)}</button>
           <button class="iconbtn icon26" data-act="lvlStep" data-v="down" data-tip="${C().esc(t('lvlDown'))}" aria-label="${C().esc(t('lvlDown'))}" ${(i >= lv.length - 1) ? 'disabled' : ''}>${C().icon('chevL2', 13)}</button></div>
@@ -309,5 +310,13 @@ window.EKO_VT = (function(){
     if(ev.key === 'ArrowDown'){ const r = [...box.querySelectorAll('.vprow')].find(x => !x.hidden); if(r) r.focus(); ev.preventDefault(); }
   });
 
-  return { toolbar, extras, body, radial, sheet, chip, readout, syncReset, viewState, wireCanvas, state, tip, byId, phone, avail, list, hidden };
+  /* Storey names from the loaded models, highest first. The fixture list is
+     the stand-in only when no model has reported its storeys yet. */
+  function levelsOf(E){
+    const HE = window.EKO_HOST_ENGINE;
+    if(HE && HE.listLevels) return HE.listLevels().map(l => l.id);
+    return (E.data.viewer && E.data.viewer.levels) || [];
+  }
+
+  return { toolbar, extras, body, radial, sheet, chip, readout, syncReset, viewState, wireCanvas, state, tip, byId, phone, avail, list, hidden, levelsOf };
 })();

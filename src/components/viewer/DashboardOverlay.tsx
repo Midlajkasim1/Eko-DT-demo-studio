@@ -409,6 +409,231 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       return true
     }
 
+    /* One menu row per real floor. Discipline models name the same floor
+       differently ("Level 01", "FIRST FLR"); junk storeys ("delete …") are dropped.
+       Picking a floor shows that floor and everything below it. */
+    type Floor = { id: string; name: string; rank: number }
+    let levels: Floor[] = []
+    let levelSig = ''
+    let levelSeq = 0
+    const floorJobs = new WeakMap<object, Promise<{ geom: number[]; byFloor: Map<string, number[]> }>>()
+    const floorCatalog = new Map<string, Floor>()
+    const ORDINALS = ['Ground floor', 'First floor', 'Second floor', 'Third floor', 'Fourth floor', 'Fifth floor', 'Sixth floor', 'Seventh floor', 'Eighth floor', 'Ninth floor', 'Tenth floor', 'Eleventh floor', 'Twelfth floor', 'Thirteenth floor', 'Fourteenth floor', 'Fifteenth floor', 'Sixteenth floor', 'Seventeenth floor', 'Eighteenth floor', 'Nineteenth floor', 'Twentieth floor']
+    const attrText = (row: any, key: string) => {
+      const v = row?.[key]
+      const raw = v && typeof v === 'object' && 'value' in v ? v.value : v
+      return raw == null || raw === '' ? '' : String(raw)
+    }
+    const namedFloor = (rank: number, name: string): Floor => {
+      const floor = { id: name, name, rank }
+      floorCatalog.set(name, floor)
+      return floor
+    }
+    const numberedFloor = (n: number) => namedFloor(n, n >= 0 && n < ORDINALS.length ? ORDINALS[n] : `Floor ${n}`)
+    const floorKey = (raw: string): Floor | null => {
+      const name = raw.trim()
+      if (!name || /delete/i.test(name)) return null
+      const s = name.toUpperCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim()
+      if (/\bBASEMENT\b|^BF$|^B\d+$/.test(s)) return namedFloor(-10, 'Basement')
+      if (/\bROOF\b|^RF$/.test(s)) return namedFloor(1000, 'Roof')
+      if (/\bGROUND\b|^GF$|\bENTRANCE\b|^LEVEL\s*0+$|^00$|^L0$/.test(s)) return numberedFloor(0)
+      const words: [RegExp, number][] = [
+        [/\bFIRST\b|\b1ST\b/, 1], [/\bSECOND\b|\b2ND\b/, 2], [/\bTHIRD\b|\b3RD\b/, 3],
+        [/\bFOURTH\b|\b4TH\b/, 4], [/\bFIFTH\b|\b5TH\b/, 5], [/\bSIXTH\b|\b6TH\b/, 6],
+        [/\bSEVENTH\b|\b7TH\b/, 7], [/\bEIGHTH\b|\b8TH\b/, 8], [/\bNINTH\b|\b9TH\b/, 9],
+        [/\bTENTH\b|\b10TH\b/, 10],
+      ]
+      for (const [re, n] of words) if (re.test(s)) return numberedFloor(n)
+      const lv = s.match(/\bLEVEL\s*0*(\d+)\b/) || s.match(/^L\s*0*(\d+)$/) || s.match(/^0*(\d+)\s*F$/) || s.match(/^0*(\d+)$/)
+      if (!lv) return null
+      const n = parseInt(lv[1], 10)
+      return Number.isFinite(n) ? numberedFloor(n) : null
+    }
+    const readStoreys = async (model: any) => {
+      if (typeof model.getItemsOfCategories !== 'function') return [] as { localId: number; floor: Floor; elevation: number }[]
+      const cats = await model.getItemsOfCategories([/IFCBUILDINGSTOREY/i])
+      const ids = Object.values(cats || {}).flat() as number[]
+      if (!ids.length) return []
+      const rows = typeof model.getItemsData === 'function' ? await model.getItemsData(ids) : []
+      const out: { localId: number; floor: Floor; elevation: number }[] = []
+      ids.forEach((localId, i) => {
+        const floor = floorKey(attrText(rows[i], 'Name') || attrText(rows[i], 'LongName'))
+        const elevation = parseFloat(attrText(rows[i], 'Elevation'))
+        if (floor && Number.isFinite(elevation)) out.push({ localId, floor, elevation })
+      })
+      return out
+    }
+    /* BIMvision shows an element on the storey that contains it. A wall on
+       Level 00 often hangs below that storey's elevation, so grouping by the
+       bottom of the box pulls it into the basement. Containment is the list;
+       height is only the fallback for geometry with no storey. */
+    const relationData = (rels: any) => {
+      const out = new Map<number, Record<string, number[]>>()
+      const put = (id: unknown, rec: any) => {
+        if (rec == null || id == null || id === '') return
+        const data = rec.data && typeof rec.data === 'object' ? rec.data : rec
+        out.set(Number(id), data)
+      }
+      if (rels && typeof rels.forEach === 'function') rels.forEach((v: any, k: any) => put(k, v))
+      else if (Array.isArray(rels)) for (const pair of rels) put(pair?.[0], pair?.[1])
+      else if (rels && typeof rels === 'object') for (const [k, v] of Object.entries(rels)) put(k, v)
+      return out
+    }
+    const assignByHeight = (geom: number[], boxes: THREE.Box3[], storeys: { floor: Floor; elevation: number }[]) => {
+      const byFloor = new Map<string, number[]>()
+      const floors: { id: string; elevation: number }[] = []
+      for (const s of storeys) {
+        if (!byFloor.has(s.floor.id)) byFloor.set(s.floor.id, [])
+        const prev = floors.find(f => f.id === s.floor.id)
+        if (!prev) floors.push({ id: s.floor.id, elevation: s.elevation })
+        else prev.elevation = Math.min(prev.elevation, s.elevation)
+      }
+      floors.sort((a, b) => a.elevation - b.elevation)
+      const ys: number[] = []
+      for (const b of boxes) if (b && !b.isEmpty() && Number.isFinite(b.min.y)) ys.push(b.min.y)
+      ys.sort((a, b) => a - b)
+      if (ys.length < 2 || floors.length < 2) return byFloor
+      const yLo = ys[Math.floor(ys.length * 0.02)]
+      const yHi = ys[Math.floor(ys.length * 0.98)]
+      const elevSpan = floors[floors.length - 1].elevation - floors[0].elevation
+      const ySpan = Math.max(yHi - yLo, 0.001)
+      const scale = elevSpan / ySpan > 50 ? 0.001 : ySpan / elevSpan > 50 ? 1000 : 1
+      const cuts = floors.map(f => ({ id: f.id, y: yLo + (f.elevation - floors[0].elevation) * scale }))
+      const slop = Math.max(0.4, ySpan * 0.02)
+      for (let i = 0; i < geom.length; i++) {
+        const box = boxes[i]
+        if (!box || box.isEmpty() || !Number.isFinite(box.min.y)) continue
+        let chosen = cuts[0].id
+        for (const c of cuts) {
+          if (box.min.y + slop >= c.y) chosen = c.id
+          else break
+        }
+        byFloor.get(chosen)!.push(geom[i])
+      }
+      return byFloor
+    }
+    const indexModel = (model: any) => {
+      const pending = floorJobs.get(model)
+      if (pending) return pending
+      const job = (async () => {
+        const geom: number[] = typeof model.getItemsIdsWithGeometry === 'function' ? await model.getItemsIdsWithGeometry() : []
+        const boxes: THREE.Box3[] = geom.length && typeof model.getBoxes === 'function' ? await model.getBoxes(geom) : []
+        const storeys = await readStoreys(model)
+        const byFloor = new Map<string, number[]>()
+        const owned = new Map<number, string>()
+        if (storeys.length && typeof model.getRelations === 'function') {
+          const storeyRels = relationData(await model.getRelations(storeys.map(s => s.localId)))
+          for (const s of storeys) {
+            if (!byFloor.has(s.floor.id)) byFloor.set(s.floor.id, [])
+            for (const id of storeyRels.get(s.localId)?.ContainsElements || []) {
+              if (!owned.has(id)) owned.set(id, s.floor.id)
+            }
+          }
+          const loose = geom.filter(id => !owned.has(id))
+          const storeyFloor = new Map(storeys.map(s => [s.localId, s.floor.id]))
+          if (loose.length && owned.size) {
+            const partRels = relationData(await model.getRelations(loose))
+            const claim = (id: number) => {
+              if (owned.has(id)) return
+              const rec = partRels.get(id)
+              const storey = rec?.ContainedInStructure?.[0]
+              if (storey != null && storeyFloor.has(storey)) owned.set(id, storeyFloor.get(storey)!)
+              const parent = rec?.Decomposes?.[0]
+              if (!owned.has(id) && parent != null && owned.has(parent)) owned.set(id, owned.get(parent)!)
+            }
+            for (let hop = 0; hop < 3; hop++) {
+              const missing: number[] = []
+              for (const id of loose) {
+                if (owned.has(id)) continue
+                const parent = partRels.get(id)?.Decomposes?.[0]
+                if (parent != null && !owned.has(parent) && !partRels.has(parent)) missing.push(parent)
+              }
+              if (missing.length) {
+                const more = relationData(await model.getRelations(missing))
+                for (const [id, rec] of more) partRels.set(id, rec)
+              }
+              for (const id of partRels.keys()) claim(id)
+            }
+          }
+        }
+        for (const id of geom) {
+          const floorId = owned.get(id)
+          if (!floorId) continue
+          if (!byFloor.has(floorId)) byFloor.set(floorId, [])
+          byFloor.get(floorId)!.push(id)
+        }
+        const still = owned.size ? geom.filter(id => !owned.has(id)) : geom
+        if (still.length && storeys.length >= 2) {
+          const wanted = new Set(still)
+          const partGeom: number[] = []
+          const partBoxes: THREE.Box3[] = []
+          for (let i = 0; i < geom.length; i++) {
+            if (!wanted.has(geom[i])) continue
+            partGeom.push(geom[i])
+            partBoxes.push(boxes[i])
+          }
+          for (const [floorId, ids] of assignByHeight(partGeom, partBoxes, storeys)) {
+            if (!byFloor.has(floorId)) byFloor.set(floorId, [])
+            byFloor.get(floorId)!.push(...ids)
+          }
+        }
+        return { geom, byFloor }
+      })().catch((err) => { floorJobs.delete(model); throw err })
+      floorJobs.set(model, job)
+      return job
+    }
+    const refreshLevels = async () => {
+      const byId = new Map<string, Floor>()
+      for (const model of engine.fragments?.models?.list?.values() ?? []) {
+        let entry: { geom: number[]; byFloor: Map<string, number[]> } = { geom: [], byFloor: new Map() }
+        try { entry = await indexModel(model) } catch { /* model not ready */ }
+        for (const id of entry.byFloor.keys()) {
+          const known = floorCatalog.get(id)
+          if (known) byId.set(id, known)
+        }
+      }
+      const next = [...byId.values()].sort((a, b) => b.rank - a.rank)
+      const sig = next.map(l => l.id).join('|')
+      if (sig === levelSig) return
+      levelSig = sig
+      levels = next
+      try { (window as any).EKO?.set?.({}) } catch { /* dashboard not up yet */ }
+    }
+    const isolateLevel = async (levelId: string) => {
+      const seq = ++levelSeq
+      for (const model of engine.fragments?.models?.list?.values() ?? []) {
+        const m = model as any
+        if (typeof m.resetVisible !== 'function') continue
+        if (seq !== levelSeq) return
+        const entry = await indexModel(m)
+        if (seq !== levelSeq) return
+        await m.resetVisible()
+        if (!levelId || levelId === 'ALL' || !entry.byFloor.size) continue
+        /* Basement is only itself. Each floor above also keeps everything below it. */
+        const picked = floorCatalog.get(levelId)
+        if (!picked) {
+          if (entry.geom.length) await m.setVisible(entry.geom, false)
+          continue
+        }
+        const show = new Set<number>()
+        let covered = false
+        for (const [id, ids] of entry.byFloor) {
+          const floor = floorCatalog.get(id)
+          if (!floor || floor.rank > picked.rank) continue
+          covered = true
+          for (const n of ids) show.add(n)
+        }
+        if (!covered) {
+          if (entry.geom.length) await m.setVisible(entry.geom, false)
+          continue
+        }
+        if (!show.size) continue
+        const hide = entry.geom.filter(id => !show.has(id))
+        if (hide.length) await m.setVisible(hide, false)
+      }
+      if (seq === levelSeq) repositionMarkers()
+    }
+
     ;(window as any).EKO_HOST_ENGINE = {
       projectPoint,
       resolveAllAssetPositions,
@@ -421,6 +646,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       bimIdFor,
       isAlarmed,
       listMapped: () => mappedList.map(m => ({ id: m.id, bimId: m.bimId })),
+      listLevels: () => levels.map(l => ({ id: l.id, name: l.name })),
+      isolateLevel,
     }
     // The dashboard may have rendered before the bridge existed: redraw so the
     // equipment markers (which need bimIdFor) appear.
@@ -448,7 +675,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const resolveTimer = setInterval(() => {
       const live = [...(engine.fragments?.models?.list?.values() ?? [])]
       const sig = live.map(keyOf).join('|')   // object identity: a reload of the same file counts as a change
+      let modelsChanged = false
       if (sig !== modelsSig) {
+        modelsChanged = true
         modelsSig = sig
         missing.clear()
         indexProven = false
@@ -459,8 +688,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         barrenPasses++
       }
       void resolveAllAssetPositions()
+      if (modelsChanged) void refreshLevels()
     }, 3000)
     void resolveAllAssetPositions()
+    void refreshLevels()
 
     return () => {
       controls?.removeEventListener('update', onCameraUpdate)

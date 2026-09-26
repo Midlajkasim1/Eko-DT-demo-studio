@@ -947,6 +947,22 @@
   width:212px
 }
 
+.dashboard-native-container .mzfly.flyLevels {
+  width:max-content;
+  min-width:200px;
+  max-width:min(280px, calc(100vw - 32px))
+}
+
+.dashboard-native-container .mzfly.flyLevels .vplist {
+  overflow-x:hidden
+}
+
+.dashboard-native-container .mzfly.flyLevels .mzopt {
+  width:auto;
+  min-width:100%;
+  box-sizing:border-box
+}
+
 .dashboard-native-container .mzflyT {
   font-family:var(--fH),sans-serif;
   font-size:var(--txCapSz);
