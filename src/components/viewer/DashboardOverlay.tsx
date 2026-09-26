@@ -6,6 +6,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
 import { ASSET_BIM_MAPPING } from '@/constants/assetBimMapping'
 import { resetCameraToHome } from '@/lib/cameraUtils'
+import { disciplineOf, layersFor, layerShows } from '@/lib/modelDiscipline'
 import type { ProjectApiSettings } from '@/types'
 
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
@@ -634,6 +635,24 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (seq === levelSeq) repositionMarkers()
     }
 
+    /* Whole models, by the discipline in the file name. Item visibility
+       (the floor filter) is left as it is. */
+    const isolateLayer = (layerId: string) => {
+      const models = useModelStore.getState().models
+      const present = new Set(
+        models.map(m => disciplineOf(m.originalFileName || '')).filter((d): d is NonNullable<typeof d> => !!d)
+      )
+      for (const m of models) {
+        const visible = layerShows(disciplineOf(m.originalFileName || ''), layerId, present)
+        useModelStore.getState().setModelVisibility(m.modelId, visible)
+        const object3D = m.type === 'glb'
+          ? engine.world?.scene?.three?.children?.find((c: any) => c.userData?.modelId === m.modelId)
+          : engine.fragments?.models?.list?.get(m.modelId)?.object
+        if (object3D) object3D.visible = visible
+      }
+      repositionMarkers()
+    }
+
     ;(window as any).EKO_HOST_ENGINE = {
       projectPoint,
       resolveAllAssetPositions,
@@ -648,6 +667,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       listMapped: () => mappedList.map(m => ({ id: m.id, bimId: m.bimId })),
       listLevels: () => levels.map(l => ({ id: l.id, name: l.name })),
       isolateLevel,
+      listLayers: () => layersFor(
+        useModelStore.getState().models.map(m => disciplineOf(m.originalFileName || ''))
+      ).map(id => ({ id, name: id })),
+      isolateLayer,
     }
     // The dashboard may have rendered before the bridge existed: redraw so the
     // equipment markers (which need bimIdFor) appear.
@@ -688,7 +711,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         barrenPasses++
       }
       void resolveAllAssetPositions()
-      if (modelsChanged) void refreshLevels()
+      if (modelsChanged) {
+        void refreshLevels()
+        const layer = (window as any).EKO?.state?.dock?.layer
+        if (layer && layer !== 'all') isolateLayer(layer)
+      }
     }, 3000)
     void resolveAllAssetPositions()
     void refreshLevels()
@@ -729,28 +756,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       } else if (customEvent.detail?.action === 'setXrayColor') {
         useAppStore.getState().setLightingParams({ xrayColor: customEvent.detail.color })
       } else if (customEvent.detail?.action === 'isolateModel') {
-        const { keyword } = customEvent.detail
-        const models = useModelStore.getState().models
-        const engine = engineRef?.current
-        
-        models.forEach(m => {
-          // If keyword is 'all', show all. Otherwise, check if originalFileName contains the keyword.
-          const isVisible = keyword === 'all' || m.originalFileName.toLowerCase().includes(keyword.toLowerCase())
-          useModelStore.getState().setModelVisibility(m.modelId, isVisible)
-          
-          if (engine) {
-            let object3D = null
-            if (m.type === 'glb') {
-              object3D = engine.world.scene.three.children.find((c: any) => c.userData?.modelId === m.modelId)
-            } else {
-              const fragModel = engine.fragments.models.list.get(m.modelId)
-              object3D = fragModel?.object
-            }
-            if (object3D) {
-              object3D.visible = isVisible
-            }
-          }
-        })
+        const host = (window as any).EKO_HOST_ENGINE
+        const layer = customEvent.detail.layer || (customEvent.detail.keyword === 'all' ? 'all' : '')
+        if (host?.isolateLayer && layer) host.isolateLayer(layer)
       } else if (customEvent.detail?.action === 'resolveAssets') {
         (window as any).EKO_HOST_ENGINE?.resolveAllAssetPositions?.()
       } else if (customEvent.detail?.action === 'flyToAsset') {

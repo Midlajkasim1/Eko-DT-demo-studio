@@ -17,7 +17,7 @@
         sectionPlane: false,
         measure: false,
         levels: true,
-        layers: false,
+        layers: true,
         viewpoints: false,
         picking: true,
         isolate: true,
@@ -66,7 +66,11 @@
           window.EKO_HOST_ENGINE.isolateLevel('ALL');
         }
       },
-      setLayerVisibility: noop,
+      setLayerVisibility: function (layerId) {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.isolateLayer) {
+          window.EKO_HOST_ENGINE.isolateLayer(layerId);
+        }
+      },
 
       setSectionPlane: noop,
       clearSection: noop,

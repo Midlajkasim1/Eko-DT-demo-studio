@@ -177,7 +177,7 @@ window.EKO_VT = (function(){
       }).join('') + note;
     }
     if(which === 'layers'){
-      const rows = E.data.viewer.layers.map(l => `<button class="mzopt mzfan vprow" data-act="setLayer" data-v="${C().esc(l)}" data-on="${d.layer === l}" data-q="${C().esc((l + ' ' + t(LBL[l])).toLowerCase())}">${C().esc(t(LBL[l]))}</button>`).join('');
+      const rows = layersOf(E).map(l => `<button class="mzopt mzfan vprow" data-act="setLayer" data-v="${C().esc(l)}" data-on="${d.layer === l}" data-q="${C().esc((l + ' ' + t(LBL[l] || l)).toLowerCase())}">${C().esc(t(LBL[l] || l))}</button>`).join('');
       return back + `<div class="vpick">${title('dockLayers')}
         <input class="vpq" type="search" placeholder="${C().esc(t('pickLayer'))}" aria-label="${C().esc(t('pickLayer'))}" autocomplete="off">
         <div class="vplist">${rows}</div></div>`;
@@ -317,6 +317,16 @@ window.EKO_VT = (function(){
     if(HE && HE.listLevels) return HE.listLevels().map(l => l.id);
     return (E.data.viewer && E.data.viewer.levels) || [];
   }
+  /* Disciplines of the loaded models. The fixture list is only the stand-in
+     before a model has reported its file name. */
+  function layersOf(E){
+    const HE = window.EKO_HOST_ENGINE;
+    if(HE && HE.listLayers) {
+      const list = HE.listLayers();
+      if(list && list.length) return list.map(l => l.id);
+    }
+    return (E.data.viewer && E.data.viewer.layers) || [];
+  }
 
-  return { toolbar, extras, body, radial, sheet, chip, readout, syncReset, viewState, wireCanvas, state, tip, byId, phone, avail, list, hidden, levelsOf };
+  return { toolbar, extras, body, radial, sheet, chip, readout, syncReset, viewState, wireCanvas, state, tip, byId, phone, avail, list, hidden, levelsOf, layersOf };
 })();

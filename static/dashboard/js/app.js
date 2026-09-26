@@ -160,20 +160,13 @@
       const targetModule = module ?? this.state.module;
       const targetSub = sub ?? null;
       
-      // Map navigation to whole-model isolation
       let targetLayer = 'all';
-      let modelKeyword = 'all';
       if (targetModule === 'systems') {
-        if (targetSub === 'hvac' || targetSub === 'electrical') {
-          targetLayer = targetSub === 'hvac' ? 'mech' : 'elec';
-          modelKeyword = 'ME-M3';
-        }
+        if (targetSub === 'hvac') targetLayer = 'mech';
+        else if (targetSub === 'electrical') targetLayer = 'elec';
       }
       if (this.state.dock) this.state.dock.layer = targetLayer;
-      
-      window.dispatchEvent(new CustomEvent('dashboard-event', {
-        detail: { action: 'isolateModel', keyword: modelKeyword }
-      }));
+      if (this.engine && this.engine.setLayerVisibility) this.engine.setLayerVisibility(targetLayer);
 
       this.set({ born: this.state.born || 'nav',
                  pageId, module: targetModule, sub: targetSub,
@@ -925,6 +918,7 @@
          layers, and the selection too (popup, equipment colour, asset panel). */
       if(k === 'reset'){ E.engine.resetView();
         if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
+        if(E.engine.setLayerVisibility) E.engine.setLayerVisibility('all');
         E.set(Object.assign({ dock:{ tool:null, bloom:null, style:'default', tone:'blue',
         level:'ALL', layer:'all', alerts:'all', minimap:false }, histAge:null, measureResult:null }, NO_SEL)); return; }
       if(!def) return;
@@ -936,18 +930,12 @@
       if(d.bloom && d.bloom !== prev) E.state.born = 'bloom';
       render(); },
     setLevel(el){ showLevel(el.dataset.v, true); },
-    setLayer(el){ 
+    setLayer(el){
       const layer = el.dataset.v;
-      E.state.dock.layer = layer; 
-      E.state.dock.bloom = null; 
-      
-      let modelKeyword = 'all';
-      if (layer === 'mech' || layer === 'elec') modelKeyword = 'ME-M3';
-      
-      window.dispatchEvent(new CustomEvent('dashboard-event', {
-        detail: { action: 'isolateModel', keyword: modelKeyword }
-      }));
-      render(); 
+      E.state.dock.layer = layer;
+      E.state.dock.bloom = null;
+      if(E.engine && typeof E.engine.setLayerVisibility === 'function') E.engine.setLayerVisibility(layer);
+      render();
     },
     setStyle(el){ E.state.dock.style = el.dataset.v; E.state.dock.bloom = null; render(); },   /* D72: every choice closes */
     /* D88–D91: reports — build → narrate → freeze → store → notify → preview */
