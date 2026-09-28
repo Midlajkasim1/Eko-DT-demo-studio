@@ -28,6 +28,8 @@ window.EKO_VT = (function(){
   /* ------------------------------ view state ------------------------------ */
   /* Every non-default view setting, named for people (D71). */
   const LBL = { all:'layAll', arch:'layArch', elec:'layElec', int:'layInt', mech:'layMech', str:'layStr' };
+  const LAYSHORT = { arch:'AR', elec:'EL', int:'IN', mech:'ME', str:'ST' };
+  const chosenLayers = d => Array.isArray(d.layer) ? d.layer : (d.layer && d.layer !== 'all' ? [d.layer] : []);
   const STY = { default:'styDefault', photo:'styPhoto', minimal:'styMinimal', xray:'styXray' };
   const levelName = (E, l) => /^L\d+$/.test(l) ? E.t('lvlName', { n: l.slice(1) }) : l;
   const styleName = (E, d) => E.t(STY[d.style] || 'styDefault');
@@ -35,7 +37,8 @@ window.EKO_VT = (function(){
     const d = E.state.dock, items = [];
     if(d.level !== 'ALL') items.push({ k:'level', text: levelName(E, d.level) });
     if(d.style !== 'default') items.push({ k:'style', text: styleName(E, d) });
-    if(d.layer !== 'all') items.push({ k:'layer', text: E.t(LBL[d.layer] || 'layAll') });
+    const layersOn = chosenLayers(d);
+    if(layersOn.length) items.push({ k:'layer', text: layersOn.map(id => E.t(LBL[id] || id)).join(', ') });
     if(d.minimap) items.push({ k:'minimap', text: E.t('dockMinimap') });
     return items;
   }
@@ -51,7 +54,7 @@ window.EKO_VT = (function(){
     switch(def.id){
       case 'select': case 'measure': case 'slice': on = d.tool === def.id; break;
       case 'levels':  on = d.bloom === 'levels' || d.level !== 'ALL'; tag = d.level !== 'ALL' ? d.level : null; break;
-      case 'layers':  on = d.layer !== 'all'; tag = on ? d.layer.slice(0, 2).toUpperCase() : null; break;
+      case 'layers': { const sel = chosenLayers(d); on = sel.length > 0; tag = on ? sel.map(id => LAYSHORT[id] || id).join('+') : null; break; }
       case 'minimap': on = !!d.minimap; break;
       case 'style':   on = d.style !== 'default'; tag = on ? E.t(STY[d.style] || 'styDefault') : null; break;
       case 'more':    on = BLOOMS_MORE.includes(d.bloom); dot = viewState(E).length > 0; break;
@@ -177,7 +180,8 @@ window.EKO_VT = (function(){
       }).join('') + note;
     }
     if(which === 'layers'){
-      const rows = layersOf(E).map(l => `<button class="mzopt mzfan vprow" data-act="setLayer" data-v="${C().esc(l)}" data-on="${d.layer === l}" data-q="${C().esc((l + ' ' + t(LBL[l] || l)).toLowerCase())}">${C().esc(t(LBL[l] || l))}</button>`).join('');
+      const picked = chosenLayers(d);
+      const rows = layersOf(E).map(l => `<button class="mzopt mzfan vprow" data-act="setLayer" data-v="${C().esc(l)}" data-on="${l === 'all' ? picked.length === 0 : picked.indexOf(l) >= 0}" data-q="${C().esc((l + ' ' + t(LBL[l] || l)).toLowerCase())}">${C().esc(t(LBL[l] || l))}</button>`).join('');
       return back + `<div class="vpick">${title('dockLayers')}
         <input class="vpq" type="search" placeholder="${C().esc(t('pickLayer'))}" aria-label="${C().esc(t('pickLayer'))}" autocomplete="off">
         <div class="vplist">${rows}</div></div>`;

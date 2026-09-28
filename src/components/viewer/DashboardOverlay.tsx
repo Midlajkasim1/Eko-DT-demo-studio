@@ -637,7 +637,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
 
     /* Whole models, by the discipline in the file name. Item visibility
        (the floor filter) is left as it is. */
-    const isolateLayer = (layerId: string) => {
+    const isolateLayer = (layerId: string | string[]) => {
       const models = useModelStore.getState().models
       const present = new Set(
         models.map(m => disciplineOf(m.originalFileName || '')).filter((d): d is NonNullable<typeof d> => !!d)

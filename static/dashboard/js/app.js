@@ -932,9 +932,13 @@
     setLevel(el){ showLevel(el.dataset.v, true); },
     setLayer(el){
       const layer = el.dataset.v;
-      E.state.dock.layer = layer;
-      E.state.dock.bloom = null;
-      if(E.engine && typeof E.engine.setLayerVisibility === 'function') E.engine.setLayerVisibility(layer);
+      const cur = E.state.dock.layer;
+      let sel = Array.isArray(cur) ? cur.slice() : (cur && cur !== 'all' ? [cur] : []);
+      if(layer === 'all') sel = [];
+      else if(sel.indexOf(layer) >= 0) sel = sel.filter(id => id !== layer);
+      else sel.push(layer);
+      E.state.dock.layer = sel.length ? sel : 'all';
+      if(E.engine && typeof E.engine.setLayerVisibility === 'function') E.engine.setLayerVisibility(E.state.dock.layer);
       render();
     },
     setStyle(el){ E.state.dock.style = el.dataset.v; E.state.dock.bloom = null; render(); },   /* D72: every choice closes */

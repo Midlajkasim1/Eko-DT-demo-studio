@@ -1,7 +1,3 @@
-/* Discipline token in a model file name, matching the Layers menu.
-   MAA-KLD-AN09-ZZ-M3-AR-0001 → arch, …-ST-… → str, …-ME-… → mech.
-   A combined ME model stands in for Electrical until a separate EL file is loaded. */
-
 export type LayerId = 'all' | 'arch' | 'elec' | 'int' | 'mech' | 'str'
 
 const TOKEN: Record<string, Exclude<LayerId, 'all'>> = {
@@ -33,9 +29,8 @@ export function layersFor(disciplines: Array<string | null>): LayerId[] {
   return ids
 }
 
-export function layerShows(discipline: string | null, layer: string, present: Set<string>): boolean {
-  if (!layer || layer === 'all') return true
-  if (discipline === layer) return true
-  if (layer === 'elec' && discipline === 'mech' && !present.has('elec')) return true
-  return false
+export function layerShows(discipline: string | null, layer: string | string[], present: Set<string>): boolean {
+  const selected = Array.isArray(layer) ? layer.filter(id => id && id !== 'all') : (!layer || layer === 'all' ? [] : [layer])
+  if (!selected.length) return true
+  return selected.some(id => discipline === id || (id === 'elec' && discipline === 'mech' && !present.has('elec')))
 }
