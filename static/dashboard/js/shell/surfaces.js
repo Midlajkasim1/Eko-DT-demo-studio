@@ -122,7 +122,9 @@ window.EKO_SURF = (function(){
       byId[top].close(); E.set({}); return top;
     }
     /* With nothing open, Escape puts the viewer tool down. Select starts off. */
-    if(E.state.dock && E.state.dock.tool){ E.state.dock.tool = null; E.set({}); return 'tool'; }
+    if(E.state.dock && E.state.dock.tool){
+      if(E.state.dock.tool === 'measure' && E.engine && E.engine.cancelMeasure) E.engine.cancelMeasure();
+      E.state.dock.tool = null; E.set({}); return 'tool'; }
     if(E.state.modelFs){ E.set({ modelFs:false }); return 'model'; }       /* D94: a mode, not a surface */
     if(PAGES.includes(E.state.pageId)){ back(); return 'back'; }
     if(E.state.histAge != null){ E.set({ histAge:null }); return 'live'; }   /* a mode, not a surface */

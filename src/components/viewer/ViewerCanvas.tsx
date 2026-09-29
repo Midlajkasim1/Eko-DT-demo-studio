@@ -22,7 +22,85 @@ import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import { unloadAllModels } from '@/lib/sceneTeardown'
 import { attachDevBridge } from '@/lib/devBridge'
 import { installStudioViewerApi } from '@/lib/studioViewerApi'
+import { SnappingClass, type FragmentsModel, type RaycastResult } from '@thatopen/fragments'
+import { chooseSnapPoint, createMeasure, measureTool, setMeasureTool, type SnapCandidate } from '@/lib/measureTool'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
+
+// The fragments snap window is about 10px. A corner on that same surface, a
+// little deeper than the face under the cursor, should still win.
+const SNAP_PX = 14
+const SNAP_DEPTH = 0.45
+
+function snapScreenPx(camera: THREE.Camera, point: THREE.Vector3, rect: DOMRect, mouse: THREE.Vector2) {
+  const v = point.clone().project(camera)
+  if (!Number.isFinite(v.x) || v.z < -1 || v.z > 1) return Infinity
+  const sx = (v.x * 0.5 + 0.5) * rect.width + rect.left
+  const sy = (-v.y * 0.5 + 0.5) * rect.height + rect.top
+  return Math.hypot(sx - mouse.x, sy - mouse.y)
+}
+
+function snapKind(hit: RaycastResult): SnapCandidate['kind'] {
+  if (hit.snappingClass === SnappingClass.LINE) return 'line'
+  if (hit.snappingClass === SnappingClass.FACE) return 'face'
+  return 'point'
+}
+
+async function snapMeasurePoint(engine: FragmentsEngine, canvas: HTMLCanvasElement, mouse: THREE.Vector2): Promise<THREE.Vector3 | null> {
+  const camera = engine.world.camera.three
+  const classes = [SnappingClass.POINT, SnappingClass.LINE, SnappingClass.FACE]
+  const models = [...(engine.fragments?.models?.list?.values() ?? [])] as FragmentsModel[]
+  const batches = await Promise.all(models.map(async (model) => {
+    if (model.object && !model.object.visible) return [] as RaycastResult[]
+    try {
+      model.object?.updateMatrixWorld(true)
+      const found = await model.raycastWithSnapping({ camera, dom: canvas, mouse, snappingClasses: classes })
+      return found ?? []
+    } catch {
+      return [] as RaycastResult[]
+    }
+  }))
+  const hits = batches.flat().filter(hit => hit?.point)
+  const rect = canvas.getBoundingClientRect()
+  return chooseSnapPoint(
+    hits.map(hit => ({ point: hit.point, distance: hit.distance, kind: snapKind(hit) })),
+    point => snapScreenPx(camera, point, rect, mouse),
+    SNAP_PX,
+    SNAP_DEPTH,
+  )
+}
+
+function hoverHit(engine: FragmentsEngine, clientX: number, clientY: number, rect: DOMRect): THREE.Vector3 | null {
+  const x = ((clientX - rect.left) / rect.width) * 2 - 1
+  const y = -((clientY - rect.top) / rect.height) * 2 + 1
+  const raycaster = new THREE.Raycaster()
+  raycaster.setFromCamera(new THREE.Vector2(x, y), engine.world.camera.three)
+  const roots: THREE.Object3D[] = []
+  for (const model of engine.fragments?.models?.list?.values() ?? []) {
+    const obj = (model as { object?: THREE.Object3D }).object
+    if (obj && obj.visible) roots.push(obj)
+  }
+  engine.world.scene.three.children.forEach(child => {
+    if (child.userData?.modelId && child.visible && !child.userData.ekoMeasure) roots.push(child)
+  })
+  const hit = raycaster.intersectObjects(roots, true).find(h => !h.object.userData?.ekoMeasure)
+  return hit ? hit.point.clone() : null
+}
+
+// The ruler keeps going at the height of the last point when the cursor
+// leaves the model. This viewer is Y-up, so that plane is horizontal.
+function levelPoint(engine: FragmentsEngine, clientX: number, clientY: number, rect: DOMRect): THREE.Vector3 | null {
+  const last = measureTool()?.lastPoint()
+  if (!last || rect.width <= 0 || rect.height <= 0) return null
+  const x = ((clientX - rect.left) / rect.width) * 2 - 1
+  const y = -((clientY - rect.top) / rect.height) * 2 + 1
+  const raycaster = new THREE.Raycaster()
+  raycaster.setFromCamera(new THREE.Vector2(x, y), engine.world.camera.three)
+  const dir = raycaster.ray.direction
+  if (Math.abs(dir.y) < 0.001) return null
+  const t = (last.y - raycaster.ray.origin.y) / dir.y
+  if (!(t > 0) || t > 500) return null
+  return raycaster.ray.origin.clone().addScaledVector(dir, t)
+}
 
 interface ViewerCanvasProps {
   onEngineReady?: (engineRef: React.MutableRefObject<FragmentsEngine | null>) => void
@@ -74,6 +152,25 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
   }, [isReady, onEngineReady])
 
   useEffect(() => { installStudioViewerApi() }, [])
+
+  useEffect(() => {
+    if (!isReady || !engineRef.current) return
+    const engine = engineRef.current
+    const scene = engine.world?.scene?.three
+    const camera = engine.world?.camera?.three
+    if (!scene || !camera) return
+    const tool = createMeasure({
+      scene,
+      getCamera: () => engine.world.camera.three,
+      getViewHeight: () => containerRef.current?.clientHeight || 800,
+      controls: engine.world.camera.controls,
+    })
+    setMeasureTool(tool)
+    return () => {
+      tool.dispose()
+      setMeasureTool(null)
+    }
+  }, [isReady])
 
   // Restore the saved view every time a project is opened. The engine is created
   // once and outlives project switches, so this cannot hang off engine-ready alone.
@@ -148,6 +245,7 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
   useEffect(() => {
     setPickerActive(false)
     setPickedCoord(null)
+    measureTool()?.clear()
     setStatsVisible(false)
     setDashboardVisible(isFinProject || !adminMode)
     useAppStore.getState().setMaterialPickerActive(false)
@@ -309,11 +407,27 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
     }
   }, [selectedMaterialElement, materialPickerActive, engineRef]);
 
+  const hoverStamp = useRef(0)
+  const measureQueue = useRef<Promise<void>>(Promise.resolve())
+  const onMeasureMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const tool = measureTool()
+    if (!tool?.pending()) return
+    const now = performance.now()
+    if (now - hoverStamp.current < 40) return
+    hoverStamp.current = now
+    const engine = engineRef.current
+    const container = containerRef.current
+    if (!engine || !container) return
+    const rect = container.getBoundingClientRect()
+    tool.hover(hoverHit(engine, e.clientX, e.clientY, rect) || levelPoint(engine, e.clientX, e.clientY, rect))
+  }
+
   const handleCanvasClick = useCallback(async (e: React.MouseEvent<HTMLDivElement>) => {
     // The dashboard Select tool is the resting tool. A click on the model
     // then opens the same card a marker tap does.
     const selectArmed = dashboardVisible && (window as any).EKO?.state?.dock?.tool === 'select'
-    if (!pickerActive && !materialPickerActive && !selectArmed) return
+    const measureArmed = dashboardVisible && (window as any).EKO?.state?.dock?.tool === 'measure'
+    if (!pickerActive && !materialPickerActive && !selectArmed && !measureArmed) return
     const engine = engineRef.current
     if (!engine) return
     const container = containerRef.current
@@ -458,6 +572,24 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
        if (stdHitPoint) hitPoint = stdHitPoint;
     }
 
+    if (measureArmed) {
+      const fallback = hitPoint ? hitPoint.clone() : null
+      const mouse = rawPx.clone()
+      const clientX = e.clientX
+      const clientY = e.clientY
+      const job = measureQueue.current.then(async () => {
+        let point = fallback
+        if (canvas) {
+          const snapped = await snapMeasurePoint(engine, canvas, mouse)
+          if (snapped) point = snapped
+        }
+        if (!point) point = levelPoint(engine, clientX, clientY, rect)
+        if (point) measureTool()?.click(point)
+      })
+      measureQueue.current = job.catch(() => {})
+      return
+    }
+
     if (hitModelId && hitExpressId) {
       if (pickerActive && hitPoint) {
          setPickedCoord([
@@ -547,6 +679,7 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
         ref={containerRef}
         className={`viewer-canvas-container${(pickerActive || materialPickerActive) ? ' picker-cursor' : ''}`}
         onClick={handleCanvasClick}
+        onMouseMove={onMeasureMove}
         style={{ visibility: step === 'viewing' ? 'visible' : 'hidden' }}
       />
 

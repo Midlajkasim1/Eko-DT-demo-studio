@@ -7,6 +7,7 @@ import { useModelStore } from '@/store/useModelStore'
 import { ASSET_BIM_MAPPING } from '@/constants/assetBimMapping'
 import { resetCameraToHome } from '@/lib/cameraUtils'
 import { disciplineOf, layersFor, layerShows } from '@/lib/modelDiscipline'
+import { measureTool } from '@/lib/measureTool'
 import type { ProjectApiSettings } from '@/types'
 
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
@@ -671,6 +672,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         useModelStore.getState().models.map(m => disciplineOf(m.originalFileName || ''))
       ).map(id => ({ id, name: id })),
       isolateLayer,
+      startMeasure: () => measureTool()?.start(),
+      cancelMeasure: () => measureTool()?.cancel(),
+      finishMeasure: () => measureTool()?.finish(),
+      clearMeasure: () => measureTool()?.clear(),
     }
     // The dashboard may have rendered before the bridge existed: redraw so the
     // equipment markers (which need bimIdFor) appear.

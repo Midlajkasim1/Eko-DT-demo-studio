@@ -1222,7 +1222,9 @@ Wait, if iframe has pointer-events: auto, it works. Let's fix this in iframe bod
 }
 
 /* ─── Picker Cursor ──────────────────────────────────────────────────────────── */
-.picker-cursor {
+.picker-cursor,
+.viewer-canvas-container.measure-cursor,
+.viewer-canvas-container.measure-cursor canvas {
   cursor: crosshair !important;
 }
 

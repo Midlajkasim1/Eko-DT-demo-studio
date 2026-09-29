@@ -15,7 +15,7 @@
       capabilities: {
         style: true,
         sectionPlane: false,
-        measure: false,
+        measure: true,
         levels: true,
         layers: true,
         viewpoints: false,
@@ -76,8 +76,34 @@
       clearSection: noop,
       onSectionHandle: on('section'),
 
-      startMeasure: noop,
-      cancelMeasure: noop,
+      startMeasure: function () {
+        var eng = window.EKO_HOST_ENGINE;
+        var report = function (r) { fire('measure', r); };
+        window.EKO_REPORT_MEASURE = report;
+        if (!eng) return;
+        eng.reportMeasure = report;
+        if (eng.startMeasure) eng.startMeasure();
+      },
+      cancelMeasure: function () {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.cancelMeasure) {
+          window.EKO_HOST_ENGINE.cancelMeasure();
+        }
+      },
+      finishMeasure: function () {
+        var eng = window.EKO_HOST_ENGINE;
+        var report = function (r) { fire('measure', r); };
+        window.EKO_REPORT_MEASURE = report;
+        if (eng) eng.reportMeasure = report;
+        if (eng && eng.finishMeasure) eng.finishMeasure();
+      },
+      clearMeasure: function () {
+        var eng = window.EKO_HOST_ENGINE;
+        var report = function (r) { fire('measure', r); };
+        window.EKO_REPORT_MEASURE = report;
+        if (eng) eng.reportMeasure = report;
+        if (eng && eng.clearMeasure) eng.clearMeasure();
+        else fire('measure', null);
+      },
       onMeasureResult: on('measure'),
 
       highlightAsset: function (id) {

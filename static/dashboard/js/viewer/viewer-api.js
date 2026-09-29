@@ -61,7 +61,8 @@ window.EKO_VIEWER = (function(){
 
      measure
        startMeasure(mode)             'point'|'area'.
-       cancelMeasure()
+       cancelMeasure()                drop the open chain; finished chains stay.
+       finishMeasure()                close the open chain and keep it.
        onMeasureResult(cb)            cb({value, unit, points:[{x,y,z}…]}) —
                                       the SHELL renders the readout.
 

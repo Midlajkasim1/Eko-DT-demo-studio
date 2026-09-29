@@ -135,6 +135,7 @@ window.EKO_I18N.en = {
 
   "dockSelect": "Select",
   "dockMeasure": "Measure",
+  "measureHow": "Click points, Enter to finish",
   "dockSlice": "Slice",
   "dockLevels": "Levels",
   "dockLayers": "Layers",

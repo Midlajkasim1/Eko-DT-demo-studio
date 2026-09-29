@@ -919,10 +919,16 @@
       if(k === 'reset'){ E.engine.resetView();
         if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
         if(E.engine.setLayerVisibility) E.engine.setLayerVisibility('all');
+        if(E.engine.clearMeasure) E.engine.clearMeasure();
         E.set(Object.assign({ dock:{ tool:null, bloom:null, style:'default', tone:'blue',
         level:'ALL', layer:'all', alerts:'all', minimap:false }, histAge:null, measureResult:null }, NO_SEL)); return; }
       if(!def) return;
-      if(def.kind === 'tool'){ d.tool = (k === 'select' && d.tool === 'select') ? null : k; d.bloom = null; }
+      if(def.kind === 'tool'){
+        const next = (d.tool === k && (k === 'select' || k === 'measure')) ? null : k;
+        if(d.tool === 'measure' && next !== 'measure' && E.engine.cancelMeasure) E.engine.cancelMeasure();
+        d.tool = next; d.bloom = null;
+        if(next === 'measure' && E.engine.startMeasure) E.engine.startMeasure('point');
+      }
       else if(def.kind === 'toggle'){ d.minimap = !d.minimap; d.bloom = null; if(d.minimap) E.state.born = 'bloom'; }
       else if(def.kind === 'more'){ const inMore = ['more','layers','style'].includes(d.bloom);
         d.bloom = (el.classList && el.classList.contains && el.classList.contains('vmback')) ? 'more' : (inMore ? null : 'more'); }
@@ -1154,7 +1160,11 @@
         if(h) ACTS.palGo({ dataset:{ i:String(E.state.palSel) } }); }
       return;
     }
-    if(ev.target.matches && ev.target.matches('input') && ev.key !== 'Escape') return;
+    if(ev.target.matches && ev.target.matches('input, textarea, select, [contenteditable="true"]') && ev.key !== 'Escape') return;
+    /* The ruler is a chain: Enter closes it. Escape still puts the tool down. */
+    if(ev.key === 'Enter' && !ev.ctrlKey && !ev.metaKey && !ev.altKey
+      && E.state.dock && E.state.dock.tool === 'measure' && E.engine && E.engine.finishMeasure){
+      ev.preventDefault(); E.engine.finishMeasure(); return; }
     /* D121: keyboard operability — Enter and Space activate any role=button element that is not a native control;
        arrows walk a menu's items (the surface manager focuses the first item on open) */
     if((ev.key === 'Enter' || ev.key === ' ') && ev.target instanceof Element && ev.target.matches('[role="button"][data-act]') && !ev.target.matches('button, a, input, select, textarea')){ ev.preventDefault(); ev.target.click(); return; }

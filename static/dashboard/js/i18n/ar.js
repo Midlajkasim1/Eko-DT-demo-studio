@@ -137,6 +137,7 @@ window.EKO_I18N.ar = {
 
   "dockSelect": "تحديد",
   "dockMeasure": "قياس",
+  "measureHow": "انقر نقاطًا، Enter لإنهاء السلسلة",
   "dockSlice": "قطع",
   "dockLevels": "الطوابق",
   "dockLayers": "الطبقات",

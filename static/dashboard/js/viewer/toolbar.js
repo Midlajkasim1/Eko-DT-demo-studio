@@ -69,6 +69,7 @@ window.EKO_VT = (function(){
     if(s.dis) return name + ' · ' + t('capNeedsLive');                 /* no shortcut on a tool that cannot run */
     if(def.id === 'levels' && E.state.dock.level !== 'ALL') return t('tipShortcut', { t: t('lvlIsolatedTip', { lvl: levelName(E, E.state.dock.level) }), k: def.key });
     if(def.id === 'reset'){ const l = resetList(E); return t('tipShortcut', { t: l.length ? t('resetListTip', { list: l.join(', ') }) : name, k: def.key }); }
+    if(def.id === 'measure') return t('tipShortcut', { t: t('measureHow'), k: def.key });
     return t('tipShortcut', { t: name, k: def.key });
   }
   function button(E, def, cls){
