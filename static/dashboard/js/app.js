@@ -56,7 +56,7 @@
       histAge: null,
       regQ: '', regStF: null, regSysF: null, regSevF: null, regSort: null, regSortDir: 'asc',
       markersOn: ss.get('eko-mk') !== '0', showAcked: true, tlMetric: 'kwh', tlRange: 'day',   /* D70: per session */
-      hmMode: 'temp', hmFloor: 'All', hmSel: null, hmOutline: false,
+      hmMode: 'temp', hmFloor: 'All', hmSel: null, hmRange: 'today', hmPlay: false, hmStep: null, hmStepLabel: '', hmOutline: false,
       hmLayers: { sensors: false, labels: true, values: true },
       woRaised: {}, dlg: null, palQ: '', palSel: 0,
       mobMore: false,
@@ -1056,7 +1056,34 @@
         ACTS.vtool({ dataset:{ v:h.tool } }); }
       else if(h.locked){ E.state.dlg = null; ACTS.teaser({ dataset:{ mod:h.mod, teaser:h.teaser } }); }   /* D122: a locked page opens its teaser, as the nav does */
       else { E.state.dlg = null; E.go(h.go.page, h.go.mod, h.go.sub || null); } },
-    hmMode(el){ E.set({ hmMode: el.dataset.v }); },
+    hmMode(el){
+      E.state.hmMode = el.dataset.v;
+      if (window.EKO_HEAT) window.EKO_HEAT.apply(E.state.hmRange);
+      E.set({ hmMode: el.dataset.v });
+    },
+    hmRange(el){
+      if(E._hmTimer){ clearInterval(E._hmTimer); E._hmTimer = null; }
+      if (window.EKO_HEAT) window.EKO_HEAT.apply(el.dataset.v);
+      E.set({ hmRange: el.dataset.v, hmPlay: false, hmStep: null, hmStepLabel: '' });
+    },
+    hmPlay(){
+      if(E.state.hmPlay){
+        if(E._hmTimer){ clearInterval(E._hmTimer); E._hmTimer = null; }
+        if(window.EKO_HEAT) window.EKO_HEAT.step(null);
+        E.set({ hmPlay: false, hmStep: null, hmStepLabel: '' });
+        return;
+      }
+      var n = window.EKO_HEAT ? window.EKO_HEAT.count() : 0;
+      if(!n) return;
+      var i = 0;
+      var run = function(){
+        var label = window.EKO_HEAT.step(i);
+        E.set({ hmPlay: true, hmStep: i, hmStepLabel: label || '' });
+        i = (i + 1) % n;
+      };
+      run();
+      E._hmTimer = setInterval(run, 1000);
+    },
     hmFloor(el){ E.set({ hmFloor: el.dataset.v }); },
     hmSel(el){ E.set({ hmSel: E.state.hmSel === el.dataset.v ? null : el.dataset.v }); },
     hmOutline(){ E.set({ hmOutline: !E.state.hmOutline }); },

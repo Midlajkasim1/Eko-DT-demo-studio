@@ -678,96 +678,137 @@ window.EKO_A = (function(){
     return C().modShell(E, E.t(w.binding.title), '', '', rows);
   }
 
-  /* ------------------------------- HEAT MAP -------------------------------- */
+  const TEMP_SP = 21, RH_SP = 60, CO2_SP = 800;
+
+  function heatMode(s){
+    if(s.hmMode === 'comfort') return 'comfort';
+    if(s.hmMode === 'hum' || s.hmMode === 'occ') return 'hum';
+    return 'temp';
+  }
+  function heatZones(d, s, mode){
+    const kind = mode === 'comfort' ? 'iaq' : 'is';
+    return d.zones.filter(z => z.kind === kind && (s.hmFloor === 'All' || z.floor === s.hmFloor));
+  }
+  function heatValue(z, mode){
+    if(mode === 'comfort') return z.co2;
+    if(mode === 'hum') return z.rh;
+    return z.tempC;
+  }
+  function heatText(z, mode){
+    const v = heatValue(z, mode);
+    if(v == null || !isFinite(v)) return '—';
+    if(mode === 'comfort') return Math.round(v) + ' ppm';
+    if(mode === 'hum') return Math.round(v) + '%';
+    return v.toFixed(1) + '\u00b0C';
+  }
+  function heatBar(z, mode){
+    const v = heatValue(z, mode);
+    if(v == null || !isFinite(v)) return 0;
+    if(mode === 'comfort') return Math.max(0, Math.min(100, (v - 400) / 12));
+    if(mode === 'hum') return Math.max(0, Math.min(100, v));
+    return Math.max(0, Math.min(100, (v - 18) / 10 * 100));
+  }
+  function heatCell(mode, v){
+    if(v == null || !isFinite(v)) return 'var(--s3)';
+    const t = mode === 'comfort' ? (v - 600) / 600 : mode === 'hum' ? (v - 40) / 40 : (v - 21) / 4;
+    const x = Math.max(0, Math.min(1, t));
+    if(x <= 0.5) return 'color-mix(in srgb, var(--s3) ' + (x / 0.5 * 100).toFixed(0) + '%, var(--info))';
+    return 'color-mix(in srgb, var(--warn) ' + ((x - 0.5) / 0.5 * 100).toFixed(0) + '%, var(--s3))';
+  }
+  function heatOver(z, mode){
+    const v = heatValue(z, mode);
+    if(v == null || !isFinite(v)) return false;
+    if(mode === 'comfort') return v > CO2_SP;
+    if(mode === 'hum') return v > RH_SP;
+    return v > TEMP_SP;
+  }
   function heatPanel(E){
     const d = E.data.heat, s = E.state, ar = E.lang === 'ar';
-    /* D32 modes (Latest mock): temp (default) / comfort / occ. */
-    const mode = s.hmMode === 'comfort' ? 'comfort' : s.hmMode === 'occ' ? 'occ' : 'temp';
-    const comfort = mode === 'comfort';
-    const zones = d.zones.filter(z => s.hmFloor === 'All' || z.floor === s.hmFloor);
-    const rank = comfort
-      ? zones.slice().sort((a,b) => Math.abs(b.dT||0) - Math.abs(a.dT||0))
-      : mode === 'occ'
-      ? zones.slice().sort((a,b) => b.occ - a.occ)
-      : zones.slice().sort((a,b) => b.tempC - a.tempC);
-    const maxK = Math.max(...zones.map(z=>z.occ));
-    const siteMean = (d.zones.reduce((s2,z)=>s2+z.tempC,0)/d.zones.length);
-    const zn = z => ar ? (z.nameAr||z.nameEn) : z.nameEn;
-    const fmtDt = z => z.dT == null ? '—' : (z.dT>0?'+':'−') + Math.abs(z.dT).toFixed(1) + '°';
-    const rankRows = rank.map((z,i) =>
+    const mode = heatMode(s);
+    const zones = heatZones(d, s, mode);
+    const rank = zones.slice().sort((a, b) => {
+      const av = heatValue(a, mode), bv = heatValue(b, mode);
+      const aOk = av != null && isFinite(av), bOk = bv != null && isFinite(bv);
+      if(aOk !== bOk) return aOk ? -1 : 1;
+      if(aOk && av !== bv) return bv - av;
+      return a.nameEn.localeCompare(b.nameEn, undefined, { numeric: true });
+    });
+    const temps = d.zones.map(z => z.tempC).filter(v => v != null && isFinite(v));
+    const co2s = d.zones.map(z => z.co2).filter(v => v != null && isFinite(v));
+    const siteMean = temps.length ? temps.reduce((n, v) => n + v, 0) / temps.length : null;
+    const co2Mean = co2s.length ? co2s.reduce((n, v) => n + v, 0) / co2s.length : null;
+    const zn = z => ar ? (z.nameAr || z.nameEn) : z.nameEn;
+    const rankRows = rank.length ? rank.map((z, i) =>
       `<button class="hmrank selrow" data-on="${s.hmSel===z.nameEn}" data-act="hmSel" data-v="${esc(z.nameEn)}">
         <span class="tMonoS cT3">${i+1}</span><span class="grow taS">${esc(zn(z))}</span>
-        <span class="hmrbar"><span style="width:${comfort?(z.dT==null?0:Math.min(100,Math.abs(z.dT)/2*100)).toFixed(0):mode==='occ'?(z.occ/maxK*100).toFixed(0):(Math.max(0,(z.tempC-20))/5*100).toFixed(0)}%"></span></span>
-        <span class="tMonoS">${comfort?esc(fmtDt(z)):mode==='occ'?esc(E.t('hmPpl',{n:z.occ})):esc(z.tempC.toFixed(1)+'\u00b0')}</span></button>`).join('');
+        <span class="hmrbar"><span style="width:${heatBar(z, mode).toFixed(0)}%"></span></span>
+        <span class="tMonoS">${esc(heatText(z, mode))}</span></button>`).join('')
+      : `<p class="alempty">${esc(E.t('hmNone'))}</p>`;
     const tglRow = (lbl, key, on) =>
       `<div class="hmtgl"><span class="grow">${esc(lbl)}</span>
         <button class="seg" data-on="${on}" data-act="hmLayer" data-v="${key}">${esc(on?E.t('onW'):E.t('offW'))}</button></div>`;
-    const sel = d.zones.find(z => z.nameEn === s.hmSel);
+    const sel = zones.find(z => z.nameEn === s.hmSel);
     const selBody = sel
-      ? `<div class="aprow"><dt>${esc(zn(sel))}</dt><dd>${comfort?esc(fmtDt(sel)):mode==='occ'?esc(E.t('hmPpl',{n:sel.occ})):esc(sel.tempC.toFixed(1)+' \u00b0C')} · ${esc(E.t('hmPpl',{n:sel.occ}))}</dd></div>`
+      ? `<div class="aprow"><dt>${esc(zn(sel))}</dt><dd>${esc(heatText(sel, mode))}</dd></div>`
       : `<p class="alempty">${esc(E.t('hmSelectedEmpty'))}</p>`;
-    const matrix = `<div class="todwrap"><table class="todm hmm"><tbody>${d.zones.map(z =>
-      `<tr><td>${esc(zn(z))}</td>${z.hours.map(v =>
-        `<td><span class="todc" style="background:color-mix(in srgb, ${comfort?'var(--warn)':'var(--btnP)'} ${(v*70).toFixed(0)}%, var(--s3))"></span></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
-    const detail = true ? `<div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('hmZoneDetail'))}</span></div>
-      ${d.comfortDetail.map(z => `<div class="hmtgl"><span class="grow">${esc(ar?(z.nameAr||z.nameEn):z.nameEn)}</span>
-        <span class="tMonoS ${z.dT>1?'cWarn':''}">${(z.dT>0?'+':'−')+Math.abs(z.dT).toFixed(1)}°</span>
-        <span class="tMonoS cT3">${esc(E.t('hmPpl',{n:z.occ}))}</span></div>`).join('')}
-      <div class="alfoot">${esc(E.t('hmZoneDetailFoot'))}</div></div>` : '';
-    const seg = (lbl,on,act,v) => `<button class="seg" data-on="${on}" data-act="${act}" data-v="${esc(v)}">${esc(lbl)}</button>`;
-    const mseg = (lbl,on,v) => `<button class="hmseg" data-on="${on}" data-act="hmMode" data-v="${v}">${esc(lbl)}</button>`;
-    const fseg = (lbl,on,v) => `<button class="hmfloor" data-on="${on}" data-act="hmFloor" data-v="${esc(v)}">${esc(lbl)}</button>`;
+    const hourRows = zones.filter(z => z.hours && z.hours.length);
+    const playingToday = s.hmPlay && (s.hmRange || 'today') === 'today';
+    const matrix = `<div class="todwrap"><table class="todm hmm"><tbody>${hourRows.map(z =>
+      `<tr><td>${esc(zn(z))}</td>${z.hours.map((v, i) =>
+        `<td style="${playingToday && s.hmStep===i?'outline:2px solid var(--acc);outline-offset:-2px':''}"><span class="todc" style="background:${heatCell(mode, v)}"></span></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    const cap = mode === 'comfort' ? E.t('hmRankComfortCap') : mode === 'hum' ? E.t('hmRankOccCap') : E.t('hmRankTempCap');
+    const unit = mode === 'comfort' ? E.t('hmUnitDt') : mode === 'hum' ? E.t('hmUnitPpl') : E.t('hmUnitTemp');
+    const mseg = (lbl, on, v) => `<button class="hmseg" data-on="${on}" data-act="hmMode" data-v="${v}">${esc(lbl)}</button>`;
+    const fseg = (lbl, on, v) => `<button class="hmfloor" data-on="${on}" data-act="hmFloor" data-v="${esc(v)}">${esc(lbl)}</button>`;
+    const foot = mode === 'comfort'
+      ? E.t('hmCo2Foot', { m: co2Mean == null ? '—' : Math.round(co2Mean) })
+      : mode === 'hum' ? E.t('hmOccFoot')
+      : E.t('hmTempFoot', { m: siteMean == null ? '—' : siteMean.toFixed(1) });
+    const hoursCard = hourRows.length ? `<div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('hmByHour'))}</span>
+        <span class="alcardm">${esc(E.t('hmByHourCap'))}</span>${chrome(E, E.t('hmByHour'), E.t('hmByHourCap'))}</div>
+        ${matrix}<div class="alfoot">${esc(E.t('hmByHourFoot'))}</div></div>` : '';
     return C().modShell(E, E.t('subHeat'), '', '',
       `<div class="hmwrap"><div class="row gap8">
-        <span class="row gap2">${mseg(E.t('hmTemp'), mode==='temp', 'temp')}${mseg(E.t('hmComfort'), comfort, 'comfort')}${mseg(E.t('hmOcc'), mode==='occ', 'occ')}</span>
+        <span class="row gap2">${mseg(E.t('hmTemp'), mode==='temp', 'temp')}${mseg(E.t('hmComfort'), mode==='comfort', 'comfort')}${mseg(E.t('hmOcc'), mode==='hum', 'hum')}</span>
         <span class="row gap4 msA">${d.floors.map(f=>fseg(f==='All'?E.t('fltAll'):f, s.hmFloor===f, f)).join('')}</span></div>
       <div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('hmRanking'))}</span>
-        <span class="alcardm">${esc(comfort?E.t('hmRankComfortCap'):mode==='occ'?E.t('hmRankOccCap'):E.t('hmRankTempCap'))}</span></div>
+        <span class="alcardm">${esc(cap)}</span></div>
         <div class="col">${rankRows}</div>
         <div class="alfoot">${esc(E.t('hmRankFoot'))}</div></div>
-      <div class="hmtgl"><span class="grow">${esc(comfort?E.t('hmOutlineBeyond'):E.t('hmOutlineAbove'))} <span class="cT3">${esc(comfort?E.t('hmUnitDt'):mode==='occ'?E.t('hmUnitPpl'):E.t('hmUnitTemp'))}</span></span>
+      <div class="hmtgl"><span class="grow">${esc(mode==='temp'?E.t('hmOutlineAbove'):E.t('hmOutlineBeyond'))} <span class="cT3">${esc(unit)}</span></span>
         <button class="seg" data-on="${s.hmOutline}" data-act="hmOutline">${esc(s.hmOutline?E.t('onW'):E.t('offW'))}</button></div>
       <div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('hmLayers'))}</span></div>
         ${tglRow(E.t('hmSensors'),'sensors',s.hmLayers.sensors)}
         ${tglRow(E.t('hmLabels'),'labels',s.hmLayers.labels)}
         ${tglRow(E.t('hmValues'),'values',s.hmLayers.values)}</div>
       <div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('hmSelected'))}</span></div>${selBody}</div>
-      <div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('hmByHour'))}</span>
-        <span class="alcardm">${esc(E.t('hmByHourCap'))}</span>${chrome(E, E.t('hmByHour'), E.t('hmByHourCap'))}</div>
-        ${matrix}<div class="alfoot">${esc(E.t('hmByHourFoot'))}</div></div>
-      ${comfort?'':mode==='occ'?`<div class="alfoot">${esc(E.t('hmOccFoot'))}</div>`:`<div class="alfoot">${esc(E.t('hmTempFoot',{m:siteMean.toFixed(1)}))}</div>`}
-      ${mode!=='occ'?detail:''}</div>`);
+      ${hoursCard}
+      <div class="alfoot">${esc(foot)}</div></div>`);
   }
 
-  /* Heat overlay drawn ON the model + the bottom range bar. */
   function heatOverlay(E){
     const d = E.data.heat, s = E.state;
-    const mode = s.hmMode === 'comfort' ? 'comfort' : s.hmMode === 'occ' ? 'occ' : 'temp';
-    const comfort = mode === 'comfort';
-    const maxO = Math.max(...d.zones.map(z=>z.occ));
-    const tiles = d.zones.filter(z => s.hmFloor==='All' || z.floor===s.hmFloor).map(z => {
-      const heat = comfort ? (z.dT==null?0:Math.min(1,Math.abs(z.dT)/2))
-        : mode==='occ' ? z.occ/maxO
-        : Math.max(0, Math.min(1, (z.tempC-20)/5));
-      const hue = comfort ? (z.dT!=null&&z.dT<0 ? 'var(--info)' : 'var(--warn)')
-        : mode==='occ' ? 'var(--btnP)' : 'var(--warn)';
-      const label = comfort ? (z.dT==null?E.t('hmInBand'):((z.dT>0?'+':'−')+Math.abs(z.dT).toFixed(1)+'°'))
-        : mode==='occ' ? E.t('hmPpl',{n:z.occ}) : z.tempC.toFixed(1)+'\u00b0C';
-      const out = s.hmOutline && (comfort ? Math.abs(z.dT||0)>1 : mode==='occ' ? z.occ>40 : z.tempC>24);
+    const mode = heatMode(s);
+    const tiles = heatZones(d, s, mode).map(z => {
+      const label = heatText(z, mode);
+      const out = s.hmOutline && heatOver(z, mode);
       return `<button class="hmzone" data-on="${s.hmSel===z.nameEn}" data-out="${out}" data-act="hmSel" data-v="${esc(z.nameEn)}"
-        style="left:${z.rect[0]}%;top:${z.rect[1]}%;width:${z.rect[2]}%;height:${z.rect[3]}%">
+        style="left:${z.rect[0]}%;top:${z.rect[1]}%;width:${Math.max(z.rect[2], 14)}%;height:auto;min-height:72px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:10px 12px">
         ${s.hmLayers.labels?`<span class="hmzn">${esc(E.lang==='ar'?(z.nameAr||z.nameEn):z.nameEn)}</span>`:''}
         ${s.hmLayers.values?`<span class="hmzv">${esc(label)}</span>`:''}</button>`;
     }).join('');
-    const seg = (lbl,on) => `<button class="seg" data-on="${on}" data-act="none">${esc(lbl)}</button>`;
+    const legend = mode === 'comfort' ? E.t('hmLegend') : mode === 'hum' ? E.t('hmLegendHum') : E.t('hmLegendTemp');
+    const range = s.hmRange === 'week' || s.hmRange === 'month' ? s.hmRange : 'today';
+    const seg = (lbl, v) => `<button class="seg" data-on="${range===v}" data-act="hmRange" data-v="${v}">${esc(lbl)}</button>`;
+    const rangeLabel = range === 'week' ? E.t('rangeWeekly') : range === 'month' ? E.t('rangeMonthly') : E.t('tlLive');
     return `<div class="hmlayer">${tiles}</div>
       <div class="heatbar mzglass">
-        <span class="tMonoS cT3">${esc(comfort?E.t('hmLegend'):mode==='occ'?E.t('hmUnitPpl'):E.t('hmLegendTemp'))}</span>
-        <span class="hmgrad" data-mode="${comfort?'comfort':'energy'}"></span>
+        <span class="tMonoS cT3">${esc(legend)}</span>
+        <span class="hmgrad" data-mode="comfort"></span>
         <span class="tCap">${esc(E.t('hmLegendCap'))}</span>
-        <span class="segbox row msA">${seg(E.t('rangeToday'),true)}${seg(E.t('rangeWeekly'),false)}${seg(E.t('rangeMonthly'),false)}</span>
-        <button class="chip" data-act="none">${esc(E.t('playW'))}</button>
-        <span class="tMonoS" style="color:var(--posTx)">${esc(E.t('tlLive'))}</span>
+        <span class="segbox row msA">${seg(E.t('rangeToday'),'today')}${seg(E.t('rangeWeekly'),'week')}${seg(E.t('rangeMonthly'),'month')}</span>
+        <button class="chip" data-on="${s.hmPlay?'true':'false'}" data-act="hmPlay">${esc(s.hmPlay?E.t('pauseW'):E.t('playW'))}</button>
+        <span class="tMonoS" style="color:var(--posTx)">${esc(s.hmPlay && s.hmStepLabel ? s.hmStepLabel : rangeLabel)}</span>
       </div>`;
   }
 

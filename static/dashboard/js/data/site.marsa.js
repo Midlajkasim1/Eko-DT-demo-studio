@@ -532,33 +532,23 @@ window.EKO_DATA.marsa = {
     "ieq": null, "ieqCapEn": null, "ieqCapAr": null
   },
 
-  /* Heat map: one zone list carries BOTH modes. rect = model overlay tile
-     (percent x/y/w/h); kwh = energy today; dT = °C vs setpoint (null = in
-     band); occ = people. hours = 8 three-hour buckets of relative load 0-1.
-     ------------------------------------------------------------------------ */
   "heat": {
-    "siteKwhToday": 922,
-    "floors": ["All","GF","1F","2F","RF"],
+    "siteKwhToday": null,
+    "floors": ["All"],
     "zones": [
-      { "nameEn": "L1 Kitchen", "nameAr": "مطبخ L1",       "floor": "1F", "rect": [30,58,13,9],  "tempC": 24.8, "kwh": 304, "dT": 1.8,  "occ": 24,  "hours": [.55,.5,.7,.9,1,.95,.8,.6] },
-      { "nameEn": "L1 Dining", "nameAr": "مطعم L1",        "floor": "1F", "rect": [45,58,14,9],  "tempC": 24.1, "kwh": 118, "dT": 1.1,  "occ": 57,  "hours": [.2,.2,.5,.7,.9,.8,.85,.5] },
-      { "nameEn": "GF Café", "nameAr": "مقهى GF",          "floor": "GF", "rect": [37,70,10,8],  "tempC": 23.9, "kwh": 96,  "dT": 0.9,  "occ": 31,  "hours": [.15,.15,.6,.8,.85,.7,.6,.3] },
-      { "nameEn": "GF Lobby", "nameAr": "بهو GF",         "floor": "GF", "rect": [49,70,12,8],  "tempC": 22.1, "kwh": 84,  "dT": null, "occ": 48,  "hours": [.4,.35,.5,.6,.65,.6,.55,.45] },
-      { "nameEn": "RF Spa", "nameAr": "سبا RF",           "floor": "RF", "rect": [56,28,11,8],  "tempC": 22.8, "kwh": 78,  "dT": null, "occ": 9,   "hours": [.2,.2,.4,.6,.7,.75,.6,.4] },
-      { "nameEn": "1F Meeting rooms", "nameAr": "قاعات اجتماعات 1F", "floor": "1F", "rect": [60,58,12,8],  "tempC": 23.7, "kwh": 64,  "dT": 0.7,  "occ": 18,  "hours": [.1,.1,.55,.85,.8,.7,.3,.1] },
-      { "nameEn": "L2 Guest rooms E", "nameAr": "غرف الضيوف شرق L2", "floor": "2F", "rect": [56,46,13,8],  "tempC": 22.5, "kwh": 58,  "dT": null, "occ": 31,  "hours": [.5,.5,.45,.35,.3,.35,.5,.6] },
-      { "nameEn": "L2 Guest rooms W", "nameAr": "غرف الضيوف غرب L2", "floor": "2F", "rect": [40,46,13,8],  "tempC": 20.2, "kwh": 52,  "dT": -0.8, "occ": 28,  "hours": [.5,.48,.42,.32,.3,.32,.48,.58] },
-      { "nameEn": "RF Gym", "nameAr": "نادي RF",           "floor": "RF", "rect": [42,28,11,8],  "tempC": 20.4, "kwh": 46,  "dT": -0.6, "occ": 12,  "hours": [.3,.5,.7,.5,.4,.5,.8,.6] },
-      { "nameEn": "GF Back office", "nameAr": "مكتب خلفي GF",   "floor": "GF", "rect": [63,70,10,8],  "tempC": 21.5, "kwh": 22,  "dT": null, "occ": 6,   "hours": [.1,.1,.5,.7,.7,.65,.3,.1] } ],
-    "comfortDetail": [
-      { "nameEn": "L11 West", "nameAr": "L11 غرب",     "dT": 1.9,  "occ": 6 },
-      { "nameEn": "L1 Kitchen", "nameAr": "مطبخ L1",   "dT": 1.4,  "occ": 24 },
-      { "nameEn": "GF Ballroom", "nameAr": "قاعة GF",  "dT": 0.8,  "occ": 112 },
-      { "nameEn": "L2 Guest E", "nameAr": "غرف شرق L2",   "dT": 0.6,  "occ": 31 },
-      { "nameEn": "GF Lobby", "nameAr": "بهو GF",     "dT": 0.4,  "occ": 48 },
-      { "nameEn": "L3 West wing", "nameAr": "الجناح الغربي L3", "dT": -0.3, "occ": 12 },
-      { "nameEn": "L1 Dining", "nameAr": "مطعم L1",    "dT": -0.5, "occ": 57 },
-      { "nameEn": "L2 Guest W", "nameAr": "غرف غرب L2",   "dT": -0.7, "occ": 28 } ]
+      { "nameEn": "IAQ-01", "nameAr": "IAQ-01", "floor": "", "kind": "iaq", "rect": [12,22,16,12], "tempC": null, "rh": null, "co2": null, "hours": [] },
+      { "nameEn": "IAQ-02", "nameAr": "IAQ-02", "floor": "", "kind": "iaq", "rect": [32,22,16,12], "tempC": null, "rh": null, "co2": null, "hours": [] },
+      { "nameEn": "IAQ-03", "nameAr": "IAQ-03", "floor": "", "kind": "iaq", "rect": [52,22,16,12], "tempC": null, "rh": null, "co2": null, "hours": [] },
+      { "nameEn": "IAQ-04", "nameAr": "IAQ-04", "floor": "", "kind": "iaq", "rect": [72,22,16,12], "tempC": null, "rh": null, "co2": null, "hours": [] },
+      { "nameEn": "IS-01", "nameAr": "IS-01", "floor": "", "kind": "is", "rect": [12,40,16,12], "tempC": null, "rh": null, "co2": null, "hours": [] },
+      { "nameEn": "IS-02", "nameAr": "IS-02", "floor": "", "kind": "is", "rect": [32,40,16,12], "tempC": null, "rh": null, "co2": null, "hours": [] },
+      { "nameEn": "IS-03", "nameAr": "IS-03", "floor": "", "kind": "is", "rect": [52,40,16,12], "tempC": null, "rh": null, "co2": null, "hours": [] },
+      { "nameEn": "IS-04", "nameAr": "IS-04", "floor": "", "kind": "is", "rect": [72,40,16,12], "tempC": null, "rh": null, "co2": null, "hours": [] },
+      { "nameEn": "IS-05", "nameAr": "IS-05", "floor": "", "kind": "is", "rect": [12,58,16,12], "tempC": null, "rh": null, "co2": null, "hours": [] },
+      { "nameEn": "IS-06", "nameAr": "IS-06", "floor": "", "kind": "is", "rect": [32,58,16,12], "tempC": null, "rh": null, "co2": null, "hours": [] },
+      { "nameEn": "IS-07", "nameAr": "IS-07", "floor": "", "kind": "is", "rect": [52,58,16,12], "tempC": null, "rh": null, "co2": null, "hours": [] }
+    ],
+    "comfortDetail": []
   },
 
   /* Viewer config. "engine" is THE one config line that picks the adapter. */

@@ -1147,8 +1147,277 @@
       }
     }
 
+    applyHeat(list);
     paint();
   }
+
+  function sensorKey(name) {
+    var m = String(name || '').toUpperCase().match(/(IAQ|IS)[-_\s]?(\d+)/);
+    if (!m || (m[1] === 'IS' && /IAQ/.test(String(name || '').toUpperCase()))) return '';
+    return m[1] + String(parseInt(m[2], 10)).padStart(2, '0');
+  }
+
+  function sensorKind(name) {
+    var key = sensorKey(name);
+    if (key.indexOf('IAQ') === 0) return 'iaq';
+    if (key.indexOf('IS') === 0) return 'is';
+    return '';
+  }
+
+  function blankZone(key) {
+    var kind = key.indexOf('IAQ') === 0 ? 'iaq' : 'is';
+    var name = key.slice(0, kind === 'iaq' ? 3 : 2) + '-' + key.slice(kind === 'iaq' ? 3 : 2);
+    return { nameEn: name, nameAr: name, floor: '', kind: kind, tempC: null, rh: null, co2: null, hours: [] };
+  }
+
+  function pointRef(eq, test) {
+    var pts = eq.points || [];
+    for (var i = 0; i < pts.length; i++) {
+      if (!test(String(pts[i].navName || ''))) continue;
+      var n = parseFloat(String(pts[i].currentValue == null ? '' : pts[i].currentValue).replace(/[^0-9.\-]/g, ''));
+      return { id: pts[i].id || '', value: isFinite(n) ? n : null };
+    }
+    return { id: '', value: null };
+  }
+
+  var heatRange = 'today';
+  var heatStep = null;
+  var heatHist = {};
+  var BANDS = ['12 am', '3 am', '6 am', '9 am', '12 pm', '3 pm', '6 pm', '9 pm'];
+  var MONTHS = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+  var HOUR_AT = {
+    '12 am': 0, '1 am': 1, '2 am': 2, '3 am': 3, '4 am': 4, '5 am': 5,
+    '6 am': 6, '7 am': 7, '8 am': 8, '9 am': 9, '10 am': 10, '11 am': 11,
+    '12 pm': 12, '1 pm': 13, '2 pm': 14, '3 pm': 15, '4 pm': 16, '5 pm': 17,
+    '6 pm': 18, '7 pm': 19, '8 pm': 20, '9 pm': 21, '10 pm': 22, '11 pm': 23
+  };
+
+  function ymd(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function dailyMap(res) {
+    var out = {};
+    var hist = res && res.history;
+    if (!hist) return out;
+    Object.keys(hist).forEach(function (year) {
+      Object.keys(hist[year] || {}).forEach(function (monthName) {
+        var mi = MONTHS.indexOf(monthName);
+        if (mi < 0) return;
+        Object.keys(hist[year][monthName] || {}).forEach(function (dayKey) {
+          var dm = String(dayKey).match(/(\d+)/);
+          if (!dm) return;
+          var hours = hist[year][monthName][dayKey] || {};
+          var sum = 0, count = 0;
+          var slotSum = [0, 0, 0, 0, 0, 0, 0, 0];
+          var slotN = [0, 0, 0, 0, 0, 0, 0, 0];
+          Object.keys(hours).forEach(function (hr) {
+            var n = parseFloat(hours[hr]);
+            var at = HOUR_AT[String(hr).toLowerCase()];
+            if (!isFinite(n) || at == null) return;
+            var band = Math.floor(at / 3);
+            slotSum[band] += n;
+            slotN[band]++;
+            sum += n;
+            count++;
+          });
+          if (!count) return;
+          out[ymd(new Date(Number(year), mi, Number(dm[1])))] = {
+            v: sum / count,
+            slots: slotSum.map(function (s, i) { return slotN[i] ? s / slotN[i] : null; })
+          };
+        });
+      });
+    });
+    return out;
+  }
+
+  function windowed(id, live, range) {
+    var pack = id && heatHist[id];
+    var days = pack && pack.days;
+    if (!days) return live;
+    var now = new Date();
+    var start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (range === 'week') start.setDate(start.getDate() - 6);
+    if (range === 'month') start.setDate(start.getDate() - 29);
+    var from = ymd(start), to = ymd(now);
+    var keys = Object.keys(days).filter(function (k) { return k >= from && k <= to && days[k] && isFinite(days[k].v); });
+    if (!keys.length) return range === 'today' ? live : null;
+    return keys.reduce(function (n, k) { return n + days[k].v; }, 0) / keys.length;
+  }
+
+  function rangeKeys(days, range) {
+    var now = new Date();
+    var start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (range === 'week') start.setDate(start.getDate() - 6);
+    if (range === 'month') start.setDate(start.getDate() - 29);
+    var from = ymd(start), to = ymd(now);
+    return Object.keys(days).filter(function (k) { return k >= from && k <= to; });
+  }
+
+  function hourBands(id, range) {
+    var days = id && heatHist[id] && heatHist[id].days;
+    if (!days) return [];
+    var keys = rangeKeys(days, range);
+    var sum = [0, 0, 0, 0, 0, 0, 0, 0];
+    var n = [0, 0, 0, 0, 0, 0, 0, 0];
+    keys.forEach(function (k) {
+      var slots = days[k] && days[k].slots;
+      if (!slots) return;
+      slots.forEach(function (v, i) {
+        if (v == null || !isFinite(v)) return;
+        sum[i] += v;
+        n[i]++;
+      });
+    });
+    var vals = sum.map(function (s, i) { return n[i] ? s / n[i] : null; });
+    return vals.some(function (v) { return v != null; }) ? vals : [];
+  }
+
+  function playDates() {
+    var n = heatRange === 'month' ? 30 : 7;
+    var out = [];
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (var i = n - 1; i >= 0; i--) {
+      var day = new Date(today);
+      day.setDate(today.getDate() - i);
+      out.push(ymd(day));
+    }
+    return out;
+  }
+
+  function sliceValue(id, live) {
+    if (heatStep == null) return windowed(id, live, heatRange);
+    var pack = id && heatHist[id] && heatHist[id].days;
+    if (!pack) return null;
+    if (heatRange === 'today') {
+      var day = pack[ymd(new Date())];
+      return day && day.slots ? day.slots[heatStep] : null;
+    }
+    var key = playDates()[heatStep];
+    var hit = key && pack[key];
+    return hit ? hit.v : null;
+  }
+
+  function playLabel() {
+    if (heatStep == null) return '';
+    if (heatRange === 'today') return BANDS[heatStep] || '';
+    var key = playDates()[heatStep];
+    if (!key) return '';
+    var p = key.split('-');
+    return Number(p[2]) + ' ' + MONTHS[Number(p[1]) - 1].slice(0, 3);
+  }
+
+  function shownId(z) {
+    var mode = window.EKO && EKO.state && EKO.state.hmMode;
+    if (mode === 'comfort') return z.co2Id;
+    if (mode === 'hum' || mode === 'occ') return z.rhId;
+    return z.tempId;
+  }
+
+  function applyShown() {
+    var site = window.EKO_DATA && window.EKO_DATA.marsa;
+    var zones = site && site.heat && site.heat.zones;
+    if (!zones) return;
+    zones.forEach(function (z) {
+      z.tempC = sliceValue(z.tempId, z.liveTemp);
+      z.rh = sliceValue(z.rhId, z.liveRh);
+      z.co2 = sliceValue(z.co2Id, z.liveCo2);
+      z.hours = hourBands(shownId(z), heatRange);
+    });
+  }
+
+  function ensureHistory(id) {
+    if (!id || heatHist[id]) return;
+    heatHist[id] = { pending: true, days: null };
+    var api = window.DashboardData;
+    if (!api || !api.getPointHistory) {
+      heatHist[id] = { pending: false, days: {} };
+      return;
+    }
+    api.getPointHistory(id, 31).then(function (res) {
+      heatHist[id] = { pending: false, days: dailyMap(res) };
+      applyShown();
+      paint();
+    }).catch(function () {
+      heatHist[id] = { pending: false, days: {} };
+    });
+  }
+
+  function floorToken(floor) {
+    var s = String(floor || '').toUpperCase();
+    if (/ROOF|\bRF\b/.test(s)) return 'RF';
+    if (/BASEMENT|\bBF\b/.test(s)) return 'BF';
+    if (/GROUND|\bGF\b|LEVEL\s*0+/.test(s)) return 'GF';
+    var m = s.match(/(?:LEVEL|FLOOR|FLR|L)\s*0*(\d+)/) || s.match(/\b(\d+)\s*F\b/);
+    if (!m) return 'GF';
+    var n = parseInt(m[1], 10);
+    if (n <= 0) return 'GF';
+    if (n === 1) return '1F';
+    if (n === 2) return '2F';
+    return n + 'F';
+  }
+
+  function applyHeat(list) {
+    var site = window.EKO_DATA && window.EKO_DATA.marsa;
+    if (!site || !site.heat || !Array.isArray(list)) return;
+    var zones = [];
+    for (var i = 1; i <= 4; i++) zones.push(blankZone('IAQ' + String(i).padStart(2, '0')));
+    for (var j = 1; j <= 7; j++) zones.push(blankZone('IS' + String(j).padStart(2, '0')));
+    var byKey = {};
+    zones.forEach(function (z) { byKey[sensorKey(z.nameEn)] = z; });
+    list.forEach(function (eq) {
+      var key = sensorKey(eq.name);
+      if (!key) return;
+      var z = byKey[key];
+      if (!z) {
+        z = blankZone(key);
+        zones.push(z);
+        byKey[key] = z;
+      }
+      if (z.kind === 'is') {
+        var temp = pointRef(eq, function (n) { return /zone[\s_-]*temp/i.test(n) && !/sp|setpoint/i.test(n); });
+        var rh = pointRef(eq, function (n) { return /zone[\s_-]*humid/i.test(n); });
+        z.tempId = temp.id; z.liveTemp = temp.value;
+        z.rhId = rh.id; z.liveRh = rh.value;
+      } else {
+        var co2 = pointRef(eq, function (n) { return /co2/i.test(n); });
+        z.co2Id = co2.id; z.liveCo2 = co2.value;
+      }
+      if (eq.floor) z.floor = floorToken(eq.floor);
+    });
+    zones.sort(function (a, b) { return a.nameEn.localeCompare(b.nameEn, undefined, { numeric: true }); });
+    zones.forEach(function (z, i) {
+      z.rect = [10 + (i % 4) * 22, 16 + Math.floor(i / 4) * 22, 18, 16];
+    });
+    var order = ['BF', 'GF', '1F', '2F', 'RF'];
+    var seen = {};
+    zones.forEach(function (z) { seen[z.floor] = true; });
+    var floors = ['All'].concat(order.filter(function (f) { return seen[f]; }));
+    Object.keys(seen).forEach(function (f) { if (order.indexOf(f) < 0) floors.push(f); });
+    site.heat.zones = zones;
+    site.heat.floors = floors;
+    zones.forEach(function (z) { ensureHistory(z.tempId); ensureHistory(z.rhId); ensureHistory(z.co2Id); });
+    applyShown();
+  }
+
+  window.EKO_HEAT = {
+    apply: function (range) {
+      heatRange = range === 'week' || range === 'month' ? range : 'today';
+      heatStep = null;
+      applyShown();
+    },
+    count: function () {
+      return heatRange === 'today' ? BANDS.length : playDates().length;
+    },
+    step: function (i) {
+      heatStep = i == null ? null : i;
+      applyShown();
+      return playLabel();
+    }
+  };
+
 window.addEventListener('dashboard-data', function (e) {
     var d = e.detail || {};
     if (d.type === 'alarms') applyAlarms(d.data);
