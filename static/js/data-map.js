@@ -1422,16 +1422,26 @@
     }
   };
 
+  function applyDocuments(payload) {
+    var site = window.EKO_DATA && window.EKO_DATA.marsa;
+    var families = payload && payload.families;
+    if (!site || !Array.isArray(families)) return;
+    site.documents = families;
+    paint();
+  }
+
 window.addEventListener('dashboard-data', function (e) {
     var d = e.detail || {};
     if (d.type === 'alarms') applyAlarms(d.data);
     if (d.type === 'power') applyPower(d.data);
     if (d.type === 'meters') applyMeters(d.data);
     if (d.type === 'equipment') applyEquipment(d.data);
+    if (d.type === 'documents') applyDocuments(d.data);
   });
 
   if (window.DashboardData && window.DashboardData.alarms) applyAlarms(window.DashboardData.alarms);
   if (window.DashboardData && window.DashboardData.power) applyPower(window.DashboardData.power);
   if (window.DashboardData && window.DashboardData.meters) applyMeters(window.DashboardData.meters);
   if (window.DashboardData && window.DashboardData.equipment) applyEquipment(window.DashboardData.equipment);
+  if (window.DashboardData && window.DashboardData.documents) applyDocuments(window.DashboardData.documents);
 })();

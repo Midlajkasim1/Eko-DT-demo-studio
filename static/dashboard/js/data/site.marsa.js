@@ -368,8 +368,6 @@ window.EKO_DATA.marsa = {
     { "id": "AHU-A2-RF-01", "sys": "vent", "crit": "B", "wtyEnd": null, "tags": [],"st": "ok", "floor": "RF",  "zone": "Zone A2", "zoneAr": "المنطقة A2", "typeEn": "Air handling unit", "typeAr": "وحدة مناولة هواء", "level": "Roof", "levelAr": "السطح", "wos": 1, "wost": "prog", "make": "TROX X-Cube", "serial": "TX-57209", "svc": "05 Jul", "cafm": "HEX-4408", "spark7": [0.48,0.5,0.49,0.5,0.51,0.5,0.49],
       "trend7": { "point": "RA temp", "unit": "°C", "vals": [21.2, 21.0, 21.4, 20.8, 21.1, 21.3, 21.0] }, "params": [["RA temp","sensor RAT-A2-01","21.0 °C"],["SA temp","sensor SAT-A2-01","13.0 °C"],["RA CO2","sensor CO2-A2-01","466.4 ppm"],["SA pressure","sensor SPT-A2-01","404.1 Pa"]],
       "activity": [["WO-2288","Damper synchronization check","09 Aug","prog"]],
-      "omDocs": [ { "tEn": "AHU O&M Manual", "tAr": "دليل التشغيل والصيانة لوحدة المناولة", "meta": "PDF · Mechanical · 2025" },
-                  { "tEn": "Preventive maintenance procedure", "tAr": "إجراء الصيانة الوقائية", "meta": "PDF · Mechanical · 2024" } ],
       "controllable": true, "finImg": "/static/dashboard/assets/ref-d4e17371.png",
       "points": [
         { "id": "coil", "nameEn": "Cooling coil valve", "nameAr": "صمام ملف التبريد", "kind": "analog", "unit": "%", "value": 0, "min": 0, "max": 100, "mode": "auto", "writable": true, "lifeSafety": false, "demoTarget": 65 },

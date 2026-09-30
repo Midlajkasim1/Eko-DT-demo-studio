@@ -1,0 +1,106 @@
+{
+  "families": [
+    {
+      "id": "fcu",
+      "tags": ["fcu"],
+      "codes": ["FCU"],
+      "types": ["fan coil"],
+      "names": [],
+      "om": {
+        "name": "FCU O & M",
+        "nameAr": "دليل تشغيل وصيانة FCU",
+        "ref": "@p:marsaAlArab:r:31b3cdb1-aec0967b"
+      },
+      "warranty": {
+        "name": "FCU warranty",
+        "nameAr": "ضمان FCU",
+        "ref": "@p:marsaAlArab:r:31b3d0a6-749611e1"
+      }
+    },
+    {
+      "id": "ahu",
+      "tags": ["ahu", "fahu", "mahu", "kahu"],
+      "codes": ["FAHU", "MAHU", "KAHU", "AHU"],
+      "types": ["air handl"],
+      "names": [],
+      "om": {
+        "name": "AHU / FAHU / MAHU / KAHU O & M",
+        "nameAr": "دليل تشغيل وصيانة وحدات مناولة الهواء",
+        "ref": "@p:marsaAlArab:r:31b3cd89-05d0c0f3"
+      },
+      "warranty": {
+        "name": "AHU / FAHU / MAHU / KAHU warranty",
+        "nameAr": "ضمان وحدات مناولة الهواء",
+        "ref": "@p:marsaAlArab:r:31b3d136-cf9a9435"
+      }
+    },
+    {
+      "id": "ecology",
+      "tags": ["ecology"],
+      "codes": ["ECU"],
+      "types": ["ecolog"],
+      "names": ["ECOLOG"],
+      "om": {
+        "name": "Ecology unit O & M",
+        "nameAr": "دليل تشغيل وصيانة وحدة البيئة",
+        "ref": "@p:marsaAlArab:r:31b3cc93-9e7c786f"
+      },
+      "warranty": {
+        "name": "Ecology unit warranty",
+        "nameAr": "ضمان وحدة البيئة",
+        "ref": "@p:marsaAlArab:r:31b3d079-d1747525"
+      }
+    },
+    {
+      "id": "cal",
+      "tags": ["calorifier"],
+      "codes": [],
+      "types": ["calorif"],
+      "names": ["CALORIF"],
+      "om": {
+        "name": "Calorifier O & M",
+        "nameAr": "دليل تشغيل وصيانة السخان",
+        "ref": "@p:marsaAlArab:r:31b3ce10-c4e20251"
+      },
+      "warranty": {
+        "name": "Calorifier warranty",
+        "nameAr": "ضمان السخان",
+        "ref": "@p:marsaAlArab:r:31b3d196-f7db9087"
+      }
+    },
+    {
+      "id": "booster",
+      "tags": [],
+      "codes": [],
+      "types": ["booster", "circulation"],
+      "names": ["BOOSTER", "CIRCULATION"],
+      "om": {
+        "name": "Booster / circulation pump O & M",
+        "nameAr": "دليل تشغيل وصيانة مضخة التعزيز",
+        "ref": "@p:marsaAlArab:r:31b3ce6e-afac13e1"
+      },
+      "warranty": {
+        "name": "Booster / circulation pump warranty",
+        "nameAr": "ضمان مضخة التعزيز",
+        "ref": "@p:marsaAlArab:r:31b3d1c6-cdb4c559"
+      }
+    },
+    {
+      "id": "fan",
+      "tags": ["fan", "exhaust"],
+      "codes": ["EF", "SF", "VF", "FAN"],
+      "types": ["extract fan", "exhaust fan", "ventilation fan"],
+      "names": [],
+      "om": {
+        "name": "Ventilation fan O & M",
+        "nameAr": "دليل تشغيل وصيانة مروحة التهوية",
+        "ref": "@p:marsaAlArab:r:31b3cd44-88c2a55a"
+      },
+      "warranty": {
+        "name": "Ventilation fan warranty",
+        "nameAr": "ضمان مروحة التهوية",
+        "ref": "@p:marsaAlArab:r:31b3d0fb-baa7c4f4"
+      }
+    }
+  ]
+}

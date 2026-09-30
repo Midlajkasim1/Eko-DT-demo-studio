@@ -868,6 +868,37 @@ window.EKO_C = (function(){
       typeEn: a.locEn ? String(a.locEn).split(' · ')[0] : '', typeAr: a.locAr ? String(a.locAr).split(' · ')[0] : '',
       level: '', levelAr: '', zone: '', zoneAr: '' };
   }
+  /* Catalog comes from /api/fin/documents. Family order in that file is the match order.
+     A loaded list with no family hides fixture manuals. */
+  function docToken(id, code) {
+    const c = String(code || '').toUpperCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return !!c && new RegExp('(?:^|[^A-Z0-9])' + c + '(?:[^A-Z0-9]|$)').test(id);
+  }
+  function docMatch(asset, fam) {
+    const id = String(asset.id || '').toUpperCase();
+    const type = String(asset.typeEn || '').toLowerCase();
+    const tags = (asset.tags || []).map(t => String(t).toLowerCase());
+    if ((fam.tags || []).some(t => { const n = String(t).toLowerCase(); return type === n || tags.indexOf(n) !== -1; })) return true;
+    if ((fam.codes || []).some(c => docToken(id, c))) return true;
+    if ((fam.types || []).some(p => p && type.indexOf(String(p).toLowerCase()) !== -1)) return true;
+    if ((fam.names || []).some(p => p && id.indexOf(String(p).toUpperCase()) !== -1)) return true;
+    return false;
+  }
+  function docRowData(d) {
+    if (!d || !(d.name || d.nameAr)) return null;
+    /* Open through this server. A FIN host link would ask for a second sign-in. */
+    const url = d.ref
+      ? '/api/fin/file?ref=' + encodeURIComponent(d.ref)
+      : (String(d.url || '').indexOf('/api/fin/file?') === 0 ? d.url : '');
+    return { tEn: d.name || d.nameAr, tAr: d.nameAr || d.name, meta: 'PDF', url: url };
+  }
+  function docsFor(E, asset) {
+    const families = E.data && E.data.documents;
+    if (!Array.isArray(families)) return null;
+    const fam = families.find(f => docMatch(asset, f)) || null;
+    if (!fam) return { om: null, warranty: null };
+    return { om: docRowData(fam.om), warranty: docRowData(fam.warranty) };
+  }
   function assetPanel(E){
     const id = E.state.assetSel;
     if(!id) return '';
@@ -899,6 +930,16 @@ window.EKO_C = (function(){
         <div class="systrend"><svg viewBox="0 0 240 56" preserveAspectRatio="none"><path d="${p.area}" fill="var(--accT)"/><path d="${p.line}" fill="none" stroke="var(--acc)" stroke-width="1.5"/></svg></div>
         <table class="rawtbl"><thead><tr><th>${esc(t('rawPoint'))}</th><th>${esc(t('rawValue'))}</th></tr></thead><tbody>${tr7.vals.map((v, i) => `<tr><td>${t('rawDay', { n: i + 1 - tr7.vals.length })}</td><td class="tMonoS">${v} ${esc(tr7.unit || '')}</td></tr>`).join('')}</tbody></table>`; })()
         : `<p class="tCap">${esc(t('emptyDash'))} · ${esc(t(reason))}</p>`) : ''}</div>`;
+    const pack = docsFor(E, r);
+    const omDocs = pack ? (pack.om ? [pack.om] : []) : (r.omDocs || []);
+    const warranty = pack ? (pack.warranty || null) : (r.warranty || null);
+    const docRow = d2 => {
+      const title = esc(arL ? (d2.tAr || d2.tEn) : d2.tEn);
+      const name = d2.url
+        ? `<button type="button" class="aplink" data-act="docOpen" data-url="${esc(d2.url)}" data-title="${title}">${title}</button>`
+        : title;
+      return `<div class="aprow"><dt>${name}</dt><dd class="cT3">${esc(d2.meta || '')}</dd></div>`;
+    };
     let body = '';
     if(tab === 'alarms'){
       body = (als.length ? als.map(a => `<div class="alref">
@@ -919,8 +960,7 @@ window.EKO_C = (function(){
         : `<p class="alempty">${esc(t('emptyDash'))}</p>`);
     } else if(tab === 'om'){
       body = `<h4 class="tLbl seclbl">${esc(t('omLib'))}</h4>`
-        + ((r.omDocs && r.omDocs.length) ? r.omDocs.map(d2 =>
-          `<div class="aprow"><dt>${esc(arL?(d2.tAr||d2.tEn):d2.tEn)}</dt><dd class="cT3">${esc(d2.meta)}</dd></div>`).join('')
+        + (omDocs.length ? omDocs.map(docRow).join('')
           : `<p class="alempty">${esc(t('omEmpty'))}</p>`)
         + `<h4 class="tLbl seclbl">${esc(t('apRefs'))}</h4>
         <div class="aprow"><dt>${esc(t('apMake'))}</dt><dd>${esc(r.make||t('emptyDash'))}</dd></div>
@@ -931,9 +971,7 @@ window.EKO_C = (function(){
           ${r.cafm?`<button class="aplink" data-act="none">${esc(t('openW'))}</button>`:''}</dd></div>
         <p class="apnote">${esc(t('omIndexed'))}</p>`;
     } else if(tab === 'warranty'){
-      body = r.warranty
-        ? `<div class="aprow"><dt>${esc(arL?(r.warranty.tAr||r.warranty.tEn):r.warranty.tEn)}</dt><dd class="cT3">${esc(r.warranty.meta||'')}</dd></div>`
-        : `<p class="alempty">${esc(t('wtyEmpty'))}</p>`;
+      body = warranty ? docRow(warranty) : `<p class="alempty">${esc(t('wtyEmpty'))}</p>`;
     } else if(tab === 'control'){
       body = window.EKO_CTL.controlTab(E, r);
     }

@@ -18,7 +18,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -41,6 +41,80 @@ with open(CONFIG_PATH, "r") as f:
 
 PROJECT_NAME = CONFIG["project_name"]
 FIN_SERVER_URL = CONFIG.get("fin_server_url", "https://localhost")
+
+
+def _documents_path() -> str:
+    name = CONFIG.get("documents_file") or "om-warranty.json"
+    if os.path.isabs(name):
+        return name
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
+
+
+def _viewer_file_url(ref: str) -> str:
+    """Same-origin link. The browser never opens the FIN host, so it does not sign in again."""
+    return "/api/fin/file?ref=" + quote(ref, safe="")
+
+
+def _fin_rec_file_url(base: str, project: str, ref: str) -> str:
+    """FIN serves a record's bytes at /api/{proj}/rec/{id}/file. The id drops the leading @."""
+    rec = ref[1:] if ref.startswith("@") else ref
+    return base.rstrip("/") + "/api/" + quote(project, safe="") + "/rec/" + quote(rec, safe=":") + "/file"
+
+
+def _catalog_doc(ref: str) -> Optional[dict]:
+    try:
+        with open(_documents_path(), "r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    for fam in raw.get("families") or []:
+        if not isinstance(fam, dict):
+            continue
+        for kind in ("om", "warranty"):
+            doc = fam.get(kind)
+            if isinstance(doc, dict) and str(doc.get("ref") or "") == ref:
+                return doc
+    return None
+
+
+def _pdf_filename(name: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9 ._-]+", "", name or "").strip() or "document"
+    if not cleaned.lower().endswith(".pdf"):
+        cleaned += ".pdf"
+    return cleaned
+
+
+def load_documents() -> dict:
+    """Re-read the catalog each call so an edit shows up on the next poll."""
+    try:
+        with open(_documents_path(), "r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {"families": []}
+    families = []
+    for fam in raw.get("families") or []:
+        if not isinstance(fam, dict):
+            continue
+        item = {
+            "id": str(fam.get("id") or ""),
+            "tags": list(fam.get("tags") or []),
+            "codes": list(fam.get("codes") or []),
+            "types": list(fam.get("types") or []),
+            "names": list(fam.get("names") or []),
+        }
+        for kind in ("om", "warranty"):
+            doc = fam.get(kind)
+            if not isinstance(doc, dict) or not doc.get("ref"):
+                continue
+            ref = str(doc["ref"])
+            item[kind] = {
+                "name": str(doc.get("name") or ""),
+                "nameAr": str(doc.get("nameAr") or ""),
+                "ref": ref,
+                "url": _viewer_file_url(ref),
+            }
+        families.append(item)
+    return {"families": families}
 
 # ─── Global State ────────────────────────────────────────────────────────────
 
@@ -692,6 +766,54 @@ async def logout():
         await client.close()
         client = None
     return {"status": "disconnected"}
+
+
+@app.get("/api/fin/documents")
+async def get_documents():
+    """O&M and warranty manuals. Each link stays on this server."""
+    return load_documents()
+
+
+@app.get("/api/fin/file")
+async def get_fin_file(ref: str, download: int = 0):
+    """Stream a catalog PDF through the FIN session that is already signed in."""
+    if not client or not client.is_authenticated:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not re.fullmatch(r"@p:[A-Za-z0-9_]+:r:[0-9a-fA-F-]+", ref or ""):
+        raise HTTPException(status_code=404, detail="Unknown document")
+    doc = _catalog_doc(ref)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Unknown document")
+    url = _fin_rec_file_url(client.base_url, client.project_name, ref)
+    headers = {"Accept": "application/pdf,*/*"}
+    auth = (client.auth_headers or {}).get("Authorization")
+    if auth:
+        headers["Authorization"] = auth
+    req = client.client.build_request("GET", url, headers=headers)
+    resp = await client.client.send(req, stream=True)
+    if resp.status_code in (401, 403):
+        await resp.aclose()
+        client.is_authenticated = False
+        raise HTTPException(status_code=401, detail="FIN session ended")
+    ctype = (resp.headers.get("content-type") or "").lower()
+    if resp.status_code != 200 or "html" in ctype or ctype.startswith("text/") or "json" in ctype:
+        await resp.aclose()
+        raise HTTPException(status_code=502, detail="FIN did not return the PDF")
+
+    async def body():
+        try:
+            async for chunk in resp.aiter_bytes(65536):
+                yield chunk
+        finally:
+            await resp.aclose()
+
+    filename = _pdf_filename(str(doc.get("name") or "document"))
+    disposition = "attachment" if download else "inline"
+    return StreamingResponse(
+        body(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
+    )
 
 
 @app.get("/api/fin/config")

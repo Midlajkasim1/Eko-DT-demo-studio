@@ -20,6 +20,7 @@ window.EKO_SURF = (function(){
 
   /* kinds: dialog (stack, keeps parent) | overlay | menu | flyout */
   const DEFS = [
+    { id:'doc',      kind:'dialog',  isOpen:()=>!!document.getElementById('docov'),             close:()=>{ const o=document.getElementById('docov'); if(o) o.remove(); } },
     { id:'wmax',     kind:'dialog',  isOpen:()=>!!document.getElementById('wmaxov'),            close:()=>{ const o=document.getElementById('wmaxov'); if(o) o.remove(); } },
     { id:'big',      kind:'dialog',  isOpen:()=>!!(CTL()&&CTL().big&&CTL().big(E)),              close:()=>CTL().closeBig(E) },
     { id:'ctl',      kind:'dialog',  isOpen:()=>!!(CTL()&&CTL().dialog&&CTL().dialog(E)),        close:()=>CTL().closeDialog(E) },
@@ -115,7 +116,11 @@ window.EKO_SURF = (function(){
   function topmost(){
     const now = openSet();
     if(!now.size) return null;
-    const unknown = [...now].filter(id => !order.includes(id));   /* opened without a render (wmax) */
+    const unknown = [...now].filter(id => !order.includes(id));
+    /* A dialog stays above the surface under it. The parent can be missing from the stack when it was already open at startup. */
+    const fresh = unknown.filter(id => byId[id].kind === 'dialog');
+    if(fresh.length) return fresh[fresh.length - 1];
+    for(let i = order.length - 1; i >= 0; i--) if(byId[order[i]].kind === 'dialog' && now.has(order[i])) return order[i];
     if(unknown.length) return unknown[unknown.length - 1];
     for(let i = order.length - 1; i >= 0; i--) if(now.has(order[i])) return order[i];
     return [...now][0];
@@ -157,6 +162,6 @@ window.EKO_SURF = (function(){
     }, true);
   }
 
-  function init(app){ E = app; last = openSet(); wireClickAway(); }
+  function init(app){ E = app; last = openSet(); order = [...last]; wireClickAway(); }
   return { init, reconcile, afterRender, escape, back, closeAll, noteClick, noteOpener, topmost, openSet: () => [...openSet()], order: () => order.slice(), PAGES };
 })();

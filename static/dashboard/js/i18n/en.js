@@ -468,6 +468,8 @@ window.EKO_I18N.en = {
   "lockNow": "Lock now",
   "engView": "Engineering view",
   "openLarge": "Open large view",
+  "docDownload": "Download",
+  "docOpenLarge": "Open large",
   "unlockedW": "Unlocked",
   "lifeSafety": "Life safety points are never controllable from EKO.",
   "engFoot": "Click any commandable point to set an override \u00b7 Life safety points are never controllable from EKO.",

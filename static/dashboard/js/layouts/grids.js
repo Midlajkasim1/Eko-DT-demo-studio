@@ -63,7 +63,12 @@
     rows: E2 => E2.data.assets,
     groups:[{ id:'identity', labelKey:'dgg.identity' }, { id:'condition', labelKey:'dgg.condition' }, { id:'maintenance', labelKey:'dgg.maintenance' }, { id:'reference', labelKey:'dgg.reference' }],
     rowMenu, expand,
-    head: (E2, n, total) => `<div class="dghead"><span class="modtitle">${esc(E2.t('modAssets'))}</span><span class="alcardt">${esc(E2.t('regHead'))}</span><span class="alcardm"> ${esc(E2.t('regConnected', { n, total:E2.data.registerTotal.toLocaleString('en-US') }))} <button class="statlink" data-act="dgQuick" data-k="st" data-v="stale">${esc(E2.t('regStaleN', { n:E2.data.assets.filter(r => r.st === 'stale').length }))}</button></span></div>`,
+    head: (E2, n, total) => {
+      /* Empty until the equipment poll. Throwing here aborts the refresh, so live readings never land. */
+      const regTotal = E2.data.registerTotal;
+      const totalTxt = regTotal == null ? E2.t('emptyDash') : regTotal.toLocaleString('en-US');
+      return `<div class="dghead"><span class="modtitle">${esc(E2.t('modAssets'))}</span><span class="alcardt">${esc(E2.t('regHead'))}</span><span class="alcardm"> ${esc(E2.t('regConnected', { n, total:totalTxt }))} <button class="statlink" data-act="dgQuick" data-k="st" data-v="stale">${esc(E2.t('regStaleN', { n:E2.data.assets.filter(r => r.st === 'stale').length }))}</button></span></div>`;
+    },
     consume(E2, s){   /* entries from other pages (Overview by-system row, alert chips) become grid filters */
       if(E2.state.regSysF){ s.filters.sys = { in:[E2.state.regSysF] }; E2.state.regSysF = null; s.dirty = true; }
       if(E2.state.regSevF){ s.filters.sev = { in:[E2.state.regSevF] }; E2.state.regSevF = null; s.dirty = true; }

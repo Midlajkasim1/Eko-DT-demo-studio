@@ -818,6 +818,54 @@
       ov.querySelector('.wmaxx').focus();
     },
     wmaxClose(){ const ov = document.getElementById('wmaxov'); if(ov) ov.remove(); },
+    /* O&M and warranty. The card stays on this server; Open large is the only new tab. */
+    docOpen(el){
+      let ref = '';
+      try {
+        const u = new URL(el.dataset.url || '', location.origin);
+        if (u.origin !== location.origin || u.pathname !== '/api/fin/file') return;
+        ref = u.searchParams.get('ref') || '';
+      } catch (e) { return; }
+      if (!/^@p:[A-Za-z0-9_]+:r:[0-9a-fA-F-]+$/.test(ref)) return;
+      const url = '/api/fin/file?ref=' + encodeURIComponent(ref);
+      const title = el.dataset.title || 'PDF';
+      ACTS.docClose();
+      const ov = document.createElement('div');
+      ov.id = 'docov';
+      ov.innerHTML = `<div class="docbox" role="dialog" aria-modal="true" aria-label="${C.esc(title)}">
+        <div class="dochead">
+          <h2 class="doctitle">${C.esc(title)}</h2>
+          <div class="docacts">
+            <a class="btnG" href="${C.esc(url)}&amp;download=1" download>${C.esc(E.t('docDownload'))}</a>
+            <a class="btnG" href="${C.esc(url)}" target="_blank" rel="noopener noreferrer">${C.esc(E.t('docOpenLarge'))}</a>
+          </div>
+          <button type="button" class="wmaxx docx" data-act="docClose" aria-label="${C.esc(E.t('close'))}">✕</button>
+        </div>
+        <iframe class="docframe" title="${C.esc(title)}" src="${C.esc(url)}"></iframe>
+      </div>`;
+      ov.addEventListener('click', ev => { if (ev.target === ov) ACTS.docClose(); });
+      const frame = ov.querySelector('.docframe');
+      const armed = new WeakSet();
+      /* The PDF viewer keeps its own key presses, so Escape has to be read inside the frame. */
+      const armFrame = () => {
+        try {
+          const win = frame.contentWindow;
+          if (!win || armed.has(win)) return;
+          armed.add(win);
+          win.addEventListener('keydown', ev => {
+            if (ev.key !== 'Escape') return;
+            ev.preventDefault();
+            if (window.EKO_SURF) window.EKO_SURF.escape();
+            else ACTS.docClose();
+          });
+        } catch (e) {}
+      };
+      frame.addEventListener('load', armFrame);
+      (window.DASHBOARD_ROOT || document.body).appendChild(ov);
+      armFrame();
+      ov.querySelector('.docx').focus();
+    },
+    docClose(){ const ov = document.getElementById('docov'); if (ov) ov.remove(); },
     /* Asset panel wide mode: a real state toggle (not a snapshot) so the
        tabs, work-order buttons and live values keep working while wide. */
     apWide(){ E.set({ apWide: !E.state.apWide }); },

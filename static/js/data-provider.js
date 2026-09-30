@@ -47,6 +47,7 @@
     getPowerHistory() { return this._json('/api/fin/power-history'); }
     getEquipment() { return this._json('/api/fin/equip-live'); }
     getAlarms() { return this._json('/api/fin/alarms'); }
+    getDocuments() { return this._json('/api/fin/documents'); }
     getMeters() { return this._json('/api/fin/pmu-live'); }
     getHisPoints() { return this._json('/api/fin/his-points'); }
     getPointHistory(id, days) {
@@ -70,6 +71,7 @@
     async getPowerHistory() { return null; }
     async getEquipment() { return null; }
     async getAlarms() { return null; }
+    async getDocuments() { return null; }
     async getMeters() { return null; }
     async getHisPoints() { return null; }
     async getPointHistory() { return null; }
@@ -86,6 +88,7 @@
     equipment: null,
     alarms: null,
     meters: null,
+    documents: null,
     timers: [],
     generation: 0,
   };
@@ -120,11 +123,12 @@
   }
 
   async function pollRealtime() {
-    const [equipment, alarms, meters, history] = await Promise.all([
+    const [equipment, alarms, meters, history, documents] = await Promise.all([
       state.provider.getEquipment(),
       state.provider.getAlarms(),
       state.provider.getMeters(),
       state.provider.getPowerHistory(),
+      state.provider.getDocuments(),
     ]);
     if (usable(history)) {
       state.powerHistory = history;
@@ -136,6 +140,7 @@
     if (usable(equipment)) { state.equipment = equipment; emit('equipment', equipment); }
     if (usable(alarms)) { state.alarms = alarms; emit('alarms', alarms); }
     if (usable(meters)) { state.meters = meters; emit('meters', meters); }
+    if (usable(documents)) { state.documents = documents; emit('documents', documents); }
   }
 
   async function start() {
@@ -169,6 +174,7 @@
     get equipment() { return state.equipment; },
     get alarms() { return state.alarms; },
     get meters() { return state.meters; },
+    get documents() { return state.documents; },
   };
 
   start();
