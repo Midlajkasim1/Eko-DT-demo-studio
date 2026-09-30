@@ -771,12 +771,13 @@ window.EKO_C = (function(){
     }
     const th = (k, lbl, filt) => `<th data-act="regSort" data-k="${k}" aria-sort="${s.regSort===k?(s.regSortDir==='desc'?'descending':'ascending'):'none'}">
       ${esc(t(lbl))} <span class="sortglyph">↕</span>${filt?` <span class="sortglyph">▾</span>`:''}</th>`;
-    const worst = a => a.map(id=>E.alarm(id)).sort((x,y)=>({critical:0,high:1,medium:2}[x.sev]-{critical:0,high:1,medium:2}[y.sev]))[0];
     const chipFor = r => {
-      if(r.st === 'stale') return `<span class="statchip" data-sev="stale">${esc(t('chipStale',{h:r.staleH}))}</span>`;
-      if(r.st === 'alarm'){ const a = worst(r.alarms);
-        const w = t('rib'+a.sev[0].toUpperCase()+a.sev.slice(1));
-        return `<span class="statchip" data-sev="${a.sev}">${r.alarms.length>1?esc(t('alarmsN',{n:r.alarms.length})):esc(t('chipAlarm',{sev:w}))}</span>`; }
+      const c = { critical:0, high:0, medium:0 };
+      (r.alarms || []).forEach(id => { const a = E.alarm(id); if (a && c[a.sev] != null) c[a.sev]++; });
+      const chips = ['critical','high','medium'].filter(s => c[s]).map(s => `<span class="statchip" data-sev="${s}">${c[s]} ${esc(t('rib'+s[0].toUpperCase()+s.slice(1)))}</span>`).join('');
+      if (chips) return `<span class="regsevs">${chips}</span>`;
+      if (r.st === 'stale') return `<span class="statchip" data-sev="stale">${esc(t('chipStale',{h:r.staleH}))}</span>`;
+      if (r.st === 'alarm') return `<span class="statchip" data-sev="high">${esc(t('chipAlarm',{sev:t('ribHigh')}))}</span>`;
       return `<span class="tCap">${esc(t('stNormal'))}</span>`;
     };
     const woCell = r => !r.wost ? `<span class="tCap">${esc(t('emptyDash'))}</span>`
@@ -871,9 +872,12 @@ window.EKO_C = (function(){
     const r = E.data.assets.find(a => a.id === id) || (window.EKO_MT && window.EKO_MT.meterAsAsset(E, id))   /* D96: a meter row opens here too */
       || alarmAsAsset(E, id);   /* an alarm's equipment the register does not list yet */
     if(!r) return '';
-    const als = (r.alarms||[]).map(x=>E.alarm(x)).filter(Boolean);   /* a refresh can retire an alarm id the row still lists */
-    const worst = als[0];
     const t = E.t.bind(E), arL = E.lang === 'ar';
+    const als = (r.alarms||[]).map(x=>E.alarm(x)).filter(Boolean);   /* a refresh can retire an alarm id the row still lists */
+    const sevN = { critical:0, high:0, medium:0 };
+    als.forEach(a => { if (sevN[a.sev] != null) sevN[a.sev]++; });
+    const worst = ['critical','high','medium'].map(s => als.find(a => a.sev === s)).find(Boolean) || als[0];
+    const sevChips = ['critical','high','medium'].filter(s => sevN[s]).map(s => `<span class="statchip" data-sev="${s}">${sevN[s]} ${esc(t('rib'+s[0].toUpperCase()+s.slice(1)))}</span>`).join('');
     const ctl = window.EKO_CTL && window.EKO_CTL.showsControl(E, r);
     let tab = E.state.apTab;
     if(!['alarms','activity','om','warranty','control'].includes(tab)) tab = 'alarms';
@@ -881,7 +885,7 @@ window.EKO_C = (function(){
     const trP = x => E.ph(x);
     const live = `<h4 class="tLbl">${esc(t('apLiveParams'))}</h4>
       ${(r.params||[]).map(p =>
-        `<div class="aprow"><dt>${esc(trP(p[0]))}<span class="apsrc">${esc(trP(p[1]))}</span></dt><dd>${esc(p[2])}</dd></div>`).join('')
+        `<div class="aprow"><dt>${esc(trP(p[0]))}<span class="apsrc">${esc(trP(p[1]))}</span></dt><dd>${esc(E.clip2 ? E.clip2(p[2]) : p[2])}</dd></div>`).join('')
         || `<p class="alempty">${esc(t('emptyDash'))}</p>`}`;
     /* D105: progressive disclosure replaces the old Pro depth — a labelled expansion in place, per user */
     const fullOn = E.disclose('full');
@@ -937,7 +941,7 @@ window.EKO_C = (function(){
       <div class="draghandle"></div>
       <div class="aphead">
         <span class="tMono grow fw6">${esc(id)}</span>
-        ${worst?`<span class="statchip" data-sev="${worst.sev}">${als.length>1?esc(t('alarmsN',{n:als.length})):esc(t('chipAlarm',{sev:t('rib'+worst.sev[0].toUpperCase()+worst.sev.slice(1))}))}</span>`:''}
+        ${sevChips ? `<span class="regsevs">${sevChips}</span>` : ''}
         <button class="iconbtn icon26 aibtn tipU" data-act="aiOpen" data-ai-label="${esc(id)}" data-ai-topic="alarms" data-ai-cap="${esc(arL?(r.levelAr||r.level):r.level)}" data-tip="${esc(t('ai.about'))}" aria-label="${esc(t('ai.about'))}">${icon('spark',16)}</button>
         <button class="iconbtn icon26" data-act="apWide" data-on="${E.state.apWide?1:0}" aria-pressed="${E.state.apWide?'true':'false'}" aria-label="${esc(t('mpExpand'))}">${icon('maximize',14)}</button>
         <button class="iconbtn icon26" data-act="closeAsset" aria-label="${esc(t('close'))}">${icon('x',12)}</button>

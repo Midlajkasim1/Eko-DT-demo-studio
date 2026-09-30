@@ -214,8 +214,7 @@
 }
 
 
-/* Equipment status dots on the live model: green healthy, red in alarm; the
-   selected one (its equipment is coloured on the model) grows a white ring. */
+/* Alarm dots only. Healthy equipment is unmarked. A selected dot grows a white ring. */
 .dashboard-native-container .mk.mkasset {
   width: 18px;
   height: 18px;

@@ -116,7 +116,15 @@
       return l === 'portfolio' ? { pageId:'portfolio', module:'overview' } : { pageId:'marsa-overview', module:'overview' }; },
     /* one place for alarm wording: plain roles read the plain line with the technical string beneath;
        compact surfaces show that second line only when "Show technical detail" is on */
-    alarmLines(a, compact){ const tech = this.lang === 'ar' ? (a.techAr || a.techEn) : a.techEn; const plain = this.loc(a, 'plain');
+    /* Cut after two decimal places. 23.316 stays 23.31. */
+    clip2(v){
+      return String(v == null ? '' : v).replace(/-?\d+\.\d{3,}/g, function(m){
+        var neg = m.charAt(0) === '-';
+        var body = neg ? m.slice(1) : m;
+        return (neg ? '-' : '') + body.slice(0, body.indexOf('.') + 3);
+      });
+    },
+    alarmLines(a, compact){ const tech = this.clip2(this.lang === 'ar' ? (a.techAr || a.techEn) : a.techEn); const plain = this.clip2(this.loc(a, 'plain'));
       if(this.wording() === 'technical') return { main: tech, sub: '' };
       return { main: plain, sub: (compact && !this.disclose('tech')) ? '' : tech }; },
     loc(a, kind){
@@ -663,24 +671,32 @@
             if(d < best){ best = d; opener = o; }
           });
         }
+        const alerts = drop.classList.contains('dlgalerts');
+        if(alerts){
+          const rib = document.getElementById('alarmribbon');
+          if(rib) opener = rib;
+        }
         const ovEl = $('overlays') || window.DASHBOARD_ROOT;
         if(!opener || !ovEl) return;
         const br = opener.getBoundingClientRect();
         const ov = ovEl.getBoundingClientRect();
-        const w = Math.min(drop.classList.contains('dlgalerts') ? 360 : 300, Math.max(200, ov.width - 24));
+        const w = Math.min(alerts ? 360 : 300, Math.max(200, ov.width - 24));
         drop.style.position = 'absolute';
         drop.style.inset = 'auto';
-        drop.style.insetInlineStart = 'auto';
         drop.style.insetInlineEnd = 'auto';
         drop.style.width = w + 'px';
         drop.style.maxWidth = 'none';
         drop.style.margin = '0';
+        drop.style.left = 'auto';
         drop.style.right = 'auto';
         drop.style.bottom = 'auto';
-        let x = br.left + br.width / 2 - ov.left - w / 2;
+        const rtl = (window.DASHBOARD_ROOT || document.documentElement).dir === 'rtl';
+        let x = alerts
+          ? (rtl ? ov.right - br.right : br.left - ov.left)
+          : (rtl ? ov.right - (br.left + br.width / 2) - w / 2 : br.left + br.width / 2 - ov.left - w / 2);
         x = Math.max(12, Math.min(x, ov.width - w - 12));
         const y = Math.max(8, br.bottom - ov.top + 6);
-        drop.style.left = x.toFixed(0) + 'px';
+        drop.style.insetInlineStart = x.toFixed(0) + 'px';
         drop.style.top = y.toFixed(0) + 'px';
       };
       place();

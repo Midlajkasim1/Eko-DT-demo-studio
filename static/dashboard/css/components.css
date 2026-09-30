@@ -1435,15 +1435,22 @@
 }
 
 .dashboard-native-container .statchip[data-sev="high"] {
-  background:var(--sysF2);
-  border:1px solid var(--sysB2);
-  color:var(--sysTx)
+  background:var(--sevHighT);
+  border:1px solid color-mix(in srgb, var(--sevHigh) 45%, transparent);
+  color:var(--sevHigh)
 }
 
 .dashboard-native-container .statchip[data-sev="medium"] {
-  background:var(--warnF2);
-  border:1px solid var(--warnB2);
-  color:var(--warnTx)
+  background:var(--sevMedT);
+  border:1px solid color-mix(in srgb, var(--sevMed) 45%, transparent);
+  color:var(--sevMed)
+}
+
+.dashboard-native-container .regsevs {
+  display:inline-flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:4px
 }
 
 .dashboard-native-container .statchip[data-sev="stale"] {
@@ -4562,7 +4569,7 @@
   .dashboard-native-container .dropStart {
     inset-inline-start:64px
   }
-  .dashboard-native-container .dropMid {
+  .dashboard-native-container .dropMid:not(.dlgalerts) {
     inset-inline-start:280px
   }
   .dashboard-native-container .dlgalerts {
@@ -6340,9 +6347,9 @@
 }
 
 .dashboard-native-container .cbadge[data-sev="medium"] {
-  background:var(--s3);
-  border:1px solid var(--bd2);
-  color:var(--t2)
+  background:var(--sevMedT);
+  border:1px solid color-mix(in srgb, var(--sevMed) 45%, transparent);
+  color:var(--sevMed)
 }
 
 .dashboard-native-container .aptab .cbadge {
@@ -11461,12 +11468,18 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 }
 
 .dashboard-native-container .statchip[data-sev="high"] {
-  background:var(--sysF2);
-  border-color:var(--sysB2);
-  color:var(--sysTx)
+  background:var(--sevHighT);
+  border-color:color-mix(in srgb, var(--sevHigh) 45%, transparent);
+  color:var(--sevHigh)
 }
 
-.dashboard-native-container .statchip[data-sev="medium"],.dashboard-native-container .pwchip[data-tone="warn"],.dashboard-native-container .pmchip[data-tone="warn"],.dashboard-native-container .uachip[data-sev="warning"],.dashboard-native-container .rpprov,.dashboard-native-container .statchip[data-q="intermittent"],.dashboard-native-container .statchip[data-q="offline"] {
+.dashboard-native-container .statchip[data-sev="medium"] {
+  background:var(--sevMedT);
+  border-color:color-mix(in srgb, var(--sevMed) 45%, transparent);
+  color:var(--sevMed)
+}
+
+.dashboard-native-container .pwchip[data-tone="warn"],.dashboard-native-container .pmchip[data-tone="warn"],.dashboard-native-container .uachip[data-sev="warning"],.dashboard-native-container .rpprov,.dashboard-native-container .statchip[data-q="intermittent"],.dashboard-native-container .statchip[data-q="offline"] {
   background:var(--warnF2);
   border-color:var(--warnB2);
   color:var(--warnTx)

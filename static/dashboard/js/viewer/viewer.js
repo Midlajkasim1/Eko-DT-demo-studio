@@ -73,25 +73,19 @@ window.EKO_V = (function(){
       out += `<button class="mk mkclu" data-key="${C().esc(worst.id)}" data-x="${worst.x}" data-y="${worst.y}" data-z="${worst.z || ''}" data-bimid="${guidOf(worst.asset) || worst.bimId || ''}" data-asset="${C().esc(worst.asset || '')}"${mkStyle(worst.x, worst.y, worst.id)} data-act="mkClu" data-alarm="${worst.id}" data-n="${g.length}" data-sel="${isSel(E, worst.asset, loc) ? 1 : 0}"
         aria-label="${C().esc(E.t('alarmsN', { n: g.length }))}" data-tip="${C().esc(eqName(E, worst.asset) + ' · ' + E.t('cluTip',{n:g.length}))}">${g.length}</button>`;
     });
-    /* Every piece of equipment located in the 3D model gets a status dot
-       (green healthy, red in alarm) unless an alarm marker already sits on it.
+    /* A dot only where something is in alarm. Healthy equipment stays unmarked.
        Several register rows can share one model element: one dot each. */
     const seen = new Set();
+    const alarmed = (g, s) => {
+      const HE = window.EKO_HOST_ENGINE;
+      return HE && HE.isAlarmed ? HE.isAlarmed(g) : !!(s && s.st === 'alarm');
+    };
     (E.data.assets || []).forEach(s => {
       const g = guidOf(s.id);
-      if(!g || groups.has(g) || seen.has(g)) return;
+      if(!g || groups.has(g) || seen.has(g) || !alarmed(g, s)) return;
       seen.add(g);
       out += assetMarker(E, s, g);
       pts.push({ key: 'as:' + s.id });
-    });
-    /* Mapped equipment that the live list did not name (the standalone export
-       never receives an equipment payload) still gets its dot. */
-    const mapped = window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.listMapped ? window.EKO_HOST_ENGINE.listMapped() : [];
-    mapped.forEach(m => {
-      if(!m || !m.bimId || seen.has(m.bimId) || groups.has(m.bimId)) return;
-      seen.add(m.bimId);
-      out += assetMarker(E, { id: m.id, st: 'ok' }, m.bimId);
-      pts.push({ key: 'as:' + m.id });
     });
     return `<div class="mklayer"${cacheOK && pts.length ? ' data-proj="1"' : ''}>${out}</div>`;
   }

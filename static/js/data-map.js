@@ -36,6 +36,8 @@
   function mapAlarm(a, i) {
     var src = a.source || '';
     var msg = a.message || src;
+    var detail = String(a.detail || '').trim();
+    if (detail.toLowerCase() === String(msg).trim().toLowerCase()) detail = '';
     var asset = assetId(src);
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     var matchedAsset = (site && site.assets || []).find(function(as) {
@@ -55,8 +57,8 @@
       locAr: src,
       plainEn: msg,
       plainAr: msg,
-      techEn: msg,
-      techAr: msg,
+      techEn: detail,
+      techAr: detail,
       impactAedMo: null,
       raised: raised(a.occurred),
       raisedAt: (function () { var d = parseWhen(a.occurred); return d ? d.getTime() : null; })(),   /* the one stored time; labels derive from it */
@@ -71,6 +73,7 @@
     if (Array.isArray(site.assets)) {
       site.assets.forEach(function (asset) {
         asset.alarms = site.alarms.filter(function (a) { return namesMatch(a.asset, asset.id) || (asset.bimId && a.bimId === asset.bimId); }).map(function (a) { return a.id; });
+        if (asset.alarms.length && asset.st !== 'stale') asset.st = 'alarm';
       });
     }
     if (window.EKO_HOST_ENGINE && typeof window.EKO_HOST_ENGINE.resolveAllAssetPositions === 'function') {
@@ -930,6 +933,7 @@
         return [p.navName, "BMS", p.currentValue];
       });
 
+      var alarmIds = (site.alarms || []).filter(function(a) { return namesMatch(a.asset, eq.name) || namesMatch(a.asset, eq.bimId); }).map(function(a) { return a.id; });
       var assetData = {
         id: eq.name,
         bimId: eq.bimId,
@@ -937,8 +941,8 @@
         crit: crit,
         wtyEnd: null,
         tags: eq.tags || [],
-        st: eq.inAlarm ? "alarm" : "ok",
-        alarms: (site.alarms || []).filter(function(a) { return namesMatch(a.asset, eq.name) || namesMatch(a.asset, eq.bimId); }).map(function(a) { return a.id; }),
+        st: (alarmIds.length || eq.inAlarm) ? "alarm" : "ok",
+        alarms: alarmIds,
         floor: eq.floor || "Unknown",
         zone: "General",
         zoneAr: "عام",

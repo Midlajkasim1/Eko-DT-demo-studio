@@ -25,6 +25,8 @@ from pydantic import BaseModel
 from fin_client import (
     FinScramClient,
     aggregate_and_restructure,
+    alarm_is_open,
+    clip_decimals,
     parse_custom_response,
     parse_zinc_csv,
     safe_get,
@@ -206,7 +208,7 @@ def _flatten_alarms(rows: list, bands: dict) -> dict:
     counts = {"critical": 0, "warning": 0, "info": 0}
 
     for row in rows or []:
-        if row.get("alarm") is not True or row.get("active") is not True:
+        if not alarm_is_open(row):
             continue
         priority = row.get("priority") if isinstance(row.get("priority"), (int, float)) else None
         severity = severity_for(priority, bands)
@@ -215,9 +217,14 @@ def _flatten_alarms(rows: list, bands: dict) -> dict:
         # "CONTROL" = an FD&D rule tripped and diagnosed a fault; "CONNECTOR" =
         # a point-level limit or comms transition. Only the former is actionable.
         dispatcher = str(row.get("dispatcher") or "").strip().upper() or None
+        message = clip_decimals(str(row.get("message") or ""))
+        detail = clip_decimals(str(row.get("detail") or "").strip())
+        if detail.lower() == message.strip().lower():
+            detail = ""
         alarms.append({
             "source": safe_get(source, "dis") or safe_get(source, "val") or "",
-            "message": row.get("message", ""),
+            "message": message,
+            "detail": detail,
             "priority": priority,
             "severity": severity,
             "dispatcher": dispatcher,

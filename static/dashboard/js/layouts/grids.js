@@ -9,6 +9,23 @@
   const esc = s => C().esc(s);
   const ar = E => E.lang === 'ar';
   const worst = (E, r) => (r.alarms || []).map(id => E.alarm(id)).filter(Boolean).sort((x, y) => ({ critical:0, high:1, medium:2 }[x.sev] - { critical:0, high:1, medium:2 }[y.sev]))[0];
+  /* One chip per severity that is actually open, so a high or medium alarm is not hidden behind Normal. */
+  const sevWord = (E, s) => E.t('rib' + s[0].toUpperCase() + s.slice(1));
+  const sevCounts = (E, r) => {
+    const c = { critical:0, high:0, medium:0, total:0 };
+    (r.alarms || []).forEach(id => { const a = E.alarm(id); if (a && c[a.sev] != null) { c[a.sev]++; c.total++; } });
+    return c;
+  };
+  const sevLabel = (E, r) => { const c = sevCounts(E, r);
+    if (c.total) return ['critical','high','medium'].filter(s => c[s]).map(s => c[s] + ' ' + sevWord(E, s)).join(', ');
+    return r.st === 'stale' ? E.t('chipStale', { h:r.staleH }) : r.st === 'alarm' ? E.t('chipAlarm', { sev:E.t('ribHigh') }) : E.t('stNormal');
+  };
+  const sevCell = (E, r) => { const c = sevCounts(E, r);
+    if (c.total) return `<span class="regsevs">${['critical','high','medium'].filter(s => c[s]).map(s => `<span class="statchip" data-sev="${s}">${c[s]} ${esc(sevWord(E, s))}</span>`).join('')}</span>`;
+    if (r.st === 'stale') return `<span class="statchip" data-sev="stale">${esc(E.t('chipStale', { h:r.staleH }))}</span>`;
+    if (r.st === 'alarm') return `<span class="statchip" data-sev="high">${esc(E.t('chipAlarm', { sev:E.t('ribHigh') }))}</span>`;
+    return `<span class="tCap">${esc(E.t('stNormal'))}</span>`;
+  };
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const svcDate = s => { if(!s || s === '–') return null; const m = /^(\d{1,2}) ([A-Za-z]{3})$/.exec(s); if(!m) return null; const mi = MONTHS.indexOf(m[2]); return mi < 0 ? null : new Date(2026, mi, +m[1]); };
   const isoDate = s => s ? new Date(s) : null;
@@ -54,10 +71,10 @@
     },
     columns:[
       { key:'id', labelKey:'dgc.id', type:'text', width:116, mono:true, def:true, grp:'identity', mob:'title', get:(E2, r) => r.id, text:(E2, r) => r.id },
-      { key:'st', labelKey:'dgc.status', type:'enum', width:138, def:true, grp:'condition', mob:'chip', get:(E2, r) => r.st, text:(E2, r) => r.st === 'alarm' ? ((r.alarms||[]).length > 1 ? (r.alarms||[]).length + ' ' + E2.t('alarms').toLowerCase() : E2.t('chipAlarm', { sev:E2.t('rib' + ((worst(E2, r)||{sev:'high'}).sev[0].toUpperCase() + (worst(E2, r)||{sev:'high'}).sev.slice(1))) })) : r.st === 'stale' ? E2.t('chipStale', { h:r.staleH }) : E2.t('stNormal'),
-        cell:(E2, r) => r.st === 'alarm' ? `<span class="statchip" data-sev="${(worst(E2, r)||{sev:'high'}).sev}">${esc((r.alarms||[]).length > 1 ? (r.alarms||[]).length + ' ' + E2.t('alarms').toLowerCase() : E2.t('chipAlarm', { sev:E2.t('rib' + ((worst(E2, r)||{sev:'high'}).sev[0].toUpperCase() + (worst(E2, r)||{sev:'high'}).sev.slice(1))) }))}</span>` : r.st === 'stale' ? `<span class="statchip" data-sev="stale">${esc(E2.t('chipStale', { h:r.staleH }))}</span>` : `<span class="tCap">${esc(E2.t('stNormal'))}</span>`,
+      { key:'st', labelKey:'dgc.status', type:'enum', width:210, def:true, grp:'condition', mob:'chip', get:(E2, r) => sevCounts(E2, r).total || r.st === 'alarm' ? 'alarm' : r.st, text:(E2, r) => sevLabel(E2, r),
+        cell:(E2, r) => sevCell(E2, r),
         enumOpts:E2 => [{ v:'alarm', label:E2.t('dgv.alarm') }, { v:'stale', label:E2.t('dgst.stale') }, { v:'ok', label:E2.t('stNormal') }],
-        sortVal:(E2, r) => ({ alarm:0, stale:1, ok:2 }[r.st]) },
+        sortVal:(E2, r) => { const c = sevCounts(E2, r); return c.critical ? 0 : c.high ? 1 : c.medium ? 2 : r.st === 'stale' ? 3 : 4; } },
       { key:'trend', labelKey:'dgc.trend', type:'text', width:132, def:true, grp:'condition', noFilter:true, get:(E2, r) => trendText(E2, r), text:(E2, r) => trendText(E2, r), cell:(E2, r) => trendCell(E2, r), sortVal:(E2, r) => { const d = trendDelta(r); return d == null ? null : -d; } },
       { key:'sev', labelKey:'dgc.sev', type:'enum', width:150, def:false, grp:'condition', get:(E2, r) => { const w = worst(E2, r); return w ? w.sev : ''; }, text:(E2, r) => { const w = worst(E2, r); return w ? E2.t('rpSev.' + w.sev) : E2.t('emptyDash'); },
         enumOpts:E2 => ['critical', 'high', 'medium'].map(v => ({ v, label:E2.t('rpSev.' + v) })), sortVal:(E2, r) => { const w = worst(E2, r); return w ? ({ critical:0, high:1, medium:2 }[w.sev]) : 9; } },

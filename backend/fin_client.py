@@ -140,6 +140,98 @@ def parse_zinc_csv(text: str) -> list[dict]:
     return rows
 
 
+def clip_decimals(text: str) -> str:
+    """Cut a displayed number after two decimal places. 23.3128 stays 23.31."""
+    return re.sub(r"(-?)(\d+)\.(\d{3,})", lambda m: f"{m.group(1)}{m.group(2)}.{m.group(3)[:2]}", text)
+
+
+def trunc2(val: float) -> str:
+    """Same cut for a real number, without rounding the third digit up."""
+    return clip_decimals(f"{val:.12f}").rstrip("0").rstrip(".")
+
+
+def alarm_is_open(row: dict) -> bool:
+    """A FIN alarm stays on the list only while its active marker is set.
+
+    A cleared record keeps the alarm marker and the message "Return to normal",
+    with the active cell empty. A stale active marker with that message is the
+    same case.
+    """
+    if not row or row.get("alarm") is not True or row.get("active") is not True:
+        return False
+    msg = str(row.get("message") or "").lower()
+    return "return to normal" not in msg
+
+
+def _split_zinc_csv(line: str) -> list[str]:
+    parts: list[str] = []
+    in_q = False
+    cur: list[str] = []
+    for ch in line:
+        if ch == '"':
+            in_q = not in_q
+        elif ch == ',' and not in_q:
+            parts.append(''.join(cur).strip())
+            cur = []
+            continue
+        cur.append(ch)
+    parts.append(''.join(cur).strip())
+    return parts
+
+
+def _alarm_detail_from_table(body: str) -> str:
+    """One technical line from a nested name,sourceRef,value block."""
+    texts: list[str] = []
+    numbers: list[tuple[str, float]] = []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line or line.startswith("ver:") or line.startswith("name,"):
+            continue
+        parts = _split_zinc_csv(line)
+        if len(parts) < 3:
+            continue
+        name = decode_zinc_unicode(parts[0].strip().strip('"')).replace("_", " ").strip()
+        raw = parts[2].strip()
+        if raw.startswith('"') and raw.endswith('"'):
+            raw = raw[1:-1]
+        raw = decode_zinc_unicode(raw).strip()
+        if raw in ("", "T", "F", "true", "false", "M"):
+            continue
+        try:
+            numbers.append((name, float(raw)))
+        except ValueError:
+            texts.append(raw)
+    fault = [t for t in texts if not t.lower().rstrip(".").endswith("normal")]
+    if fault:
+        return clip_decimals(fault[-1])
+    if numbers:
+        name, val = numbers[0]
+        return clip_decimals(f"{name} {trunc2(val)}")
+    return clip_decimals(texts[-1]) if texts else ""
+
+
+def attach_alarm_details(text: str, rows: list[dict]) -> None:
+    """Stamp each alarm row with the diagnostic sentence from its metadata block."""
+    if not text or not rows:
+        return
+    details: dict[str, str] = {}
+    for chunk in re.split(r"(?m)^(?=@)", text):
+        if not chunk.startswith("@"):
+            continue
+        id_tok = chunk.split(" ", 1)[0].strip()
+        found = re.search(r"name,sourceRef,value\s*\n(.*?)\n\s*>>", chunk, re.S)
+        if not found or not id_tok:
+            continue
+        detail = _alarm_detail_from_table(found.group(1))
+        if detail:
+            details[id_tok] = detail
+    for row in rows:
+        ref = row.get("id")
+        val = ref.get("val") if isinstance(ref, dict) else None
+        if val and details.get(val):
+            row["detail"] = details[val]
+
+
 def parse_custom_response(text: str) -> dict:
     """Parse a FIN hisRead Zinc response into rows + curVal + unit."""
     if not text:
@@ -530,6 +622,7 @@ class FinScramClient:
         points = parse_zinc_csv(points_text)
         equipment = parse_zinc_csv(equip_text)
         alarms = parse_zinc_csv(alarms_text)
+        attach_alarm_details(alarms_text or "", alarms)
         self.last_alarm_rows = alarms
         self.last_point_rows = points
 
@@ -589,9 +682,7 @@ class FinScramClient:
             # Filter active alarms
             equip_alarms = []
             for a in alarms:
-                if (safe_get(a.get("sourceRef"), "val") == equip_id
-                        and a.get("alarm") is True
-                        and a.get("active") is True):
+                if safe_get(a.get("sourceRef"), "val") == equip_id and alarm_is_open(a):
                     equip_alarms.append({
                         "alarm": a.get("message", "N/A"),
                         "priority": a.get("priority", 0),
@@ -661,13 +752,16 @@ class FinScramClient:
                 elif isinstance(val, bool):
                     display_val = "T" if val else "F"
                 elif isinstance(val, (int, float)):
-                    val = round(val, 2)
                     if unit == "%" or any(x in nav_lower for x in ["valve", "coil", "demand"]):
                         val = int(val)
                         unit = "%"
-                    display_val = f"{val}{unit}" if unit else str(val)
+                        display_val = f"{val}{unit}"
+                    else:
+                        display_val = trunc2(float(val))
+                        if unit:
+                            display_val = f"{display_val}{unit}"
                 else:
-                    display_val = str(val)
+                    display_val = clip_decimals(str(val))
 
                 nav_key = nav_lower.replace(" ", "_")
                 if nav_key in seen_navs:
