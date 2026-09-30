@@ -96,7 +96,7 @@
   "realtime_endpoints": {
     "points": "/api/{project}/eval?expr=readAll(point+or+cmd+or+sensor+or+rule+or+diag)",
     "equipment": "/api/{project}/read?filter=equip",
-    "alarms": "/api/{project}/eval?expr=readAll(equip+or+point).alarms"
+    "alarms": "/api/{project}/eval?expr=readAll(equip+or+point).alarms(today)"
   },
   "power_endpoints": {
     "Total_Power_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181ee6e-67dac181,2026-05-21..today()%2C%7B-limit%7D)",
