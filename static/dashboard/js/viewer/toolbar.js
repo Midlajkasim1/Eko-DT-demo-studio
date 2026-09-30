@@ -52,7 +52,8 @@ window.EKO_VT = (function(){
     const dis = !!def.cap && !cp[def.cap];
     let on = false, tag = null, dot = false, muted = false;
     switch(def.id){
-      case 'select': case 'measure': case 'slice': on = d.tool === def.id; break;
+      case 'select': case 'measure': on = d.tool === def.id; break;
+      case 'slice': on = !!d.slice; break;
       case 'levels':  on = d.bloom === 'levels' || d.level !== 'ALL'; tag = d.level !== 'ALL' ? d.level : null; break;
       case 'layers': { const sel = chosenLayers(d); on = sel.length > 0; tag = on ? sel.map(id => LAYSHORT[id] || id).join('+') : null; break; }
       case 'minimap': on = !!d.minimap; break;
@@ -70,6 +71,7 @@ window.EKO_VT = (function(){
     if(def.id === 'levels' && E.state.dock.level !== 'ALL') return t('tipShortcut', { t: t('lvlIsolatedTip', { lvl: levelName(E, E.state.dock.level) }), k: def.key });
     if(def.id === 'reset'){ const l = resetList(E); return t('tipShortcut', { t: l.length ? t('resetListTip', { list: l.join(', ') }) : name, k: def.key }); }
     if(def.id === 'measure') return t('tipShortcut', { t: t('measureHow'), k: def.key });
+    if(def.id === 'slice') return t('tipShortcut', { t: t('sliceHow'), k: def.key });
     return t('tipShortcut', { t: name, k: def.key });
   }
   function button(E, def, cls){

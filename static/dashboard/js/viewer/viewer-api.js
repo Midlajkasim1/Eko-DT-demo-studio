@@ -55,13 +55,16 @@ window.EKO_VIEWER = (function(){
 
      section & slice
        setSectionPlane({axis:'x'|'y'|'z', position:0..1, enabled:true})
-       clearSection()
+       startSlice()                   arm click-to-cut. Each click adds a plane.
+       stopSlice()                    disarm. Planes stay and the Slice button stays on.
+       clearSection()                 remove every slice plane.
        onSectionHandle(cb)            cb({screenX, screenY}) — where the shell
                                       should draw its drag handle.
 
      measure
        startMeasure(mode)             'point'|'area'.
        cancelMeasure()                drop the open chain; finished chains stay.
+       clearMeasure()                 remove every chain. Turning Measure off does this.
        finishMeasure()                close the open chain and keep it.
        onMeasureResult(cb)            cb({value, unit, points:[{x,y,z}…]}) —
                                       the SHELL renders the readout.

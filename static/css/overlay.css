@@ -67,7 +67,10 @@
 }
 .dashboard-native-container .mklayer .mk,
 .dashboard-native-container .pmuchip,
-.dashboard-native-container .mkpop {
+.dashboard-native-container .mkpop,
+.dashboard-native-container .vradial,
+.dashboard-native-container .vsheet,
+.dashboard-native-container .scrim {
   pointer-events: auto;
 }
 .dashboard-native-container[lang="ar"] {

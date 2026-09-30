@@ -8,6 +8,7 @@ import { ASSET_BIM_MAPPING } from '@/constants/assetBimMapping'
 import { resetCameraToHome } from '@/lib/cameraUtils'
 import { disciplineOf, layersFor, layerShows } from '@/lib/modelDiscipline'
 import { measureTool } from '@/lib/measureTool'
+import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
 import type { ProjectApiSettings } from '@/types'
 
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
@@ -223,6 +224,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, clipping: true,
     })
     const ghostEdge = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false })
+    watchClipping(ghostDepth)
+    watchClipping(ghostFill)
+    watchClipping(ghostEdge)
     let ghost: { group: THREE.Group; model: any } | null = null
     const tintGhost = (tone: 'alarm' | 'healthy' | 'amber') => {
       const c = tone === 'alarm' ? ALARM : tone === 'amber' ? AMBER : HEALTHY
@@ -676,6 +680,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       cancelMeasure: () => measureTool()?.cancel(),
       finishMeasure: () => measureTool()?.finish(),
       clearMeasure: () => measureTool()?.clear(),
+      startSlice: () => sliceTool()?.start(),
+      stopSlice: () => sliceTool()?.stop(),
+      clearSection: () => sliceTool()?.clear(),
     }
     // The dashboard may have rendered before the bridge existed: redraw so the
     // equipment markers (which need bimIdFor) appear.
@@ -732,6 +739,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       clearInterval(resolveTimer)
       void clearHighlight()
       removeGhost()
+      unwatchClipping(ghostDepth)
+      unwatchClipping(ghostFill)
+      unwatchClipping(ghostEdge)
       ghostDepth.dispose()
       ghostFill.dispose()
       ghostEdge.dispose()

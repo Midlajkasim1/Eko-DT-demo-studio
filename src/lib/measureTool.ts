@@ -463,7 +463,6 @@ export function createMeasure(opts: {
       armed = true
       setCursor(true)
     },
-    // Turning the tool off drops the chain that was never closed with Enter.
     cancel() {
       armed = false
       setCursor(false)

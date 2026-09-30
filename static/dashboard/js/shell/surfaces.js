@@ -72,8 +72,13 @@ window.EKO_SURF = (function(){
     if(opened.length){
       const newest = opened[opened.length - 1];
       if(byId[newest].kind !== 'dialog' && !byId[newest].sticky){
-        /* one transient surface: everything else that is open closes now (a sticky companion, D132, stays) */
-        DEFS.forEach(d => { if(d.id !== newest && !d.sticky && now.has(d.id)) d.close(); });
+        /* one transient surface: everything else that is open closes now (a sticky companion, D132, stays).
+           Levels, Layers, and Style sit over the selection card, so the card stays open behind them. */
+        DEFS.forEach(d => {
+          if(d.id === newest || d.sticky || !now.has(d.id)) return;
+          if(newest === 'fly' && d.id === 'mkpop') return;
+          d.close();
+        });
       }
       opened.forEach(id => { rm(order, id); order.push(id); if(lastClick) openers[id] = lastClick; });
       pendingEnter = newest;   /* D121: a menu or popover takes focus on open so the keyboard can walk it */
@@ -121,9 +126,11 @@ window.EKO_SURF = (function(){
       if(top === 'pal' && E.state.palQ){ E.state.palQ = ''; E.state.palSel = 0; E.set({}); return 'cleared'; }
       byId[top].close(); E.set({}); return top;
     }
-    /* With nothing open, Escape puts the viewer tool down. Select starts off. */
+    /* With nothing open, Escape puts the click tool down. A latched slice stays. */
     if(E.state.dock && E.state.dock.tool){
-      if(E.state.dock.tool === 'measure' && E.engine && E.engine.cancelMeasure) E.engine.cancelMeasure();
+      if(E.state.dock.tool === 'measure' && E.engine && E.engine.clearMeasure) E.engine.clearMeasure();
+      if(E.state.dock.tool === 'slice' && E.engine && E.engine.stopSlice) E.engine.stopSlice();
+      if(E.state.dock.tool === 'select' && E.dropSelection) E.dropSelection();
       E.state.dock.tool = null; E.set({}); return 'tool'; }
     if(E.state.modelFs){ E.set({ modelFs:false }); return 'model'; }       /* D94: a mode, not a surface */
     if(PAGES.includes(E.state.pageId)){ back(); return 'back'; }

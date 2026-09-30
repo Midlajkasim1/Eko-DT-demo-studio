@@ -8106,7 +8106,7 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   left:50%;
   bottom:16px;
   transform:translateX(-50%);
-  z-index:16;
+  z-index:26; /* above .mkpop (24) so Levels and Layers paint over the selection card */
   display:flex;
   flex-direction:column;
   align-items:center;

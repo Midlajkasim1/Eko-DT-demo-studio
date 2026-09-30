@@ -1224,8 +1224,14 @@ Wait, if iframe has pointer-events: auto, it works. Let's fix this in iframe bod
 /* ─── Picker Cursor ──────────────────────────────────────────────────────────── */
 .picker-cursor,
 .viewer-canvas-container.measure-cursor,
-.viewer-canvas-container.measure-cursor canvas {
+.viewer-canvas-container.measure-cursor canvas,
+.viewer-canvas-container.slice-cursor,
+.viewer-canvas-container.slice-cursor canvas {
   cursor: crosshair !important;
+}
+.viewer-canvas-container.slice-drag,
+.viewer-canvas-container.slice-drag canvas {
+  cursor: grabbing !important;
 }
 
 /* ─── Right Panels Container ─────────────────────────────────────────────────── */

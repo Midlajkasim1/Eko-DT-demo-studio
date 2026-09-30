@@ -137,6 +137,7 @@ window.EKO_I18N.en = {
   "dockMeasure": "Measure",
   "measureHow": "Click points, Enter to finish",
   "dockSlice": "Slice",
+  "sliceHow": "Click a face to cut, drag the arrow to move",
   "dockLevels": "Levels",
   "dockLayers": "Layers",
   "dockMinimap": "Minimap",

@@ -44,7 +44,7 @@
       alarmF: { sev: new Set(), sys: new Set() },
       triageOpen: {},
       assetSel: null, apTab: 'alarms',
-      dock: { tool: null, bloom: null, style: 'default', tone: 'blue',
+      dock: { tool: null, slice: false, bloom: null, style: 'default', tone: 'blue',
               level: 'ALL', layer: 'all', alerts: 'all', minimap: false },
       mkPop: null, mkPopN: 0, mkPulse: null, paint: null, radial: null, vbarMin: ls.get('eko-vbar') === 'min',   /* D73 */
       ovpMin: ls.get('eko-ovp') === 'min', panMin: ls.get('eko-pan') === 'min', regMin: ls.get('eko-reg') === 'min',   /* D128: the register's model strip */
@@ -733,8 +733,10 @@
   function goHome(){ if(E.engine && typeof E.engine.resetView === 'function') E.engine.resetView(); }
   /* Nothing selected: no popup, no equipment colour, no asset panel, no locate
      pulse. Reset uses it, and so does the host's orientation-cube home button. */
-  const NO_SEL = { mkPop: null, mkPopN: 0, mkPulse: null, paint: null, assetSel: null };
+  const NO_SEL = { mkPop: null, mkPopN: 0, mkPulse: null, paint: null, assetSel: null, pickEl: null };
   E.clearSelection = () => E.set(NO_SEL);
+  /* Mutate only. The caller renders once, after the tool change. */
+  E.dropSelection = () => Object.assign(E.state, NO_SEL);
   /* close=true dismisses the floor menu (a pick). The stepper leaves it open. */
   function showLevel(id, close){
     E.state.dock.level = id;
@@ -904,9 +906,8 @@
       E.engine.flyTo(id);
       setTimeout(() => { E.state.mkPulse = null; render(); }, 2200); },
 
-    /* Viewport controls (D69): ONE handler for the bar, the More flyout /
-       sheet rows, the radial, the palette and the shortcut keys. Select is
-       the resting state; a disabled tool stays disabled (honest). */
+    /* One handler for the bar, the sheet, the radial, and the shortcut keys.
+       Select and Measure share the click. Slice stays on until it is clicked off or Reset. */
     vtool(el){ const k = el.dataset.v, d = E.state.dock, VT = window.EKO_VT;
       const def = VT.byId(k);
       /* D74: a tool the engine cannot run says why when clicked */
@@ -920,14 +921,33 @@
         if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
         if(E.engine.setLayerVisibility) E.engine.setLayerVisibility('all');
         if(E.engine.clearMeasure) E.engine.clearMeasure();
-        E.set(Object.assign({ dock:{ tool:null, bloom:null, style:'default', tone:'blue',
+        if(E.engine.clearSection) E.engine.clearSection();
+        E.set(Object.assign({ dock:{ tool:null, slice:false, bloom:null, style:'default', tone:'blue',
         level:'ALL', layer:'all', alerts:'all', minimap:false }, histAge:null, measureResult:null }, NO_SEL)); return; }
       if(!def) return;
       if(def.kind === 'tool'){
-        const next = (d.tool === k && (k === 'select' || k === 'measure')) ? null : k;
-        if(d.tool === 'measure' && next !== 'measure' && E.engine.cancelMeasure) E.engine.cancelMeasure();
-        d.tool = next; d.bloom = null;
-        if(next === 'measure' && E.engine.startMeasure) E.engine.startMeasure('point');
+        /* Select and Measure take clicks. Slice is a latch: it stays on beside them.
+           Clicking Slice while another tool has the clicks re-arms the cut.
+           Clicking it again, while it has the clicks, removes the planes. */
+        if(k === 'slice'){
+          if(d.tool === 'measure' && E.engine.clearMeasure) E.engine.clearMeasure();
+          if(d.tool === 'select') E.dropSelection();
+          if(d.tool === 'slice' && d.slice){
+            d.slice = false; d.tool = null;
+            if(E.engine.clearSection) E.engine.clearSection();
+          } else {
+            d.slice = true; d.tool = 'slice';
+            if(E.engine.startSlice) E.engine.startSlice();
+          }
+          d.bloom = null;
+        } else {
+          const next = d.tool === k ? null : k;
+          if(d.tool === 'measure' && next !== 'measure' && E.engine.clearMeasure) E.engine.clearMeasure();
+          if(d.tool === 'select' && next !== 'select') E.dropSelection();
+          if(d.tool === 'slice' && E.engine.stopSlice) E.engine.stopSlice();
+          d.tool = next; d.bloom = null;
+          if(next === 'measure' && E.engine.startMeasure) E.engine.startMeasure('point');
+        }
       }
       else if(def.kind === 'toggle'){ d.minimap = !d.minimap; d.bloom = null; if(d.minimap) E.state.born = 'bloom'; }
       else if(def.kind === 'more'){ const inMore = ['more','layers','style'].includes(d.bloom);

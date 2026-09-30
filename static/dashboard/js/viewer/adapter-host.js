@@ -14,7 +14,7 @@
     return {
       capabilities: {
         style: true,
-        sectionPlane: false,
+        sectionPlane: true,
         measure: true,
         levels: true,
         layers: true,
@@ -73,7 +73,15 @@
       },
 
       setSectionPlane: noop,
-      clearSection: noop,
+      startSlice: function () {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.startSlice) window.EKO_HOST_ENGINE.startSlice();
+      },
+      stopSlice: function () {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.stopSlice) window.EKO_HOST_ENGINE.stopSlice();
+      },
+      clearSection: function () {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.clearSection) window.EKO_HOST_ENGINE.clearSection();
+      },
       onSectionHandle: on('section'),
 
       startMeasure: function () {

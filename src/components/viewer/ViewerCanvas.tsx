@@ -24,12 +24,15 @@ import { attachDevBridge } from '@/lib/devBridge'
 import { installStudioViewerApi } from '@/lib/studioViewerApi'
 import { SnappingClass, type FragmentsModel, type RaycastResult } from '@thatopen/fragments'
 import { chooseSnapPoint, createMeasure, measureTool, setMeasureTool, type SnapCandidate } from '@/lib/measureTool'
+import { createSlice, hasCuts, pointKept, setSliceTool, sliceTool } from '@/lib/sliceTool'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 
 // The fragments snap window is about 10px. A corner on that same surface, a
 // little deeper than the face under the cursor, should still win.
 const SNAP_PX = 14
 const SNAP_DEPTH = 0.45
+// Left-drag orbits and right-drag pans, and the browser still fires click on release.
+const CAMERA_DRAG_PX = 6
 
 function snapScreenPx(camera: THREE.Camera, point: THREE.Vector3, rect: DOMRect, mouse: THREE.Vector2) {
   const v = point.clone().project(camera)
@@ -59,7 +62,7 @@ async function snapMeasurePoint(engine: FragmentsEngine, canvas: HTMLCanvasEleme
       return [] as RaycastResult[]
     }
   }))
-  const hits = batches.flat().filter(hit => hit?.point)
+  const hits = batches.flat().filter(hit => hit?.point && pointKept(hit.point))
   const rect = canvas.getBoundingClientRect()
   return chooseSnapPoint(
     hits.map(hit => ({ point: hit.point, distance: hit.distance, kind: snapKind(hit) })),
@@ -82,8 +85,68 @@ function hoverHit(engine: FragmentsEngine, clientX: number, clientY: number, rec
   engine.world.scene.three.children.forEach(child => {
     if (child.userData?.modelId && child.visible && !child.userData.ekoMeasure) roots.push(child)
   })
-  const hit = raycaster.intersectObjects(roots, true).find(h => !h.object.userData?.ekoMeasure)
+  const hit = raycaster.intersectObjects(roots, true).find(h =>
+    !h.object.userData?.ekoMeasure && !h.object.userData?.ekoSlice && pointKept(h.point))
   return hit ? hit.point.clone() : null
+}
+
+async function keptModelHits(
+  model: FragmentsModel,
+  camera: THREE.Camera,
+  canvas: HTMLCanvasElement,
+  mouse: THREE.Vector2,
+): Promise<RaycastResult[]> {
+  if (model.object && !model.object.visible) return []
+  try {
+    model.object?.updateMatrixWorld(true)
+    const data = { camera: camera as THREE.PerspectiveCamera | THREE.OrthographicCamera, dom: canvas, mouse }
+    const found = hasCuts() ? await model.raycastAll(data) : [await model.raycast(data)]
+    return (found ?? []).filter(hit => !!hit?.point && pointKept(hit.point))
+  } catch {
+    return []
+  }
+}
+
+async function sliceSurface(
+  engine: FragmentsEngine,
+  canvas: HTMLCanvasElement,
+  clientX: number,
+  clientY: number,
+): Promise<{ point: THREE.Vector3, normal: THREE.Vector3 } | null> {
+  const camera = engine.world.camera.three
+  const mouse = new THREE.Vector2(clientX, clientY)
+  const models = [...(engine.fragments?.models?.list?.values() ?? [])] as FragmentsModel[]
+  const hits = await Promise.all(models.map(async (model) => {
+    const found = await keptModelHits(model, camera, canvas, mouse)
+    let best: { point: THREE.Vector3, normal: THREE.Vector3, distance: number } | null = null
+    for (const hit of found) {
+      if (!hit.normal || hit.normal.lengthSq() < 1e-8) continue
+      const distance = hit.distance ?? hit.rayDistance ?? 0
+      if (!best || distance < best.distance) best = { point: hit.point, normal: hit.normal, distance }
+    }
+    return best
+  }))
+  let best: { point: THREE.Vector3, normal: THREE.Vector3, distance: number } | null = null
+  for (const hit of hits) {
+    if (hit && (!best || hit.distance < best.distance)) best = hit
+  }
+  if (best) return { point: best.point.clone(), normal: best.normal.clone() }
+
+  const rect = canvas.getBoundingClientRect()
+  const x = ((clientX - rect.left) / rect.width) * 2 - 1
+  const y = -((clientY - rect.top) / rect.height) * 2 + 1
+  const raycaster = new THREE.Raycaster()
+  raycaster.setFromCamera(new THREE.Vector2(x, y), camera)
+  const roots: THREE.Object3D[] = []
+  for (const model of models) {
+    if (model.object?.visible) roots.push(model.object)
+  }
+  const faceHit = raycaster.intersectObjects(roots, true).find(h =>
+    h.face && !h.object.userData?.ekoSlice && !h.object.userData?.ekoMeasure && pointKept(h.point))
+  if (!faceHit?.face) return null
+  const normal = faceHit.face.normal.clone().transformDirection(faceHit.object.matrixWorld)
+  if (normal.dot(raycaster.ray.direction) > 0) normal.negate()
+  return { point: faceHit.point.clone(), normal }
 }
 
 // The ruler keeps going at the height of the last point when the cursor
@@ -99,7 +162,8 @@ function levelPoint(engine: FragmentsEngine, clientX: number, clientY: number, r
   if (Math.abs(dir.y) < 0.001) return null
   const t = (last.y - raycaster.ray.origin.y) / dir.y
   if (!(t > 0) || t > 500) return null
-  return raycaster.ray.origin.clone().addScaledVector(dir, t)
+  const point = raycaster.ray.origin.clone().addScaledVector(dir, t)
+  return pointKept(point) ? point : null
 }
 
 interface ViewerCanvasProps {
@@ -110,6 +174,8 @@ interface ViewerCanvasProps {
 
 export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = false }: ViewerCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const cameraDrag = useRef(false)
+  const skipToolClick = useRef(false)
   const statsRef = useRef<any>(null)
   const statsContainerRef = useRef<HTMLDivElement>(null)
   const [statsVisible, setStatsVisible] = useState(false)
@@ -129,6 +195,42 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
       setDashboardVisible(true)
     }
   }, [isFinProject, adminMode])
+
+  useEffect(() => {
+    let startX = 0
+    let startY = 0
+    let tracking = false
+    const down = (e: PointerEvent) => {
+      const el = containerRef.current
+      if (!el || !el.contains(e.target as Node)) return
+      tracking = true
+      cameraDrag.current = false
+      skipToolClick.current = false
+      startX = e.clientX
+      startY = e.clientY
+    }
+    const move = (e: PointerEvent) => {
+      if (!tracking || cameraDrag.current || e.buttons === 0) return
+      const dx = e.clientX - startX
+      const dy = e.clientY - startY
+      if (dx * dx + dy * dy > CAMERA_DRAG_PX * CAMERA_DRAG_PX) cameraDrag.current = true
+    }
+    const up = () => {
+      if (tracking && cameraDrag.current) skipToolClick.current = true
+      tracking = false
+      cameraDrag.current = false
+    }
+    window.addEventListener('pointerdown', down, true)
+    window.addEventListener('pointermove', move, true)
+    window.addEventListener('pointerup', up, true)
+    window.addEventListener('pointercancel', up, true)
+    return () => {
+      window.removeEventListener('pointerdown', down, true)
+      window.removeEventListener('pointermove', move, true)
+      window.removeEventListener('pointerup', up, true)
+      window.removeEventListener('pointercancel', up, true)
+    }
+  }, [])
 
 
 
@@ -166,9 +268,22 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
       controls: engine.world.camera.controls,
     })
     setMeasureTool(tool)
+    const dom = containerRef.current
+    const slice = dom ? createSlice({
+      scene,
+      dom,
+      getCamera: () => engine.world.camera.three,
+      getViewHeight: () => containerRef.current?.clientHeight || 800,
+      controls: engine.world.camera.controls,
+      fragments: engine.fragments,
+      renderer: engine.world.renderer?.three,
+    }) : null
+    if (slice) setSliceTool(slice)
     return () => {
       tool.dispose()
       setMeasureTool(null)
+      slice?.dispose()
+      setSliceTool(null)
     }
   }, [isReady])
 
@@ -246,6 +361,7 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
     setPickerActive(false)
     setPickedCoord(null)
     measureTool()?.clear()
+    sliceTool()?.clear()
     setStatsVisible(false)
     setDashboardVisible(isFinProject || !adminMode)
     useAppStore.getState().setMaterialPickerActive(false)
@@ -412,6 +528,10 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
   const onMeasureMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const tool = measureTool()
     if (!tool?.pending()) return
+    if (cameraDrag.current) {
+      tool.hover(null)
+      return
+    }
     const now = performance.now()
     if (now - hoverStamp.current < 40) return
     hoverStamp.current = now
@@ -427,7 +547,8 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
     // then opens the same card a marker tap does.
     const selectArmed = dashboardVisible && (window as any).EKO?.state?.dock?.tool === 'select'
     const measureArmed = dashboardVisible && (window as any).EKO?.state?.dock?.tool === 'measure'
-    if (!pickerActive && !materialPickerActive && !selectArmed && !measureArmed) return
+    const sliceArmed = dashboardVisible && (window as any).EKO?.state?.dock?.tool === 'slice'
+    if (!pickerActive && !materialPickerActive && !selectArmed && !measureArmed && !sliceArmed) return
     const engine = engineRef.current
     if (!engine) return
     const container = containerRef.current
@@ -435,6 +556,18 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
 
     const rect = container.getBoundingClientRect()
     const canvas = container.querySelector('canvas')
+    const dragged = skipToolClick.current
+    skipToolClick.current = false
+    if (sliceArmed) {
+      if (sliceTool()?.suppressClick()) return
+      if (dragged || sliceTool()?.hitsHandle(e.clientX, e.clientY)) return
+      if (canvas) {
+        const hit = await sliceSurface(engine, canvas, e.clientX, e.clientY)
+        if (hit) sliceTool()?.place(hit.point, hit.normal)
+      }
+      return
+    }
+    if ((measureArmed || selectArmed) && dragged) return
     if (canvas) {
       const canvasRect = canvas.getBoundingClientRect()
     }
@@ -458,13 +591,10 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
             const mAny = m as any;
             if (m.object) m.object.updateMatrixWorld(true);
             if (typeof mAny.raycast === 'function') {
-              let hit = await mAny.raycast({
-                camera: engine.world.camera.three,
-                dom: canvas,
-                mouse: rawPx,
-              });
-              if (hit && typeof hit.localId === 'number') {
-                const dist = hit.distance ?? hit.rayDistance ?? 0;
+              const found = await keptModelHits(m as FragmentsModel, engine.world.camera.three, canvas, rawPx)
+              for (const hit of found) {
+                if (typeof hit.localId !== 'number') continue
+                const dist = hit.distance ?? hit.rayDistance ?? 0
                 if (dist < fragHitDistance) {
                   fragHitDistance = dist;
                   hitModelId = modelId;
@@ -520,9 +650,9 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
     let hits: THREE.Intersection[] = []
     for (const h of allHits) {
        const mesh = h.object as THREE.Mesh
-       if (mesh.visible) {
-           hits.push(h)
-       }
+       if (!mesh.visible || mesh.userData?.ekoSlice || mesh.userData?.ekoMeasure) continue
+       if (!pointKept(h.point)) continue
+       hits.push(h)
     }
     hits.sort((a, b) => a.distance - b.distance)
 
