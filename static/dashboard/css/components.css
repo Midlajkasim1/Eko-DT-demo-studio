@@ -7656,6 +7656,15 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   background:var(--sevCrit)
 }
 
+/* Bright fills, same as the marker glyphs. Light theme darkens the chip tokens. */
+.dashboard-native-container .mkclu[data-sev="high"] {
+  background:#F08A3C
+}
+
+.dashboard-native-container .mkclu[data-sev="medium"] {
+  background:#C4B03A
+}
+
 .dashboard-native-container,.dashboard-native-container {
   overscroll-behavior:none
 }

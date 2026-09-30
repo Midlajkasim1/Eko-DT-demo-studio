@@ -97,8 +97,10 @@ window.EKO_C = (function(){
     high:    { c:'var(--sevHigh)', shape:'tri' },
     medium:  { c:'var(--sevMed)',  shape:'sq' }
   };
+  /* On the model these stay the bright hues. Light theme darkens --sevHigh and --sevMed for text chips. */
+  const MARK = { critical:'var(--sevCrit)', high:'#F08A3C', medium:'#C4B03A' };
   function sevGlyph(sev, acked, px=13, marker=false){
-    const s = SEV[sev] || SEV.medium, c = s.c;
+    const s = SEV[sev] || SEV.medium, c = marker ? (MARK[sev] || MARK.medium) : s.c;
     const fill = acked ? 'none' : c;
     const stroke = marker ? 'rgba(0,0,0,0.5)' : c;
     const sw = marker ? 1 : 2.5;

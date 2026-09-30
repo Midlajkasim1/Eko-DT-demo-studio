@@ -34,6 +34,13 @@ window.EKO_V = (function(){
   const guidOf = assetId => { const HE = window.EKO_HOST_ENGINE;
     return HE && HE.bimIdFor && assetId ? HE.bimIdFor(assetId) : null; };
   const SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
+  /* Live rows arrive as critical / warning / info. A warning is a high marker. */
+  const sevOf = a => {
+    const s = String(a && a.sev || '').toLowerCase();
+    if (s === 'critical') return 'critical';
+    if (s === 'high' || s === 'warning') return 'high';
+    return 'medium';
+  };
   /* A marker's inline position: its cached one, or — when the rest of the
      layer is cached — hidden on its own until position() places it, so a new
      marker never makes the whole layer blink. */
@@ -59,19 +66,26 @@ window.EKO_V = (function(){
     /* alert-centre display filter (D30); only LOCATED alarms get a marker —
        an alarm without a world position has nothing to point at (D64) */
     const list = E.visAlarms().filter(a => (isFinite(+a.x) && isFinite(+a.y)) || a.bimId || guidOf(a.asset));
-    /* Alarms on the same equipment (or the same spot) collapse into ONE
-       cluster badge that opens the worst of them. */
+    /* One marker per equipment. The colour is the worst severity. The number
+       is every open alarm on that equipment, not only the winning severity. */
     const where = a => guidOf(a.asset) || a.bimId || a.asset || (Math.round(a.x) + ',' + Math.round(a.y));
     const groups = new Map();
     list.forEach(a => { const k = where(a); if(!groups.has(k)) groups.set(k, []); groups.get(k).push(a); });
     let out = '';
     const pts = [];
     groups.forEach((g, loc) => {
-      if(g.length === 1){ out += marker(E, g[0], loc); pts.push({ key: g[0].id }); return; }
-      const worst = g.slice().sort((p, q) => (SEV_RANK[p.sev] ?? 9) - (SEV_RANK[q.sev] ?? 9))[0];
-      pts.push({ key: worst.id });
-      out += `<button class="mk mkclu" data-key="${C().esc(worst.id)}" data-x="${worst.x}" data-y="${worst.y}" data-z="${worst.z || ''}" data-bimid="${guidOf(worst.asset) || worst.bimId || ''}" data-asset="${C().esc(worst.asset || '')}"${mkStyle(worst.x, worst.y, worst.id)} data-act="mkClu" data-alarm="${worst.id}" data-n="${g.length}" data-sel="${isSel(E, worst.asset, loc) ? 1 : 0}"
-        aria-label="${C().esc(E.t('alarmsN', { n: g.length }))}" data-tip="${C().esc(eqName(E, worst.asset) + ' · ' + E.t('cluTip',{n:g.length}))}">${g.length}</button>`;
+      const buckets = { critical: [], high: [], medium: [] };
+      g.forEach(a => buckets[sevOf(a)].push(a));
+      const sev = ['critical', 'high', 'medium'].find(s => buckets[s].length);
+      const head = buckets[sev][0];
+      if (g.length === 1) {
+        out += marker(E, head, loc);
+        pts.push({ key: head.id });
+        return;
+      }
+      pts.push({ key: head.id });
+      out += `<button class="mk mkclu" data-key="${C().esc(head.id)}" data-sev="${sev}" data-x="${head.x}" data-y="${head.y}" data-z="${head.z || ''}" data-bimid="${guidOf(head.asset) || head.bimId || ''}" data-asset="${C().esc(head.asset || '')}"${mkStyle(head.x, head.y, head.id)} data-act="mkClu" data-alarm="${head.id}" data-n="${g.length}" data-sel="${isSel(E, head.asset, loc) ? 1 : 0}"
+        aria-label="${C().esc(E.t('alarmsN', { n: g.length }))}" data-tip="${C().esc(eqName(E, head.asset) + ' · ' + E.t('cluTip',{n:g.length}))}">${g.length}</button>`;
     });
     /* A dot only where something is in alarm. Healthy equipment stays unmarked.
        Several register rows can share one model element: one dot each. */
@@ -90,15 +104,17 @@ window.EKO_V = (function(){
     return `<div class="mklayer"${cacheOK && pts.length ? ' data-proj="1"' : ''}>${out}</div>`;
   }
   const marker = (E, a, where) =>
-    `<button class="mk" data-key="${C().esc(a.id)}" data-x="${a.x}" data-y="${a.y}" data-z="${a.z || ''}" data-bimid="${guidOf(a.asset) || a.bimId || ''}" data-asset="${C().esc(a.asset || '')}" data-act="mkOpen" data-alarm="${a.id}"${mkStyle(a.x, a.y, a.id)}
+    `<button class="mk" data-key="${C().esc(a.id)}" data-sev="${sevOf(a)}" data-x="${a.x}" data-y="${a.y}" data-z="${a.z || ''}" data-bimid="${guidOf(a.asset) || a.bimId || ''}" data-asset="${C().esc(a.asset || '')}" data-act="mkOpen" data-alarm="${a.id}"${mkStyle(a.x, a.y, a.id)}
        data-sel="${isSel(E, a.asset, where) ? 1 : 0}" data-pulse="${E.state.mkPulse===a.id?1:0}" aria-label="${C().esc(a.asset)}" data-tip="${C().esc(eqName(E, a.asset))}">
-       ${C().sevGlyph(a.sev, !!a.ack, 16, true)}</button>`;
+       ${C().sevGlyph(sevOf(a), !!a.ack, 16, true)}</button>`;
   const assetMarker = (E, s, g) => {
     const esc = C().esc, tip = eqName(E, s.id), key = 'as:' + s.id, sel = isSel(E, s.id, g);
     /* the same alarm rule the engine paints the model with, so dot and model agree */
     const HE = window.EKO_HOST_ENGINE, alarm = HE && HE.isAlarmed ? HE.isAlarmed(g) : s.st === 'alarm';
+    let sev = 'critical', best = 9;
+    (s.alarms || []).forEach(id => { const a = E.alarm(id); if (!a) return; const bucket = sevOf(a); const r = SEV_RANK[bucket] ?? 9; if (r < best) { best = r; sev = bucket; } });
     return `<button class="mk mkasset" data-key="${esc(key)}" data-bimid="${esc(g)}" data-asset="${esc(s.id)}" data-act="mkAsset"${mkStyle(null, null, key)}
-       data-st="${alarm ? 'alarm' : 'ok'}" data-sel="${sel ? 1 : 0}" aria-pressed="${sel}"
+       data-st="${alarm ? 'alarm' : 'ok'}" data-sev="${alarm ? esc(sev) : ''}" data-sel="${sel ? 1 : 0}" aria-pressed="${sel}"
        aria-label="${esc(tip)}" data-tip="${esc(tip)}"><i aria-hidden="true"></i></button>`;
   };
   const chipLayer = (chips) =>

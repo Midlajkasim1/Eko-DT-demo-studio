@@ -229,7 +229,13 @@
   z-index: 11; /* alarm markers (12) stay on top where they overlap */
 }
 .dashboard-native-container .mk.mkasset[data-st="alarm"] {
-  color: #ef4444;
+  color: var(--sevCrit);
+}
+.dashboard-native-container .mk.mkasset[data-sev="high"] {
+  color: #F08A3C;
+}
+.dashboard-native-container .mk.mkasset[data-sev="medium"] {
+  color: #C4B03A;
 }
 .dashboard-native-container .mk.mkasset i {
   display: block;
