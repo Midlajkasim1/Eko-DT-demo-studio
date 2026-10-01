@@ -900,6 +900,61 @@ window.EKO_C = (function(){
     if (!fam) return { om: null, warranty: null };
     return { om: docRowData(fam.om), warranty: docRowData(fam.warranty) };
   }
+  /* Same name rules as readFcuPoints. A blank or Null point is left off the panel. */
+  function fcuFold(name) {
+    return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+  function fcuClean(value) {
+    if (value == null) return null;
+    const s = String(value).trim();
+    if (!s || s === '—' || s === '--' || s === 'N/A' || /^null$/i.test(s)) return null;
+    return s;
+  }
+  function fcuNumber(raw) {
+    const m = String(raw).replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
+    if (!m) return null;
+    const n = parseFloat(m[0]);
+    return Number.isFinite(n) ? n : null;
+  }
+  function fcuShown(raw, unit) {
+    if (!raw) return null;
+    const upper = raw.trim().toUpperCase();
+    if (upper === 'T' || upper === 'TRUE' || upper === 'ON' || upper === 'RUN' || upper === 'RUNNING') return 'On';
+    if (upper === 'F' || upper === 'FALSE' || upper === 'OFF' || upper === 'STOP' || upper === 'STOPPED') return 'Off';
+    const n = fcuNumber(raw);
+    if (n != null && unit && raw.indexOf(unit) === -1 && !/[a-zA-Z°]/.test(raw)) {
+      const text = Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10);
+      return text + unit;
+    }
+    return raw;
+  }
+  function fcuFind(points, test) {
+    for (let i = 0; i < points.length; i++) {
+      if (test(fcuFold(points[i] && points[i].navName))) return points[i];
+    }
+    return null;
+  }
+  function fcuPointRows(asset) {
+    const id = String(asset && asset.id || '').toUpperCase();
+    const type = String(asset && asset.typeEn || '').toUpperCase();
+    if (id.indexOf('FCU') !== 0 && type.indexOf('FCU') === -1) return '';
+    const points = (asset && asset.points) || [];
+    if (!points.length) return '';
+    const zone = fcuFind(points, k => k.indexOf('zonetemp') !== -1 && k.indexOf('set') === -1 && !/sp$/.test(k));
+    const pos = fcuFind(points, k => k.indexOf('coolingvalvepos') !== -1 || (k.indexOf('valve') !== -1 && k.indexOf('pos') !== -1 && k.indexOf('cmd') === -1));
+    const cmd = fcuFind(points, k => k.indexOf('coolingvalvecmd') !== -1 || (k.indexOf('valve') !== -1 && (k.indexOf('cmd') !== -1 || k.indexOf('command') !== -1)));
+    const speed = fcuFind(points, k => k.indexOf('fanspeed') !== -1);
+    const run = fcuFind(points, k => k.indexOf('fanrun') !== -1 || k === 'fanstatus');
+    const rows = [
+      ['ZONE_TEMP', fcuShown(fcuClean(zone && zone.currentValue), ' °C')],
+      ['COOLING_VALVE_POS', fcuShown(fcuClean(pos && pos.currentValue), ' %')],
+      ['COOLING_VALVE_CMD', fcuShown(fcuClean(cmd && cmd.currentValue), ' %')],
+      ['FAN_SPEED_MODE', fcuShown(fcuClean(speed && speed.currentValue), ' %')],
+      ['FAN_RUN_STS', fcuShown(fcuClean(run && run.currentValue), '')],
+    ].filter(row => row[1]);
+    if (!rows.length) return '';
+    return rows.map(row => `<div class="aprow"><dt>${esc(row[0])}</dt><dd>${esc(row[1])}</dd></div>`).join('');
+  }
   function assetPanel(E){
     const id = E.state.assetSel;
     if(!id) return '';
@@ -925,7 +980,9 @@ window.EKO_C = (function(){
     const fullOn = E.disclose('full');
     const tr7 = r.trend7 && Array.isArray(r.trend7.vals) && r.trend7.vals.length >= 2 ? r.trend7 : null;
     const reason = r.st === 'stale' ? 'dgNoTrend.stale' : (r.trendKind === 'state' ? 'dgNoTrend.state' : 'dgNoTrend.none');
+    const fcuRows = fcuPointRows(r);
     const full = `<div class="apfull"><div class="row gap8"><h4 class="tLbl grow">${esc(t('apFullT'))}</h4><button class="statlink" data-act="disclose" data-k="full" aria-expanded="${fullOn}">${esc(t(fullOn ? 'hideFull' : 'discloseFull'))}</button></div>
+      ${fcuRows}
       ${fullOn ? (tr7 ? (() => { const p = window.ekoTrend(tr7.vals, 240, 56); const lo = Math.min(...tr7.vals), hi = Math.max(...tr7.vals);
         return `<p class="tCap">${esc(trP(tr7.point))} · ${esc(t('apTrendPts', { n: tr7.vals.length }))} · ${lo}–${hi} ${esc(tr7.unit || '')}</p>
         <div class="systrend"><svg viewBox="0 0 240 56" preserveAspectRatio="none"><path d="${p.area}" fill="var(--accT)"/><path d="${p.line}" fill="none" stroke="var(--acc)" stroke-width="1.5"/></svg></div>
