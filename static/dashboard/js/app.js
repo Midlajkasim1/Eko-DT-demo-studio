@@ -818,7 +818,7 @@
       ov.querySelector('.wmaxx').focus();
     },
     wmaxClose(){ const ov = document.getElementById('wmaxov'); if(ov) ov.remove(); },
-    /* O&M and warranty. The card stays on this server; Open large is the only new tab. */
+    /* O&M and warranty. The card stays on this server; the new-tab icon is the only one that leaves it. */
     docOpen(el){
       let ref = '';
       try {
@@ -829,6 +829,8 @@
       if (!/^@p:[A-Za-z0-9_]+:r:[0-9a-fA-F-]+$/.test(ref)) return;
       const url = '/api/fin/file?ref=' + encodeURIComponent(ref);
       const title = el.dataset.title || 'PDF';
+      const dl = C.esc(E.t('docDownload'));
+      const tab = C.esc(E.t('docOpenLarge'));
       ACTS.docClose();
       const ov = document.createElement('div');
       ov.id = 'docov';
@@ -836,8 +838,8 @@
         <div class="dochead">
           <h2 class="doctitle">${C.esc(title)}</h2>
           <div class="docacts">
-            <a class="btnG" href="${C.esc(url)}&amp;download=1" download>${C.esc(E.t('docDownload'))}</a>
-            <a class="btnG" href="${C.esc(url)}" target="_blank" rel="noopener noreferrer">${C.esc(E.t('docOpenLarge'))}</a>
+            <a class="iconbtn tipU" href="${C.esc(url)}&amp;download=1" download data-tip="${dl}" aria-label="${dl}">${C.icon('download', 15)}</a>
+            <a class="iconbtn tipU" href="${C.esc(url)}" target="_blank" rel="noopener noreferrer" data-tip="${tab}" aria-label="${tab}">${C.icon('external', 15)}</a>
           </div>
           <button type="button" class="wmaxx docx" data-act="docClose" aria-label="${C.esc(E.t('close'))}">✕</button>
         </div>

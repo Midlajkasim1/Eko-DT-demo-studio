@@ -469,7 +469,7 @@ window.EKO_I18N.en = {
   "engView": "Engineering view",
   "openLarge": "Open large view",
   "docDownload": "Download",
-  "docOpenLarge": "Open large",
+  "docOpenLarge": "Open in a new tab",
   "unlockedW": "Unlocked",
   "lifeSafety": "Life safety points are never controllable from EKO.",
   "engFoot": "Click any commandable point to set an override \u00b7 Life safety points are never controllable from EKO.",
