@@ -6,6 +6,7 @@ Also serves the compiled viewer app from the 'static/' directory.
 """
 
 import asyncio
+import copy
 import json
 import mimetypes
 import os
@@ -37,10 +38,84 @@ from fin_client import (
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
 with open(CONFIG_PATH, "r") as f:
-    CONFIG = json.load(f)
+    BASE_CONFIG = json.load(f)
+
+# CONFIG is what the polling loops and parsers read. It starts as the file defaults and
+# is replaced by BASE_CONFIG overlaid with the open project's settings (see below), so
+# config.json stays the fallback for anything a project does not set itself.
+CONFIG = copy.deepcopy(BASE_CONFIG)
 
 PROJECT_NAME = CONFIG["project_name"]
 FIN_SERVER_URL = CONFIG.get("fin_server_url", "https://localhost")
+
+# project.json `apiSettings` key -> config.json key, for settings that replace the value whole
+PROJECT_STR_SETTINGS = {
+    "finProjectName": "project_name",
+    "finBaseUrl": "fin_server_url",
+    "finDisplayName": "display_name",
+}
+PROJECT_DICT_SETTINGS = {
+    "finLivePoints": "live_point_ids",
+    "finEndpoints": "power_endpoints",
+    "finEquipmentClasses": "equipment_classes",
+    "finMeterProfile": "meter_profile",
+    "finSeverityBands": "severity_bands",
+}
+
+
+def project_overrides(settings: Optional[dict]) -> dict:
+    """The config.json keys a project's apiSettings replaces, with the values it supplies.
+
+    Missing, blank or wrongly typed values are left out, so the default stays.
+    Only known keys are read: nothing else in apiSettings (weather key, dashboard
+    layout) reaches the backend config.
+    """
+    out: dict = {}
+    if not isinstance(settings, dict):
+        return out
+    for src, dst in PROJECT_STR_SETTINGS.items():
+        value = settings.get(src)
+        if isinstance(value, str) and value.strip():
+            out[dst] = value.strip()
+    for src, dst in PROJECT_DICT_SETTINGS.items():
+        value = settings.get(src)
+        if isinstance(value, dict) and value:
+            out[dst] = value
+    interval = settings.get("finInterval")
+    if isinstance(interval, (int, float)) and not isinstance(interval, bool) and interval > 0:
+        out["polling.live_ms"] = interval
+    return out
+
+
+def merge_project_settings(base: dict, settings: Optional[dict]) -> dict:
+    """Overlay a project's apiSettings onto the config.json defaults.
+
+    A project value replaces the default whole (never a key-by-key merge, so one
+    site's point IDs cannot leak into another's).
+    """
+    merged = copy.deepcopy(base)
+    for key, value in project_overrides(settings).items():
+        if key == "polling.live_ms":
+            merged["polling"] = {**(merged.get("polling") or {}), "live_ms": value}
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
+
+
+# Which project the active configuration belongs to (None = none identified), and which
+# config.json keys that project replaces. Lets a client confirm what the backend is serving.
+ACTIVE_PROJECT_ID: Optional[str] = None
+ACTIVE_OVERRIDES: list = []
+
+
+def apply_project_settings(settings: Optional[dict], project_id: Optional[str] = None) -> None:
+    """Make `settings` the active configuration; None restores the config.json defaults."""
+    global CONFIG, PROJECT_NAME, FIN_SERVER_URL, ACTIVE_PROJECT_ID, ACTIVE_OVERRIDES
+    CONFIG = merge_project_settings(BASE_CONFIG, settings)
+    PROJECT_NAME = CONFIG["project_name"]
+    FIN_SERVER_URL = CONFIG.get("fin_server_url", "https://localhost")
+    ACTIVE_PROJECT_ID = project_id or None
+    ACTIVE_OVERRIDES = sorted(project_overrides(settings))
 
 
 def _documents_path() -> str:
@@ -477,6 +552,9 @@ def _compute_facility_services(realtime: dict) -> dict:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
+    # An exported project ships its own project.json beside this file; its settings
+    # become the active configuration, with config.json as the fallback
+    apply_project_settings(*_bundled_project())
     yield
     # Cleanup
     global polling_tasks, client
@@ -491,6 +569,45 @@ def _cancel_polling():
         if not task.done():
             task.cancel()
     polling_tasks = []
+
+
+def _start_polling():
+    global polling_tasks
+    polling_tasks = [
+        asyncio.create_task(realtime_loop()),
+        asyncio.create_task(live_loop()),
+    ]
+
+
+def _reset_caches():
+    """Drop data polled under the previous configuration so it is never served for the next."""
+    global cached_equip_data, cached_power_data, cached_building_data, cached_sensor_avg
+    global cached_power_history, cached_fdd_summary, cached_meter_data, cached_alarm_data
+    global cached_facility
+    cached_equip_data = {}
+    cached_power_data = {}
+    cached_building_data = {}
+    cached_sensor_avg = {"temp": None, "humidity": None, "co2": None}
+    cached_power_history = {}
+    cached_fdd_summary = []
+    cached_meter_data = {}
+    cached_alarm_data = {}
+    cached_facility = {}
+
+
+def _bundled_project() -> tuple[Optional[dict], Optional[str]]:
+    """(apiSettings, projectId) from the project.json exported next to this file, if any."""
+    try:
+        with open(PROJECT_JSON, "r", encoding="utf-8") as handle:
+            meta = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None, None
+    if not isinstance(meta, dict):
+        return None, None
+    settings = meta.get("apiSettings")
+    project_id = meta.get("projectId")
+    return (settings if isinstance(settings, dict) else None,
+            project_id if isinstance(project_id, str) else None)
 
 
 app = FastAPI(
@@ -531,6 +648,14 @@ class LoginRequest(BaseModel):
     password: str
     server_url: Optional[str] = None
     project_name: Optional[str] = None
+    # The open project's apiSettings (point mappings, severity, ...). Never credentials.
+    settings: Optional[dict] = None
+    project_id: Optional[str] = None
+
+
+class ProjectSettingsRequest(BaseModel):
+    settings: dict
+    project_id: Optional[str] = None
 
 
 class StatusResponse(BaseModel):
@@ -545,7 +670,12 @@ class StatusResponse(BaseModel):
 @app.post("/api/fin/login")
 async def login(req: LoginRequest):
     """Authenticate with FIN server using SCRAM-SHA-256."""
-    global client, polling_tasks, FIN_SERVER_URL, PROJECT_NAME
+    global client, FIN_SERVER_URL, PROJECT_NAME
+
+    # Settings sent with the login belong to the project being opened; without them the
+    # configuration already active (bundled project or config.json) stays in force
+    if req.settings is not None:
+        apply_project_settings(req.settings, req.project_id)
 
     server_url = req.server_url or FIN_SERVER_URL
     project = req.project_name or PROJECT_NAME
@@ -555,6 +685,7 @@ async def login(req: LoginRequest):
     PROJECT_NAME = project
 
     _cancel_polling()
+    _reset_caches()
 
     # Close existing client
     if client:
@@ -566,15 +697,60 @@ async def login(req: LoginRequest):
     if not success:
         raise HTTPException(status_code=401, detail="Authentication failed")
 
-    polling_tasks = [
-        asyncio.create_task(realtime_loop()),
-        asyncio.create_task(live_loop()),
-    ]
+    _start_polling()
 
     return {
         "status": "success",
         "message": f"Authenticated to {server_url} as {req.username}",
         "project": project,
+    }
+
+
+@app.post("/api/fin/project-settings")
+async def set_project_settings(req: ProjectSettingsRequest):
+    """Switch the live session to another project's FIN configuration, without a new sign-in.
+
+    Needs an authenticated session, since it changes what the shared session polls.
+    The FIN server cannot change here — that needs a fresh sign-in, so it is reported.
+    """
+    global FIN_SERVER_URL
+    _require_client()
+
+    apply_project_settings(req.settings, req.project_id)
+    wanted_url = str(req.settings.get("finBaseUrl") or "").strip().rstrip("/")
+    reconnect_required = bool(wanted_url) and wanted_url != client.base_url
+    # The session is bound to the server it signed in to; keep reporting that one
+    FIN_SERVER_URL = client.base_url
+    client.project_name = PROJECT_NAME
+    # Rows read for the previous project feed /his-points and the alarm views until the next poll
+    client.last_alarm_rows = []
+    client.last_point_rows = []
+
+    _cancel_polling()
+    _reset_caches()
+    _start_polling()
+
+    return {
+        "status": "success",
+        "project": PROJECT_NAME,
+        "reconnect_required": reconnect_required,
+    }
+
+
+@app.get("/api/fin/project-settings")
+async def get_project_settings():
+    """The configuration the backend is serving right now, and where each block comes from.
+
+    Needs a session: it returns point IDs. `source` is "project" when the open project
+    supplies the block and "default" when config.json does.
+    """
+    _require_client()
+    blocks = ["live_point_ids", "power_endpoints", "equipment_classes", "meter_profile", "severity_bands"]
+    return {
+        "project_id": ACTIVE_PROJECT_ID,
+        "project_name": PROJECT_NAME,
+        "config": {key: CONFIG.get(key) for key in blocks},
+        "source": {key: "project" if key in ACTIVE_OVERRIDES else "default" for key in blocks},
     }
 
 
@@ -820,6 +996,7 @@ async def get_fin_file(ref: str, download: int = 0):
 async def get_config():
     """Get the current config (without sensitive data)."""
     return {
+        "project_id": ACTIVE_PROJECT_ID,
         "project_name": PROJECT_NAME,
         "server_url": FIN_SERVER_URL,
         "display_name": CONFIG.get("display_name", PROJECT_NAME),

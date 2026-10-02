@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useFinStore } from '@/store/useFinStore'
+import { useProjectStore } from '@/store/useProjectStore'
 
 export function FinLoginPanel() {
   const isConnected = useFinStore(s => s.isConnected)
@@ -16,10 +17,20 @@ export function FinLoginPanel() {
   const [projectName, setProjectName] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
 
+  const syncProjectSettings = useFinStore(s => s.syncProjectSettings)
+  const projectId = useProjectStore(s => s.currentProject?.projectId)
+  const apiSettings = useProjectStore(s => s.currentProject?.apiSettings)
+
   // Check backend status on mount
   useEffect(() => {
     fetchStatus()
   }, [fetchStatus])
+
+  // A connected session follows the open project: switching projects or saving
+  // Dashboard Settings points the backend at that project's FIN configuration
+  useEffect(() => {
+    if (isConnected) syncProjectSettings()
+  }, [isConnected, projectId, apiSettings, syncProjectSettings])
 
   const handleLogin = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()

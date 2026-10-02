@@ -2,6 +2,22 @@ import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useProjectStore } from '@/store/useProjectStore'
 import { writeJson } from '@/lib/projectDb'
+import {
+  KeyValueEditor,
+  MappingSection,
+  MeterProfileEditor,
+  SeverityEditor,
+  type EditorState,
+} from '@/components/project/FinMappingEditors'
+import { SITE_FIN_EQUIPMENT_CLASSES, SITE_FIN_METER_PROFILE, SITE_FIN_SEVERITY_BANDS } from '@/constants/finDefaults'
+import {
+  MAPPING_FIELDS,
+  MAPPING_TITLES,
+  applyMappingValues,
+  mappingProblem,
+  type MappingField,
+} from '@/lib/finSettings'
+import type { JsonObject } from '@/lib/mappingRows'
 import type { ProjectApiSettings } from '@/types'
 
 const DEFAULT_FIN_LIVE_POINTS = {
@@ -97,6 +113,56 @@ interface ProjectSettingsModalProps {
   onClose: () => void
 }
 
+// Connection values the modal starts from. A project that never set them is not given them on save.
+const CONNECTION_DEFAULTS = {
+  finBaseUrl: 'https://localhost',
+  finProjectName: '',
+  finInterval: 5000,
+  weatherApiKey: '',
+  weatherLat: 24.469,
+  weatherLon: 54.358,
+}
+
+type MappingStates = Record<MappingField, EditorState>
+
+const mappingStatesFrom = (s: ProjectApiSettings): MappingStates =>
+  Object.fromEntries(MAPPING_FIELDS.map(f => [f, { value: s[f] as JsonObject | undefined }])) as MappingStates
+
+// What each Data Mapping block controls, and the presets that can be copied into it
+const MAPPING_SECTIONS: { field: MappingField; hint: string; presets: { label: string; value: object }[] }[] = [
+  {
+    field: 'finLivePoints',
+    hint: 'Maps dashboard metrics (e.g. total_power) to FIN point IDs. Use {project} for the FIN project name.',
+    presets: [
+      { label: 'Load Default (EkoMedical)', value: DEFAULT_FIN_LIVE_POINTS },
+      { label: 'Load Marsa Al Arab', value: SITE_FIN_LIVE_POINTS },
+    ],
+  },
+  {
+    field: 'finEndpoints',
+    hint: 'Maps history queries (e.g. Total_Power_Consumption_his) to FIN API expressions.',
+    presets: [
+      { label: 'Load Default (EkoMedical)', value: DEFAULT_FIN_ENDPOINTS },
+      { label: 'Load Marsa Al Arab', value: SITE_FIN_ENDPOINTS },
+    ],
+  },
+  {
+    field: 'finEquipmentClasses',
+    hint: 'Which equipment tags count as plant systems or meters, and the order used to pick an equipment type.',
+    presets: [{ label: 'Load Marsa Al Arab', value: SITE_FIN_EQUIPMENT_CLASSES }],
+  },
+  {
+    field: 'finMeterProfile',
+    hint: 'The name prefix that identifies power meters, and the point-name aliases for each meter metric.',
+    presets: [{ label: 'Load Marsa Al Arab', value: SITE_FIN_METER_PROFILE }],
+  },
+  {
+    field: 'finSeverityBands',
+    hint: 'How a FIN alarm priority maps to critical / warning / info. "desc": a higher number is more severe.',
+    presets: [{ label: 'Load Marsa Al Arab', value: SITE_FIN_SEVERITY_BANDS }],
+  },
+]
+
 const DEFAULT_DASHBOARD_CONFIG = {
   navButtons: [
     { id: "floor-nav", icon: "bx bx-show", tooltip: "Navigate Floors", action: "toggle-panel", panel: "floorIsolation" },
@@ -143,19 +209,24 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   const [activeTab, setActiveTab] = useState<'nav'|'info'|'side'|'fin'|'data'>('fin')
   
   const [settings, setSettings] = useState<ProjectApiSettings>({
-    finBaseUrl: 'https://localhost',
-    finProjectName: '',
-    finInterval: 5000,
-    weatherApiKey: '',
-    weatherLat: 24.469,
-    weatherLon: 54.358,
+    ...CONNECTION_DEFAULTS,
     ...DEFAULT_DASHBOARD_CONFIG
   })
   const [saving, setSaving] = useState(false)
+  // What each Data Mapping editor last reported (undefined value = not set). `revs` remounts an
+  // editor when its content is replaced from outside: opening a project, a preset or Clear.
+  const [mappings, setMappings] = useState<MappingStates>(() => mappingStatesFrom({}))
+  const [revs, setRevs] = useState<Record<MappingField, number>>(
+    () => Object.fromEntries(MAPPING_FIELDS.map(f => [f, 0])) as Record<MappingField, number>
+  )
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
     if (visible && currentProject) {
       const savedSettings = currentProject.apiSettings || {}
+      setMappings(mappingStatesFrom(savedSettings))
+      setRevs(prev => Object.fromEntries(MAPPING_FIELDS.map(f => [f, prev[f] + 1])) as typeof prev)
+      setSaveError(null)
       const mergedSettings: any = { 
         ...DEFAULT_DASHBOARD_CONFIG,
         ...savedSettings 
@@ -171,45 +242,84 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
         }
       })
 
-      setSettings(prev => ({ 
-        ...prev, 
-        ...mergedSettings 
-      }))
+      // Start from this project's own settings. Carrying the previous project's state
+      // over (the modal stays mounted) would leak its mappings into this one on save.
+      setSettings({ ...CONNECTION_DEFAULTS, ...mergedSettings })
     }
-  }, [visible, currentProject])
+    // Re-read on open or project switch only; other changes to the project (a new thumbnail)
+    // must not wipe edits in progress
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, currentProject?.projectId])
 
   if (!visible || !currentProject) return null
 
+  // isFin only decides FIN-specific side effects below; every settings tab is for every project
+  const isFin = !!currentProject.isFinProject
+
+  const setMapping = (field: MappingField, state: EditorState) => {
+    const problem = state.value ? mappingProblem(field, state.value) : null
+    setMappings(prev => ({ ...prev, [field]: { value: state.value, error: state.error ?? problem ?? undefined } }))
+  }
+  // A preset or Clear replaces the editor's content, so it is remounted to show it
+  const loadMapping = (field: MappingField, value: JsonObject | undefined) => {
+    setMapping(field, { value })
+    setRevs(prev => ({ ...prev, [field]: prev[field] + 1 }))
+  }
+
   const handleSave = async () => {
     if (!folderHandle) return
+    // Nothing malformed is written; say which sections need fixing
+    const invalid = MAPPING_FIELDS.filter(f => mappings[f].error)
+    if (invalid.length) {
+      setActiveTab('data')
+      setSaveError(`Not saved. Fix ${invalid.map(f => MAPPING_TITLES[f]).join(', ')}.`)
+      return
+    }
+    const validSettings = applyMappingValues(
+      settings,
+      Object.fromEntries(MAPPING_FIELDS.map(f => [f, mappings[f].value]))
+    )
+    if (!isFin) {
+      // Opening and saving must not stamp a normal project with the defaults the modal starts from
+      const saved = (currentProject.apiSettings || {}) as Record<string, unknown>
+      const out = validSettings as Record<string, unknown>
+      for (const [key, def] of Object.entries(CONNECTION_DEFAULTS)) {
+        if (!(key in saved) && out[key] === def) delete out[key]
+      }
+    }
+    setSaveError(null)
     setSaving(true)
     try {
       const updatedMeta = {
         ...currentProject,
-        apiSettings: settings,
+        apiSettings: validSettings,
         updatedAt: Date.now(),
       }
       await writeJson(folderHandle, 'project.json', updatedMeta)
       useProjectStore.setState({ currentProject: updatedMeta })
 
       // Always write api-config.json for FIN projects so the standalone viewer has it
-      if (currentProject.isFinProject) {
+      if (isFin) {
         const apiConfig = {
-          project_name: settings.finProjectName || currentProject.name,
-          fin_server_url: settings.finBaseUrl || 'https://localhost',
+          project_name: validSettings.finProjectName || currentProject.name,
+          fin_server_url: validSettings.finBaseUrl || 'https://localhost',
+          display_name: validSettings.finDisplayName,
           direct_mode: true, // Always true for FIN standalone viewer
-          polling_interval: settings.finInterval || 5000,
-          live_point_ids: settings.finLivePoints || {},
-          power_endpoints: settings.finEndpoints || {},
+          polling_interval: validSettings.finInterval || 5000,
+          live_point_ids: validSettings.finLivePoints || {},
+          power_endpoints: validSettings.finEndpoints || {},
+          equipment_classes: validSettings.finEquipmentClasses,
+          meter_profile: validSettings.finMeterProfile,
+          severity_bands: validSettings.finSeverityBands,
           weather: {
-            lat: settings.weatherLat ?? 24.469,
-            lon: settings.weatherLon ?? 54.358,
-            apiKey: settings.weatherApiKey || '88214bff7aa566e9f6ff1ba5db38f65f',
+            lat: validSettings.weatherLat ?? 24.469,
+            lon: validSettings.weatherLon ?? 54.358,
+            apiKey: validSettings.weatherApiKey || '88214bff7aa566e9f6ff1ba5db38f65f',
           },
-          navButtons: settings.navButtons,
-          leftCards: settings.leftCards,
-          rightCards: settings.rightCards,
-          sideButtons: settings.sideButtons,
+          navButtons: validSettings.navButtons,
+          leftCards: validSettings.leftCards,
+          rightCards: validSettings.rightCards,
+          sideButtons: validSettings.sideButtons,
         }
         await writeJson(folderHandle, 'api-config.json', apiConfig)
       }
@@ -283,6 +393,10 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 <input type="text" value={settings.finProjectName || ''} onChange={e => update('finProjectName', e.target.value)} />
               </div>
               <div className="ds-field">
+                <label>Display Name</label>
+                <input type="text" value={settings.finDisplayName || ''} onChange={e => update('finDisplayName', e.target.value)} placeholder="Shown on the sign-in screen" />
+              </div>
+              <div className="ds-field">
                 <label>Polling Interval (ms)</label>
                 <input type="number" value={settings.finInterval || 5000} onChange={e => update('finInterval', parseInt(e.target.value) || 5000)} />
               </div>
@@ -305,8 +419,9 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
             </div>
           )}
 
-          {activeTab === 'data' && (
-            <div className="ds-pane">
+          {/* Kept mounted (just hidden) so rows being edited survive a switch of tab */}
+          {(
+            <div className="ds-pane" style={activeTab === 'data' ? undefined : { display: 'none' }}>
               <h3 className="ds-section-title">Standalone Mode (Direct API)</h3>
               <p className="ds-hint">Enable this to bypass the Python backend and fetch data directly from FIN (useful when hosting this viewer inside the FIN framework).</p>
               <div className="ds-field">
@@ -321,75 +436,35 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 </label>
               </div>
 
-              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>FIN Live Points Mapping</h3>
-              <p className="ds-hint">Map your dashboard metrics (e.g. total_power) to specific FIN point IDs.</p>
-              
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                <button 
-                  className="ds-btn ds-btn-secondary" 
-                  style={{ padding: '4px 12px', fontSize: '12px' }}
-                  onClick={() => update('finLivePoints', DEFAULT_FIN_LIVE_POINTS)}
-                >
-                  Load Default (EkoMedical)
-                </button>
-                <button 
-                  className="ds-btn ds-btn-secondary" 
-                  style={{ padding: '4px 12px', fontSize: '12px' }}
-                  onClick={() => update('finLivePoints', SITE_FIN_LIVE_POINTS)}
-                >
-                  Load Marsa Al Arab
-                </button>
-              </div>
-
-              <div className="ds-field">
-                <textarea 
-                  rows={12}
-                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '10px 12px', borderRadius: '6px', fontSize: '13px', fontFamily: 'monospace' }}
-                  value={settings.finLivePoints ? JSON.stringify(settings.finLivePoints, null, 2) : JSON.stringify(DEFAULT_FIN_LIVE_POINTS, null, 2)}
-                  onChange={e => {
-                    try {
-                      update('finLivePoints', JSON.parse(e.target.value))
-                    } catch(err) {
-                      // ignore parse errors while typing
-                    }
-                  }}
-                />
-              </div>
-
-              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>FIN Endpoints Mapping</h3>
-              <p className="ds-hint">Map history queries (e.g. AHU_Usage_his) to API expressions.</p>
-
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                <button 
-                  className="ds-btn ds-btn-secondary" 
-                  style={{ padding: '4px 12px', fontSize: '12px' }}
-                  onClick={() => update('finEndpoints', DEFAULT_FIN_ENDPOINTS)}
-                >
-                  Load Default (EkoMedical)
-                </button>
-                <button 
-                  className="ds-btn ds-btn-secondary" 
-                  style={{ padding: '4px 12px', fontSize: '12px' }}
-                  onClick={() => update('finEndpoints', SITE_FIN_ENDPOINTS)}
-                >
-                  Load Marsa Al Arab
-                </button>
-              </div>
-
-              <div className="ds-field">
-                <textarea 
-                  rows={12}
-                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '10px 12px', borderRadius: '6px', fontSize: '13px', fontFamily: 'monospace' }}
-                  value={settings.finEndpoints ? JSON.stringify(settings.finEndpoints, null, 2) : JSON.stringify(DEFAULT_FIN_ENDPOINTS, null, 2)}
-                  onChange={e => {
-                    try {
-                      update('finEndpoints', JSON.parse(e.target.value))
-                    } catch(err) {
-                      // ignore parse errors while typing
-                    }
-                  }}
-                />
-              </div>
+              {MAPPING_SECTIONS.map(section => {
+                const { field } = section
+                const editorKey = `${currentProject.projectId}-${field}-${revs[field]}`
+                const onChange = (state: EditorState) => setMapping(field, state)
+                return (
+                  <MappingSection
+                    key={field}
+                    title={MAPPING_TITLES[field]}
+                    hint={section.hint}
+                    presets={section.presets}
+                    hasValue={!!mappings[field].value}
+                    error={mappings[field].error}
+                    onLoad={value => loadMapping(field, value)}
+                  >
+                    {field === 'finMeterProfile' ? (
+                      <MeterProfileEditor key={editorKey} value={mappings[field].value} onChange={onChange} />
+                    ) : field === 'finSeverityBands' ? (
+                      <SeverityEditor key={editorKey} value={mappings[field].value} onChange={onChange} />
+                    ) : (
+                      <KeyValueEditor
+                        key={editorKey}
+                        value={mappings[field].value}
+                        kind={field === 'finEquipmentClasses' ? 'list' : 'string'}
+                        onChange={onChange}
+                      />
+                    )}
+                  </MappingSection>
+                )
+              })}
             </div>
           )}
 
@@ -493,6 +568,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
         </div>
 
         <div className="dashboard-settings-footer">
+          {saveError && <span style={{ color: 'var(--red)', fontSize: '12px', marginRight: 'auto' }}>{saveError}</span>}
           <button className="ds-btn ds-btn-secondary" onClick={onClose}>Cancel</button>
           <button className="ds-btn ds-btn-primary" onClick={handleSave} disabled={saving}>
             {saving ? 'Saving...' : 'Save Settings'}

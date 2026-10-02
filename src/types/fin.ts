@@ -86,4 +86,7 @@ export interface FinLoginRequest {
   password: string
   server_url?: string
   project_name?: string
+  /** The open project's FIN configuration, set by the store; never credentials */
+  settings?: Record<string, unknown>
+  project_id?: string
 }

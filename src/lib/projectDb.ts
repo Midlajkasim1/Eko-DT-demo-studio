@@ -587,10 +587,14 @@ export async function exportFinProjectAsZip(handle: FileSystemDirectoryHandle, m
   const apiConfig = {
     project_name: apiSettings.finProjectName || meta.name,
     fin_server_url: apiSettings.finBaseUrl || 'https://localhost',
+    display_name: apiSettings.finDisplayName,
     direct_mode: true, // Always true for FIN standalone viewer
     polling_interval: apiSettings.finInterval || 5000,
     live_point_ids: apiSettings.finLivePoints || {},
     power_endpoints: apiSettings.finEndpoints || {},
+    equipment_classes: apiSettings.finEquipmentClasses,
+    meter_profile: apiSettings.finMeterProfile,
+    severity_bands: apiSettings.finSeverityBands,
     weather: {
       lat: apiSettings.weatherLat ?? 24.469,
       lon: apiSettings.weatherLon ?? 54.358,
