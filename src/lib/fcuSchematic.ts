@@ -378,20 +378,25 @@ export function createFcuSchematic(localBox: THREE.Box3, modelMatrix: THREE.Matr
   const bladeDepth = Math.min(hz * 0.4, fanR * 0.95)
   const scroll = new THREE.CylinderGeometry(fanR * 1.05, fanR * 1.05, bladeDepth * 1.02, 32, 1, true)
   scroll.rotateX(Math.PI / 2)
-  const scrollMesh = add(scroll, housingMat)
-  scrollMesh.position.set(fanX, 0, 0)
+  // fanPivot rotates the entire blower 90° so the disc faces along X (parallel to the narrow end)
+  const fanPivot = new THREE.Group()
+  fanPivot.position.set(fanX, 0, 0)
+  fanPivot.rotation.y = Math.PI / 2
+  group.add(fanPivot)
+  const scrollMesh = add(scroll, housingMat, fanPivot)
+  scrollMesh.position.set(0, 0, 0)
   const motorLen = bladeDepth * 0.72
   const motor = new THREE.CylinderGeometry(fanR * 0.2, fanR * 0.25, motorLen, 16)
   motor.rotateX(Math.PI / 2)
-  const motorMesh = add(motor, housingMat)
-  motorMesh.position.set(fanX, 0, bladeDepth * 0.5 + motorLen * 0.42)
+  const motorMesh = add(motor, housingMat, fanPivot)
+  motorMesh.position.set(0, 0, bladeDepth * 0.5 + motorLen * 0.42)
   const flange = new THREE.CylinderGeometry(fanR * 0.3, fanR * 0.3, bladeDepth * 0.08, 16)
   flange.rotateX(Math.PI / 2)
-  const flangeMesh = add(flange, housingMat)
-  flangeMesh.position.set(fanX, 0, bladeDepth * 0.5)
+  const flangeMesh = add(flange, housingMat, fanPivot)
+  flangeMesh.position.set(0, 0, bladeDepth * 0.5)
 
   const rotor = new THREE.Group()
-  rotor.position.set(fanX, 0, 0)
+  rotor.position.set(0, 0, 0)
   const bladeShape = new THREE.Shape()
   const r0 = fanR * 0.3
   const r1 = fanR * 0.9
@@ -416,7 +421,7 @@ export function createFcuSchematic(localBox: THREE.Box3, modelMatrix: THREE.Matr
   const hub = new THREE.CylinderGeometry(fanR * 0.16, fanR * 0.16, bladeDepth * 0.55, 16)
   hub.rotateX(Math.PI / 2)
   add(hub, housingMat, rotor)
-  group.add(rotor)
+  fanPivot.add(rotor)
 
   const probeMat = metal(0xe7edf2, 0.82, 0.18)
   const probeX = -hx * 0.78
@@ -460,4 +465,3 @@ export function createFcuSchematic(localBox: THREE.Box3, modelMatrix: THREE.Matr
     },
   }
 }
-
