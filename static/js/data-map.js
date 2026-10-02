@@ -958,6 +958,7 @@
         cafm: "--",
         trend7: null,
         params: params,
+        points: eq.points || [],
         activity: [],
         spark7: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
       };

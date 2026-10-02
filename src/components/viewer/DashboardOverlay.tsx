@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import * as OBC from '@thatopen/components'
 import { useProjectStore } from '@/store/useProjectStore'
 import { useAppStore } from '@/store/useAppStore'
@@ -9,6 +10,8 @@ import { resetCameraToHome } from '@/lib/cameraUtils'
 import { disciplineOf, layersFor, layerShows } from '@/lib/modelDiscipline'
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
+import { createFcuSchematic, type FcuSchematic } from '@/lib/fcuSchematic'
+import { useFinStore } from '@/store/useFinStore'
 import type { ProjectApiSettings } from '@/types'
 
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
@@ -185,6 +188,31 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
        with the depth cleared first it shows through walls, pipes and slabs.
        The model's own materials are left alone. */
     const overlay = new THREE.Scene()
+    // Standard-material parts need lights. The ghost shader ignores them.
+    const fcuHemi = new THREE.HemisphereLight(0xf5f7fa, 0x7d858f, 0.42)
+    const fcuKey = new THREE.DirectionalLight(0xfff4ea, 1.55)
+    const fcuFill = new THREE.DirectionalLight(0xd7e0ea, 0.38)
+    const fcuAim = new THREE.Object3D()
+    const fcuAim2 = new THREE.Object3D()
+    fcuKey.target = fcuAim
+    fcuFill.target = fcuAim2
+    fcuKey.castShadow = false
+    fcuFill.castShadow = false
+    overlay.add(fcuHemi, fcuKey, fcuFill, fcuAim, fcuAim2)
+    const fcuAt = new THREE.Vector3()
+    const fcuCam = new THREE.Vector3()
+    const fcuRight = new THREE.Vector3()
+    const fcuUp = new THREE.Vector3(0, 1, 0)
+    let fcuEnv: THREE.Texture | null = null
+    try {
+      const pmrem = new THREE.PMREMGenerator(engine.world.renderer.three)
+      const room = new RoomEnvironment()
+      fcuEnv = pmrem.fromScene(room, 0.04).texture
+      overlay.environment = fcuEnv
+      overlay.environmentIntensity = 0.72
+      room.dispose()
+      pmrem.dispose()
+    } catch { /* the three lights above still shade the parts */ }
     // The nearest surface only: a depth-only pass, then the fill and edges on it
     const ghostDepth = new THREE.MeshBasicMaterial({
       colorWrite: false, side: THREE.DoubleSide,
@@ -228,12 +256,39 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     watchClipping(ghostFill)
     watchClipping(ghostEdge)
     let ghost: { group: THREE.Group; model: any } | null = null
+    let fcu: { schematic: FcuSchematic; assetId: string; bimId: string; last: number; synced: number } | null = null
+    const fcuAssetId = (asked: string, bimId: string): string | null => {
+      const norm = normAssetId(asked)
+      const rec = ASSET_BIM_MAPPING[norm] || ASSET_BIM_MAPPING[asked]
+      if (rec?.type === 'FCU') return norm
+      const hit = mappedList.find(m => m.bimId === bimId && (ASSET_BIM_MAPPING[m.id]?.type === 'FCU'))
+      return hit ? hit.id : null
+    }
+    const pointsFor = (assetId: string, bimId: string) => {
+      const want = fold(assetId)
+      const lists: any[] = []
+      const fin = useFinStore.getState().equipment
+      if (Array.isArray(fin)) lists.push(fin)
+      const dash = (window as any).DashboardData?.equipment
+      if (Array.isArray(dash)) lists.push(dash)
+      else if (Array.isArray(dash?.equipment)) lists.push(dash.equipment)
+      for (const list of lists) {
+        const eq = list.find((e: any) => e && (e.bimId === bimId || fold(String(e.name || '')) === want))
+        if (eq?.points?.length) return eq.points
+      }
+      return []
+    }
     const tintGhost = (tone: 'alarm' | 'healthy' | 'amber') => {
       const c = tone === 'alarm' ? ALARM : tone === 'amber' ? AMBER : HEALTHY
       ghostFill.uniforms.uColor.value.copy(c)
       ghostEdge.color.copy(c).multiplyScalar(0.45)   // a darker line of the same hue reads on light and dark styles
     }
     const removeGhost = () => {
+      if (fcu) {
+        fcu.schematic.dispose()
+        fcu = null
+      }
+      ghostFill.uniforms.uOpacity.value = 0.6
       if (!ghost) return
       ghost.group.removeFromParent()
       ghost.group.traverse((o: any) => o.geometry?.dispose())
@@ -242,9 +297,34 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     // Runs after every frame the viewer draws, whichever style drew it
     const drawGhost = () => {
       if (!ghost || !ghost.group.visible) return
+      if (fcu) {
+        const now = performance.now()
+        const dt = Math.min(0.05, (now - fcu.last) / 1000)
+        fcu.last = now
+        fcu.schematic.tick(dt)
+        if (now - fcu.synced > 400) {
+          fcu.synced = now
+          fcu.schematic.apply(pointsFor(fcu.assetId, fcu.bimId))
+        }
+      }
       const renderer = engine.world?.renderer?.three
       const camera = engine.world?.camera?.three
       if (!renderer || !camera) return
+      if (fcu) {
+        fcu.schematic.group.getWorldPosition(fcuAt)
+        fcuCam.copy(camera.position).sub(fcuAt)
+        if (fcuCam.lengthSq() < 1e-8) fcuCam.set(0, 0.4, 1)
+        fcuCam.normalize()
+        fcuRight.crossVectors(fcuCam, fcuUp)
+        if (fcuRight.lengthSq() < 1e-6) fcuRight.set(1, 0, 0)
+        else fcuRight.normalize()
+        fcuKey.position.copy(fcuAt).addScaledVector(fcuCam, 1.4).addScaledVector(fcuUp, 0.9).addScaledVector(fcuRight, 0.7)
+        fcuAim.position.copy(fcuAt)
+        fcuFill.position.copy(fcuAt).addScaledVector(fcuCam, 0.5).addScaledVector(fcuRight, -1.1).addScaledVector(fcuUp, -0.15)
+        fcuAim2.position.copy(fcuAt)
+        fcuAim.updateMatrixWorld()
+        fcuAim2.updateMatrixWorld()
+      }
       const autoClear = renderer.autoClear
       renderer.autoClear = false
       renderer.setRenderTarget(null)
@@ -259,7 +339,19 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ghost.group.matrixWorldNeedsUpdate = true
       ghost.group.visible = ghost.model.object.visible !== false
     }
-    const buildGhost = async (entry: Located, bimId: string, seq: number) => {
+    const mountFcu = (group: THREE.Group, entry: Located, assetId: string, bimId: string) => {
+      const schematic = createFcuSchematic(entry.localBox, entry.model.object.matrixWorld, group)
+      if (!schematic) return
+      group.add(schematic.group)
+      // Depth pass is the solid casing; it would hide the parts inside.
+      group.traverse((o) => {
+        if (o.userData?.ekoGhostDepth) o.visible = false
+      })
+      ghostFill.uniforms.uOpacity.value = 0.22
+      fcu = { schematic, assetId, bimId, last: performance.now(), synced: 0 }
+      schematic.apply(pointsFor(assetId, bimId))
+    }
+    const buildGhost = async (entry: Located, bimId: string, seq: number, assetId: string | null) => {
       let meshes: any[][] = []
       try { meshes = await entry.model.getItemsGeometry([entry.localId]) } catch { return }
       if (seq !== highlightSeq || colored?.bimId !== bimId) return   // a newer selection won
@@ -276,6 +368,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           const depth = new THREE.Mesh(geom, ghostDepth)
           const fill = new THREE.Mesh(geom, ghostFill)
           const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom, 25), ghostEdge)
+          depth.userData.ekoGhostDepth = true
           depth.renderOrder = 0
           fill.renderOrder = 1
           edges.renderOrder = 2
@@ -288,6 +381,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ghost = { group, model: entry.model }
       syncGhost()
       overlay.add(group)
+      if (seq === highlightSeq && colored?.bimId === bimId && assetId) mountFcu(group, entry, assetId, bimId)
     }
 
     /* Equipment is green or red. Anything else stays amber. */
@@ -393,7 +487,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const highlightAsset = async (assetIdOrBimId: string) => {
       const seq = ++highlightSeq
       const bimId = toBimId(assetIdOrBimId)
-      if (colored && colored.bimId === bimId && ghost) { syncColour(); return true }
+      const assetId = bimId ? fcuAssetId(assetIdOrBimId, bimId) : null
+      if (colored && colored.bimId === bimId && ghost) {
+        syncColour()
+        if (fcu && assetId) fcu.schematic.apply(pointsFor(assetId, bimId))
+        return true
+      }
       colored = null
       removeGhost()
       const entry = bimId ? await locate(bimId) : null
@@ -401,7 +500,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const tone = toneFor(assetIdOrBimId, bimId)
       colored = { bimId, tone }
       tintGhost(tone)
-      await buildGhost(entry, bimId, seq)
+      await buildGhost(entry, bimId, seq, assetId)
       return seq === highlightSeq && !!ghost
     }
 
@@ -745,6 +844,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ghostDepth.dispose()
       ghostFill.dispose()
       ghostEdge.dispose()
+      fcuEnv?.dispose()
       delete (window as any).EKO_HOST_ENGINE
     }
   }, [engineReady])
