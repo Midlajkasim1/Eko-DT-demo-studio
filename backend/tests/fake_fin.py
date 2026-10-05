@@ -31,6 +31,12 @@ def _equipment():
 
 class FakeFinClient:
     slow_realtime = False   # True: the first realtime read never returns during a test
+    # Names the fake FIN server does not know: reading them fails like an unknown project does
+    unknown_projects: set = set()
+    # Point IDs (with {project} resolved) that do not exist in the fake project. Every other ID does.
+    missing_points: set = set()
+    # Set to a status code to make every probe answer it (e.g. 500 for "cannot tell")
+    probe_status = None
 
     def __init__(self, base_url, project_name):
         self.base_url = base_url.rstrip("/")
@@ -54,6 +60,23 @@ class FakeFinClient:
         self.last_alarm_rows = [dict(ALARM_ROW)]
         self.last_point_rows = [{"id": {"val": "@p:x:r:1", "dis": "pt"}, "his": True, "navName": "pt"}]
         return _equipment()
+
+    async def fetch_probe(self, endpoint):
+        """The read-only probe the backend uses for validation, answered from the settings above."""
+        if FakeFinClient.probe_status:
+            return FakeFinClient.probe_status, ""
+        if self.project_name == "ghost" or self.project_name in FakeFinClient.unknown_projects:
+            return 404, ""
+        if "filter=equip" in endpoint:
+            return 200, 'ver:"3.0"\nid,dis\n@e1,"EQ-1"\n'
+        if "readById" in endpoint:
+            from urllib.parse import unquote
+            pid = unquote(endpoint).split("readById(@", 1)[1].rstrip(")")
+            # browser tests cannot reach the class attributes, so an ID ending ":999" never exists
+            if pid in FakeFinClient.missing_points or pid.endswith(":999"):
+                return 200, 'ver:"3.0" err dis:"UnknownRecErr"\nempty\n'
+            return 200, 'ver:"3.0"\nid,curVal\n@' + pid + ',1\n'
+        return 404, ""
 
     async def fetch_live_point(self, point_id_template):
         tail = point_id_template.rsplit(":", 1)[-1]

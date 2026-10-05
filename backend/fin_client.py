@@ -552,6 +552,20 @@ class FinScramClient:
             print(f"[FIN] Fetch error {url}: {e}")
             return None
 
+    async def fetch_probe(self, endpoint: str) -> tuple[Optional[int], Optional[str]]:
+        """GET that reports what FIN answered: (status, text), or (None, None) if FIN is unreachable.
+
+        Unlike fetch_api it never ends the session, so a caller can tell "FIN says this
+        record does not exist" from "the request failed".
+        """
+        url = endpoint if endpoint.startswith("http") else f"{self.base_url}{endpoint}"
+        try:
+            resp = await self.client.get(url, headers=self.auth_headers)
+            return resp.status_code, resp.text
+        except Exception as e:
+            print(f"[FIN] Probe error {url}: {e}")
+            return None, None
+
     def _resolve_endpoint(self, template: str) -> str:
         """Replace {project} placeholder in endpoint template."""
         return template.replace("{project}", self.project_name)

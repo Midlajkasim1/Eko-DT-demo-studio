@@ -47,15 +47,32 @@ export function FinLoginPanel() {
   }, [logout])
 
   if (isConnected) {
+    // false = signed in, but the project name did not resolve on this FIN server.
+    // null/undefined = not checked (e.g. an older backend): shown as before.
+    const notValidated = status?.project_validated === false
     return (
       <div className="fin-login-panel fin-connected">
         <div className="fin-status-badge">
-          <span className="fin-status-dot connected" />
-          <span className="fin-status-label">Connected</span>
+          <span className="fin-status-dot connected" style={notValidated ? { background: '#d9a400' } : undefined} />
+          <span className="fin-status-label">{notValidated ? 'Not validated' : 'FIN Connected'}</span>
         </div>
+        {status?.project_validated === true && (
+          <div className="fin-validated" style={{ fontSize: '12px', opacity: 0.85 }}>✓ Project validated</div>
+        )}
+        {notValidated && (
+          <div className="fin-error" role="alert">
+            FIN connection succeeded, but the selected FIN project could not be validated.
+            {status?.project_name ? ` Check the FIN Project Name (${status.project_name}).` : ''}
+          </div>
+        )}
         <div className="fin-connected-info">
           <span className="fin-project-name">{status?.display_name || status?.project_name || 'FIN'}</span>
           <span className="fin-server-url">{status?.server_url || serverUrl}</span>
+          {status?.project_source === 'default' && (
+            <span className="fin-server-url" title="This project sets no FIN Project Name, so the backend default is used">
+              Project: {status.project_name} (backend default)
+            </span>
+          )}
         </div>
         <button className="fin-btn fin-btn-disconnect" onClick={handleLogout}>
           Disconnect
@@ -127,7 +144,7 @@ export function FinLoginPanel() {
               type="text"
               value={projectName}
               onChange={e => setProjectName(e.target.value)}
-              placeholder="ekoMedical (from config)"
+              placeholder="Blank = this project's FIN Project Name"
             />
           </div>
         )}

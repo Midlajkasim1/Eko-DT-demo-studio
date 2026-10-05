@@ -663,6 +663,43 @@ class StatusResponse(BaseModel):
     project_name: str
     server_url: str
     display_name: str
+    # None = not checked (no session). The name never comes from FIN, so `project_source` says
+    # where it came from: "request" (typed at sign-in), "project" (the open project) or "default" (config.json)
+    project_validated: Optional[bool] = None
+    project_source: Optional[str] = None
+    project_id: Optional[str] = None
+
+
+class ValidateMappingRequest(BaseModel):
+    project_id: Optional[str] = None
+    # apiSettings block name -> the block as currently edited (null / empty = not configured)
+    blocks: dict
+
+
+# ─── Project validation ──────────────────────────────────────────────────────
+
+# What the last sign-in / project switch found. FIN does not return a project name, so
+# `source` records where the name in use came from.
+PROJECT_CHECK: dict = {"validated": None, "source": None}
+
+
+def _is_error_grid(text: str) -> bool:
+    """A Zinc error grid carries the `err` marker in its first (meta) line."""
+    first = (text or "").lstrip().split("\n", 1)[0]
+    return bool(re.search(r"\berr\b", first))
+
+
+async def _validate_project(c) -> bool:
+    """One project-scoped read of a single equip record: proves the project name resolves
+    on this FIN server and the session can read it. Cheap by design, no site scan."""
+    status, text = await c.fetch_probe(f"/api/{quote(c.project_name, safe='')}/read?filter=equip&limit=1")
+    return status == 200 and text is not None and not _is_error_grid(text)
+
+
+def _name_source(requested: bool) -> str:
+    if requested:
+        return "request"
+    return "project" if "project_name" in ACTIVE_OVERRIDES else "default"
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
@@ -670,7 +707,7 @@ class StatusResponse(BaseModel):
 @app.post("/api/fin/login")
 async def login(req: LoginRequest):
     """Authenticate with FIN server using SCRAM-SHA-256."""
-    global client, FIN_SERVER_URL, PROJECT_NAME
+    global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK
 
     # Settings sent with the login belong to the project being opened; without them the
     # configuration already active (bundled project or config.json) stays in force
@@ -679,6 +716,7 @@ async def login(req: LoginRequest):
 
     server_url = req.server_url or FIN_SERVER_URL
     project = req.project_name or PROJECT_NAME
+    name_source = _name_source(bool(req.project_name))
 
     # Update globals if overridden
     FIN_SERVER_URL = server_url
@@ -697,12 +735,17 @@ async def login(req: LoginRequest):
     if not success:
         raise HTTPException(status_code=401, detail="Authentication failed")
 
+    # Signed in is not the same as usable: the project name must resolve on this server too
+    PROJECT_CHECK = {"validated": await _validate_project(client), "source": name_source}
+
     _start_polling()
 
     return {
         "status": "success",
         "message": f"Authenticated to {server_url} as {req.username}",
         "project": project,
+        "project_validated": PROJECT_CHECK["validated"],
+        "project_source": name_source,
     }
 
 
@@ -713,7 +756,7 @@ async def set_project_settings(req: ProjectSettingsRequest):
     Needs an authenticated session, since it changes what the shared session polls.
     The FIN server cannot change here — that needs a fresh sign-in, so it is reported.
     """
-    global FIN_SERVER_URL
+    global FIN_SERVER_URL, PROJECT_CHECK
     _require_client()
 
     apply_project_settings(req.settings, req.project_id)
@@ -725,6 +768,7 @@ async def set_project_settings(req: ProjectSettingsRequest):
     # Rows read for the previous project feed /his-points and the alarm views until the next poll
     client.last_alarm_rows = []
     client.last_point_rows = []
+    PROJECT_CHECK = {"validated": await _validate_project(client), "source": _name_source(False)}
 
     _cancel_polling()
     _reset_caches()
@@ -734,6 +778,8 @@ async def set_project_settings(req: ProjectSettingsRequest):
         "status": "success",
         "project": PROJECT_NAME,
         "reconnect_required": reconnect_required,
+        "project_validated": PROJECT_CHECK["validated"],
+        "project_source": PROJECT_CHECK["source"],
     }
 
 
@@ -754,6 +800,150 @@ async def get_project_settings():
     }
 
 
+# ─── Mapping validation ──────────────────────────────────────────────────────
+# Checks what the editor sends against the FIN project the session is signed in to. It reads
+# FIN and nothing else: it never changes the configuration, never looks at config.json, and
+# never invents a mapping, so a default can not be reported as the project's own.
+
+MAX_VALIDATED_POINTS = 300
+POINT_REF_RE = re.compile(r"(?:readById|hisRead)\(@([^,)\s]+)")
+
+
+def _item(status: str, detail: Optional[str] = None) -> dict:
+    return {"status": status, **({"detail": detail} if detail else {})}
+
+
+def _block(items: dict, detail: Optional[str] = None, status: Optional[str] = None) -> dict:
+    """Block status from its items: any missing -> not_found, else any unchecked -> cannot_validate."""
+    if status is None:
+        found = {i["status"] for i in items.values()}
+        status = ("not_found" if "not_found" in found
+                  else "cannot_validate" if "cannot_validate" in found or not found
+                  else "valid")
+    return {"status": status, "items": items, **({"detail": detail} if detail else {})}
+
+
+def _not_configured(block: str) -> dict:
+    # backend_default: this block is not set by the open project, so the backend serves its own
+    # default for it. Reported so the UI can say so; the default itself is never returned.
+    key = {"finLivePoints": "live_point_ids", "finEndpoints": "power_endpoints",
+           "finEquipmentClasses": "equipment_classes", "finMeterProfile": "meter_profile",
+           "finSeverityBands": "severity_bands"}[block]
+    return {"status": "not_configured", "items": {}, "backend_default": key not in ACTIVE_OVERRIDES}
+
+
+async def _point_results(c, pids: list[str]) -> dict[str, dict]:
+    """valid / not_found / cannot_validate per resolved point ID, using FIN only."""
+    catalogue = {str(safe_get(r.get("id"), "val") or "").lstrip("@") for r in c.last_point_rows or []}
+    sem = asyncio.Semaphore(8)
+
+    async def one(pid: str) -> dict:
+        if pid in catalogue:
+            return _item("valid")
+        async with sem:
+            status, text = await c.fetch_probe(
+                f"/api/{quote(c.project_name, safe='')}/eval?expr={quote(f'readById(@{pid})', safe='')}")
+        if status is None:
+            return _item("cannot_validate", "FIN could not be reached.")
+        if status == 404:
+            return _item("not_found", "FIN has no such record in this project.")
+        if status != 200:
+            return _item("cannot_validate", f"FIN answered {status}.")
+        if _is_error_grid(text or ""):
+            return _item("not_found", "FIN has no such record in this project.")
+        lines = (text or "").strip().split("\n")
+        return _item("valid") if len(lines) >= 3 and lines[2].strip() else _item(
+            "not_found", "FIN has no such record in this project.")
+
+    unique = sorted(set(pids))
+    return dict(zip(unique, await asyncio.gather(*(one(p) for p in unique))))
+
+
+def _meter_items(profile: dict) -> dict:
+    realtime = (cached_building_data.get("Building_Info") or {}).get("Equipments") or {}
+    prefix = str(profile.get("prefix") or "").strip()
+    point_map = profile.get("point_map") if isinstance(profile.get("point_map"), dict) else {}
+    if not realtime:
+        wait = _item("cannot_validate", "Equipment has not been read from FIN yet. Try again in a moment.")
+        return {**({"prefix": wait} if prefix else {}), **{k: wait for k in point_map}}
+    meters = _extract_meters(realtime, {"prefix": prefix, "point_map": point_map}) if prefix and point_map else {}
+    items: dict = {}
+    if prefix:
+        found = any(str(eq.get("name", "")).upper().startswith(prefix.upper())
+                    for fd in realtime.values() if isinstance(fd, dict)
+                    for eq in fd.get("hvac", []) if isinstance(eq, dict))
+        items["prefix"] = _item("valid") if found else _item("not_found", f"No equipment name starts with {prefix}.")
+    for key in point_map:
+        if not meters:
+            items[key] = _item("cannot_validate", "No meter matched the prefix to read this metric from.")
+        elif any(m.get(key) is not None for m in meters.values()):
+            items[key] = _item("valid")
+        else:
+            items[key] = _item("not_found", "No meter point matches these aliases.")
+    return items
+
+
+@app.post("/api/fin/validate-mapping")
+async def validate_mapping(req: ValidateMappingRequest):
+    """Check the given mapping blocks against the FIN project this session is signed in to."""
+    _require_client()
+    # The session serves one project at a time; refuse rather than check another project's mappings
+    if req.project_id != ACTIVE_PROJECT_ID:
+        raise HTTPException(status_code=409, detail="The backend is serving a different project.")
+
+    def given(name: str) -> Optional[dict]:
+        value = req.blocks.get(name)
+        return value if isinstance(value, dict) and value else None
+
+    live, endpoints = given("finLivePoints"), given("finEndpoints")
+    # (block, key, resolved point id) for everything that names a FIN point
+    refs: list[tuple[str, str, Optional[str]]] = []
+    for key, value in (live or {}).items():
+        refs.append(("finLivePoints", key, str(value).replace("{project}", client.project_name).lstrip("@")
+                     if isinstance(value, str) else None))
+    for key, value in (endpoints or {}).items():
+        match = POINT_REF_RE.search(value) if isinstance(value, str) else None
+        refs.append(("finEndpoints", key, match.group(1).replace("{project}", client.project_name)
+                     if match else None))
+
+    readable = [pid for _, _, pid in refs if pid and POINT_ID_RE.match(pid)]
+    if len(set(readable)) > MAX_VALIDATED_POINTS:
+        raise HTTPException(status_code=413, detail=f"More than {MAX_VALIDATED_POINTS} points to check.")
+    results = await _point_results(client, readable)
+
+    blocks: dict = {}
+    for name in ("finLivePoints", "finEndpoints"):
+        if not given(name):
+            blocks[name] = _not_configured(name)
+            continue
+        items = {}
+        for block, key, pid in refs:
+            if block != name:
+                continue
+            if pid is None:
+                items[key] = _item("cannot_validate", "No FIN point ID found in this value.")
+            elif not POINT_ID_RE.match(pid):
+                items[key] = _item("cannot_validate", "Not a point ID this check can read.")
+            else:
+                items[key] = results[pid]
+        blocks[name] = _block(items)
+
+    profile = given("finMeterProfile")
+    blocks["finMeterProfile"] = _block(_meter_items(profile)) if profile else _not_configured("finMeterProfile")
+
+    # No FIN record backs these: which tags count as plant, and what a priority number means, is site policy
+    for name in ("finEquipmentClasses", "finSeverityBands"):
+        blocks[name] = (_block({}, "Site policy: FIN holds nothing to check this against.", "cannot_validate")
+                        if given(name) else _not_configured(name))
+
+    return {
+        "project_id": ACTIVE_PROJECT_ID,
+        "project_name": PROJECT_NAME,
+        "valid": not any(b["status"] == "not_found" for b in blocks.values()),
+        "blocks": blocks,
+    }
+
+
 @app.get("/api/fin/status", response_model=StatusResponse)
 async def get_status():
     """Check connection status."""
@@ -762,6 +952,9 @@ async def get_status():
         project_name=PROJECT_NAME,
         server_url=FIN_SERVER_URL,
         display_name=CONFIG.get("display_name", PROJECT_NAME),
+        project_validated=PROJECT_CHECK["validated"] if client and client.is_authenticated else None,
+        project_source=PROJECT_CHECK["source"] if client and client.is_authenticated else None,
+        project_id=ACTIVE_PROJECT_ID,
     )
 
 
@@ -936,11 +1129,12 @@ async def get_building_info():
 @app.post("/api/fin/logout")
 async def logout():
     """Disconnect from FIN server."""
-    global client
+    global client, PROJECT_CHECK
     _cancel_polling()
     if client:
         await client.close()
         client = None
+    PROJECT_CHECK = {"validated": None, "source": None}
     return {"status": "disconnected"}
 
 

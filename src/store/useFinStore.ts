@@ -73,6 +73,8 @@ export const useFinStore = create<FinState>((set, get) => ({
       }
       appliedConfigKey = config?.key ?? null
       set({ isConnected: true, isAuthenticating: false, connectionError: null })
+      // Signed in is not the same as usable: status carries whether the project name validated
+      await get().fetchStatus()
 
       // Kick off initial data fetch
       setTimeout(() => {
@@ -165,6 +167,8 @@ export const useFinStore = create<FinState>((set, get) => ({
       }
       if (!res.ok) return
       appliedConfigKey = config.key
+      // The switch re-validates the project name, so the badge must follow it
+      void get().fetchStatus()
       // Whatever was polled under the previous project must not linger on screen
       set({ equipment: [], powerData: null, lastUpdated: null })
       const data = await res.json().catch(() => ({}))

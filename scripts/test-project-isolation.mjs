@@ -206,6 +206,95 @@ try {
     'FIN viewer api-config.json has B\'s mappings and none of A\'s')
 
   check(loginPosts.length === 1, `exactly one /api/fin/login (the explicit Connect), got ${loginPosts.length}`)
+
+  // ═══ Mapping validation (the fake FIN has no point whose ID ends ":999", and no project "ghost") ═══
+  const badges = (t, status) => section(t).locator(status ? `[data-status="${status}"]` : '[data-status]')
+  const liveT = 'FIN Live Points Mapping'
+  const validate = async () => { await page.click('button:has-text("Validate Mapping")'); await page.waitForSelector('text=Nothing was changed') }
+
+  // A: both configured live points exist -> two ✓ Valid, nothing else
+  await open(A, false)
+  await openData()
+  check(await badges(liveT).count() === 0, 'A: no validation badges before Validate Mapping is pressed')
+  await validate()
+  check(await badges(liveT, 'valid').count() === 2, 'A: Validate Mapping marks both live points ✓ Valid')
+  check((await badges(liveT, 'valid').first().innerText()).includes('Valid'), 'A: badge reads "✓ Valid"')
+  // meter prefix is checked against equipment once the first poll has landed
+  await until(async () => { await validate(); return (await badges('Meter Profile', 'valid').count()) >= 1 }, 'meter prefix ✓ Valid')
+  check(true, 'A: meter prefix PMU ✓ Valid against the fake FIN equipment')
+
+  // editing a row makes its old result disappear; a missing point shows ✕ Not Found and is NOT removed
+  await section(liveT).locator('input[aria-label="Value"]').first().fill('p:{project}:r:999')
+  check(await badges(liveT).count() === 0, 'A: editing a block clears its (now stale) validation badges')
+  await validate()
+  const nf = badges(liveT, 'not_found')
+  check(await nf.count() === 1 && (await nf.first().innerText()).includes('Not Found'), 'A: a point FIN does not have shows ✕ Not Found')
+  check((await rows(liveT))[0][1] === 'p:{project}:r:999' && (await rows(liveT)).length === 2, 'A: the invalid mapping stays in the editor, not deleted')
+  check(await badges(liveT, 'valid').count() === 1, 'A: the other live point is still ✓ Valid')
+  await close()
+  check(JSON.stringify((await disk('iso-A')).apiSettings) === JSON.stringify(A.apiSettings), 'A: validating wrote nothing to project.json')
+
+  // B (A -> B): B's own mappings, no leftover result from A, and A's invalid point does not leak
+  await open(B, false)
+  await openData()
+  check(await badges(liveT).count() === 0, 'A->B: no validation result carried over from A')
+  await validate()
+  check(await badges(liveT, 'valid').count() === Object.keys(B2.apiSettings.finLivePoints).length &&
+    await badges(liveT, 'not_found').count() === 0, 'A->B: B validates against its own mappings, A\'s invalid point is not B\'s')
+  await close()
+  // B -> A: A's unsaved edit is gone, A's saved mapping is valid again
+  await open(A, false)
+  await openData()
+  await validate()
+  check(await badges(liveT, 'valid').count() === 2 && await badges(liveT, 'not_found').count() === 0, 'B->A: A\'s saved mappings are ✓ Valid again')
+  await close()
+
+  // C (normal project, no mappings): Not Configured, and none of config.json's Marsa IDs on screen
+  await open(C, false)
+  await openData()
+  const body = () => page.locator('.dashboard-settings-modal').innerText()
+  check((await body()).includes('No project-specific mappings configured'), 'C: "No project-specific mappings configured" is shown')
+  check(await badges(liveT, 'not_configured').count() === 1 && (await rows(liveT)).length === 0, 'C: Live Points reads — Not Configured with no rows')
+  check(!(await body()).includes('3181ee6e') && !(await body()).includes('r:111'), 'C: no config.json / other-project point IDs are displayed')
+  await validate()
+  check(await page.locator('.dashboard-settings-modal [data-status="not_configured"]').count() >= 5 &&
+    (await body()).includes('backend uses its own default'), 'C: after Validate every block is Not Configured and the backend default is only mentioned, never shown')
+  check(!(await body()).includes('3181ee6e'), 'C: still no default point IDs after validating')
+  await close()
+
+  // ── connection validation and the FIN Project Name ──
+  const typeProject = async name => {
+    await page.click('button:has-text("Disconnect")')
+    await page.waitForSelector('#fin-username')
+    await page.fill('#fin-username', 'tester'); await page.fill('#fin-password', 'secret')
+    if (!(await page.locator('#fin-project').count())) await page.click('.fin-advanced-toggle')
+    await page.fill('#fin-project', name)
+    await page.click('button:has-text("Connect")')
+  }
+  const nameField = () => page.locator('.ds-field', { has: page.locator('label:text-is("FIN Project Name")') }).locator('input')
+  const openFin = async () => { await page.click('text=Dashboard Settings'); await page.waitForSelector('.dashboard-settings-modal'); await page.click('.ds-tab:has-text("FIN Config")') }
+
+  await open(A, false)
+  await typeProject('ghost')
+  await page.waitForSelector('text=could not be validated', { timeout: 10000 })
+  check(await page.locator('text=Not validated').count() > 0 && await page.locator('text=Project validated').count() === 0,
+    'ghost project: signed in but NOT reported as a validated FIN connection')
+  await typeProject('typedA')
+  await page.waitForSelector('text=Project validated', { timeout: 10000 })
+  check(await page.locator('text=could not be validated').count() === 0, 'real project: ✓ FIN Connected / ✓ Project validated')
+  await openFin()
+  check(await nameField().inputValue() === 'typedA', 'A: FIN Project Name is filled with the name this project was connected with')
+  await close()
+  check((await disk('iso-A')).apiSettings.finProjectName === undefined, 'A: that name is only a draft until Save Settings (nothing written)')
+  // another project must not receive A's connection name
+  await open(B, false)
+  await openFin()
+  check(await nameField().inputValue() === '', 'A->B: B\'s FIN Project Name is not filled from A\'s connection')
+  await close()
+  await open(A, false)
+  await openFin()
+  check(await nameField().inputValue() !== 'typedA', 'B->A: the connection name was not saved into A by switching')
+  await close()
 } catch (e) {
   console.log('ERROR', e.stack || e.message)
   failures++

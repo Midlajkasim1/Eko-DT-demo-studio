@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useProjectStore } from '@/store/useProjectStore'
+import { useFinStore } from '@/store/useFinStore'
 import { writeJson } from '@/lib/projectDb'
 import {
   KeyValueEditor,
@@ -18,6 +19,7 @@ import {
   type MappingField,
 } from '@/lib/finSettings'
 import type { JsonObject } from '@/lib/mappingRows'
+import { validateMappings, type ValidationResponse } from '@/lib/mappingValidation'
 import type { ProjectApiSettings } from '@/types'
 
 const DEFAULT_FIN_LIVE_POINTS = {
@@ -220,6 +222,13 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
     () => Object.fromEntries(MAPPING_FIELDS.map(f => [f, 0])) as Record<MappingField, number>
   )
   const [saveError, setSaveError] = useState<string | null>(null)
+  // The latest Validate Mapping answer for the open project. Never saved, never edits the mappings.
+  const [validation, setValidation] = useState<ValidationResponse | null>(null)
+  const [validating, setValidating] = useState(false)
+  const [validateError, setValidateError] = useState<string | null>(null)
+  const finConnected = useFinStore(s => s.isConnected)
+  const openProjectId = useRef<string | undefined>(undefined)
+  useEffect(() => { openProjectId.current = currentProject?.projectId }, [currentProject?.projectId])
 
   useEffect(() => {
     if (visible && currentProject) {
@@ -227,9 +236,24 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
       setMappings(mappingStatesFrom(savedSettings))
       setRevs(prev => Object.fromEntries(MAPPING_FIELDS.map(f => [f, prev[f] + 1])) as typeof prev)
       setSaveError(null)
+      setValidation(null)
+      setValidateError(null)
       const mergedSettings: any = { 
         ...DEFAULT_DASHBOARD_CONFIG,
         ...savedSettings 
+      }
+
+      // FIN never returns a project name. The one name that is known to work is the one this
+      // project was just connected with, so offer it, but only into an empty field of the project
+      // that made the connection. It is saved with Save Settings like any other edit.
+      const fin = useFinStore.getState()
+      const connectedName = fin.status?.project_name
+      if (
+        currentProject.isFinProject && !savedSettings.finProjectName && connectedName &&
+        fin.isConnected && fin.status?.project_validated === true &&
+        fin.status.project_source === 'request' && fin.status.project_id === currentProject.projectId
+      ) {
+        mergedSettings.finProjectName = connectedName
       }
       
       // Ensure any newly added default items that aren't in the saved database are appended
@@ -259,6 +283,33 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   const setMapping = (field: MappingField, state: EditorState) => {
     const problem = state.value ? mappingProblem(field, state.value) : null
     setMappings(prev => ({ ...prev, [field]: { value: state.value, error: state.error ?? problem ?? undefined } }))
+    // An edited block no longer matches what was checked
+    setValidation(prev => {
+      if (!prev?.blocks[field]) return prev
+      const blocks = { ...prev.blocks }
+      delete blocks[field]
+      return { ...prev, blocks }
+    })
+  }
+
+  const handleValidate = async () => {
+    const projectId = currentProject.projectId
+    setValidating(true)
+    setValidateError(null)
+    try {
+      // Make sure the backend session is on this project before asking it to check anything
+      await useFinStore.getState().syncProjectSettings()
+      const result = await validateMappings(
+        projectId,
+        Object.fromEntries(MAPPING_FIELDS.map(f => [f, mappings[f].error ? undefined : mappings[f].value]))
+      )
+      // The user may have switched project while FIN was answering
+      if (openProjectId.current === projectId && result.project_id === projectId) setValidation(result)
+    } catch (e) {
+      if (openProjectId.current === projectId) setValidateError(e instanceof Error ? e.message : 'Validation failed.')
+    } finally {
+      setValidating(false)
+    }
   }
   // A preset or Clear replaces the editor's content, so it is remounted to show it
   const loadMapping = (field: MappingField, value: JsonObject | undefined) => {
@@ -436,6 +487,32 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 </label>
               </div>
 
+              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Mapping validation</h3>
+              {MAPPING_FIELDS.every(f => !mappings[f].value) && (
+                <p className="ds-hint">
+                  — Not Configured. No project-specific mappings configured for this {isFin ? 'FIN ' : ''}project.
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '8px' }}>
+                <button
+                  type="button"
+                  className="ds-btn ds-btn-secondary"
+                  style={{ padding: '4px 12px', fontSize: '12px' }}
+                  disabled={!finConnected || validating}
+                  title={finConnected ? 'Check these mappings against the connected FIN project' : 'Connect to FIN first'}
+                  onClick={handleValidate}
+                >
+                  {validating ? 'Validating…' : 'Validate Mapping'}
+                </button>
+                {!finConnected && <span className="ds-hint" style={{ margin: 0 }}>Connect to FIN to validate.</span>}
+                {validation && (
+                  <span className="ds-hint" style={{ margin: 0 }}>
+                    Checked against FIN project {validation.project_name}. Nothing was changed.
+                  </span>
+                )}
+              </div>
+              {validateError && <div style={{ color: 'var(--red)', fontSize: '12px', marginBottom: '8px' }}>{validateError}</div>}
+
               {MAPPING_SECTIONS.map(section => {
                 const { field } = section
                 const editorKey = `${currentProject.projectId}-${field}-${revs[field]}`
@@ -449,9 +526,10 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                     hasValue={!!mappings[field].value}
                     error={mappings[field].error}
                     onLoad={value => loadMapping(field, value)}
+                    result={validation?.blocks[field]}
                   >
                     {field === 'finMeterProfile' ? (
-                      <MeterProfileEditor key={editorKey} value={mappings[field].value} onChange={onChange} />
+                      <MeterProfileEditor key={editorKey} value={mappings[field].value} onChange={onChange} results={validation?.blocks[field]?.items} />
                     ) : field === 'finSeverityBands' ? (
                       <SeverityEditor key={editorKey} value={mappings[field].value} onChange={onChange} />
                     ) : (
@@ -460,6 +538,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                         value={mappings[field].value}
                         kind={field === 'finEquipmentClasses' ? 'list' : 'string'}
                         onChange={onChange}
+                        results={validation?.blocks[field]?.items}
                       />
                     )}
                   </MappingSection>

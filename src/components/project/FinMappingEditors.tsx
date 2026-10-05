@@ -9,6 +9,7 @@ import {
   type MappingRow,
   type ValueKind,
 } from '@/lib/mappingRows'
+import { STATUS_LABEL, type BlockResult, type ItemResult, type MappingStatus } from '@/lib/mappingValidation'
 
 /** What an editor reports upward: the object to save (undefined = not set) or a problem */
 export interface EditorState {
@@ -28,6 +29,26 @@ const inputStyle = {
   minWidth: 0,
 } as const
 
+const STATUS_COLOR: Record<MappingStatus, string> = {
+  valid: 'var(--green, #2e9d5b)',
+  not_found: 'var(--red)',
+  cannot_validate: '#d9a400',
+  not_configured: 'var(--text-secondary)',
+}
+
+/** One mapping's validation result: ✓ Valid / ✕ Not Found / ⚠ Cannot Validate / — Not Configured */
+export function StatusBadge({ status, detail }: { status: MappingStatus; detail?: string }) {
+  return (
+    <span
+      data-status={status}
+      title={detail}
+      style={{ color: STATUS_COLOR[status], fontSize: '12px', whiteSpace: 'nowrap', alignSelf: 'center', minWidth: '110px' }}
+    >
+      {STATUS_LABEL[status]}
+    </span>
+  )
+}
+
 /** The keys an editor does not own, carried through to the saved value unchanged */
 function withoutKeys(obj: JsonObject | undefined, keys: string[]): JsonObject {
   const rest = { ...(obj ?? {}) }
@@ -39,11 +60,13 @@ interface KeyValueEditorProps {
   value: JsonObject | undefined
   kind: ValueKind
   onChange: (state: EditorState) => void
+  /** Validation result per row key, shown beside the row. Never changes the value. */
+  results?: Record<string, ItemResult>
 }
 
 /** One configuration entry per row. Edits, deletes, adds and pasted imports all rebuild the
  *  same object the backend already expects. Remount (change `key`) to load a new value. */
-export function KeyValueEditor({ value, kind, onChange }: KeyValueEditorProps) {
+export function KeyValueEditor({ value, kind, onChange, results }: KeyValueEditorProps) {
   const [rows, setRows] = useState<MappingRow[]>(() => rowsFromObject(value, kind))
   const [importing, setImporting] = useState(false)
   const [importText, setImportText] = useState('')
@@ -83,7 +106,7 @@ export function KeyValueEditor({ value, kind, onChange }: KeyValueEditorProps) {
 
   return (
     <div>
-      {rows.length === 0 && <p className="ds-hint" style={{ margin: '0 0 8px' }}>Nothing set. The backend default applies.</p>}
+      {rows.length === 0 && <p className="ds-hint" style={{ margin: '0 0 8px' }}>Not Configured. This project has no mapping here.</p>}
 
       {rows.map(row => (
         <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
@@ -103,6 +126,9 @@ export function KeyValueEditor({ value, kind, onChange }: KeyValueEditorProps) {
             onChange={e => edit(row.id, { text: e.target.value })}
             style={{ ...inputStyle, flex: 1 }}
           />
+          {results?.[row.key.trim()] && (
+            <StatusBadge status={results[row.key.trim()].status} detail={results[row.key.trim()].detail} />
+          )}
           <button
             type="button"
             className="ds-btn ds-btn-secondary"
@@ -160,10 +186,12 @@ export function KeyValueEditor({ value, kind, onChange }: KeyValueEditorProps) {
 interface MeterProfileEditorProps {
   value: JsonObject | undefined
   onChange: (state: EditorState) => void
+  /** "prefix" and each metric key -> validation result */
+  results?: Record<string, ItemResult>
 }
 
 /** prefix + point_map. Any other key in the saved profile is carried through untouched. */
-export function MeterProfileEditor({ value, onChange }: MeterProfileEditorProps) {
+export function MeterProfileEditor({ value, onChange, results }: MeterProfileEditorProps) {
   const [prefix, setPrefix] = useState(() => (typeof value?.prefix === 'string' ? value.prefix : ''))
   const [extras] = useState<JsonObject>(() => withoutKeys(value, ['prefix', 'point_map']))
   const initialMap = value?.point_map && typeof value.point_map === 'object' && !Array.isArray(value.point_map)
@@ -182,17 +210,21 @@ export function MeterProfileEditor({ value, onChange }: MeterProfileEditorProps)
     <div>
       <div className="ds-field">
         <label>Meter name prefix</label>
-        <input
-          type="text"
-          value={prefix}
-          placeholder="e.g. PMU"
-          onChange={e => { setPrefix(e.target.value); emit(e.target.value, map) }}
-        />
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <input
+            type="text"
+            value={prefix}
+            placeholder="e.g. PMU"
+            onChange={e => { setPrefix(e.target.value); emit(e.target.value, map) }}
+          />
+          {results?.prefix && <StatusBadge status={results.prefix.status} detail={results.prefix.detail} />}
+        </div>
       </div>
       <label style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Point name aliases per metric</label>
       <KeyValueEditor
         value={initialMap}
         kind="list"
+        results={results}
         onChange={state => { setMap(state); emit(prefix, state) }}
       />
     </div>
@@ -255,16 +287,31 @@ interface MappingSectionProps {
   hasValue: boolean
   error?: string
   onLoad: (value: JsonObject | undefined) => void
+  /** The latest Validate Mapping result for this block, if any */
+  result?: BlockResult
   children: ReactNode
 }
 
 /** Title, description, presets and Clear around one mapping editor. Presets and Clear call
  *  onLoad; the parent remounts the editor so its rows show the new value. */
-export function MappingSection({ title, hint, presets, hasValue, error, onLoad, children }: MappingSectionProps) {
+export function MappingSection({ title, hint, presets, hasValue, error, onLoad, result, children }: MappingSectionProps) {
   return (
     <div className="ds-field" style={{ marginTop: '28px' }}>
       <h3 className="ds-section-title">{title}</h3>
       <p className="ds-hint">{hint}</p>
+      {/* Only the open project's own mapping is shown here. A backend default is never loaded into the editor. */}
+      {!hasValue && (
+        <p className="ds-hint" style={{ margin: '0 0 8px' }}>
+          <StatusBadge status="not_configured" />
+          {result?.backend_default && " The backend uses its own default for this block. It is not shown here and is not this project's mapping."}
+        </p>
+      )}
+      {hasValue && result && (result.items && Object.keys(result.items).length === 0) && (
+        <p className="ds-hint" style={{ margin: '0 0 8px' }}>
+          <StatusBadge status={result.status} detail={result.detail} />
+          {result.detail && ` ${result.detail}`}
+        </p>
+      )}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
         {presets.map(p => (
           <button key={p.label} type="button" className="ds-btn ds-btn-secondary" style={smallBtn}
