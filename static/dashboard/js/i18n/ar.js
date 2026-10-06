@@ -657,7 +657,7 @@ window.EKO_I18N.ar = {
   "pwHeroPrevCap.weekly": "ك.و.س · الإثنين–الأحد السابق",
   "pwHeroPrevCap.monthly": "ك.و.س · الشهر التقويمي السابق",
   "pwCarbon": "انبعاثات الكربون",
-  "pwCarbonCap": "{r} كج CO2/ك.و.س · منذ بداية الشهر",
+  "pwCarbonCap": "مباشر · كج/س",
   "pwContractedMwCap": "التعاقدي {v} م.و",
   "pwDbShare": "حصة لوحات التوزيع",
   "pwDbShareCap": "{when} · حصة من {v} ك.و.س",

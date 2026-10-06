@@ -517,7 +517,7 @@ window.EKO_C = (function(){
       `<div class="pwtile"><div class="pwth"><span class="ovklbl">${esc(lbl)}</span>
           ${chip?`<span class="pwchip" data-tone="${chipTone}">${esc(chip)}</span>`:''}${ctl(E, lbl, cap)}</div>
         <div class="ovkval"><span class="ovknum">${esc(val)}</span><span class="ovkunit">${esc(unit)}</span></div>
-        <span class="ovkcap">${esc(cap)}</span>${chart||''}</div>`;
+        ${cap ? `<span class="ovkcap">${esc(cap)}</span>` : ''}${chart||''}</div>`;
     /* Hero mini-charts (D39 — measured from the Final mock): banded track,
        gradient value bar with an amber over-baseline overflow segment and a
        marker dot; the baseline/contracted tick carries its label above. */
@@ -552,8 +552,10 @@ window.EKO_C = (function(){
       <span class="pwminix tMonoS cT3"><i>${esc(ar?hc.fromAr:hc.fromEn)}</i><i>${esc(ar?hc.toAr:hc.toEn)}</i></span></div>`;
     };
     const el = E.data.energyLanding;
-    const carbonT = (el.mtdKwh != null) ? el.mtdKwh * b.co2KgPerKwh / 1000 : null;   /* derives */
-    const peakPct = (m.peakTodayMw != null && p.contractedMw) ? Math.round(m.peakTodayMw / p.contractedMw * 100) : null; /* derives */
+    const carbonKgH = el.carbonKgH;
+    const peakKw = m.peakTodayKw != null ? m.peakTodayKw : (m.peakTodayMw != null ? m.peakTodayMw * 1000 : null);
+    const contractedKw = p.contractedMw != null ? p.contractedMw * 1000 : null;
+    const peakPct = (peakKw != null && contractedKw) ? Math.round(peakKw / contractedKw * 100) : null;
     const nd = (v, d2) => v == null ? '--' : fmt(v, d2 == null ? 1 : d2);
     const tr = E.state.pwTrendRange || 'today';
     const sumArr = a => {
@@ -587,8 +589,8 @@ window.EKO_C = (function(){
       ${hero(E.t('pwCurrentCons'), el.currentKw != null ? E.t('pwAboveChip') : '', el.currentKw != null ? 'warn' : '', nd(el.currentKw,1), el.currentKw != null ? 'kW' : '', E.t('pwBaselineKwCap',{v:fmt(el.baselineKw,1)}), el.currentKw != null ? bullet(p.heroCharts.current,'L') : '')}
       ${hero(E.t('pwHeroNow.'+tr), '', '', nd(heroNow, 1), heroNow != null ? 'kWh' : '', E.t('pwHeroNowCap.'+tr))}
       ${hero(E.t('pwHeroPrev.'+tr), '', '', nd(heroPrev, 1), heroPrev != null ? 'kWh' : '', E.t('pwHeroPrevCap.'+tr))}
-      ${hero(E.t('pwCarbon'), '', '', nd(carbonT,1), carbonT != null ? 't' : '', E.t('pwCarbonCap',{r:b.co2KgPerKwh}))}
-      ${hero(E.t('pwPeak'), peakPct != null ? E.t('pwPctLimit',{p:peakPct}) : '', peakPct != null ? 'crit' : '', nd(m.peakTodayMw,1), m.peakTodayMw != null ? 'MW' : '', E.t('pwContractedMwCap',{v:p.contractedMw}), m.peakTodayMw != null ? bullet(p.heroCharts.peak,'P') : '')}
+      ${hero(E.t('pwCarbon'), '', '', nd(carbonKgH,1), carbonKgH != null ? 'kg/h' : '', '')}
+      ${hero(E.t('pwPeak'), peakPct != null ? E.t('pwPctLimit',{p:peakPct}) : '', peakPct != null ? 'crit' : '', nd(peakKw,1), peakKw != null ? 'kW' : '', E.t('pwContractedLine',{v:fmt(contractedKw,0)}), peakKw != null ? bullet(p.heroCharts.peak,'P') : '')}
     </div>`;
     const zhAll = { hourly: p.zoneLast24, today: p.zoneHourly, weekly: p.zoneWeekly, monthly: p.zoneMonthly };
     const lastVal = z => (z && z.length) ? Number(z[z.length-1])||0 : 0;

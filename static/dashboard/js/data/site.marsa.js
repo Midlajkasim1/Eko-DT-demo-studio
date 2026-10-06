@@ -45,6 +45,7 @@ window.EKO_DATA.marsa = {
     "todayForecastEodMwh": null,
     "loadAboveBaselinePct": null,
     "baselineKw": 71.0,
+    "peakTodayKw": null,
     "peakTodayMw": null,
     "peakPctOfLimit": null,
     "contractedKw": 125,
@@ -180,6 +181,7 @@ window.EKO_DATA.marsa = {
     "perfWordEn": null, "perfWordAr": null,
     "currentKw": null, "baselineKw": null,
     "mtdKwh": null,
+    "carbonKgH": null,
     "overnightDeviationPct": null,
     "overnightWordEn": null, "overnightWordAr": null, "overnightTone": "ok",
     "sumGauges": [

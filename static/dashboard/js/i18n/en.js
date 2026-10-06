@@ -607,7 +607,7 @@ window.EKO_I18N.en = {
   "pwHeroPrevCap.weekly": "kWh · previous Monday–Sunday",
   "pwHeroPrevCap.monthly": "kWh · previous calendar month",
   "pwCarbon": "CARBON EMISSION",
-  "pwCarbonCap": "{r} kg CO2/kWh · month to date",
+  "pwCarbonCap": "live · kg/h",
   "pwContractedMwCap": "contracted {v} MW",
   "pwDbShare": "DISTRIBUTION BOARD SHARE",
   "pwDbShareCap": "{when} · share of {v} kWh",

@@ -178,7 +178,12 @@
     var loadKw = asNum(p.hourly_energy != null ? p.hourly_energy : p.total_power);
     if (loadKw != null) { set(m, "loadNowMw", trunc1(toMw(loadKw))); set(el, "currentKw", trunc1(loadKw)); }
     var peak = asNum(p.peak_demand);
-    if (peak != null) set(m, "peakTodayMw", trunc1(toMw(peak)));
+    if (peak != null) {
+      set(m, "peakTodayKw", trunc1(peak));
+      set(m, "peakTodayMw", trunc1(peak / 1000));
+    }
+    var carbonKgH = asNum(p.carbon);
+    if (carbonKgH != null) set(el, "carbonKgH", trunc1(carbonKgH));
     var iaq = asNum(p.iaq_index);
     if (iaq != null) {
       set(m, "iaq", trunc1(iaq));
