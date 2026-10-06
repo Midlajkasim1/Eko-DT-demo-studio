@@ -332,11 +332,12 @@ window.EKO_A = (function(){
       });
       const u = (pmus||[]).find(x => x.id === id);
       const gi = ids.indexOf(id);
+      const hourly = !(range === '7d' || range === '30d' || range === '6M' || range === '1Y');
       return {
         id,
         n: u ? (u.db ? id+' · '+u.db : id) : id,
         c: hues[gi >= 0 ? gi : pi] || '#F0A93B',
-        vals: keys.map((_, i2) => n[i2] ? sum[i2]/n[i2] : null)
+        vals: keys.map((_, i2) => n[i2] ? (hourly ? sum[i2]/n[i2] : sum[i2]) : null)
       };
     });
     const vals = keys.map((_, i2) => {
@@ -354,15 +355,16 @@ window.EKO_A = (function(){
   function anomPage(E){
     const d = E.data.anom, ar = E.lang === 'ar';
     const pmus = E.data.power.pmus || [];
+    const boardIds = ['PMU09','PMU04','PMU05','PMU06','PMU07','PMU08'];
+    const boards = boardIds.map(id => pmus.find(u => u.id === id)).filter(Boolean);
     const nd = (v, d2) => (v == null || !isFinite(Number(v))) ? '--' : fmt(v, d2 == null ? 1 : d2);
-    const kwVals = pmus.map(u => Number(u.kw)).filter(v => isFinite(v));
-    const maxKw = kwVals.length ? Math.max(...kwVals) : 0;
-    const totKw = kwVals.reduce((s2, v) => s2 + v, 0);
-    const totMw = kwVals.length ? totKw / 1000 : null;
-    const heroes = pmus.map(u => {
-      const bar = maxKw && u.kw != null ? Math.max(0, Math.round(Number(u.kw) / maxKw * 100)) : 0;
+    const kwhVals = pmus.map(u => Number(u.kwh)).filter(v => isFinite(v));
+    const maxKwh = kwhVals.length ? Math.max(...kwhVals) : 0;
+    const totKwh = kwhVals.reduce((s2, v) => s2 + v, 0);
+    const heroes = (boards.length ? boards : pmus.slice(0, 6)).map(u => {
+      const bar = maxKwh && u.kwh != null ? Math.max(0, Math.round(Number(u.kwh) / maxKwh * 100)) : 0;
       return `<div class="pwtile"><div class="pwth"><span class="ovklbl">${esc(u.id)}</span>${C().ctl(E, u.id, u.db, { topic:'peak' })}</div>
-        <div class="ovkval"><span class="ovknum">${nd(u.kw)}</span><span class="ovkunit">kW</span></div>
+        <div class="ovkval"><span class="ovknum">${nd(u.kwh)}</span><span class="ovkunit">kWh</span></div>
         <span class="ovkcap">${esc(u.db || '')} \u00b7 ${nd(u.v,1)} V \u00b7 ${nd(u.pf,1)} PF</span>
         <div class="pmubar39"><svg><rect x="0%" y="8" width="100%" height="8" fill="var(--chTrack)"/>
           <rect x="0%" y="10" width="${bar}%" height="4" rx="2" fill="var(--chFill)"/></svg></div></div>`;
@@ -372,7 +374,7 @@ window.EKO_A = (function(){
     const range = E.state.anomRange || '24h';
     const daySel = E.state.anomDays || [];
     const pmuSel = E.state.anomPmus || [];
-    const evSeries = anomEvidenceSeries(E.data.power, range, daySel, pmuSel, pmus);
+    const evSeries = anomEvidenceSeries(E.data.power, range, daySel, pmuSel, boards.length ? boards : pmus);
     const evPts = evSeries.vals.length > 1
       ? evSeries.vals.map((v,i2) => `${(i2/(evSeries.vals.length-1)*100).toFixed(2)},${(100 - v/evSeries.yMax*100).toFixed(2)}`).join(' ')
       : (evSeries.vals.length === 1 ? `50,${(100 - evSeries.vals[0]/evSeries.yMax*100).toFixed(2)}` : '');
@@ -386,7 +388,7 @@ window.EKO_A = (function(){
       <div class="pwwh"><span class="alcardt">${esc(E.t('anomEvidence'))}</span>${chrome2}
         <span class="segbox row msA">${['24h','7d','30d','6M','1Y'].map(r2=>`<button class="seg" data-on="${range===r2}" data-act="anomRange" data-v="${r2}">${r2}</button>`).join('')}</span></div>
       <div class="fchips">${days.map((k,di)=>`<button class="fchip" data-act="anomDay" data-d="${di+1}" data-on="${daySel.indexOf(di+1)>=0}">${esc(E.t(k))}</button>`).join('')}</div>
-      <div class="fchips">${pmus.map(u=>`<button class="fchip fchipB" data-act="anomPmu" data-id="${esc(u.id)}" data-on="${pmuSel.indexOf(u.id)>=0}">${esc(u.id)}</button>`).join('')}</div>
+      <div class="fchips">${(boards.length ? boards : pmus).map(u=>`<button class="fchip fchipB" data-act="anomPmu" data-id="${esc(u.id)}" data-on="${pmuSel.indexOf(u.id)>=0}">${esc(u.id)}</button>`).join('')}</div>
       <div class="fcap">${esc(evCap)}</div>
       <div class="ch39 anch39"><div class="chy39"><span>${evSeries.any?evSeries.yMax:'--'}</span><span>${evSeries.any?Math.round(evSeries.yMax/2):'--'}</span><span>0</span></div>
         <div class="chplot39">
@@ -403,7 +405,7 @@ window.EKO_A = (function(){
             const tot = evSeries.vals[i2];
             const totTxt = fmt(tot, 1);
             if (rows.length > 1) rows.unshift({ c: '#F0A93B', n: 'Total', v: totTxt });
-            return `<span class="chhit39" data-chtip="${encodeURIComponent(JSON.stringify({ t: evSeries.titles[i2], u: 'kW', rows }))}"></span>`;
+            return `<span class="chhit39" data-chtip="${encodeURIComponent(JSON.stringify({ t: evSeries.titles[i2], u: 'kWh', rows }))}"></span>`;
           }).join('')}</div>` : ''}
         </div></div>
       <div class="chx39" style="display:grid;grid-template-columns:repeat(${Math.max(evSeries.labels.length,1)},minmax(0,1fr));padding-inline-start:28px">${evSeries.labels.map(t2=>`<span>${esc(t2)}</span>`).join('')}</div>
@@ -426,7 +428,7 @@ window.EKO_A = (function(){
         <span class="pmuid39">${esc(u.id)}</span>
         <span>${nd(u.a,1)}</span><span>${nd(u.v,1)}</span><span>${nd(u.hz,2)}</span>
         <span>${nd(u.kw)}</span><span>${nd(u.kwh)}</span></div>`).join('')}</div>
-      <span class="ovkcap">${esc(E.t('anomPmuFoot',{mw:nd(totMw,2)}))}</span></article>`;
+      <span class="ovkcap">${esc(E.t('anomPmuFoot',{mw:nd(totKwh,1)}))}</span></article>`;
     return `<div class="pwarea" data-pg="anom">
       <div class="pwhero cols6">${heroes.join('')}</div>
       <div class="angrid39"><div class="col gap10">${evidence}${tod}</div>${rail}</div></div>`;

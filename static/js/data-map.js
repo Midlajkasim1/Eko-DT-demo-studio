@@ -154,13 +154,14 @@
   var BOARD_KEYS = ["mcc1","mcc2","smdb_kit","lvfp","ats","sump_pump"];
   var PMU_IDS = ["PMU09","PMU04","PMU05","PMU06","PMU07","PMU08"];
   var PMU_HIS = {
-    PMU09: "PMU09_MCC_01_his",
-    PMU04: "PMU04_MCC_02_his",
-    PMU05: "PMU05_SMDB_KIT_his",
-    PMU06: "PMU06_LVFP_Z7_01_his",
-    PMU07: "PMU07_ATS_E_his",
-    PMU08: "PMU08_SWPS02_his"
+    PMU09: "Hourly_EC_MCC1_his",
+    PMU04: "Hourly_EC_MCC2_his",
+    PMU05: "Hourly_EC_SMDB_KIT_his",
+    PMU06: "Hourly_EC_LVFP_his",
+    PMU07: "Hourly_EC_ATS_his",
+    PMU08: "Hourly_EC_SP_his"
   };
+  var lastBoardKwh = {};
 
   function applyPower(p) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
@@ -997,6 +998,19 @@
         site.power.zoneHues = ZONE_HUES;
         changed = true;
       }
+      PMU_IDS.forEach(function (id, i) {
+        var kwh = asNum(p[BOARD_KEYS[i]]);
+        if (kwh == null && site.power.boards && site.power.boards[i]) kwh = asNum(site.power.boards[i][1]);
+        if (kwh != null) lastBoardKwh[id] = kwh;
+      });
+      if (Array.isArray(site.power.pmus)) {
+        site.power.pmus.forEach(function (row) {
+          if (row && lastBoardKwh[row.id] != null) {
+            var next = trunc1(lastBoardKwh[row.id]);
+            if (row.kwh !== next) { row.kwh = next; changed = true; }
+          }
+        });
+      }
     }
     if (changed) paint();
   }
@@ -1038,6 +1052,10 @@
       var k = pmuKey(name);
       if (k) byKey[k] = { name: name, row: meters[name] || {} };
     });
+    (site.assets || []).forEach(function (a) {
+      var k = pmuKey(a.id);
+      if (k && !byKey[k]) byKey[k] = { name: a.id, row: {} };
+    });
     function rowOf(meta, live) {
       var r = live && live.row;
       var db = meta.db;
@@ -1048,13 +1066,20 @@
         kw: r ? asNum(r.active_power) : null,
         a: r ? asNum(r.current) : null,
         hz: r ? asNum(r.frequency) : null,
-        kwh: r ? asNum(r.total_energy) : null,
+        kwh: lastBoardKwh[meta.id] != null ? lastBoardKwh[meta.id] : (r ? asNum(r.total_energy) : null),
         v: r ? asNum(r.voltage) : null,
         pf: null
       };
     }
-    site.power.pmus = PMU_CANON.map(function (meta) {
-      return rowOf(meta, byKey[meta.id]);
+    var canonDb = {};
+    PMU_CANON.forEach(function (m) { canonDb[m.id] = m.db; });
+    var ids = Object.keys(byKey);
+    ids.sort(function (a, b) {
+      return (parseInt(a.replace(/\D/g, ""), 10) || 0) - (parseInt(b.replace(/\D/g, ""), 10) || 0);
+    });
+    if (!ids.length) ids = PMU_CANON.map(function (m) { return m.id; });
+    site.power.pmus = ids.map(function (id) {
+      return rowOf({ id: id, db: canonDb[id] }, byKey[id]);
     });
     paint();
   }
@@ -1222,6 +1247,10 @@
         }
       });
     });
+
+    if (site.power) {
+      applyMeters((window.DashboardData && window.DashboardData.meters) || {});
+    }
 
     if (window.EKO_HOST_ENGINE && typeof window.EKO_HOST_ENGINE.resolveAllAssetPositions === 'function') {
       window.EKO_HOST_ENGINE.resolveAllAssetPositions();

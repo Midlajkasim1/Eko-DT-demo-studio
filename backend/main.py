@@ -246,24 +246,28 @@ def _extract_meters(realtime: dict, profile: dict) -> dict:
 
     meters: dict = {}
     for floor_data in realtime.values():
-        for eq in floor_data.get("hvac", []):
-            name = str(eq.get("name", ""))
-            if not name.upper().startswith(prefix):
+        buckets = floor_data.values() if isinstance(floor_data, dict) else []
+        for items in buckets:
+            if not isinstance(items, list):
                 continue
-            metrics: dict = {key: None for key in point_map}
-            for pt in eq.get("points", []):
-                nav = str(pt.get("navName", "")).lower().replace("-", " ").replace("_", " ")
-                best_key, best_len = None, -1
-                for key, aliases in point_map.items():
-                    for alias in aliases:
-                        if alias in nav and len(alias) > best_len:
-                            best_key, best_len = key, len(alias)
-                if not best_key:
+            for eq in items:
+                name = str(eq.get("name", ""))
+                if not name.upper().startswith(prefix):
                     continue
-                match = re.search(r"-?\d+(?:\.\d+)?", str(pt.get("currentValue", "")))
-                if match:
-                    metrics[best_key] = float(match.group())
-            meters[name] = metrics
+                metrics: dict = {key: None for key in point_map}
+                for pt in eq.get("points", []):
+                    nav = str(pt.get("navName", "")).lower().replace("-", " ").replace("_", " ")
+                    best_key, best_len = None, -1
+                    for key, aliases in point_map.items():
+                        for alias in aliases:
+                            if alias in nav and len(alias) > best_len:
+                                best_key, best_len = key, len(alias)
+                    if not best_key:
+                        continue
+                    match = re.search(r"-?\d+(?:\.\d+)?", str(pt.get("currentValue", "")))
+                    if match:
+                        metrics[best_key] = float(match.group())
+                meters[name] = metrics
     return meters
 
 
