@@ -22,7 +22,9 @@ window.EKO_V = (function(){
      dots — neither has a meaningful x/y on the live model); chips by x,y. */
   const projKey = (x, y, key) => key ? 'k:' + key : (+x) + ',' + (+y);
   const hostSig = E => { const h = document.getElementById('enginehost'); if(!h) return '';
-    const r = h.getBoundingClientRect(); return E.state.pageId + ':' + Math.round(r.width) + 'x' + Math.round(r.height); };
+    const r = h.getBoundingClientRect();
+    const hid = E.state.alarmF && E.state.alarmF.sev ? [...E.state.alarmF.sev].sort().join(',') : '';
+    return E.state.pageId + ':' + (E.state.module || '') + ':' + (E.state.sub || '') + ':' + hid + ':' + (E.state.showAcked ? 1 : 0) + ':' + (E.state.markersOn ? 1 : 0) + ':' + Math.round(r.width) + 'x' + Math.round(r.height); };
   /* valid only for a re-render of the SAME page with the SAME host box — a
      route change or a resize always waits for a fresh projection */
   let cacheOK = false;
@@ -65,7 +67,11 @@ window.EKO_V = (function(){
     if(!E.state.markersOn) return '<div class="mklayer"></div>';
     /* alert-centre display filter (D30); only LOCATED alarms get a marker —
        an alarm without a world position has nothing to point at (D64) */
-    const list = E.visAlarms().filter(a => (isFinite(+a.x) && isFinite(+a.y)) || a.bimId || guidOf(a.asset));
+    let list = E.visAlarms().filter(a => (isFinite(+a.x) && isFinite(+a.y)) || a.bimId || guidOf(a.asset));
+    if (E.state.module === 'systems' && E.state.sub) {
+      const grp = ((E.data.systems && E.data.systems.groups) || []).find(g => g.id === E.state.sub);
+      if (grp && grp.sysKey) list = list.filter(a => grp.sysKey.includes(a.sys));
+    }
     /* One marker per equipment. The colour is the worst severity. The number
        is every open alarm on that equipment, not only the winning severity. */
     const where = a => guidOf(a.asset) || a.bimId || a.asset || (Math.round(a.x) + ',' + Math.round(a.y));
@@ -85,10 +91,11 @@ window.EKO_V = (function(){
       }
       pts.push({ key: head.id });
       out += `<button class="mk mkclu" data-key="${C().esc(head.id)}" data-sev="${sev}" data-x="${head.x}" data-y="${head.y}" data-z="${head.z || ''}" data-bimid="${guidOf(head.asset) || head.bimId || ''}" data-asset="${C().esc(head.asset || '')}"${mkStyle(head.x, head.y, head.id)} data-act="mkClu" data-alarm="${head.id}" data-n="${g.length}" data-sel="${isSel(E, head.asset, loc) ? 1 : 0}"
-        aria-label="${C().esc(E.t('alarmsN', { n: g.length }))}" data-tip="${C().esc(eqName(E, head.asset) + ' · ' + E.t('cluTip',{n:g.length}))}">${g.length}</button>`;
+        aria-label="${C().esc(E.t('alarmsN', { n: g.length }))}" data-tip="${C().esc(eqName(E, head.asset) + ' · ' + E.t('cluTip',{n:g.length}))}">${C().sevGlyph(sev, false, 20, true, g.length)}</button>`;
     });
-    /* A dot only where something is in alarm. Healthy equipment stays unmarked.
-       Several register rows can share one model element: one dot each. */
+    /* Extra engine-alarmed assets only if a visible (filtered) alarm still
+       belongs to them — otherwise Alert Centre filters would leave a stray dot. */
+    const visAssets = new Set(list.map(a => a.asset));
     const seen = new Set();
     const alarmed = (g, s) => {
       const HE = window.EKO_HOST_ENGINE;
@@ -96,7 +103,7 @@ window.EKO_V = (function(){
     };
     (E.data.assets || []).forEach(s => {
       const g = guidOf(s.id);
-      if(!g || groups.has(g) || seen.has(g) || !alarmed(g, s)) return;
+      if(!g || groups.has(g) || seen.has(g) || !visAssets.has(s.id) || !alarmed(g, s)) return;
       seen.add(g);
       out += assetMarker(E, s, g);
       pts.push({ key: 'as:' + s.id });
@@ -115,7 +122,7 @@ window.EKO_V = (function(){
     (s.alarms || []).forEach(id => { const a = E.alarm(id); if (!a) return; const bucket = sevOf(a); const r = SEV_RANK[bucket] ?? 9; if (r < best) { best = r; sev = bucket; } });
     return `<button class="mk mkasset" data-key="${esc(key)}" data-bimid="${esc(g)}" data-asset="${esc(s.id)}" data-act="mkAsset"${mkStyle(null, null, key)}
        data-st="${alarm ? 'alarm' : 'ok'}" data-sev="${alarm ? esc(sev) : ''}" data-sel="${sel ? 1 : 0}" aria-pressed="${sel}"
-       aria-label="${esc(tip)}" data-tip="${esc(tip)}"><i aria-hidden="true"></i></button>`;
+       aria-label="${esc(tip)}" data-tip="${esc(tip)}">${alarm ? C().sevGlyph(sev, false, 16, true) : '<i aria-hidden="true"></i>'}</button>`;
   };
   const chipLayer = (chips) =>
     `<div class="pmulayer"${allCached(chips) ? ' data-proj="1"' : ''}>${chips.map(pc =>

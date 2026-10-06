@@ -818,15 +818,20 @@
 .dashboard-native-container .mkclu {
   min-width:20px;
   height:20px;
-  border-radius:50%;
-  background:var(--sevCrit);
-  border:1px solid rgba(0,0,0,.5);
+  padding:0;
+  border:0;
+  background:transparent;
   color:var(--inkOnFill);
   display:grid;
   place-items:center;
   font-weight:700;
   font-size:var(--txCapSz);
   font-family:'JetBrains Mono',monospace
+}
+.dashboard-native-container .mkclu svg {
+  width:20px;
+  height:20px;
+  filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))
 }
 
 .dashboard-native-container #vpmain {
@@ -3016,6 +3021,11 @@
   font-family:'JetBrains Mono',monospace;
   display:grid;
   place-items:center
+}
+.dashboard-native-container .sysgn[data-n="0"] {
+  background:transparent;
+  border-color:var(--bd2);
+  color:var(--t3)
 }
 
 .dashboard-native-container .syscard {
@@ -7745,16 +7755,7 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 }
 
 .dashboard-native-container .mkclu {
-  background:var(--sevCrit)
-}
-
-/* Bright fills, same as the marker glyphs. Light theme darkens the chip tokens. */
-.dashboard-native-container .mkclu[data-sev="high"] {
-  background:#F08A3C
-}
-
-.dashboard-native-container .mkclu[data-sev="medium"] {
-  background:#C4B03A
+  background:transparent
 }
 
 .dashboard-native-container,.dashboard-native-container {

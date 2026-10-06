@@ -33,6 +33,27 @@
     return m ? m[1] : (s.slice(0, 40) || 'FIN');
   }
 
+  /* Systems overlay groups key on these labels: HVAC, Electrical, Life safety, Security. */
+  function classifySys(text, asset) {
+    if (asset && asset.sys) {
+      if (asset.sys === 'elec') return 'Electrical';
+      if (asset.sys === 'fire') return 'Life safety';
+      if (asset.sys === 'sec') return 'Security';
+      if (asset.sys === 'hvac' || asset.sys === 'vent' || asset.sys === 'pumps') return 'HVAC';
+    }
+    var s = String(text || (asset && (asset.id + ' ' + (asset.typeEn || ''))) || '').toLowerCase();
+    function hit(words) {
+      return words.some(function (w) {
+        return new RegExp('(?:^|[^a-z0-9])' + w + '(?:[^a-z0-9]|\\d|$)').test(s);
+      });
+    }
+    if (hit(['facp', 'fm200', 'fire', 'smoke', 'sprinkler', 'detector']) || /(?:^|[^a-z0-9])fd[-_]/.test(s)) return 'Life safety';
+    if (hit(['cctv', 'camera']) || /(?:^|[^a-z0-9])cam[-_]/.test(s)) return 'Security';
+    if (hit(['fahu', 'mahu', 'ahu', 'fcu', 'vav', 'chiller', 'coil', 'exhaust', 'extract', 'sump', 'pool', 'pump', 'hvac', 'valve']) || /(?:^|[^a-z0-9])(?:ef|ch)[-_]/.test(s)) return 'HVAC';
+    if (hit(['mcc', 'smdb', 'lvfp', 'ats', 'edb', 'ups', 'pmu', 'elec', 'lighting']) || /(?:^|[^a-z0-9])db[-_]/.test(s)) return 'Electrical';
+    return 'HVAC';
+  }
+
   function mapAlarm(a, i) {
     var src = a.source || '';
     var msg = a.message || src;
@@ -50,7 +71,7 @@
       bimId: matchedAsset ? matchedAsset.bimId : null,
       sev: sev(a.severity),
       cat: a.diagnosed ? 'fdd' : 'sys',
-      sys: src || 'System',
+      sys: classifySys(src + ' ' + msg, matchedAsset),
       ack: null,
       ageH: ageH(a.occurred),
       locEn: src,
@@ -979,9 +1000,12 @@
       else if (/ahu|fahu|mahu|lift/i.test(eq.type)) crit = "B";
 
       var sys = "hvac";
-      if (/mcc|smdb|elec/i.test(eq.type)) sys = "elec";
-      if (/facp|fm200|is|cctv/i.test(eq.type)) sys = "sec";
+      var typeName = String(eq.type || '') + ' ' + String(eq.name || '');
+      if (/mcc|smdb|elec|lvfp|\bats\b|edb|ups|pmu/i.test(typeName)) sys = "elec";
+      if (/facp|fm200|fire|smoke/i.test(typeName)) sys = "fire";
+      if (/cctv|camera/i.test(typeName)) sys = "sec";
       if (/fan|exhaust|extract|vav/i.test(eq.type)) sys = "vent";
+      if (/pump|sump|pool|ahu|fahu|fcu|chiller/i.test(typeName)) sys = "hvac";
 
       var params = (eq.points || []).filter(function(p) { return p.reporting; }).slice(0, 4).map(function(p) {
         return [p.navName, "BMS", p.currentValue];
@@ -1125,8 +1149,9 @@
         }
       }
       (site.alarms || []).forEach(function(al) {
-        if (namesMatch(al.asset, asset.id)) {
+        if (namesMatch(al.asset, asset.id) || (asset.bimId && al.bimId === asset.bimId)) {
           al.bimId = al.bimId || asset.bimId;
+          al.sys = classifySys(al.locEn || al.asset, asset);
         }
       });
     });

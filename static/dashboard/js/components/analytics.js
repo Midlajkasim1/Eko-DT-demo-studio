@@ -112,11 +112,11 @@ window.EKO_A = (function(){
         return `<div class="sysgroup">
           <button class="sysgrouph" data-lock="true" data-act="teaser" data-teaser="systems.${g.id}" data-mod="systems">
             <span class="sysdot2" style="background:${g.hue}"></span><span class="sysgt">${esc(ar?g.labelAr:g.labelEn)}</span>
-            <span class="sysgn">${n}</span><span class="msA cT3">${icon('lock',12)}</span></button></div>`;
+            <span class="sysgn" data-n="${n}" title="${esc(n + ' open alarms')}">${n}</span><span class="msA cT3">${icon('lock',12)}</span></button></div>`;
       return `<div class="sysgroup">
         <button class="sysgrouph" data-act="goSub" data-mod="systems" data-sub="${g.id}" data-page="systems">
           <span class="sysdot2" style="background:${g.hue}"></span><span class="sysgt">${esc(ar?g.labelAr:g.labelEn)}</span>
-          <span class="sysgn">${n}</span>
+          <span class="sysgn" data-n="${n}" title="${esc(n + ' open alarms')}">${n}</span>
           ${E.state.sub?'':`<span class="sgchev msA cT3" role="button" tabindex="0" data-act="sysExpTgl" data-v="${g.id}"
             aria-label="${esc(E.t(open?'collapseNav':'expandNav'))}" data-open="${open}">${icon('chevD',12)}</span>`}</button>
         ${open || E.state.sub ? `<div class="sysgrid">${g.cards.filter(c => E.state.sub ? true : !c.subOnly).map(c=>sysCard(E,c,g)).join('')}</div>` : ''}</div>`;

@@ -112,22 +112,24 @@ window.EKO_C = (function(){
   };
   /* On the model these stay the bright hues. Light theme darkens --sevHigh and --sevMed for text chips. */
   const MARK = { critical:'var(--sevCrit)', high:'#F08A3C', medium:'#C4B03A' };
-  function sevGlyph(sev, acked, px=13, marker=false){
+  function sevGlyph(sev, acked, px=13, marker=false, count){
     const s = SEV[sev] || SEV.medium, c = marker ? (MARK[sev] || MARK.medium) : s.c;
+    const n = (count != null && count > 1) ? Number(count) : 0;
     const fill = acked ? 'none' : c;
     const stroke = marker ? 'rgba(0,0,0,0.5)' : c;
     const sw = marker ? 1 : 2.5;
-    let shp, barY;
-    if(s.shape==='circ'){ shp = `<circle cx="12" cy="12" r="10" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`; barY = 12; }
-    else if(s.shape==='tri'){ shp = `<polygon points="12,3 22.5,21 1.5,21" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round"/>`; barY = 15.5; }
-    else { shp = `<rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`; barY = 12; }
-    const mark = (!marker && !acked)
+    let shp, barY, numY;
+    if(s.shape==='circ'){ shp = `<circle cx="12" cy="12" r="10" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`; barY = 12; numY = 16; }
+    else if(s.shape==='tri'){ shp = `<polygon points="12,3 22.5,21 1.5,21" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round"/>`; barY = 15.5; numY = 17.4; }
+    else { shp = `<rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`; barY = 12; numY = 16; }
+    const mark = (!marker && !acked && !n)
       ? (s.shape==='tri'
         ? `<path d="M12 10v4.4" stroke="#0B1020" stroke-width="2.8" stroke-linecap="round"/><path d="M12 18h.01" stroke="#0B1020" stroke-width="3" stroke-linecap="round"/>`
         : `<path d="M12 6.6v6.2" stroke="#0B1020" stroke-width="3" stroke-linecap="round"/><path d="M12 17.2h.01" stroke="#0B1020" stroke-width="3.2" stroke-linecap="round"/>`)
       : '';
     const bar = acked ? `<path d="M5.5 ${barY}h13" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/>` : '';
-    return `<svg width="${px}" height="${px}" viewBox="0 0 24 24" aria-hidden="true">${shp}${mark}${bar}</svg>`;
+    const num = n ? `<text x="12" y="${numY}" text-anchor="middle" font-size="${n>9?8:11}" font-weight="700" fill="#0B1020" font-family="JetBrains Mono,ui-monospace,monospace">${n}</text>` : '';
+    return `<svg width="${px}" height="${px}" viewBox="0 0 24 24" aria-hidden="true">${shp}${mark}${bar}${num}</svg>`;
   }
   const sevAction = (E, sev) =>
     E.t(sev === 'critical' ? 'sevActNow' : sev === 'high' ? 'sevToday' : 'sevThisWeek');
