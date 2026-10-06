@@ -11524,9 +11524,25 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   border-radius:0
 }
 
+.dashboard-native-container .pwarea[data-pg="anom"] .angrid39 > .pwwidget {
+  min-height:0;
+  max-height:min(62vh, 640px);
+  overflow:hidden;
+  display:flex;
+  flex-direction:column
+}
+.dashboard-native-container .pmuhdr39 {
+  flex:none
+}
 .dashboard-native-container .pmurows {
+  flex:1 1 auto;
+  min-height:0;
+  overflow-x:hidden;
+  overflow-y:auto;
   justify-content:flex-start;
-  gap:2px
+  gap:2px;
+  scrollbar-width:thin;
+  scrollbar-color:var(--bd2) transparent
 }
 
 .dashboard-native-container .upcard {

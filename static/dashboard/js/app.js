@@ -613,7 +613,7 @@
      scroller to the top (the alarms panel jumped when the account menu
      opened). Positions are captured before the rebuild and restored after,
      matched by selector and order. */
-  const SCROLLERS = ['#modcontent', '.ovpad', '.apbody', '.nflist', '.regscroll', '.dgscroll', '.dlg', '.aclist', '.vplist', '#ekonav', '.rpwrap', '.rphub', '.pagepad', '.pwarea', '.scrollY'];
+  const SCROLLERS = ['#modcontent', '.ovpad', '.apbody', '.nflist', '.regscroll', '.dgscroll', '.dlg', '.aclist', '.vplist', '#ekonav', '.rpwrap', '.rphub', '.pagepad', '.pwarea', '.scrollY', '.pmurows'];
   function keepScroll(){
     const saved = [];
     SCROLLERS.forEach(sel => {
