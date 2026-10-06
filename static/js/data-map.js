@@ -1104,8 +1104,8 @@
 
       var sys = sysFromFin(eq);
 
-      var params = (eq.points || []).filter(function(p) { return p.reporting; }).slice(0, 4).map(function(p) {
-        return [p.navName, "BMS", p.currentValue];
+      var params = (eq.points || []).filter(function(p) { return p.reporting; }).map(function(p) {
+        return [p.navName, "", p.currentValue];
       });
 
       var alarmIds = (site.alarms || []).filter(function(a) { return namesMatch(a.asset, eq.name) || namesMatch(a.asset, eq.bimId); }).map(function(a) { return a.id; });

@@ -1053,7 +1053,7 @@ window.EKO_C = (function(){
     const trP = x => E.ph(x);
     const live = `<h4 class="tLbl">${esc(t('apLiveParams'))}</h4>
       ${(r.params||[]).map(p =>
-        `<div class="aprow"><dt>${esc(trP(p[0]))}<span class="apsrc">${esc(trP(p[1]))}</span></dt><dd>${esc(E.clip2 ? E.clip2(p[2]) : p[2])}</dd></div>`).join('')
+        `<div class="aprow"><dt>${esc(trP(p[0]))}${p[1] ? `<span class="apsrc">${esc(trP(p[1]))}</span>` : ''}</dt><dd>${esc(E.clip2 ? E.clip2(p[2]) : p[2])}</dd></div>`).join('')
         || `<p class="alempty">${esc(t('emptyDash'))}</p>`}`;
     /* D105: progressive disclosure replaces the old Pro depth — a labelled expansion in place, per user */
     const fullOn = E.disclose('full');

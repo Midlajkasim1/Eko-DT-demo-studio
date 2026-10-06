@@ -52,7 +52,7 @@
     { section:'dgr.sRef', act:'none', attr:'asset', labelKey:'dgr.cafm', icon:'expand' }
   ];
   const expand = (E, r) => { const t = E.t.bind(E); const als = (r.alarms || []).map(id => E.alarm(id)).filter(Boolean);
-    const live = (r.params || []).length ? `<dl class="dgxl">${r.params.map(p => `<div class="aprow"><dt>${esc(pAr(E, p[0]))}<span class="apsrc">${esc(pAr(E, p[1]))}</span></dt><dd>${esc(p[2])}</dd></div>`).join('')}</dl>` : `<p class="tCap">${esc(t('emptyDash'))}</p>`;
+    const live = (r.params || []).length ? `<dl class="dgxl">${r.params.map(p => `<div class="aprow"><dt>${esc(pAr(E, p[0]))}${p[1] ? `<span class="apsrc">${esc(pAr(E, p[1]))}</span>` : ''}</dt><dd>${esc(p[2])}</dd></div>`).join('')}</dl>` : `<p class="tCap">${esc(t('emptyDash'))}</p>`;
     const al = als.length ? als.map(a => `<div class="alref"><div class="alrefh"><span class="statchip" data-sev="${a.sev}">${esc(t('rib' + a.sev[0].toUpperCase() + a.sev.slice(1)).toLowerCase())}</span><span class="alrefage tMonoS msA">${esc(a.age)}</span></div>
       <div class="alreft">${esc(E.alarmLines(a).main)}</div>${E.alarmLines(a).sub ? `<div class="alreftech">${esc(E.alarmLines(a).sub)}</div>` : ''}<div class="alrefack">${a.ack ? esc(t('ackShort', { time:a.ack.time, who:a.ack.who })) : esc(t('apUnack'))}</div></div>`).join('') : `<p class="tCap">${esc(t('apNoAlarms'))}</p>`;
     return `<div class="dgxg"><section><h4 class="tLbl">${esc(t('apLiveParams'))}</h4>${live}</section><section><h4 class="tLbl">${esc(t('dgxAlarms'))}</h4>${al}</section></div>`; };

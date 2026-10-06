@@ -722,8 +722,7 @@ class FinScramClient:
 
                 is_rule = nav_lower.startswith("rule")
                 if not is_rule:
-                    skip_patterns = ["sensor no response", "metadata", "[metadata_block]",
-                                     "cooling valve not maintaining", "not maintaining setpoint"]
+                    skip_patterns = ["metadata", "[metadata_block]"]
                     if any(pat in nav_lower for pat in skip_patterns):
                         continue
                     if nav_lower in ["start/stop", "start_stop", "startstop"]:
