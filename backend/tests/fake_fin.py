@@ -37,6 +37,26 @@ class FakeFinClient:
     missing_points: set = set()
     # Set to a status code to make every probe answer it (e.g. 500 for "cannot tell")
     probe_status = None
+    # (FIN project the client was bound to, endpoint) for every probe, so a test can prove which
+    # FIN project identifier each request carried
+    probe_log: list = []
+    # What POST /api/sys/eval answers with (a FIN Host project grid), and the POSTs it received.
+    # post_status makes every POST answer that status instead (e.g. 500, 403).
+    # The header is the one captured from the FIN Host (`dis` is the display name); the ids and
+    # `dis` values are the confirmed ones. Cells after `dis` were not captured and are empty.
+    projects_text = (
+        'ver:"3.0"\n'
+        'id,type,dis,route,routeStatus,readRoutes,readRouteStatus,created,doc,version,routeErr,backup,'
+        'name hidden,projMeta hidden,mod hidden\n'
+        '@p:adnocWarsan,"local","adnocWarsan"' + ',' * 12 + '\n'
+        '@p:ellisdonDemo,"local","ellisdonDemo"' + ',' * 12 + '\n'
+        '@p:khaznaDataCenter,"local","KHAZNA DATA CENTER"' + ',' * 12 + '\n'
+        '@p:marsaAlArab,"local","marsaAlArab"' + ',' * 12 + '\n'
+    )
+    post_status = None
+    post_log: list = []
+    # unreachable: the POST fails like a FIN that is down (status None)
+    post_unreachable = False
 
     def __init__(self, base_url, project_name):
         self.base_url = base_url.rstrip("/")
@@ -61,12 +81,33 @@ class FakeFinClient:
         self.last_point_rows = [{"id": {"val": "@p:x:r:1", "dis": "pt"}, "his": True, "navName": "pt"}]
         return _equipment()
 
+    async def post_probe(self, endpoint, body):
+        FakeFinClient.post_log.append((self.project_name, endpoint, body))
+        if FakeFinClient.post_unreachable:
+            return None, None
+        if FakeFinClient.post_status:
+            return FakeFinClient.post_status, ""
+        return 200, FakeFinClient.projects_text
+
     async def fetch_probe(self, endpoint):
         """The read-only probe the backend uses for validation, answered from the settings above."""
+        FakeFinClient.probe_log.append((self.project_name, endpoint))
         if FakeFinClient.probe_status:
             return FakeFinClient.probe_status, ""
         if self.project_name == "ghost" or self.project_name in FakeFinClient.unknown_projects:
             return 404, ""
+        if "readAll(" in endpoint and "/eval" in endpoint:
+            # a project's point list: IDs carry the project the request names, so a test can tell
+            # which project's points came back
+            from urllib.parse import unquote
+            proj = endpoint.split("/api/", 1)[1].split("/", 1)[0]
+            if proj == "ghost" or proj in FakeFinClient.unknown_projects:
+                return 404, ""
+            return 200, (
+                'ver:"3.0"\nid,navName,equipRef,unit,his\n'
+                f'@p:{proj}:r:111 "Total Power",Total Power,@e1 "EQ-1",kW,M\n'
+                f'@p:{proj}:r:222 "Supply Temp",Supply Temp,@e1 "EQ-1",,\n'
+            )
         if "filter=equip" in endpoint:
             return 200, 'ver:"3.0"\nid,dis\n@e1,"EQ-1"\n'
         if "readById" in endpoint:

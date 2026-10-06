@@ -361,6 +361,70 @@ def parse_alarm_fdd_points(alarms_text: str) -> list[dict]:
     return fdd_points
 
 
+# ─── FIN project list ────────────────────────────────────────────────────────
+
+PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
+# The project grid FIN returns for secureEval(projs()) has the columns
+#   id,type,dis,route,routeStatus,readRoutes,readRouteStatus,created,doc,version,routeErr,backup,
+#   name hidden,projMeta hidden,mod hidden
+# and `dis` is the display name (`name` is a hidden internal column, never shown). A row whose `dis`
+# is empty is listed under its identifier, never a made-up name.
+PROJECT_NAME_COLUMNS = ("dis",)
+
+
+def zinc_string_body(expr: str) -> str:
+    """The Zinc grid a Haystack `eval` POST carries: one `expr` column, one row."""
+    escaped = expr.replace("\\", "\\\\").replace('"', '\\"')
+    return 'ver:"3.0"\nexpr\n"' + escaped + '"\n'
+
+
+def parse_fin_projects(text: str) -> list[dict]:
+    """Project records from a FIN grid: every row whose id is `@p:<projectId>`.
+
+    Returns [{"id": "marsaAlArab", "name": "..."}] sorted by name. `id` is what `/api/{id}/...`
+    takes. Rows with any other kind of id are ignored, and an id seen twice is kept once.
+    """
+    if not text:
+        return []
+    # a cell can hold a nested grid (projMeta); collapse it so it cannot add or split rows
+    text = collapse_metadata_blocks(text)
+    lines = [ln for ln in text.replace("\r", "").split("\n") if ln.strip()]
+    header: list[str] = []
+    first_data = 0
+    if lines and lines[0].startswith("ver:"):
+        first_data = 1
+    # the column names follow the version line; a record row starts with its ref instead
+    if first_data < len(lines) and not lines[first_data].lstrip().startswith("@"):
+        # a column name may carry Zinc metadata after it (`name dis:"Project"`); only the name counts
+        header = [(h.strip().strip('"').split() or [''])[0].lower() for h in _split_zinc_csv(lines[first_data])]
+        first_data += 1
+    name_cols = [header.index(c) for c in PROJECT_NAME_COLUMNS if c in header]
+
+    found: dict[str, str] = {}
+    for ln in lines[first_data:]:
+        cells = _split_zinc_csv(ln)
+        if not cells:
+            continue
+        ref, _, ref_dis = cells[0].partition(" ")
+        if not ref.startswith("@p:"):
+            continue
+        pid = ref[3:]
+        if not PROJECT_ID_RE.match(pid) or pid in found:
+            continue
+        name = ""
+        for col in name_cols:
+            if col < len(cells):
+                value = decode_zinc_unicode(cells[col].strip().strip('"')).strip()
+                if value and value != "M":
+                    name = value
+                    break
+        if not name:
+            name = decode_zinc_unicode(ref_dis.strip().strip('"')).strip()
+        found[pid] = name or pid
+    return sorted(({"id": pid, "name": name} for pid, name in found.items()),
+                  key=lambda p: (p["name"].lower(), p["id"]))
+
+
 # ─── Time Aggregation ────────────────────────────────────────────────────────
 
 AM_PM_LOOKUP = {
@@ -564,6 +628,35 @@ class FinScramClient:
             return resp.status_code, resp.text
         except Exception as e:
             print(f"[FIN] Probe error {url}: {e}")
+            return None, None
+
+    async def post_probe(self, endpoint: str, body: str) -> tuple[Optional[int], Optional[str]]:
+        """POST a Zinc body with the signed-in session: (status, text), or (None, None) if FIN is
+        unreachable. Like fetch_probe it never ends the session."""
+        url = endpoint if endpoint.startswith("http") else f"{self.base_url}{endpoint}"
+
+        print("[FIN] POST URL:", url)
+        print("[FIN] POST BODY:")
+        print(body)
+
+        try:
+            resp = await self.client.post(
+                url,
+                content=body.encode("utf-8"),
+                headers={
+                    **self.auth_headers,
+                    "Content-Type": "text/zinc; charset=utf-8",
+                    "Accept": "text/zinc",
+                },
+            )
+
+            print("[FIN] POST STATUS:", resp.status_code)
+            print("[FIN] POST RESPONSE:", resp.text)
+
+            return resp.status_code, resp.text
+
+        except Exception as e:
+            print(f"[FIN] Post error {url}: {e}")
             return None, None
 
     def _resolve_endpoint(self, template: str) -> str:

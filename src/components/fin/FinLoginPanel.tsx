@@ -50,14 +50,21 @@ export function FinLoginPanel() {
     // false = signed in, but the project name did not resolve on this FIN server.
     // null/undefined = not checked (e.g. an older backend): shown as before.
     const notValidated = status?.project_validated === false
+    // The session is signed in, but the open project names no FIN project: nothing is read for it
+    const unset = status?.project_source === 'unset'
     return (
       <div className="fin-login-panel fin-connected">
         <div className="fin-status-badge">
-          <span className="fin-status-dot connected" style={notValidated ? { background: '#d9a400' } : undefined} />
-          <span className="fin-status-label">{notValidated ? 'Not validated' : 'FIN Connected'}</span>
+          <span className="fin-status-dot connected" style={notValidated || unset ? { background: '#d9a400' } : undefined} />
+          <span className="fin-status-label">{unset ? 'No FIN project set' : notValidated ? 'Not validated' : 'FIN Connected'}</span>
         </div>
         {status?.project_validated === true && (
           <div className="fin-validated" style={{ fontSize: '12px', opacity: 0.85 }}>✓ Project validated</div>
+        )}
+        {unset && (
+          <div className="fin-error" role="alert">
+            Signed in to FIN, but this project has no FIN Project Name. Set it in Dashboard Settings → FIN Config.
+          </div>
         )}
         {notValidated && (
           <div className="fin-error" role="alert">

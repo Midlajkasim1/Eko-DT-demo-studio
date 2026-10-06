@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 # Two projects that disagree on every Data Mapping block
 PROJECT_A = {
+    "finProjectName": "marsaAlArab",
     "finLivePoints": {"total_power": "p:{project}:r:111"},
     "finEndpoints": {"A_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:1,today())"},
     "finEquipmentClasses": {"system_tags": ["ahu"], "meter_tags": ["meter"], "type_priority": ["ahu"]},
@@ -27,6 +28,7 @@ PROJECT_A = {
     "finSeverityBands": {"order": "desc", "critical": 250, "warning": 150},   # priority 200 -> warning
 }
 PROJECT_B = {
+    "finProjectName": "ellisdonDemo",
     "finLivePoints": {"total_power": "p:{project}:r:222"},
     "finEndpoints": {"B_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:2,today())"},
     "finEquipmentClasses": {"system_tags": ["fcu"], "meter_tags": ["meter"], "type_priority": ["fcu"]},

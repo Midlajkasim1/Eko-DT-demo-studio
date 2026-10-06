@@ -24,13 +24,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from fin_client import (
+    PROJECT_ID_RE,
     FinScramClient,
     aggregate_and_restructure,
     alarm_is_open,
     clip_decimals,
     parse_custom_response,
+    parse_fin_projects,
     parse_zinc_csv,
     safe_get,
+    zinc_string_body,
 )
 
 # ─── Load Config ─────────────────────────────────────────────────────────────
@@ -696,10 +699,27 @@ async def _validate_project(c) -> bool:
     return status == 200 and text is not None and not _is_error_grid(text)
 
 
+# (project_id, name) typed at sign-in. Kept for that one project only: it is never saved, so a
+# later settings sync of the same project must not drop it, and another project must not get it.
+TYPED_NAME: Optional[tuple] = None
+
+
 def _name_source(requested: bool) -> str:
+    """Where the FIN project name in use came from. "unset": the open project has none, and the
+    config.json default is deliberately not substituted for a project that is being managed."""
+    if not PROJECT_NAME:
+        return "unset"
     if requested:
         return "request"
     return "project" if "project_name" in ACTIVE_OVERRIDES else "default"
+
+
+def _display_name() -> str:
+    """A project that was applied but sets no display name shows its own FIN project name,
+    never the config.json site label (that belongs to the backend's default site)."""
+    if "display_name" in ACTIVE_OVERRIDES or ACTIVE_PROJECT_ID is None:
+        return CONFIG.get("display_name", PROJECT_NAME)
+    return PROJECT_NAME
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
@@ -707,20 +727,26 @@ def _name_source(requested: bool) -> str:
 @app.post("/api/fin/login")
 async def login(req: LoginRequest):
     """Authenticate with FIN server using SCRAM-SHA-256."""
-    global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK
+    global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK, TYPED_NAME
 
     # Settings sent with the login belong to the project being opened; without them the
     # configuration already active (bundled project or config.json) stays in force
-    if req.settings is not None:
+    managed = req.settings is not None
+    if managed:
         apply_project_settings(req.settings, req.project_id)
 
     server_url = req.server_url or FIN_SERVER_URL
-    project = req.project_name or PROJECT_NAME
-    name_source = _name_source(bool(req.project_name))
+    typed = (req.project_name or "").strip()
+    if managed and not typed and "project_name" not in ACTIVE_OVERRIDES:
+        project = ""   # this project has no FIN Project Name: unconfigured, not the default site
+    else:
+        project = typed or PROJECT_NAME
+    TYPED_NAME = (req.project_id, typed) if managed and typed else None
 
     # Update globals if overridden
     FIN_SERVER_URL = server_url
     PROJECT_NAME = project
+    name_source = _name_source(bool(typed))
 
     _cancel_polling()
     _reset_caches()
@@ -735,10 +761,13 @@ async def login(req: LoginRequest):
     if not success:
         raise HTTPException(status_code=401, detail="Authentication failed")
 
-    # Signed in is not the same as usable: the project name must resolve on this server too
-    PROJECT_CHECK = {"validated": await _validate_project(client), "source": name_source}
-
-    _start_polling()
+    # Signed in is not the same as usable: the project name must resolve on this server too.
+    # With no project name there is nothing to check or poll.
+    if project:
+        PROJECT_CHECK = {"validated": await _validate_project(client), "source": name_source}
+        _start_polling()
+    else:
+        PROJECT_CHECK = {"validated": None, "source": name_source}
 
     return {
         "status": "success",
@@ -756,10 +785,17 @@ async def set_project_settings(req: ProjectSettingsRequest):
     Needs an authenticated session, since it changes what the shared session polls.
     The FIN server cannot change here — that needs a fresh sign-in, so it is reported.
     """
-    global FIN_SERVER_URL, PROJECT_CHECK
+    global FIN_SERVER_URL, PROJECT_CHECK, PROJECT_NAME, TYPED_NAME
     _require_client()
 
     apply_project_settings(req.settings, req.project_id)
+    # A project without its own FIN Project Name is unconfigured, except for the name typed at
+    # sign-in for this same project. Never the config.json default, never another project's name.
+    if TYPED_NAME and TYPED_NAME[0] != (req.project_id or None):
+        TYPED_NAME = None
+    kept = TYPED_NAME[1] if TYPED_NAME else ""
+    if "project_name" not in ACTIVE_OVERRIDES:
+        PROJECT_NAME = kept
     wanted_url = str(req.settings.get("finBaseUrl") or "").strip().rstrip("/")
     reconnect_required = bool(wanted_url) and wanted_url != client.base_url
     # The session is bound to the server it signed in to; keep reporting that one
@@ -768,11 +804,16 @@ async def set_project_settings(req: ProjectSettingsRequest):
     # Rows read for the previous project feed /his-points and the alarm views until the next poll
     client.last_alarm_rows = []
     client.last_point_rows = []
-    PROJECT_CHECK = {"validated": await _validate_project(client), "source": _name_source(False)}
+    name_source = _name_source(bool(kept) and "project_name" not in ACTIVE_OVERRIDES)
+    PROJECT_CHECK = {
+        "validated": await _validate_project(client) if PROJECT_NAME else None,
+        "source": name_source,
+    }
 
     _cancel_polling()
     _reset_caches()
-    _start_polling()
+    if PROJECT_NAME:
+        _start_polling()
 
     return {
         "status": "success",
@@ -838,6 +879,8 @@ async def _point_results(c, pids: list[str]) -> dict[str, dict]:
     sem = asyncio.Semaphore(8)
 
     async def one(pid: str) -> dict:
+        if not c.project_name:
+            return _item("cannot_validate", "This project has no FIN Project Name to check against.")
         if pid in catalogue:
             return _item("valid")
         async with sem:
@@ -944,6 +987,88 @@ async def validate_mapping(req: ValidateMappingRequest):
     }
 
 
+# ─── FIN project discovery ───────────────────────────────────────────────────
+# Which FIN projects exist on the server, and which resources one of them has. Both go through
+# the signed-in session, so the browser never holds FIN credentials, and neither changes the
+# project the session is serving: the project asked about travels in the request, not the session.
+
+MAX_RESOURCES = 5000
+
+
+def _fin_failure(status: Optional[int], text: Optional[str], what: str) -> HTTPException:
+    """The API error for a FIN answer that is not a usable grid."""
+    if status is None:
+        return HTTPException(status_code=502, detail="FIN could not be reached.")
+    if status in (401, 403):
+        # not 401: that would read as "the Eko-DT session ended"
+        return HTTPException(status_code=403, detail=f"FIN did not allow this account to read {what}.")
+    if status == 404:
+        return HTTPException(status_code=404, detail=f"FIN has no such {what}.")
+    return HTTPException(status_code=502, detail=f"FIN answered {status} for {what}.")
+
+
+@app.get("/api/fin/projects")
+async def get_fin_projects():
+    """The projects on the FIN server: [{"id": "marsaAlArab", "name": "..."}].
+
+    `id` is the identifier FIN uses in `/api/{id}/...`; `name` is only for display. The request
+    is the one the FIN Host page makes (POST /api/sys/eval); its expression comes from
+    config.json `project_discovery`, so a server that answers differently needs no code change.
+    """
+    _require_client()
+    cfg = CONFIG.get("project_discovery") or {}
+    endpoint = str(cfg.get("endpoint") or "").strip()
+    expr = str(cfg.get("expr") or "").strip()
+    if not endpoint or not expr:
+        raise HTTPException(
+            status_code=503,
+            detail="FIN project discovery is not configured (config.json project_discovery.endpoint and .expr).")
+    status, text = await client.post_probe(endpoint, zinc_string_body(expr))
+    if status != 200 or text is None:
+        raise _fin_failure(status, text, "project list")
+    if _is_error_grid(text):
+        raise HTTPException(status_code=502, detail="FIN returned an error for the project list.")
+    return {"projects": parse_fin_projects(text), "server_url": client.base_url}
+
+
+@app.get("/api/fin/resources")
+async def get_fin_resources(project: str):
+    """The points of ONE FIN project, for the Data Mapping pickers.
+
+    Read-only, and keyed by the `project` asked about, never the session's: choosing a project
+    in Dashboard Settings loads that project's own points before anything is saved.
+    `ref` is the point ID with the project name written as {project}, ready to store in a mapping.
+    """
+    _require_client()
+    if not PROJECT_ID_RE.match(project):
+        raise HTTPException(status_code=400, detail="Not a FIN project identifier.")
+    template = (CONFIG.get("realtime_endpoints") or {}).get("points")
+    if not template:
+        raise HTTPException(status_code=503, detail="No point query is configured (realtime_endpoints.points).")
+    status, text = await client.fetch_probe(template.replace("{project}", quote(project, safe="")))
+    if status != 200 or text is None:
+        raise _fin_failure(status, text, "project")
+    if _is_error_grid(text):
+        raise HTTPException(status_code=404, detail="FIN has no such project.")
+    rows = parse_zinc_csv(text)
+    items = []
+    for row in rows[:MAX_RESOURCES]:
+        pid = str(safe_get(row.get("id"), "val") or "").lstrip("@")
+        if not pid:
+            continue
+        equip = safe_get(row.get("equipRef"), "dis")
+        items.append({
+            "id": pid,
+            "ref": pid.replace(f":{project}:", ":{project}:", 1) if f":{project}:" in pid else pid,
+            "name": safe_get(row.get("id"), "dis") or row.get("dis") or row.get("navName") or pid,
+            "navName": row.get("navName") if isinstance(row.get("navName"), str) else None,
+            "equip": equip or None,
+            "unit": row.get("unit") if isinstance(row.get("unit"), str) else None,
+            "his": row.get("his") is True,
+        })
+    return {"project": project, "resources": items, "truncated": len(rows) > MAX_RESOURCES}
+
+
 @app.get("/api/fin/status", response_model=StatusResponse)
 async def get_status():
     """Check connection status."""
@@ -951,7 +1076,7 @@ async def get_status():
         connected=client.is_authenticated if client else False,
         project_name=PROJECT_NAME,
         server_url=FIN_SERVER_URL,
-        display_name=CONFIG.get("display_name", PROJECT_NAME),
+        display_name=_display_name(),
         project_validated=PROJECT_CHECK["validated"] if client and client.is_authenticated else None,
         project_source=PROJECT_CHECK["source"] if client and client.is_authenticated else None,
         project_id=ACTIVE_PROJECT_ID,
@@ -1193,7 +1318,7 @@ async def get_config():
         "project_id": ACTIVE_PROJECT_ID,
         "project_name": PROJECT_NAME,
         "server_url": FIN_SERVER_URL,
-        "display_name": CONFIG.get("display_name", PROJECT_NAME),
+        "display_name": _display_name(),
     }
 
 
@@ -1209,7 +1334,7 @@ async def auth_status():
         "authenticated": client.is_authenticated if client else False,
         "project": PROJECT_NAME,
         "server_url": FIN_SERVER_URL,
-        "display_name": CONFIG.get("display_name", PROJECT_NAME),
+        "display_name": _display_name(),
     }
 
 

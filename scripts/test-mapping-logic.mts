@@ -3,6 +3,7 @@ import assert from 'node:assert'
 import { rowsFromObject, objectFromRows, parseImport, mergeEntries } from '../src/lib/mappingRows.ts'
 import { SITE_FIN_EQUIPMENT_CLASSES, SITE_FIN_METER_PROFILE } from '../src/constants/finDefaults.ts'
 import { mappingProblem, applyMappingValues, toBackendSettings, MAPPING_FIELDS } from '../src/lib/finSettings.ts'
+import { projectIdFromSelection, projectLabel, savedProjectState } from '../src/lib/finProjects.ts'
 
 const same = (a: unknown, b: unknown) => assert.deepStrictEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)))
 let passed = 0
@@ -62,6 +63,51 @@ test('project A and B settings stay independent through apply / allow-list', () 
   const sent = toBackendSettings({ ...A, weatherApiKey: 'SECRET', navButtons: [] } as never)
   assert(!('weatherApiKey' in sent) && !('navButtons' in sent) && sent.finLivePoints)
   for (const f of MAPPING_FIELDS) assert(f.startsWith('fin'))
+})
+
+test('each project keeps its own FIN project name and mappings through a project.json save and reload', () => {
+  // what handleSave writes and openRecentProject reads back is the JSON text of the project
+  const reload = (s: object) => JSON.parse(JSON.stringify({ apiSettings: s })).apiSettings
+  const A = applyMappingValues({ finProjectName: 'marsaAlArab' }, { finLivePoints: { ahu_temp: 'p:{project}:r:A' } })
+  const B = applyMappingValues({ finProjectName: 'ellisdonDemo' }, { finLivePoints: { ahu_temp: 'p:{project}:r:B' } })
+  for (const [s, name, id] of [[A, 'marsaAlArab', 'A'], [B, 'ellisdonDemo', 'B']] as const) {
+    const back = reload(s)
+    assert.strictEqual(back.finProjectName, name)
+    assert.deepStrictEqual(back.finLivePoints, { ahu_temp: `p:{project}:r:${id}` })
+    assert.deepStrictEqual(toBackendSettings(back), toBackendSettings(s))        // what the backend is sent
+  }
+  // a project that saved nothing has no project name and no mapping, and gets none from A or B
+  assert.deepStrictEqual(toBackendSettings(reload(applyMappingValues({}, {}))), {})
+})
+
+test('FIN project dropdown: shows the name, stores the identifier, never swaps a saved project', () => {
+  const projects = [
+    { id: 'adnocWarsan', name: 'ADNOC WARSAN' }, { id: 'ellisdonDemo', name: 'ELLISDON DEMO' },
+    { id: 'khaznaDataCenter', name: 'KHAZNA DATA CENTER' }, { id: 'marsaAlArab', name: 'MARSA AL ARAB' },
+  ]
+  assert.strictEqual(projectIdFromSelection(projects, 'marsaAlArab'), 'marsaAlArab')
+  assert.strictEqual(projectIdFromSelection(projects, 'ellisdonDemo'), 'ellisdonDemo')
+  assert.strictEqual(projectIdFromSelection(projects, 'MARSA AL ARAB'), '')      // a display name is never an id
+  assert.strictEqual(projectLabel(projects[3]), 'MARSA AL ARAB (marsaAlArab)')
+  assert.strictEqual(projectLabel({ id: 'x', name: 'x' }), 'x')
+  assert.strictEqual(savedProjectState(projects, undefined), 'none')             // unconfigured stays unconfigured
+  assert.strictEqual(savedProjectState(projects, 'marsaAlArab'), 'available')
+  assert.strictEqual(savedProjectState(projects, 'retiredProject'), 'missing')   // kept and reported, not replaced
+  assert.strictEqual(savedProjectState([], 'marsaAlArab'), 'missing')
+
+  // A -> B -> A through the settings the picker feeds: each keeps its own project and mapping
+  const reload = (s: object) => JSON.parse(JSON.stringify({ apiSettings: s })).apiSettings
+  const pick = (base: object, id: string, ref: string) =>
+    applyMappingValues({ ...base, finProjectName: projectIdFromSelection(projects, id) }, { finLivePoints: { total_power: ref } })
+  const A = pick({}, 'marsaAlArab', 'p:{project}:r:A')
+  const B = pick({}, 'ellisdonDemo', 'p:{project}:r:B')
+  for (const s of [A, B, A]) {
+    const back = toBackendSettings(reload(s))
+    assert.strictEqual(back.finProjectName, s === A ? 'marsaAlArab' : 'ellisdonDemo')
+    assert.deepStrictEqual(back.finLivePoints, { total_power: s === A ? 'p:{project}:r:A' : 'p:{project}:r:B' })
+  }
+  // a project nobody configured is not given a project by the dropdown
+  assert.strictEqual(toBackendSettings(reload(applyMappingValues({}, {}))).finProjectName, undefined)
 })
 
 console.log(`\n${passed} logic tests passed`)

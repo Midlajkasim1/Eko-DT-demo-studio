@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { useProjectStore } from '@/store/useProjectStore'
 import { useFinStore } from '@/store/useFinStore'
 import { writeJson } from '@/lib/projectDb'
+import { FinProjectPicker } from '@/components/project/FinProjectPicker'
+import { fetchFinResources, type FinResource } from '@/lib/finProjects'
 import {
   KeyValueEditor,
   MappingSection,
@@ -227,8 +229,30 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   const [validating, setValidating] = useState(false)
   const [validateError, setValidateError] = useState<string | null>(null)
   const finConnected = useFinStore(s => s.isConnected)
+  const finStatus = useFinStore(s => s.status)
   const openProjectId = useRef<string | undefined>(undefined)
   useEffect(() => { openProjectId.current = currentProject?.projectId }, [currentProject?.projectId])
+
+  // The points of the FIN project selected in FIN Config, read from that project (not from the
+  // session's). Keyed by the project they were loaded for, so a late answer for a previously
+  // selected project, or for another Eko-DT project, is dropped and never shown.
+  const selectedFinProject = settings.finProjectName || ''
+  const [resources, setResources] = useState<
+    { project: string; state: 'ready' | 'error'; items: FinResource[]; truncated?: boolean; message?: string } | null
+  >(null)
+  useEffect(() => {
+    if (!visible || !finConnected || !selectedFinProject) return
+    let cancelled = false
+    const project = selectedFinProject
+    // typing an identifier by hand must not query FIN for every keystroke
+    const timer = setTimeout(() => {
+      fetchFinResources(project).then(
+        r => { if (!cancelled) setResources({ project, state: 'ready', items: r.resources, truncated: r.truncated }) },
+        (e: unknown) => { if (!cancelled) setResources({ project, state: 'error', items: [], message: e instanceof Error ? e.message : 'Unknown error' }) }
+      )
+    }, 300)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [visible, finConnected, selectedFinProject, currentProject?.projectId])
 
   useEffect(() => {
     if (visible && currentProject) {
@@ -279,6 +303,9 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
 
   // isFin only decides FIN-specific side effects below; every settings tab is for every project
   const isFin = !!currentProject.isFinProject
+  // Validation reads the FIN project the backend session serves. A project picked here but not
+  // saved yet is not that project, so it would be checked against the wrong one.
+  const validateBlocked = (finStatus?.project_name ?? '') !== selectedFinProject
 
   const setMapping = (field: MappingField, state: EditorState) => {
     const problem = state.value ? mappingProblem(field, state.value) : null
@@ -440,8 +467,12 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 <input type="text" value={settings.finBaseUrl || ''} onChange={e => update('finBaseUrl', e.target.value)} />
               </div>
               <div className="ds-field">
-                <label>FIN Project Name</label>
-                <input type="text" value={settings.finProjectName || ''} onChange={e => update('finProjectName', e.target.value)} />
+                <label>FIN Project</label>
+                <FinProjectPicker
+                  value={settings.finProjectName || ''}
+                  connected={finConnected}
+                  onChange={id => update('finProjectName', id)}
+                />
               </div>
               <div className="ds-field">
                 <label>Display Name</label>
@@ -493,18 +524,39 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                   — Not Configured. No project-specific mappings configured for this {isFin ? 'FIN ' : ''}project.
                 </p>
               )}
+              {!selectedFinProject && (
+                <p className="ds-hint">No FIN project selected. Choose one in FIN Config to load its points here.</p>
+              )}
+              {selectedFinProject && finConnected && resources?.project !== selectedFinProject && (
+                <p className="ds-hint" data-testid="fin-resources-status">Loading the points of FIN project {selectedFinProject}...</p>
+              )}
+              {selectedFinProject && finConnected && resources?.project === selectedFinProject && (
+                <p className="ds-hint" data-testid="fin-resources-status">
+                  {resources.state === 'ready' && (
+                    `${resources.items.length} points available from FIN project ${resources.project}${resources.truncated ? ' (list cut short)' : ''}. ` +
+                    'In FIN Live Points, click a Value field and choose a point; which point is which stays your decision.'
+                  )}
+                  {resources.state === 'error' && `Could not load the points of ${resources.project}: ${resources.message}. Mappings can still be typed.`}
+                </p>
+              )}
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '8px' }}>
                 <button
                   type="button"
                   className="ds-btn ds-btn-secondary"
                   style={{ padding: '4px 12px', fontSize: '12px' }}
-                  disabled={!finConnected || validating}
+                  disabled={!finConnected || validating || validateBlocked}
                   title={finConnected ? 'Check these mappings against the connected FIN project' : 'Connect to FIN first'}
                   onClick={handleValidate}
                 >
                   {validating ? 'Validating…' : 'Validate Mapping'}
                 </button>
                 {!finConnected && <span className="ds-hint" style={{ margin: 0 }}>Connect to FIN to validate.</span>}
+                {finConnected && validateBlocked && (
+                  <span className="ds-hint" style={{ margin: 0 }}>
+                    Save Settings first: validation checks the FIN project this session serves
+                    ({finStatus?.project_name || 'none'}), not the one just selected.
+                  </span>
+                )}
                 {validation && (
                   <span className="ds-hint" style={{ margin: 0 }}>
                     Checked against FIN project {validation.project_name}. Nothing was changed.
@@ -537,6 +589,8 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                         key={editorKey}
                         value={mappings[field].value}
                         kind={field === 'finEquipmentClasses' ? 'list' : 'string'}
+                        suggestions={field === 'finLivePoints' && resources?.state === 'ready' && resources.project === selectedFinProject
+                          ? resources.items : undefined}
                         onChange={onChange}
                         results={validation?.blocks[field]?.items}
                       />

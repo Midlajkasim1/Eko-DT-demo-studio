@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
+import type { FinResource } from '@/lib/finProjects'
 import {
   mergeEntries,
   newRowId,
@@ -62,11 +63,15 @@ interface KeyValueEditorProps {
   onChange: (state: EditorState) => void
   /** Validation result per row key, shown beside the row. Never changes the value. */
   results?: Record<string, ItemResult>
+  /** Points of the selected FIN project, offered as choices for a Value field. Typing is still
+   *  free: a suggestion is never applied on its own, and nothing is matched to a key by guessing. */
+  suggestions?: FinResource[]
 }
 
 /** One configuration entry per row. Edits, deletes, adds and pasted imports all rebuild the
  *  same object the backend already expects. Remount (change `key`) to load a new value. */
-export function KeyValueEditor({ value, kind, onChange, results }: KeyValueEditorProps) {
+export function KeyValueEditor({ value, kind, onChange, results, suggestions }: KeyValueEditorProps) {
+  const listId = useId()
   const [rows, setRows] = useState<MappingRow[]>(() => rowsFromObject(value, kind))
   const [importing, setImporting] = useState(false)
   const [importText, setImportText] = useState('')
@@ -106,6 +111,15 @@ export function KeyValueEditor({ value, kind, onChange, results }: KeyValueEdito
 
   return (
     <div>
+      {suggestions?.length ? (
+        <datalist id={listId}>
+          {suggestions.map(r => (
+            <option key={r.id} value={r.ref}>
+              {[r.name, r.equip, r.unit].filter(Boolean).join(' · ')}
+            </option>
+          ))}
+        </datalist>
+      ) : null}
       {rows.length === 0 && <p className="ds-hint" style={{ margin: '0 0 8px' }}>Not Configured. This project has no mapping here.</p>}
 
       {rows.map(row => (
@@ -123,6 +137,7 @@ export function KeyValueEditor({ value, kind, onChange, results }: KeyValueEdito
             aria-label="Value"
             placeholder={kind === 'list' ? 'comma, separated, values' : 'value'}
             value={row.text}
+            list={suggestions?.length ? listId : undefined}
             onChange={e => edit(row.id, { text: e.target.value })}
             style={{ ...inputStyle, flex: 1 }}
           />

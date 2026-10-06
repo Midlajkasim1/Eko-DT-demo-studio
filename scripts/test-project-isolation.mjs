@@ -28,16 +28,19 @@ const until = async (fn, what, ms = 10000) => {
 
 // ─── projects: every block differs between A and B; C is a normal project with no mappings ───
 const base = { version: 1, createdAt: 1, updatedAt: 1, models: [], geolocation: null }
-const settingsFor = (n, prefix, order, critical, warning) => ({
+const settingsFor = (n, prefix, order, critical, warning, fin) => ({
+  finProjectName: fin,
   finLivePoints: { total_power: `p:{project}:r:${n}`, [`only_${prefix}`]: `p:{project}:r:${n}1` },
   finEndpoints: { [`${prefix}_his`]: `/api/{project}/eval?expr=hisRead(@p:{project}:r:${n},today())` },
   finEquipmentClasses: { system_tags: [prefix === 'A' ? 'ahu' : 'fcu'], meter_tags: ['meter'], type_priority: [prefix === 'A' ? 'ahu' : 'fcu'] },
   finMeterProfile: { prefix: prefix === 'A' ? 'PMU' : 'MTR', point_map: { active_power: [`power ${prefix}`] } },
   finSeverityBands: { order, critical, warning },
 })
-const A = { ...base, projectId: 'iso-A', name: 'Project A', isFinProject: true, apiSettings: settingsFor(111, 'A', 'desc', 250, 150) }
-const B = { ...base, projectId: 'iso-B', name: 'Project B', isFinProject: true, apiSettings: settingsFor(222, 'B', 'asc', 300, 250) }
+const A = { ...base, projectId: 'iso-A', name: 'Project A', isFinProject: true, apiSettings: settingsFor(111, 'A', 'desc', 250, 150, 'marsaAlArab') }
+const B = { ...base, projectId: 'iso-B', name: 'Project B', isFinProject: true, apiSettings: settingsFor(222, 'B', 'asc', 300, 250, 'ellisdonDemo') }
 const C = { ...base, projectId: 'iso-C', name: 'Project C (normal)' }
+// a FIN project that has not been given a FIN Project Name yet
+const D = { ...base, projectId: 'iso-D', name: 'Project D (FIN, no name)', isFinProject: true }
 
 // ─── backend with the fake FIN client ───
 const server = spawn(python, ['tests/fake_fin_server.py', '--port', '8000'], { cwd: path.join(ROOT, 'backend'), stdio: 'ignore' })
@@ -170,6 +173,9 @@ try {
   await close()
   const cfgC = await until(async () => { const c = await backend('/api/fin/project-settings'); return c.project_id === 'iso-C' && c }, 'backend to serve C')
   check(Object.values(cfgC.source).every(v => v === 'default') && !JSON.stringify(cfgC.config).includes('iso-'), 'C: backend fell back to config.json defaults, not B\'s mappings')
+  const stC = await backend('/api/fin/status')
+  check(stC.project_name === '' && stC.project_source === 'unset' && stC.display_name === '' && stC.project_validated === null,
+    'C: no FIN project name is shown as unconfigured, not as the default site (' + JSON.stringify([stC.project_name, stC.project_source]) + ')')
 
   // ── real navigation: project list -> open A ──
   await page.evaluate(() => window.__twin.stores.app.getState().setStep('projects'))
@@ -271,10 +277,10 @@ try {
     await page.fill('#fin-project', name)
     await page.click('button:has-text("Connect")')
   }
-  const nameField = () => page.locator('.ds-field', { has: page.locator('label:text-is("FIN Project Name")') }).locator('input')
+  const nameField = () => page.locator('.ds-field', { has: page.locator('label:text-is("FIN Project")') }).locator('input')
   const openFin = async () => { await page.click('text=Dashboard Settings'); await page.waitForSelector('.dashboard-settings-modal'); await page.click('.ds-tab:has-text("FIN Config")') }
 
-  await open(A, false)
+  await open(D, true)
   await typeProject('ghost')
   await page.waitForSelector('text=could not be validated', { timeout: 10000 })
   check(await page.locator('text=Not validated').count() > 0 && await page.locator('text=Project validated').count() === 0,
@@ -283,17 +289,17 @@ try {
   await page.waitForSelector('text=Project validated', { timeout: 10000 })
   check(await page.locator('text=could not be validated').count() === 0, 'real project: ✓ FIN Connected / ✓ Project validated')
   await openFin()
-  check(await nameField().inputValue() === 'typedA', 'A: FIN Project Name is filled with the name this project was connected with')
+  check(await nameField().inputValue() === 'typedA', 'D: FIN Project Name is filled with the name this project was connected with')
   await close()
-  check((await disk('iso-A')).apiSettings.finProjectName === undefined, 'A: that name is only a draft until Save Settings (nothing written)')
+  check((await disk('iso-D')).apiSettings === undefined, 'D: that name is only a draft until Save Settings (nothing written)')
   // another project must not receive A's connection name
   await open(B, false)
   await openFin()
-  check(await nameField().inputValue() === '', 'A->B: B\'s FIN Project Name is not filled from A\'s connection')
+  check(await nameField().inputValue() === 'ellisdonDemo', 'D->B: B shows its own FIN Project Name, not the name D connected with')
   await close()
-  await open(A, false)
+  await open(D, false)
   await openFin()
-  check(await nameField().inputValue() !== 'typedA', 'B->A: the connection name was not saved into A by switching')
+  check(await nameField().inputValue() === '', 'B->D: the connection name was not saved into D by switching')
   await close()
 } catch (e) {
   console.log('ERROR', e.stack || e.message)
