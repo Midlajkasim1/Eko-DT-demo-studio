@@ -91,12 +91,13 @@
     return null;
   }
 
-  function toMw(v) {
-    return v > 50 ? v / 1000 : v;
+  function trunc1(v) {
+    if (v == null || !isFinite(v)) return v;
+    return Math.trunc(v * 10 + (v < 0 ? -1e-9 : 1e-9)) / 10;
   }
 
-  function toMwh(v) {
-    return v >= 200 ? v / 1000 : v;
+  function toMw(v) {
+    return v > 50 ? v / 1000 : v;
   }
 
   var ZONE_NAMES = ["MCC 1","MCC 2","Kitchen SMDB","LVFP","ATS","Sump pump"];
@@ -124,15 +125,13 @@
       obj[key] = val;
       changed = true;
     }
-    var loadKw = asNum(p.total_power);
-    if (loadKw != null) { set(m, "loadNowMw", toMw(loadKw)); set(el, "currentKw", loadKw); }
-    var daily = asNum(p.daily_energy);
-    if (daily != null) set(m, "energyTodayMwh", toMwh(daily));
+    var loadKw = asNum(p.hourly_energy != null ? p.hourly_energy : p.total_power);
+    if (loadKw != null) { set(m, "loadNowMw", trunc1(toMw(loadKw))); set(el, "currentKw", trunc1(loadKw)); }
     var peak = asNum(p.peak_demand);
-    if (peak != null) set(m, "peakTodayMw", toMw(peak));
+    if (peak != null) set(m, "peakTodayMw", trunc1(toMw(peak)));
     var iaq = asNum(p.iaq_index);
     if (iaq != null) {
-      set(m, "iaq", iaq);
+      set(m, "iaq", trunc1(iaq));
       if (site.spaces) {
         set(site.spaces, "ieq", iaq);
         var q = iaq >= 80 ? "good" : iaq >= 60 ? "moderate" : "poor";
@@ -142,33 +141,33 @@
     }
     var comfort = asNum(p.comfort_compliance);
     if (comfort != null) {
-      set(m, "comfortIndex", comfort);
+      set(m, "comfortIndex", trunc1(comfort));
       if (site.spaces) {
-        set(site.spaces, "comfortPct", comfort);
+        set(site.spaces, "comfortPct", trunc1(comfort));
         set(site.spaces, "spComfortCap", "within target band");
       }
     }
     var water = asNum(p.total_water);
     if (water != null) {
-      set(m, "waterTodayM3", water);
+      set(m, "waterTodayM3", trunc1(water));
       if (site.landing && site.landing.water) {
-        set(site.landing.water, "headEn", Math.round(water) + " m³ today");
-        set(site.landing.water, "headAr", Math.round(water) + " م³ اليوم");
+        set(site.landing.water, "headEn", trunc1(water) + " m³ today");
+        set(site.landing.water, "headAr", trunc1(water) + " م³ اليوم");
       }
     }
     var gas = asNum(p.total_gas);
     if (gas != null) {
-      set(m, "gasTodayM3", gas);
+      set(m, "gasTodayM3", trunc1(gas));
       if (site.landing && site.landing.gas) {
-        set(site.landing.gas, "headEn", Math.round(gas) + " m³ today");
-        set(site.landing.gas, "headAr", Math.round(gas) + " م³ اليوم");
+        set(site.landing.gas, "headEn", trunc1(gas) + " m³ today");
+        set(site.landing.gas, "headAr", trunc1(gas) + " م³ اليوم");
       }
     }
     var mtd = asNum(p.current_month);
-    if (mtd != null) set(el, "mtdKwh", mtd);
+    if (mtd != null) set(el, "mtdKwh", trunc1(mtd));
     var perf = asNum(p.energy_performance);
     if (perf != null && perf >= 0 && perf <= 500) {
-      set(el, "performancePct", perf);
+      set(el, "performancePct", trunc1(perf));
     } else {
       el.performancePct = null;
     }
@@ -181,12 +180,12 @@
       var overnight = (rawOvernight != null && rawOvernight >= 0 && rawOvernight <= 100) ? rawOvernight : null;
       var enDev = (rawEnDev != null && rawEnDev >= -100 && rawEnDev <= 100) ? rawEnDev : null;
       
-      set(el, "overnightDeviationPct", overnight);
+      set(el, "overnightDeviationPct", overnight == null ? overnight : trunc1(overnight));
       
       if (el.sumGauges) {
         el.sumGauges.forEach(function(g) {
           if (g.key === "enDev" && enDev != null) {
-            set(g, "val", Math.trunc(enDev * 10) / 10);
+            set(g, "val", trunc1(enDev));
             set(g, "wordEn", Math.abs(enDev) <= 5 ? "Healthy" : "Deviation");
             set(g, "wordAr", Math.abs(enDev) <= 5 ? "سليم" : "انحراف");
             set(g, "tone", Math.abs(enDev) <= 5 ? "ok" : "warn");
@@ -210,7 +209,7 @@
         hvacGrp.cards.forEach(function(c) {
           if (c.labelEn === "TEMPERATURE DEVIATION INDEX") {
             if (tempDev != null) {
-              set(c, "v", String(Math.trunc(tempDev * 10) / 10));
+              set(c, "v", trunc1(tempDev));
               set(c, "capEn", tempDev > 2 ? "Warning" : "Normal");
               set(c, "capAr", tempDev > 2 ? "تحذير" : "طبيعي");
               set(c, "tone", tempDev > 2 ? "warn" : "ok");
@@ -218,7 +217,7 @@
           }
           if (c.labelEn === "ENERGY PERFORMANCE RATIO") {
             if (enPerf != null) {
-              set(c, "v", String(Math.trunc(enPerf * 100) / 100));
+              set(c, "v", trunc1(enPerf));
               set(c, "capEn", enPerf < 1.2 ? "Healthy" : "Above target");
               set(c, "capAr", enPerf < 1.2 ? "سليم" : "فوق الهدف");
               set(c, "tone", enPerf < 1.2 ? "ok" : "warn");
@@ -226,7 +225,7 @@
           }
           if (c.labelEn === "COMFORT ENERGY INDEX") {
             if (comfIdx != null) {
-              set(c, "v", String(Math.trunc(comfIdx * 100) / 100));
+              set(c, "v", trunc1(comfIdx));
               set(c, "capEn", comfIdx >= 60 ? "Good" : comfIdx >= 40 ? "Fair" : "Poor");
               set(c, "capAr", comfIdx >= 60 ? "جيد" : comfIdx >= 40 ? "مقبول" : "ضعيف");
               set(c, "tone", comfIdx >= 60 ? "ok" : "warn");
@@ -248,13 +247,13 @@
         
         elecGrp.cards.forEach(function(c) {
           if (c.labelEn === "ENERGY DEVIATION" && enDev != null) {
-            set(c, "v", String(Math.trunc(enDev * 10) / 10));
+            set(c, "v", trunc1(enDev));
             set(c, "capEn", Math.abs(enDev) <= 5 ? "Healthy" : "Deviation");
             set(c, "capAr", Math.abs(enDev) <= 5 ? "سليم" : "انحراف");
             set(c, "tone", Math.abs(enDev) <= 5 ? "ok" : "warn");
           }
           if (c.labelEn === "PEAK DEMAND" && peakD != null) {
-            set(c, "v", String(Math.trunc(peakD * 10) / 10));
+            set(c, "v", trunc1(peakD));
             set(c, "capEn", "Recorded");
             set(c, "capAr", "مسجل");
             set(c, "tone", "ok");
@@ -304,8 +303,8 @@
         }
       }
 
-      var enSpark = extractDaily("Total_Power_Consumption_his");
-      if (site.summary) { applySparkAndDelta(site.summary[0], enSpark); changed = true; }
+      var enSpark = extractDaily("Hourly_Energy_Consumption_his");
+      if (!enSpark.length) enSpark = extractDaily("Total_Power_Consumption_his");
       var wtSpark = extractDaily("Total_Water_Consumption_his");
       if (site.summary) { applySparkAndDelta(site.summary[1], wtSpark); changed = true; }
       var gsSpark = extractDaily("Total_Gas_Consumption_his");
@@ -409,6 +408,61 @@
           var n = new Date();
           return { y: n.getFullYear(), m: n.getMonth(), d: n.getDate(), h: n.getHours() };
         }
+      }
+
+      function shiftDay(y, m, d, delta) {
+        var dt = new Date(Date.UTC(y, m, d));
+        dt.setUTCDate(dt.getUTCDate() + delta);
+        return { y: dt.getUTCFullYear(), m: dt.getUTCMonth(), d: dt.getUTCDate() };
+      }
+
+      function hoursThrough(flat, y, m, d, maxH) {
+        var hours = [], i;
+        for (i = 0; i <= maxH; i++) hours.push(null);
+        (flat || []).forEach(function (pt) {
+          if (pt.y === y && pt.m === m && pt.d === d && pt.h >= 0 && pt.h <= maxH) hours[pt.h] = pt.val;
+        });
+        return hours;
+      }
+
+      function sumKnown(arr) {
+        var s = 0, n = 0;
+        (arr || []).forEach(function (v) {
+          if (v != null && isFinite(v)) { s += v; n++; }
+        });
+        return n ? s : null;
+      }
+
+      /* FIN nav name is Hourly_Energy_Consumption. Each sample is that hour's
+         kWh. Energy today is midnight through the current hour, Dubai time.
+         Yesterday uses the same hours so the percent and the spark match. */
+      var hourlyFlat = flattenHist(
+        p.power_history.Hourly_Energy_Consumption_his || p.power_history.Total_Power_Consumption_his
+      );
+      var nowP = nowParts();
+      var yestP = shiftDay(nowP.y, nowP.m, nowP.d, -1);
+      var todayHours = hoursThrough(hourlyFlat, nowP.y, nowP.m, nowP.d, nowP.h);
+      var yestHours = hoursThrough(hourlyFlat, yestP.y, yestP.m, yestP.d, nowP.h);
+      var todayKwh = sumKnown(todayHours);
+      var yestKwh = sumKnown(yestHours);
+      if (todayKwh != null) {
+        set(m, "energyTodayKwh", trunc1(todayKwh));
+        set(m, "energyTodayMwh", todayKwh / 1000);
+      }
+      if (site.summary && site.summary[0]) {
+        var energyRow = site.summary[0];
+        energyRow.spark = todayHours;
+        energyRow.sparkCompare = yestHours;
+        if (todayKwh != null && yestKwh != null && yestKwh > 0) {
+          var yPct = Math.round(((todayKwh - yestKwh) / yestKwh) * 100);
+          var ySign = yPct > 0 ? "+" : "";
+          energyRow.deltaEn = ySign + yPct + "% vs yesterday";
+          energyRow.deltaAr = ySign + yPct + "% مقارنة بالأمس";
+        } else {
+          energyRow.deltaEn = null;
+          energyRow.deltaAr = null;
+        }
+        changed = true;
       }
 
       function todayHourly(flat) {
@@ -730,7 +784,7 @@
             for (wi = 0; wi < wToday.length; wi++) {
               if (wToday[wi]) { wtSum += wToday[wi]; wtN++; }
             }
-            if (wtN) site.water.todayM3 = Math.trunc(wtSum * 100) / 100;
+            if (wtN) site.water.todayM3 = trunc1(wtSum);
             var dayKeys7 = [], di, ddt;
             for (di = 6; di >= 0; di--) {
               ddt = new Date(now.y, now.m, now.d - di);
@@ -742,7 +796,7 @@
             var last7 = bucket(wFlat, function (pt) { return pt.y + "-" + (pt.m + 1) + "-" + pt.d; }, dayKeys7, "sum");
             var a7 = 0, n7 = 0;
             last7.forEach(function (v) { if (v) { a7 += v; n7++; } });
-            if (n7) site.water.avgDrawM3Day = Math.trunc((a7 / n7) * 10) / 10;
+            if (n7) site.water.avgDrawM3Day = trunc1(a7 / n7);
             if (wToday.length > 1) site.water.sparkToday = wToday;
             else if (n7) site.water.sparkToday = last7;
             changed = true;
@@ -753,7 +807,7 @@
       // ---- GAS page wiring ------------------------------------------------
       if (site.gas) {
         if (p.total_gas != null) {
-          site.gas.todayM3 = Math.trunc(asNum(p.total_gas) * 100) / 100;
+          site.gas.todayM3 = trunc1(asNum(p.total_gas));
           changed = true;
         }
         if (p.power_history && p.power_history.Total_Gas_Consumption_his) {
@@ -790,7 +844,7 @@
             for (gi = 0; gi < gToday.length; gi++) {
               if (gToday[gi]) { gtSum += gToday[gi]; gtN++; }
             }
-            if (gtN) site.gas.todayM3 = Math.trunc(gtSum * 100) / 100;
+            if (gtN) site.gas.todayM3 = trunc1(gtSum);
   
             // 7-day average
             var gDay7 = [], gdi, gddt;
@@ -802,14 +856,14 @@
             var gLast7 = bucket(gFlat, function(pt){ return pt.y + "-" + (pt.m + 1) + "-" + pt.d; }, gDay7, "sum");
             var ga7 = 0, gn7 = 0;
             gLast7.forEach(function(v){ if (v) { ga7 += v; gn7++; } });
-            if (gn7) site.gas.avg7M3 = Math.trunc((ga7 / gn7) * 10) / 10;
+            if (gn7) site.gas.avg7M3 = trunc1(ga7 / gn7);
   
             // Month-to-date
             var gmtdSum = 0;
             gFlat.forEach(function(pt){
               if (pt.y === gNow.y && pt.m === gNow.m) gmtdSum += pt.val;
             });
-            if (gmtdSum > 0) site.gas.mtdM3 = Math.trunc(gmtdSum * 10) / 10;
+            if (gmtdSum > 0) site.gas.mtdM3 = trunc1(gmtdSum);
   
             // daily14 — last 14 days for the bar chart (replaces mock array)
             var g14 = [], g14i, g14dt;

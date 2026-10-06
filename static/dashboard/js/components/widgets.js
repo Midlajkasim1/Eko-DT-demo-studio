@@ -10,8 +10,20 @@ window.EKO_C = (function(){
 
   const esc = s => String(s ?? '').replace(/[&<>"']/g,
     c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const fmt = (n, d=0) => n == null ? '--' : Number(n).toLocaleString('en-US',
-    { minimumFractionDigits: d, maximumFractionDigits: d });
+  /* Drop extra digits; 73.958 → 73.9. Counts pass d=0. */
+  function truncDec(n, d){
+    const x = Number(n);
+    if(!isFinite(x)) return NaN;
+    if(d <= 0) return Math.trunc(x + (x < 0 ? -1e-9 : 1e-9));
+    const f = Math.pow(10, d);
+    return Math.trunc(x * f + (x < 0 ? -1e-9 : 1e-9)) / f;
+  }
+  const fmt = (n, d=1) => {
+    if(n == null || n === '') return '--';
+    const t = truncDec(n, d);
+    if(!isFinite(t)) return '--';
+    return t.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  };
 
   /* ------------------------------- icon set ------------------------------- */
   const IC = {
@@ -142,6 +154,26 @@ window.EKO_C = (function(){
     }
     return d;
   }
+  /* Two series on one scale, zero at the baseline. Null hours break the line.
+     A larger value sits higher. Returns one path string per continuous run. */
+  function sparkPathRange(vals, mn, mx, w=100, h=22){
+    const span = (mx - mn) || 1, n = Math.max(vals.length - 1, 1), segs = [];
+    let cur = [];
+    const flush = () => { if(cur.length >= 2) segs.push(cur); cur = []; };
+    vals.forEach((v, i) => {
+      if(v == null || !isFinite(+v)){ flush(); return; }
+      cur.push([i / n * w, 3 + (mx - (+v)) / span * (h - 6)]);
+    });
+    flush();
+    return segs.map(pts => {
+      let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
+      for(let i=1;i<pts.length;i++){
+        const [x0,y0]=pts[i-1],[x1,y1]=pts[i];
+        d += ` C${(x0+(x1-x0)/2).toFixed(1)},${y0.toFixed(1)} ${(x0+(x1-x0)/2).toFixed(1)},${y1.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)}`;
+      }
+      return d;
+    }).join(' ');
+  }
 
   /* ------------------------------ alarm ribbon -----------------------------
      Spec addition (D2): THE one place counts are stated, on every page,
@@ -206,13 +238,26 @@ window.EKO_C = (function(){
 
   /* Overview executive summary: KPI rows with domain hue wash + sparkline. */
   /* D135: a summary row's value is read from metrics.* (one data layer); unmeasured = the dash */
-  const sumVal = (E, r) => { const m = (E.data.metrics || {})[r.metric]; return m == null ? '--' : fmt(m, r.d || 0); };
+  const sumVal = (E, r) => { const m = (E.data.metrics || {})[r.metric]; return m == null ? '--' : fmt(m, r.d == null ? 1 : r.d); };
   function execSummary(E){
     const rows = E.data.summary.map(r => {
       const deltaText = E.lang === 'ar' ? r.deltaAr : r.deltaEn;
       const capText   = E.lang === 'ar' ? r.capAr   : r.capEn;
-      const hasSpark  = Array.isArray(r.spark) && r.spark.length >= 2;
-      const spark = hasSpark
+      const hasSpark  = Array.isArray(r.spark) && r.spark.length >= 2 && r.spark.every(v => v != null && isFinite(+v));
+      const cmp = Array.isArray(r.sparkCompare) ? r.sparkCompare : null;
+      const finite = arr => (arr || []).filter(v => v != null && isFinite(+v));
+      const bothN = finite(r.spark).length + (cmp ? finite(cmp).length : 0);
+      let spark;
+      if(cmp && r.spark.length >= 2 && bothN >= 2){
+        const both = finite(r.spark).concat(finite(cmp)).map(Number);
+        const mx = Math.max(0, ...both), mn = Math.min(0, ...both);
+        const todayD = sparkPathRange(r.spark, mn, mx);
+        const yestD = sparkPathRange(cmp, mn, mx);
+        spark = `<div class="ovkspark"><svg viewBox="0 0 100 22" width="100" height="22" role="img" aria-label="${esc(E.t('kEnergyToday'))}">
+             ${yestD ? `<path d="${yestD}" fill="none" stroke="${r.dom}" stroke-width="1.25" stroke-dasharray="2.5 1.5" opacity="0.45"/>` : ''}
+             ${todayD ? `<path d="${todayD}" fill="none" stroke="${r.dom}" stroke-width="1.5"/>` : ''}</svg>
+           ${deltaText ? `<span class="ovkdelta">${esc(deltaText)}</span>` : ''}</div>`;
+      } else spark = hasSpark
         ? `<div class="ovkspark"><svg viewBox="0 0 100 22" width="100" height="22" aria-hidden="true">
              <path d="${sparkPath(r.spark)}" fill="none" stroke="${r.dom}" stroke-width="1.5"/></svg>
            ${deltaText ? `<span class="ovkdelta">${esc(deltaText)}</span>` : ''}</div>`
@@ -244,7 +289,7 @@ window.EKO_C = (function(){
           <div class="ovkval"><span class="ovknum">--</span></div></div>`;
       }
       return `<div class="ovk ovkDark"><div class="ovkhead"><span class="scdot" data-tone="${dotTone}"></span><span class="ovklbl">${esc(lbl)}</span>${ctl(E, lbl, '')}</div>
-        <div class="ovkval"><span class="ovknum">${esc(String(val))}</span>${u ? `<span class="ovkunit">${esc(u)}</span>` : ''}</div>
+        <div class="ovkval"><span class="ovknum">${esc(fmt(val, 1))}</span>${u ? `<span class="ovkunit">${esc(u)}</span>` : ''}</div>
         ${word ? `<div class="scrow"><span class="ovkcap msA" data-tone="${dotTone==='warn'?'warn':'pos'}">${esc(word)}</span></div>` : ''}</div>`;
     };
     const hasSpark = Array.isArray(d.perfSpark) && d.perfSpark.length >= 2;
@@ -256,7 +301,7 @@ window.EKO_C = (function(){
     const perfWord  = ar ? d.perfWordAr  : d.perfWordEn;
     return summaryShell(E, E.t('energySummary'), '<div class="ovklist">'
       + `<div class="ovk ovkDark"><div class="ovkhead"><span class="scdot" data-tone="ok"></span><span class="ovklbl">${esc(E.t('enPerf'))}</span>${ctl(E, E.t('enPerf'), '')}</div>
-          <div class="ovkval"><span class="ovknum">${d.performancePct == null ? '--' : fmt(d.performancePct,2)}</span>${d.performancePct != null ? '<span class="ovkunit">%</span>' : ''}</div>
+          <div class="ovkval"><span class="ovknum">${d.performancePct == null ? '--' : fmt(d.performancePct,1)}</span>${d.performancePct != null ? '<span class="ovkunit">%</span>' : ''}</div>
           ${hasSpark ? `<div class="scrow"><svg viewBox="0 0 90 20" width="90" height="20" aria-hidden="true">
             <polyline points="${pts}" fill="none" stroke="var(--domEnergy)" stroke-width="1.5"/></svg>
           ${perfDelta ? `<span class="ovkcap msA" data-tone="t3">${esc(perfDelta)}</span>` : ''}</div>` : ''}
@@ -284,14 +329,14 @@ window.EKO_C = (function(){
             <span class="ovkcap" data-tone="${capTone||'t3'}">${esc(cap)}</span></div>`
           : (v !== '--' && cap ? `<div class="ovkcap" data-tone="${capTone||'t3'}">${esc(cap)}</div>` : '')}</div>`;
     const W='rgba(96,165,250,.05)', G='rgba(167,139,250,.05)';
-    const wVal = m.waterTodayM3 == null ? '--' : fmt(m.waterTodayM3);
-    const gVal = m.gasTodayM3   == null ? '--' : fmt(m.gasTodayM3);
+    const wVal = m.waterTodayM3 == null ? '--' : fmt(m.waterTodayM3, 1);
+    const gVal = m.gasTodayM3   == null ? '--' : fmt(m.gasTodayM3, 1);
     const wDelta = ar ? srow('water').deltaAr : srow('water').deltaEn;
     const gDelta = ar ? srow('gas').deltaAr   : srow('gas').deltaEn;
     return summaryShell(E, E.t('utilitiesOverview'), '<div class="ovklist">'
-      + row(W,'meter','#60A5FA',E.t('kWaterMeters'), u.waterMeters == null ? '--' : fmt(u.waterMeters), '', u.waterMeters != null ? E.t('wordActive') : '', 'pos')
+      + row(W,'meter','#60A5FA',E.t('kWaterMeters'), u.waterMeters == null ? '--' : fmt(u.waterMeters, 0), '', u.waterMeters != null ? E.t('wordActive') : '', 'pos')
       + row(W,'droplet','#60A5FA',E.t('kWaterConsToday'), wVal, 'm\u00b3', wDelta||'', 't3', wVal !== '--' ? u.waterSparkPath : null)
-      + row(G,'meter','#A78BFA',E.t('kGasMeters'), u.gasMeters == null ? '--' : fmt(u.gasMeters), '', u.gasMeters != null ? E.t('wordActive') : '', 'pos')
+      + row(G,'meter','#A78BFA',E.t('kGasMeters'), u.gasMeters == null ? '--' : fmt(u.gasMeters, 0), '', u.gasMeters != null ? E.t('wordActive') : '', 'pos')
       + row(G,'flame','#A78BFA',E.t('kGasConsToday'), gVal, 'm\u00b3', gDelta||'', 't3', gVal !== '--' ? u.gasSparkPath : null)
       + '</div>');
   }
@@ -436,19 +481,19 @@ window.EKO_C = (function(){
         <span class="optstate" data-tone="${k.tone}">(${esc(ar?k.stateAr:k.stateEn)})</span>
         <p class="opttip">${esc(ar?k.tipAr:k.tipEn)}</p>
         <div class="optcells">
-          <span class="optcell"><i class="optlbl">${esc(E.t('wasteLbl'))}</i><b class="tMonoS">${fmt(k.wasteKwh,2)} kWh</b></span>
-          <span class="optcell"><i class="optlbl">${esc(E.t('costLbl'))}</i><b class="tMonoS">${fmt(k.wasteKwh*b.aedPerKwh,2)} AED</b></span>
+          <span class="optcell"><i class="optlbl">${esc(E.t('wasteLbl'))}</i><b class="tMonoS">${fmt(k.wasteKwh,1)} kWh</b></span>
+          <span class="optcell"><i class="optlbl">${esc(E.t('costLbl'))}</i><b class="tMonoS">${fmt(k.wasteKwh*b.aedPerKwh,1)} AED</b></span>
         </div></article>`).join('');
     const RAMP2 = ['#C2504B','#D07A3C','#D8A83C','#D8C63C'];
     const rank = [...d.kpis].sort((x,y)=>y.wasteKwh-x.wasteKwh);
     const rampOf = k => RAMP2[Math.min(rank.indexOf(k), RAMP2.length-1)];
     const maxKwh = rank[0].wasteKwh;
     const wr = `<div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('ewrT'))}</span></div>
-      <div class="row gap8"><span class="ewrtot tMonoS">${fmt(d.wasteTotalKwh,2)} kWh</span>
-        <span class="ewrtot tMonoS">${fmt(d.wasteTotalKwh*b.aedPerKwh,2)} AED</span></div>
+      <div class="row gap8"><span class="ewrtot tMonoS">${fmt(d.wasteTotalKwh,1)} kWh</span>
+        <span class="ewrtot tMonoS">${fmt(d.wasteTotalKwh*b.aedPerKwh,1)} AED</span></div>
       ${d.kpis.map(k => `<div class="ewrrow">
         <span class="ewrchip" style="background:${rampOf(k)}">${esc(ar?k.labelAr:k.labelEn)}</span>
-        <span class="tMonoS msA">${fmt(k.sharePct,2)}%</span>
+        <span class="tMonoS msA">${fmt(k.sharePct,1)}%</span>
         <span class="ewrbar"><span style="width:${(k.wasteKwh/maxKwh*100).toFixed(0)}%;background:${rampOf(k)}"></span></span></div>`).join('')}</div>`;
     return modShell(E, E.t('modEnergy'), '', '',
       `<div class="opthead"><span class="alcardt">${esc(E.t('optT'))}</span>
@@ -500,7 +545,7 @@ window.EKO_C = (function(){
     const el = E.data.energyLanding;
     const carbonT = (el.mtdKwh != null) ? el.mtdKwh * b.co2KgPerKwh / 1000 : null;   /* derives */
     const peakPct = (m.peakTodayMw != null && p.contractedMw) ? Math.round(m.peakTodayMw / p.contractedMw * 100) : null; /* derives */
-    const nd = (v, d2) => v == null ? '--' : fmt(v, d2);  /* null → '--' helper */
+    const nd = (v, d2) => v == null ? '--' : fmt(v, d2 == null ? 1 : d2);
     const tr = E.state.pwTrendRange || 'today';
     const sumArr = a => {
       if (!a || !a.length || a.every(v => v == null)) return null;
@@ -530,11 +575,11 @@ window.EKO_C = (function(){
       heroPrev = sumArr(p.zoneYesterday);
     }
     const heroRow = `<div class="pwhero">
-      ${hero(E.t('pwCurrentCons'), el.currentKw != null ? E.t('pwAboveChip') : '', el.currentKw != null ? 'warn' : '', nd(el.currentKw,2), el.currentKw != null ? 'kW' : '', E.t('pwBaselineKwCap',{v:fmt(el.baselineKw,1)}), el.currentKw != null ? bullet(p.heroCharts.current,'L') : '')}
-      ${hero(E.t('pwHeroNow.'+tr), '', '', nd(heroNow, Math.abs(heroNow||0)>=100?0:1), heroNow != null ? 'kWh' : '', E.t('pwHeroNowCap.'+tr))}
-      ${hero(E.t('pwHeroPrev.'+tr), '', '', nd(heroPrev, Math.abs(heroPrev||0)>=100?0:1), heroPrev != null ? 'kWh' : '', E.t('pwHeroPrevCap.'+tr))}
-      ${hero(E.t('pwCarbon'), '', '', nd(carbonT,2), carbonT != null ? 't' : '', E.t('pwCarbonCap',{r:b.co2KgPerKwh}))}
-      ${hero(E.t('pwPeak'), peakPct != null ? E.t('pwPctLimit',{p:peakPct}) : '', peakPct != null ? 'crit' : '', nd(m.peakTodayMw,2), m.peakTodayMw != null ? 'MW' : '', E.t('pwContractedMwCap',{v:p.contractedMw}), m.peakTodayMw != null ? bullet(p.heroCharts.peak,'P') : '')}
+      ${hero(E.t('pwCurrentCons'), el.currentKw != null ? E.t('pwAboveChip') : '', el.currentKw != null ? 'warn' : '', nd(el.currentKw,1), el.currentKw != null ? 'kW' : '', E.t('pwBaselineKwCap',{v:fmt(el.baselineKw,1)}), el.currentKw != null ? bullet(p.heroCharts.current,'L') : '')}
+      ${hero(E.t('pwHeroNow.'+tr), '', '', nd(heroNow, 1), heroNow != null ? 'kWh' : '', E.t('pwHeroNowCap.'+tr))}
+      ${hero(E.t('pwHeroPrev.'+tr), '', '', nd(heroPrev, 1), heroPrev != null ? 'kWh' : '', E.t('pwHeroPrevCap.'+tr))}
+      ${hero(E.t('pwCarbon'), '', '', nd(carbonT,1), carbonT != null ? 't' : '', E.t('pwCarbonCap',{r:b.co2KgPerKwh}))}
+      ${hero(E.t('pwPeak'), peakPct != null ? E.t('pwPctLimit',{p:peakPct}) : '', peakPct != null ? 'crit' : '', nd(m.peakTodayMw,1), m.peakTodayMw != null ? 'MW' : '', E.t('pwContractedMwCap',{v:p.contractedMw}), m.peakTodayMw != null ? bullet(p.heroCharts.peak,'P') : '')}
     </div>`;
     const zhAll = { hourly: p.zoneLast24, today: p.zoneHourly, weekly: p.zoneWeekly, monthly: p.zoneMonthly };
     const lastVal = z => (z && z.length) ? Number(z[z.length-1])||0 : 0;
@@ -551,7 +596,7 @@ window.EKO_C = (function(){
     const dbEmpty = boards.every(x => x[1] == null || Number(x[1]) === 0);
     const hues = p.zoneHues && p.zoneHues.length ? p.zoneHues : ['#4EA3E8','#F0A93B','#45C79A','#E48FC4','#A78BFA','#E06C75'];
     const dbWhen = E.t('pwDbWhen.'+tr);
-    const dbTot = dbEmpty ? '--' : (totKwh >= 100 ? fmt(totKwh,0) : fmt(totKwh,1));
+    const dbTot = dbEmpty ? '--' : fmt(totKwh, 1);
     const C2 = 2*Math.PI*58;
     let cum = 0;
     const dsegs = boards.map((x,i2)=>{
@@ -579,7 +624,7 @@ window.EKO_C = (function(){
       <div class="dblist grow">${boards.map((x,i2) =>
         `<button class="dbrow" data-act="pwBoard" data-i="${i2}" data-on="${String(E.state.pwBoard)===String(i2)}"><span class="dbid">${esc(x[0])}</span>
           <span class="dbbar"><span style="width:${totalMax?((Math.max(0, Number(x[1])||0)/totalMax*100).toFixed(1)):0}%;background:${hues[i2]}"></span></span>
-          <span class="dbkw">${x[1]==null||(dbEmpty&&Number(x[1])===0)?'--':((Number(x[1])>=100?fmt(x[1],0):fmt(Number(x[1]),1))+' kWh')}</span>${icon('chevR',12)}</button>`).join('')}</div></article>`;
+          <span class="dbkw">${x[1]==null||(dbEmpty&&Number(x[1])===0)?'--':(fmt(Number(x[1]),1)+' kWh')}</span>${icon('chevR',12)}</button>`).join('')}</div></article>`;
     let zh = (zhAll[tr] && zhAll[tr][0]) ? zhAll[tr] : [[]];
     let zhHues = hues;
     let zhNames = boardNames;
@@ -603,7 +648,7 @@ window.EKO_C = (function(){
         ? (zh[0]||[]).map((_,i2)=>String(i2+1))
         : Array.from({length:hours},(_,i2)=>(i2%2===0)?String(i2).padStart(2,'0'):''));
     const zoneName = i2 => zhNames[i2] || (ar ? (p.zonesAr[i2]||p.zones[i2]) : p.zones[i2]);
-    const nv = (v, d2) => v >= 100 ? fmt(v, 0) : fmt(v, d2 == null ? 1 : d2);
+    const nv = (v, d2) => fmt(v, d2 == null ? 1 : d2);
     const chtipAttr = payload => encodeURIComponent(JSON.stringify(payload));
     const hitCell = (label, unit, rows) =>
       `<span class="chhit39" data-chtip="${chtipAttr({ t: label, u: unit, rows })}"></span>`;
@@ -691,7 +736,7 @@ window.EKO_C = (function(){
             ${n3===1 ? `<circle cx="${xAt(0).toFixed(2)}" cy="${pty(ps[0]).toFixed(2)}" r="1.8" fill="#4EA3E8"/>` : ''}
             </svg>
           ${n3 ? `<div class="chhits39">${pkHits}</div>` : ''}
-          ${contract != null ? `<span class="pkband39">${esc(E.t('pwContractedLine',{v:fmt(contract, contract>=10?0:1)}))}</span>` : ''}
+          ${contract != null ? `<span class="pkband39">${esc(E.t('pwContractedLine',{v:fmt(contract,1)}))}</span>` : ''}
           ${n3 ? `<span class="pkavg39" style="top:${yA.toFixed(1)}%">${esc(E.t('pwAvgLine',{v:fmt(peakAvg,1)}))}</span>` : ''}
         </div>
         ${xAxis(Math.max(n3, hours))}</div></div>
@@ -748,11 +793,11 @@ window.EKO_C = (function(){
     return modShell(E, E.t('subPower'), '', openBtn,
       mrow(E.t('cmLoadNow'), `${fmt(sv.loadNowKw,1)} <i class="cmunit">kW</i>`, E.t('cmBaseline',{v:sv.baselineKw}), load)
       + mrow(E.t('cmPeakToday'), `${fmt(sv.peakKw,1)} <i class="cmunit">kW</i>`, E.t('cmLimit',{v:sv.limitKw}), peak)
-      + mrow(E.t('cmPf'), sv.pf.toFixed(2), E.t('cmTarget',{v:sv.pfTarget}), pf)
-      + mrow(E.t('cmAvoid'), `<span class="cWarn2">AED ${fmt(sv.avoidAed,2)}</span>`, `${fmt(sv.avoidKwh)} kWh`)
+      + mrow(E.t('cmPf'), fmt(sv.pf,1), E.t('cmTarget',{v:sv.pfTarget}), pf)
+      + mrow(E.t('cmAvoid'), `<span class="cWarn2">AED ${fmt(sv.avoidAed,1)}</span>`, `${fmt(sv.avoidKwh,1)} kWh`)
       + `<div class="cmzhead">${esc(E.t('zonesToday'))}</div>${zrows}
       <div class="cmwarn"><span class="cmwdot"></span>
-        <span class="cmwtxt">${esc(E.t('wasteWarnN',{n:sv.warnN}))} \u00b7 <span class="tMonoS">AED ${fmt(sv.warnAed,2)}</span></span>
+        <span class="cmwtxt">${esc(E.t('wasteWarnN',{n:sv.warnN}))} \u00b7 <span class="tMonoS">AED ${fmt(sv.warnAed,1)}</span></span>
         <button class="cmwview" data-act="goPage" data-page="power" data-sub="power">${esc(E.t('viewW'))}</button></div>`);
   }
 
@@ -790,7 +835,7 @@ window.EKO_C = (function(){
       <div class="regbar">
         <div><div class="modtitle">${esc(t('modAssets'))}</div>
           <span class="alcardt">${esc(t('regHead'))}</span>
-          <span class="alcardm"> ${esc(t('regConnected',{n:rows.length,total:fmt(E.data.registerTotal)}))} </span>
+          <span class="alcardm"> ${esc(t('regConnected',{n:rows.length,total:fmt(E.data.registerTotal,0)}))} </span>
           <button class="alcardm statlink" data-act="regStF" data-v="stale" data-on="${s.regStF==='stale'}">${esc(t('regStaleN',{n:staleN}))}</button></div>
         <input class="regsearch msA" data-act="regQ" value="${esc(s.regQ||'')}" placeholder="${esc(t('regSearchPh'))}" aria-label="${esc(t('regSearchPh'))}">
         ${s.regSysF?`<button class="chip" data-on="true" data-act="regSysClear">${esc((f=>f?(E.lang==='ar'?f.ar:f.en):s.regSysF)(E.data.families.find(x=>x.id===s.regSysF)))} ${icon('x',10)}</button>`:''}
@@ -923,7 +968,7 @@ window.EKO_C = (function(){
     if (upper === 'F' || upper === 'FALSE' || upper === 'OFF' || upper === 'STOP' || upper === 'STOPPED') return 'Off';
     const n = fcuNumber(raw);
     if (n != null && unit && raw.indexOf(unit) === -1 && !/[a-zA-Z°]/.test(raw)) {
-      const text = Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10);
+      const text = fmt(n, 1);
       return text + unit;
     }
     return raw;
@@ -955,6 +1000,29 @@ window.EKO_C = (function(){
     if (!rows.length) return '';
     return rows.map(row => `<div class="aprow"><dt>${esc(row[0])}</dt><dd>${esc(row[1])}</dd></div>`).join('');
   }
+  function ahuPointRows(asset) {
+    const id = String(asset && asset.id || '').toUpperCase();
+    const type = String(asset && asset.typeEn || '').toUpperCase();
+    if (id.indexOf('AHU') !== 0 && type.indexOf('AHU') === -1) return '';
+    const points = (asset && asset.points) || [];
+    if (!points.length) return '';
+    const raTemp = fcuFind(points, k => k.indexOf('ratemp') !== -1 && k.indexOf('set') === -1 && !/sp$/.test(k));
+    const raHum = fcuFind(points, k => k.indexOf('rahum') !== -1 && k.indexOf('set') === -1 && !/sp$/.test(k));
+    const raCo2 = fcuFind(points, k => k.indexOf('raco2') !== -1 && k.indexOf('set') === -1 && !/sp$/.test(k));
+    const saTemp = fcuFind(points, k => k.indexOf('satemp') !== -1 && k.indexOf('set') === -1 && !/sp$/.test(k));
+    const saHum = fcuFind(points, k => k.indexOf('sahum') !== -1 && k.indexOf('set') === -1 && !/sp$/.test(k));
+    const saPressure = fcuFind(points, k => k.indexOf('sapressure') !== -1 && k.indexOf('set') === -1 && !/sp$/.test(k));
+    const rows = [
+      ['RA_TEMP', fcuShown(fcuClean(raTemp && raTemp.currentValue), ' °C')],
+      ['RA_HUM', fcuShown(fcuClean(raHum && raHum.currentValue), ' %')],
+      ['RA_CO2', fcuShown(fcuClean(raCo2 && raCo2.currentValue), ' ppm')],
+      ['SA_TEMP', fcuShown(fcuClean(saTemp && saTemp.currentValue), ' °C')],
+      ['SA_HUM', fcuShown(fcuClean(saHum && saHum.currentValue), ' %')],
+      ['SA_PRESSURE', fcuShown(fcuClean(saPressure && saPressure.currentValue), ' Pa')],
+    ].filter(row => row[1]);
+    if (!rows.length) return '';
+    return rows.map(row => `<div class="aprow"><dt>${esc(row[0])}</dt><dd>${esc(row[1])}</dd></div>`).join('');
+  }
   function assetPanel(E){
     const id = E.state.assetSel;
     if(!id) return '';
@@ -981,8 +1049,10 @@ window.EKO_C = (function(){
     const tr7 = r.trend7 && Array.isArray(r.trend7.vals) && r.trend7.vals.length >= 2 ? r.trend7 : null;
     const reason = r.st === 'stale' ? 'dgNoTrend.stale' : (r.trendKind === 'state' ? 'dgNoTrend.state' : 'dgNoTrend.none');
     const fcuRows = fcuPointRows(r);
+    const ahuRows = ahuPointRows(r);
     const full = `<div class="apfull"><div class="row gap8"><h4 class="tLbl grow">${esc(t('apFullT'))}</h4><button class="statlink" data-act="disclose" data-k="full" aria-expanded="${fullOn}">${esc(t(fullOn ? 'hideFull' : 'discloseFull'))}</button></div>
       ${fcuRows}
+      ${ahuRows}
       ${fullOn ? (tr7 ? (() => { const p = window.ekoTrend(tr7.vals, 240, 56); const lo = Math.min(...tr7.vals), hi = Math.max(...tr7.vals);
         return `<p class="tCap">${esc(trP(tr7.point))} · ${esc(t('apTrendPts', { n: tr7.vals.length }))} · ${lo}–${hi} ${esc(tr7.unit || '')}</p>
         <div class="systrend"><svg viewBox="0 0 240 56" preserveAspectRatio="none"><path d="${p.area}" fill="var(--accT)"/><path d="${p.line}" fill="none" stroke="var(--acc)" stroke-width="1.5"/></svg></div>

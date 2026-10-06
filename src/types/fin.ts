@@ -40,6 +40,7 @@ export interface FinFddRule {
  */
 export interface FinPowerLiveResponse {
   timestamp: string
+  hourly_energy: number | null
   total_power: number | null
   peak_demand: number | null
   energy_deviation: number | null

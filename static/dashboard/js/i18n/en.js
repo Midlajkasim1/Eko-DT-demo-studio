@@ -1899,7 +1899,7 @@ window.EKO_I18N.en = {
   "ad.energy.fcst.b1": "End-of-day and end-of-month forecast per meter",
   "ad.energy.fcst.b2": "Budget overrun warnings while there is time to act",
   "ad.energy.fcst.b3": "Peak-demand forecast against the contracted limit",
-  "ad.energy.fcst.fig": "{v} MWh so far today — the end-of-day forecast would sit next to it",
+  "ad.energy.fcst.fig": "{v} kWh so far today — the end-of-day forecast would sit next to it",
   "ad.contact": "To activate this module, contact your administrator.",
   "mkImpact": "Estimated impact AED {v} / month",
   "mkCluNote": "{n|alarmsN} here · the most serious is shown",

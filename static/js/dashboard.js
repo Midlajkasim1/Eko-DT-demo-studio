@@ -368,7 +368,10 @@
 
   function historySeries(key, raw) {
     const power = live.power;
-    const nested = power && power.power_history ? power.power_history[key] : null;
+    const hist = power && power.power_history ? power.power_history : null;
+    let nested = hist ? hist[key] : null;
+    if (!nested && hist && key === 'Hourly_Energy_Consumption_his') nested = hist.Total_Power_Consumption_his;
+    if (!nested && hist && key === 'Total_Power_Consumption_his') nested = hist.Hourly_Energy_Consumption_his;
     if (!nested) return [];
     const flat = flattenHistory(nested);
     return raw ? flat : clampToCursor(flat);
@@ -402,6 +405,7 @@
 
   function liveLoadKw() {
     const power = live.power;
+    if (power && power.hourly_energy != null) return power.hourly_energy;
     if (power && power.total_power != null) return power.total_power;
     const pmu = pmuLiveSum();
     return pmu ? pmu.sum : null;
@@ -430,8 +434,11 @@
 
   function shortNum(v, digits = 1) {
     if (v == null || !isFinite(v)) return '—';
-    if (Math.abs(v) >= 10000) return (v / 1000).toFixed(1) + 'k';
-    return Number(v).toLocaleString('en-US', { maximumFractionDigits: digits });
+    const d = digits == null ? 1 : digits;
+    const f = Math.pow(10, d);
+    const t = Math.trunc((Math.abs(v) >= 10000 ? v / 1000 : v) * f + (v < 0 ? -1e-9 : 1e-9)) / f;
+    if (Math.abs(v) >= 10000) return t.toFixed(d) + 'k';
+    return t.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
   }
 
   // Values for each hour (0-23) of one calendar day, null where no sample
@@ -480,7 +487,7 @@
   }
 
   function energyKpis() {
-    const series = historySeries('Total_Power_Consumption_his');
+    const series = historySeries('Hourly_Energy_Consumption_his');
     const now = new Date();
     const today = daySumWithPmuFallback(series, now);
     const lastMonthDay = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
@@ -493,7 +500,7 @@
 
     // FIN total → live PMU sum → Peak_Demand; loadSrc labels which one answered.
     const power = live.power;
-    const finLoad = power ? power.total_power : null;
+    const finLoad = power ? (power.hourly_energy != null ? power.hourly_energy : power.total_power) : null;
     const pmu = finLoad == null ? pmuLiveSum() : null;
     let load = finLoad != null ? finLoad : (pmu ? pmu.sum : null);
     let loadSrc = finLoad != null ? '' : (pmu ? 'pmu' : '');
@@ -538,7 +545,7 @@
     const dots = points.map((p, i) => {
       const x = (i / (points.length - 1)) * 240;
       const y = 44 - ((p.val - min) / span) * 34;
-      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5" fill="transparent" data-tip="${esc(`${stamp(p.ts)}\n${shortNum(p.val, 2)}`)}" style="cursor:crosshair"/>`;
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5" fill="transparent" data-tip="${esc(`${stamp(p.ts)}\n${shortNum(p.val, 1)}`)}" style="cursor:crosshair"/>`;
     }).join('');
     return { line, area: `${line} L240,48 L0,48 Z`, dots };
   }
@@ -562,7 +569,7 @@
       },
       {
         label: 'COMFORT COMPLIANCE',
-        v: comfort != null ? Number(comfort).toFixed(1) : '—',
+        v: comfort != null ? shortNum(comfort, 1) : '—',
         unit: comfort != null ? '%' : '',
         cap: t('within target band'),
       },
@@ -610,7 +617,7 @@
       if (item.id === 'waste') { const n = activeFindings().length; return n ? `${n} ${t('findings')}` : '—'; }
       if (item.id === 'lbm') { const m = live.meters; const n = m ? Object.keys(m).length : 0; return n ? `${n} ${t('meters live')}` : '—'; }
       if (item.id === 'anom') { const n = pmuHistKeys().length; return n ? `${n} ${t('PMU trends')}` : '—'; }
-      if (item.id === 'cons') { const k = energyKpis(); return k.consumed != null ? `${(k.consumed / 1000).toFixed(1)} ${t('MWh today')}` : '—'; }
+      if (item.id === 'cons') { const k = energyKpis(); return k.consumed != null ? `${shortNum(k.consumed / 1000, 1)} ${t('MWh today')}` : '—'; }
       if (item.id === 'bench') return t('Requires portfolio');
       if (item.id === 'budget') return t('Requires targets');
       if (item.id === 'fcst') return t('In design');
@@ -891,7 +898,7 @@
       const k = energyKpis();
       const spark = sparkPaths(k.spark);
       const momHtml = k.momPct == null ? '' :
-        `<span style="color:${k.momPct > 0 ? 'var(--warnTx)' : 'var(--posTx)'}">${k.momPct > 0 ? '▲' : '▼'} ${Math.abs(k.momPct).toFixed(1)}% ${t('month-on-month')}</span>`;
+        `<span style="color:${k.momPct > 0 ? 'var(--warnTx)' : 'var(--posTx)'}">${k.momPct > 0 ? '▲' : '▼'} ${shortNum(Math.abs(k.momPct), 1)}% ${t('month-on-month')}</span>`;
       kpiHtml = `
         <div>
           <div class="kpi-label">${t("CONSUMED TODAY")}</div>
@@ -1115,7 +1122,7 @@
     const x = (ts) => 30 + ((ts - t0) / span) * 288;
     const y = (v) => 100 - ((v - vmin) / (vmax - vmin)) * 92;
     const pts = (s) => s.map((p) => `${x(p.ts.getTime()).toFixed(1)},${y(p.val).toFixed(1)}`).join(' ');
-    const fmtAxis = (v) => Math.abs(v) >= 1000 ? (v / 1000).toFixed(1) + 'k' : v.toFixed(1);
+    const fmtAxis = (v) => shortNum(v, 1);
     const dLabel = (ms) => {
       const d = new Date(ms);
       return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -1146,8 +1153,8 @@
           const ref = refSeries && refSeries.length
             ? refSeries.reduce((a, r) => Math.abs(r.ts - p.ts) < Math.abs(a.ts - p.ts) ? r : a)
             : null;
-          const tip = `${stamp(p.ts)}\n${shortNum(p.val, 2)}${unit ? ' ' + unit : ''}` +
-            (ref ? `\n${t('ref')} ${shortNum(ref.val, 2)}` : '');
+          const tip = `${stamp(p.ts)}\n${shortNum(p.val, 1)}${unit ? ' ' + unit : ''}` +
+            (ref ? `\n${t('ref')} ${shortNum(ref.val, 1)}` : '');
           return `<circle cx="${x(p.ts.getTime()).toFixed(1)}" cy="${y(p.val).toFixed(1)}" r="4" fill="transparent" data-tip="${esc(tip)}" style="cursor:crosshair"/>`;
         }).join('')}</g>
       </svg>`;
@@ -1699,7 +1706,7 @@
     const hist = live.power && live.power.power_history ? live.power.power_history : null;
     if (!hist) return emptyBox('—');
 
-    const total = historySeries('Total_Power_Consumption_his');
+    const total = historySeries('Hourly_Energy_Consumption_his');
     const services = SERVICE_CHANNELS
       .filter((c) => hist[c.key])
       .map((c) => ({ ...c, series: historySeries(c.key) }));
@@ -1798,7 +1805,7 @@
   };
 
   function weeklyChartHtml(kind, seriesOverride) {
-    const series = seriesOverride || historySeries('Total_Power_Consumption_his');
+    const series = seriesOverride || historySeries('Hourly_Energy_Consumption_his');
     // EKO-012: differenced when the series is a register, summed when it is not.
     const { bars: mb, totalizer } = dailyMeterBars(series, 7);
     const days = mb.map((b) => ({ date: b.date, sum: b.value, register: b.register, partial: b.partial }));
@@ -2112,8 +2119,8 @@
             ${hoverColumns(Array.from({ length: 24 }, (_, h) => {
               const v = actual[h], p = profile[h];
               const dev = (v != null && p != null && p > 0) ? ((v - p) / p) * 100 : null;
-              return `${String(h).padStart(2, '0')}:00\n${v == null ? t('no data') : t('Actual') + ' ' + shortNum(v, 2)}` +
-                (p == null ? '' : `\n${t('Typical profile')} ${shortNum(p, 2)}`) +
+              return `${String(h).padStart(2, '0')}:00\n${v == null ? t('no data') : t('Actual') + ' ' + shortNum(v, 1)}` +
+                (p == null ? '' : `\n${t('Typical profile')} ${shortNum(p, 1)}`) +
                 (dev == null ? '' : `\n${dev > 0 ? '+' : ''}${dev.toFixed(0)}%`);
             }), 30 - 6.25, 12.5)}
           </svg>`,
@@ -2122,7 +2129,7 @@
 
   // Hour-of-week load intensity averaged over the last 28 days of the historian
   function heatmapHtml() {
-    const series = historySeries('Total_Power_Consumption_his');
+    const series = historySeries('Hourly_Energy_Consumption_his');
     const cutoff = Date.now() - 28 * 86400000;
     const sums = Array.from({ length: 7 }, () => Array(24).fill(0));
     const counts = Array.from({ length: 7 }, () => Array(24).fill(0));
@@ -2588,7 +2595,7 @@
         if (REF.length >= 2) REF_KIND = 'setpoint';
       }
     } else {
-      const full = historySeries('Total_Power_Consumption_his', true);
+      const full = historySeries('Hourly_Energy_Consumption_his', true);
       SERIES = full.map((p) => ({ t: p.ts.getTime(), v: p.val }));
       const liveLoad = liveLoadKw();
       if (liveLoad != null) SERIES.push({ t: now, v: liveLoad });

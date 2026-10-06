@@ -40,7 +40,17 @@ window.EKO_WALL = (function(){
   const C = () => window.EKO_C, V = () => window.EKO_V, EST = () => window.EKO_EST, PWA = () => window.EKO_PWA, PF = () => window.EKO_PF, R = () => window.EKO_ROLLUP;
   const esc = s => C().esc(s);
   const SEVR = { critical: 0, high: 1, medium: 2 };
-  const fmtW = (n, d) => Number(n || 0).toLocaleString('en-GB', { maximumFractionDigits: d == null ? 0 : d });   /* Western numerals on the wall, every language */
+  const truncDec = (n, d) => {
+    const x = Number(n); if (!isFinite(x)) return 0;
+    if (d <= 0) return Math.trunc(x + (x < 0 ? -1e-9 : 1e-9));
+    const f = Math.pow(10, d);
+    return Math.trunc(x * f + (x < 0 ? -1e-9 : 1e-9)) / f;
+  };
+  const fmtW = (n, d) => {
+    const dd = d == null ? 0 : d;
+    const t = truncDec(n || 0, dd);
+    return t.toLocaleString('en-GB', { minimumFractionDigits: dd, maximumFractionDigits: dd });
+  };
   const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   const toMin = s => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '').trim()); return m ? (+m[1]) * 60 + (+m[2]) : null; };
   let E = null, timer = null, lastCounts = null, changedAt = 0, changedKeys = [], epoch = 0, shiftIdx = 0, hotTimer = null, listenersOn = false, boardFit = null;
@@ -259,10 +269,32 @@ window.EKO_WALL = (function(){
 
   /* ------------------------------ chart helpers --------------------------- */
   /* Every chart is inline SVG in the neutral tones; hue only where the data carries a domain hue (sparklines) or alarm state. */
-  const spark = (vals, hue) => { const v = (vals || []).filter(x => x != null); if(v.length < 2) return ''; const max = Math.max.apply(null, v), min = Math.min.apply(null, v), span = (max - min) || 1;
-    const pts = v.map((x, i) => `${(i / (v.length - 1) * 100).toFixed(1)},${(26 - (x - min) / span * 22).toFixed(1)}`);
+  const spark = (vals, hue, compare) => {
     const id = 'wg' + String(hue || 'n').replace(/[^a-z0-9]/gi, '');
-    return `<svg class="wspark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${esc(hue || '#93A1B8')}" stop-opacity=".45"/><stop offset="1" stop-color="${esc(hue || '#93A1B8')}" stop-opacity="0"/></linearGradient></defs><polygon points="0,28 ${pts.join(' ')} 100,28" fill="url(#${id})"/><polyline points="${pts.join(' ')}" fill="none" stroke="${esc(hue || 'currentColor')}" stroke-width="2.5" vector-effect="non-scaling-stroke"/></svg>`; };
+    const finite = a => (a || []).filter(x => x != null && isFinite(+x));
+    if(compare && compare.length){
+      const both = finite(vals).concat(finite(compare)).map(Number);
+      if(both.length < 2) return '';
+      const max = Math.max(0, ...both), min = Math.min(0, ...both), span = (max - min) || 1;
+      const n = Math.max((vals || []).length, compare.length, 2);
+      const segs = arr => {
+        const out = []; let cur = [];
+        for(let i = 0; i < n; i++){
+          const x = arr[i];
+          if(x == null || !isFinite(+x)){ if(cur.length >= 2) out.push(cur); cur = []; continue; }
+          cur.push(`${(i / (n - 1) * 100).toFixed(1)},${(26 - ((+x) - min) / span * 22).toFixed(1)}`);
+        }
+        if(cur.length >= 2) out.push(cur);
+        return out;
+      };
+      const yest = segs(compare).map(p => `<polyline points="${p.join(' ')}" fill="none" stroke="${esc(hue || 'currentColor')}" stroke-width="1.5" stroke-dasharray="3 2" opacity="0.45" vector-effect="non-scaling-stroke"/>`).join('');
+      const today = segs(vals || []).map(p => `<polyline points="${p.join(' ')}" fill="none" stroke="${esc(hue || 'currentColor')}" stroke-width="2.5" vector-effect="non-scaling-stroke"/>`).join('');
+      return `<svg class="wspark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">${yest}${today}</svg>`;
+    }
+    const v = finite(vals); if(v.length < 2) return ''; const max = Math.max.apply(null, v), min = Math.min.apply(null, v), span = (max - min) || 1;
+    const pts = v.map((x, i) => `${(i / (v.length - 1) * 100).toFixed(1)},${(26 - (x - min) / span * 22).toFixed(1)}`);
+    return `<svg class="wspark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${esc(hue || '#93A1B8')}" stop-opacity=".45"/><stop offset="1" stop-color="${esc(hue || '#93A1B8')}" stop-opacity="0"/></linearGradient></defs><polygon points="0,28 ${pts.join(' ')} 100,28" fill="url(#${id})"/><polyline points="${pts.join(' ')}" fill="none" stroke="${esc(hue || 'currentColor')}" stroke-width="2.5" vector-effect="non-scaling-stroke"/></svg>`;
+  };
   const ring = (pct, tone) => { const p = Math.max(0, Math.min(100, pct || 0)), r = 42, c = 2 * Math.PI * r;
     return `<svg class="wring" viewBox="0 0 100 100" aria-hidden="true" data-tone="${tone || 'ok'}"><circle class="wringbg" cx="50" cy="50" r="${r}" fill="none" stroke-width="10"/><circle class="wringfg" cx="50" cy="50" r="${r}" fill="none" stroke-width="10" stroke-linecap="round" stroke-dasharray="${(c * p / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 50 50)"/></svg>`; };
   const bullet = (v, max, target, state) => { const m = Math.max(max || 0, 1); return `<div class="wbullet" data-state="${state || 'ok'}"><span class="wbfill" style="width:${(Math.min(v, m) / m * 100).toFixed(1)}%"></span>${target != null ? `<span class="wbtick" style="inset-inline-start:${(Math.min(target, m) / m * 100).toFixed(1)}%"></span>` : ''}</div>`; };
@@ -279,7 +311,7 @@ window.EKO_WALL = (function(){
   function kpiTile(o){
     /* o: { key, label, value, unit, spark, hue, ring (pct), cap, tone } */
     const val = `<span class="wkv"><span class="wnum2">${esc(o.value)}</span>${o.unit ? `<span class="wunit">${esc(o.unit)}</span>` : ''}</span>`;
-    const vis = o.ring != null ? `<div class="wkring">${ring(o.ring, o.tone)}${val}</div>` : val + (o.spark ? spark(o.spark, o.hue) : '');
+    const vis = o.ring != null ? `<div class="wkring">${ring(o.ring, o.tone)}${val}</div>` : val + (o.spark ? spark(o.spark, o.hue, o.sparkCompare) : '');
     return `<div class="wkpi" data-key="${esc(o.key)}" data-tone="${o.tone || 'ok'}" data-size="${o.size || 'std'}"><span class="wklbl">${esc(o.label)}</span>${vis}${o.cap ? `<span class="wkcap wextra">${esc(o.cap)}</span>` : ''}</div>`;
   }
   function kpiStrip(f, m){
@@ -295,7 +327,7 @@ window.EKO_WALL = (function(){
       const R2 = R(), comp = R2.ratio(f.sites, { num: s => s.pmDone, den: s => s.pmDue, denKey: 'sites', needs: 'records', state: s => s.state });
       if(comp.value != null) tiles.push({ key: 'pm', size: 'sec', label: t('pfc.compliance'), value: fmtW(comp.value * 100), unit: '%', ring: comp.value * 100, cap: cov(comp) });
     } else {
-      (E.data.summary || []).filter(r => ['energy', 'water', 'gas', 'comfort'].includes(r.key)).forEach(r => tiles.push({ key: r.key, label: t(r.label), value: (E.data.metrics || {})[r.metric] == null ? '\u2013' : fmtW(E.data.metrics[r.metric], r.d), unit: r.u || '', spark: r.spark, hue: r.dom, cap: r.capEn ? (E.lang === 'ar' ? r.capAr : r.capEn) : (E.lang === 'ar' ? r.deltaAr : r.deltaEn) }));
+      (E.data.summary || []).filter(r => ['energy', 'water', 'gas', 'comfort'].includes(r.key)).forEach(r => tiles.push({ key: r.key, label: t(r.label), value: (E.data.metrics || {})[r.metric] == null ? '\u2013' : fmtW(E.data.metrics[r.metric], r.d), unit: r.u || '', spark: r.spark, sparkCompare: r.sparkCompare, hue: r.dom, cap: r.capEn ? (E.lang === 'ar' ? r.capAr : r.capEn) : (E.lang === 'ar' ? r.deltaAr : r.deltaEn) }));
       const p = (E.data.power || {}).subview;
       if(p && p.peakKw != null && p.limitKw) tiles.push({ key: 'peak', label: t('wall.kpiPeak'), value: fmtW(p.peakKw / p.limitKw * 100), unit: '%', ring: p.peakKw / p.limitKw * 100, tone: p.peakKw / p.limitKw >= 0.9 ? 'warn' : 'ok', cap: t('wall.ofContract', { kw: fmtW(p.limitKw) }) });
       const w = E.data.water;

@@ -38,7 +38,7 @@ const DEFAULT_FIN_ENDPOINTS = {
 
 // Site preset — must stay in sync with backend/config.json (single source of truth)
 const SITE_FIN_LIVE_POINTS = {
-  "total_power": "p:{project}:r:3181ee6e-67dac181",
+  "hourly_energy": "p:{project}:r:3181ee6e-67dac181",
   "peak_demand": "p:{project}:r:3181f788-2d229f48",
   "energy_deviation": "p:{project}:r:3181f71f-2f0083d7",
   "energy_intensity": "p:{project}:r:3181f767-e5cb6329",
@@ -65,7 +65,7 @@ const SITE_FIN_LIVE_POINTS = {
 }
 
 const SITE_FIN_ENDPOINTS = {
-  "Total_Power_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181ee6e-67dac181,2026-05-21..today()%2C%7B-limit%7D)",
+  "Hourly_Energy_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181ee6e-67dac181,2026-05-21..today()%2C%7B-limit%7D)",
   "Power_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181ee6e-67dac181,2026-05-21..today()%2C%7B-limit%7D)",
   "Peak_Demand_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f788-2d229f48,2026-05-21..today()%2C%7B-limit%7D)",
   "Energy_Deviation_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f71f-2f0083d7,2026-05-21..today()%2C%7B-limit%7D)",

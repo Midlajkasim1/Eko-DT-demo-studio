@@ -45,7 +45,7 @@ window.EKO_A = (function(){
     const head = `<div class="ovkhead">${dot}<span class="ovklbl">${esc(ar?c.labelAr:c.labelEn)}</span>
       ${c.chipEn?`<span class="pwchip msA" data-tone="${c.tone}">${esc(ar?c.chipAr:c.chipEn)}</span>`:''}</div>`;
     if(c.kind === 'stat'){
-      const sv = c.v == null ? '--' : String(c.v);
+      const sv = c.v == null || c.v === '' ? '--' : (isFinite(+c.v) ? fmt(+c.v, 1) : String(c.v));
       const chip = c.chipEn ? (ar?c.chipAr:c.chipEn) : null;
       const capStr = (ar?c.capAr:c.capEn) || '';
       const dotTone = (c.chipEn && g && g.hue) ? null : wash;
@@ -67,7 +67,7 @@ window.EKO_A = (function(){
           <circle cx="62" cy="66" r="4.5" fill="var(--s3)" stroke="var(--bd2)" stroke-width="1.5"/></svg>
         ${g.ticks.map(t=>`<span style="${t.css}">${esc(t.t)}</span>`).join('')}</div>
         <div class="scrow"><span class="ovkcap" data-tone="${c.tone==='warn'?'warn':'pos'}">${esc(word)}</span>
-        <span class="scval sm msA">${esc(String(c.val))}${c.u?esc(c.u):''}</span></div></div>`;
+        <span class="scval sm msA">${esc(c.val == null ? '--' : fmt(c.val, 1))}${c.u?esc(c.u):''}</span></div></div>`;
     }
     if(c.kind === 'donut'){
       const d = ekoDonut(c.pct);
@@ -76,7 +76,7 @@ window.EKO_A = (function(){
           <circle cx="${d.cx}" cy="${d.cy}" r="${d.r}" fill="none" stroke="var(--s3)" stroke-width="8"/>
           <circle cx="${d.cx}" cy="${d.cy}" r="${d.r}" fill="none" stroke="var(--acc)" stroke-width="8"
             stroke-dasharray="${d.dash}" stroke-linecap="round" transform="rotate(-90 ${d.cx} ${d.cy})"/></svg>
-          <span class="scdpct tMonoS fw6">${fmt(c.pct, c.pct % 1 ? 2 : 0)}%</span></div>
+          <span class="scdpct tMonoS fw6">${fmt(c.pct, 1)}%</span></div>
         <span class="ovkcap" data-tone="pos">${esc(word)}</span></div>`;
     }
     if(c.kind === 'tiles')
@@ -176,7 +176,9 @@ window.EKO_A = (function(){
     const word = c => (ar ? c.wordAr : c.wordEn) || '';
     // Only non-subOnly stat/gauge cards become hero tiles at the top
     const heroes = g.cards.filter(c => (c.kind === 'stat' || c.kind === 'gauge') && !c.subOnly).map(c => {
-      const v = c.kind === 'stat' ? (c.v == null ? '--' : String(c.v)) : (c.val == null ? '--' : String(c.val));
+      const v = c.kind === 'stat'
+        ? (c.v == null || c.v === '' ? '--' : (isFinite(+c.v) ? fmt(+c.v, 1) : String(c.v)))
+        : (c.val == null ? '--' : fmt(c.val, 1));
       const cap = (ar ? c.capAr : c.capEn) || '';
       const chip = c.chipEn ? (ar ? c.chipAr : c.chipEn) : null;
       const chipTone = c.tone === 'warn' ? 'warn' : 'ok';
@@ -186,7 +188,7 @@ window.EKO_A = (function(){
     g.cards.forEach(c => {
       // subOnly stat cards → rendered as full-width widget boxes (same look as Overall Health)
       if(c.kind === 'stat' && c.subOnly){
-        const sv = c.v == null ? '--' : String(c.v);
+        const sv = c.v == null || c.v === '' ? '--' : (isFinite(+c.v) ? fmt(+c.v, 1) : String(c.v));
         const cap = (ar ? c.capAr : c.capEn) || '';
         const chip = c.chipEn ? (ar ? c.chipAr : c.chipEn) : null;
         const wash = (c.tone === 'warn' || c.tone === 'crit') ? 'warn' : 'ok';
@@ -206,7 +208,7 @@ window.EKO_A = (function(){
             <circle cx="${d.cx}" cy="${d.cy}" r="${d.r}" fill="none" stroke="var(--s3)" stroke-width="8"/>
             <circle cx="${d.cx}" cy="${d.cy}" r="${d.r}" fill="none" stroke="var(--acc)" stroke-width="8"
               stroke-dasharray="${d.dash}" stroke-linecap="round" transform="rotate(-90 ${d.cx} ${d.cy})"/></svg>
-          <div class="col"><span class="tMono fw6">${fmt(c.pct,2)}%</span>
+          <div class="col"><span class="tMono fw6">${fmt(c.pct,1)}%</span>
             <span class="ovkcap" data-tone="pos">${esc(word(c))}</span></div></div>`));
       }
       if(c.kind === 'tiles')
@@ -247,7 +249,7 @@ window.EKO_A = (function(){
   function benchPage(E){
     const d = E.data.bench, ar = E.lang === 'ar';
     const heroes = [
-      heroTile(E, E.t('benchIntensity'), fmt(d.siteWhm2), 'Wh/m²', E.t('benchIntensityCap',{t:E.data.basis.asOf})),
+      heroTile(E, E.t('benchIntensity'), fmt(d.siteWhm2, 1), 'Wh/m²', E.t('benchIntensityCap',{t:E.data.basis.asOf})),
       heroTile(E, E.t('benchHighest'), d.highestEn, '', ar?d.highestNoteAr:d.highestNote),
       heroTile(E, E.t('benchInBand'), d.inBand, '', ar?d.inBandListAr:d.inBandListEn)];
     const maxV = Math.max(...d.rows.map(r=>r.bandHi), ...d.rows.map(r=>r.whm2)) * 1.15;
@@ -257,7 +259,7 @@ window.EKO_A = (function(){
         <span class="benchbar">
           <span class="benchband" style="inset-inline-start:${(r.bandLo/maxV*100).toFixed(1)}%;width:${((r.bandHi-r.bandLo)/maxV*100).toFixed(1)}%"></span>
           <span class="benchval" data-out="${r.out}" style="width:${(r.whm2/maxV*100).toFixed(1)}%"></span></span>
-        <span class="tMonoS">${fmt(r.whm2)} Wh/m²</span>
+        <span class="tMonoS">${fmt(r.whm2, 1)} Wh/m²</span>
         <span class="benchnote" data-out="${r.out}">${esc(ar?r.noteAr:r.noteEn)}</span></div>`;
     }).join('');
     return page(E, heroes, widget(E, E.t('benchBySys'), E.t('benchBySysCap'),
@@ -352,7 +354,7 @@ window.EKO_A = (function(){
   function anomPage(E){
     const d = E.data.anom, ar = E.lang === 'ar';
     const pmus = E.data.power.pmus || [];
-    const nd = (v, d2) => (v == null || !isFinite(Number(v))) ? '--' : fmt(v, d2);
+    const nd = (v, d2) => (v == null || !isFinite(Number(v))) ? '--' : fmt(v, d2 == null ? 1 : d2);
     const kwVals = pmus.map(u => Number(u.kw)).filter(v => isFinite(v));
     const maxKw = kwVals.length ? Math.max(...kwVals) : 0;
     const totKw = kwVals.reduce((s2, v) => s2 + v, 0);
@@ -361,7 +363,7 @@ window.EKO_A = (function(){
       const bar = maxKw && u.kw != null ? Math.max(0, Math.round(Number(u.kw) / maxKw * 100)) : 0;
       return `<div class="pwtile"><div class="pwth"><span class="ovklbl">${esc(u.id)}</span>${C().ctl(E, u.id, u.db, { topic:'peak' })}</div>
         <div class="ovkval"><span class="ovknum">${nd(u.kw)}</span><span class="ovkunit">kW</span></div>
-        <span class="ovkcap">${esc(u.db || '')} \u00b7 ${nd(u.v,1)} V \u00b7 ${nd(u.pf,2)} PF</span>
+        <span class="ovkcap">${esc(u.db || '')} \u00b7 ${nd(u.v,1)} V \u00b7 ${nd(u.pf,1)} PF</span>
         <div class="pmubar39"><svg><rect x="0%" y="8" width="100%" height="8" fill="var(--chTrack)"/>
           <rect x="0%" y="10" width="${bar}%" height="4" rx="2" fill="var(--chFill)"/></svg></div></div>`;
     });
@@ -396,10 +398,10 @@ window.EKO_A = (function(){
           ${evSeries.vals.length ? `<div class="chhits39">${evSeries.vals.map((_,i2) => {
             const rows = evSeries.per.map(row => ({
               c: row.c, n: row.n,
-              v: row.vals[i2] == null ? '--' : (row.vals[i2] >= 100 ? fmt(row.vals[i2], 0) : fmt(row.vals[i2], 1))
+              v: row.vals[i2] == null ? '--' : fmt(row.vals[i2], 1)
             }));
             const tot = evSeries.vals[i2];
-            const totTxt = tot >= 100 ? fmt(tot, 0) : fmt(tot, 1);
+            const totTxt = fmt(tot, 1);
             if (rows.length > 1) rows.unshift({ c: '#F0A93B', n: 'Total', v: totTxt });
             return `<span class="chhit39" data-chtip="${encodeURIComponent(JSON.stringify({ t: evSeries.titles[i2], u: 'kW', rows }))}"></span>`;
           }).join('')}</div>` : ''}
@@ -435,7 +437,7 @@ window.EKO_A = (function(){
     const d = E.data.fcst, ar = E.lang === 'ar';
     const heroes = [
       heroTile(E, E.t('fcstPeakDay'), ar?d.peakDayAr:d.peakDayEn, '', E.t('fcstPeakCap',{v:fmt(d.peakMwh,1),p:d.peakPct})),
-      heroTile(E, E.t('fcstMonthEnd'), fmt(d.monthEndMwh), 'MWh', E.t('fcstMonthCap')),
+      heroTile(E, E.t('fcstMonthEnd'), fmt(d.monthEndMwh, 1), 'MWh', E.t('fcstMonthCap')),
       heroTile(E, E.t('fcstBasis'), ar?d.basisAr:d.basisEn, '', E.t('fcstBasisCap'))];
     const maxV = Math.max(...d.days.map(x=>x[3])) * 1.1;
     const cols = d.days.map((x,di) =>
@@ -466,7 +468,7 @@ window.EKO_A = (function(){
   }
   function waterPage(E){
     const d = E.data.water || {}, ar = E.lang === 'ar';
-    const nd = (v, d2) => (v == null || !isFinite(Number(v))) ? '--' : fmt(v, d2);
+    const nd = (v, d2) => (v == null || !isFinite(Number(v))) ? '--' : fmt(v, d2 == null ? 1 : d2);
     const dash = esc(E.t('emptyDash'));
     const hasFin = Array.isArray(d.todayH) || Array.isArray(d.hourly) || Array.isArray(d.weekly) || Array.isArray(d.monthly);
     const sumHrs = arr => {
@@ -507,7 +509,7 @@ window.EKO_A = (function(){
       const bh = Math.max(0, Number(v)||0)/YMX*96;
       dbars += `<rect x="${x}" y="${(96-bh).toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="1" fill="url(#wtBarG)"/>`;
       const lab = xLive[i] || String(i+1);
-      const tipV = v == null || Number(v)===0 ? '--' : (v >= 100 ? fmt(v,0) : fmt(v,1));
+      const tipV = v == null || Number(v)===0 ? '--' : fmt(v, 1);
       whits += `<span class="chhit39" data-chtip="${encodeURIComponent(JSON.stringify({ t: lab, u: 'm³', rows: [{ c:'#38BDF8', n: E.t('wtDaily'), v: tipV }] }))}"></span>`;
     });
     const avgY = (tr==='today' && avgVal != null) ? (96 - avgVal/YMX*96).toFixed(1) : null;
@@ -530,7 +532,7 @@ window.EKO_A = (function(){
             ${avgY!=null?`<line x1="0" x2="100" y1="${avgY}" y2="${avgY}" stroke="var(--chTx)" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>`:''}
             ${dbars}</svg>
           ${n ? `<div class="chhits39">${whits}</div>` : ''}
-          ${tr==='today' && avgVal!=null?`<span class="wtavgchip">${esc(E.t('wtDailyAvg',{v:avgVal}))}</span>`:''}
+          ${tr==='today' && avgVal!=null?`<span class="wtavgchip">${esc(E.t('wtDailyAvg',{v:fmt(avgVal,1)}))}</span>`:''}
         </div>
         <div class="chx39" style="grid-template-columns:repeat(${Math.max(n,1)},minmax(0,1fr))">${(n?xLive:['']).map(t2=>`<span>${esc(t2||'')}</span>`).join('')}</div>
         </div></div>
@@ -571,9 +573,9 @@ window.EKO_A = (function(){
       <div class="ovkval"><span class="ovknum">${esc(v)}</span><span class="ovkunit">${esc(u)}</span></div>
       <span class="ovkcap">${esc(cap)}</span></div>`;
     const heroes = `<div class="pwhero cols3">
-      ${hero(E.t('kGasToday'), d.todayM3 == null ? '--' : fmt(d.todayM3), 'm\u00b3', E.t('capToNow',{time:E.data.basis.asOf}).replace(' \u00b7 live','').replace(' \u00b7 \u0645\u0628\u0627\u0634\u0631',''))}
-      ${hero(E.t('gasAvg7'), d.avg7M3 == null ? '--' : fmt(d.avg7M3), 'm\u00b3', E.t('gasAvg7Cap'))}
-      ${hero(E.t('gasMtd'), d.mtdM3 == null ? '--' : fmt(d.mtdM3), 'm\u00b3', (ar?(d.meterAr||d.meterEn):d.meterEn) ? (ar?(d.meterAr||d.meterEn):d.meterEn).split(' \u00b7')[0] : '')}</div>`;
+      ${hero(E.t('kGasToday'), d.todayM3 == null ? '--' : fmt(d.todayM3, 1), 'm\u00b3', E.t('capToNow',{time:E.data.basis.asOf}).replace(' \u00b7 live','').replace(' \u00b7 \u0645\u0628\u0627\u0634\u0631',''))}
+      ${hero(E.t('gasAvg7'), d.avg7M3 == null ? '--' : fmt(d.avg7M3, 1), 'm\u00b3', E.t('gasAvg7Cap'))}
+      ${hero(E.t('gasMtd'), d.mtdM3 == null ? '--' : fmt(d.mtdM3, 1), 'm\u00b3', (ar?(d.meterAr||d.meterEn):d.meterEn) ? (ar?(d.meterAr||d.meterEn):d.meterEn).split(' \u00b7')[0] : '')}</div>`;
 
     // --- Live-data chart (toggle-aware) ---
     const tr = E.state.gsTrendRange || 'today';
@@ -601,7 +603,7 @@ window.EKO_A = (function(){
       const bh = Math.max(0, Number(v) || 0) / YMX * 96;
       gbars += `<rect x="${x}" y="${(96 - bh).toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="1" fill="url(#gsBarG)"/>`;
       const lab   = xrow_labels[i] != null ? String(xrow_labels[i]) : String(i + 1);
-      const tipV  = v == null || Number(v) === 0 ? '--' : (v >= 100 ? fmt(v, 0) : fmt(v, 1));
+      const tipV  = v == null || Number(v) === 0 ? '--' : fmt(v, 1);
       ghits += `<span class="chhit39" data-chtip="${encodeURIComponent(JSON.stringify({ t: lab, u: 'm³', rows: [{ c:'#A16207', n: E.t('gasDailyT'), v: tipV }] }))}"></span>`;
     });
 
@@ -631,7 +633,7 @@ window.EKO_A = (function(){
     const basis = widget(E, E.t('gasBasis'), '',
       dl(E.t('gasMeterLbl'), esc((ar?(d.meterAr||d.meterEn):d.meterEn) || '--'))
       + dl(E.t('gasSourceLbl'), esc(src || '--'))
-      + dl(E.t('gasTariffLbl'), d.tariffAedM3 == null ? '--' : esc(E.t('gasTariffV',{v:d.tariffAedM3.toFixed(2)}))),
+      + dl(E.t('gasTariffLbl'), d.tariffAedM3 == null ? '--' : esc(E.t('gasTariffV',{v:fmt(d.tariffAedM3,1)}))),
       E.t('gasFoot',{m: d.meterEn ? d.meterEn.split(' ')[0] : '--', s:src || '--'}));
     return `<div class="pwarea" data-pg="gas">
       <div class="pwheadrow"><div><span class="alcardt pgtitle">${esc(E.t('gasHdrT'))}</span>
@@ -651,8 +653,8 @@ window.EKO_A = (function(){
       <div class="ovkcap">${esc(cap)}</div></div>`;
     return C().summaryShell(E, E.t('spacesOverview'), '<div class="ovklist">'
       + row(E.t('spComfort'), fmt(d.comfortPct,1), '%', E.t('spComfortCap'))
-      + row(E.t('spOccupied'), fmt(d.occupiedPct), '%', ar?d.occPeakAr:d.occPeakEn)
-      + row(E.t('spIeq'), fmt(d.ieq, 2), '', ar?d.ieqCapAr:d.ieqCapEn)
+      + row(E.t('spOccupied'), fmt(d.occupiedPct, 1), '%', ar?d.occPeakAr:d.occPeakEn)
+      + row(E.t('spIeq'), fmt(d.ieq, 1), '', ar?d.ieqCapAr:d.ieqCapEn)
       + '</div>');
   }
   function assetsSummary(E){
@@ -662,7 +664,7 @@ window.EKO_A = (function(){
       <div class="ovkval"><span class="ovknum" ${tone?'style="color:var(--sevCrit)"':''}>${esc(v)}</span></div>
       <div class="ovkcap">${esc(cap)}</div></div>`;
     return C().summaryShell(E, E.t('assetsOverview'), '<div class="ovklist">'
-      + row(E.t('asRegistered'), fmt(E.data.registerTotal), E.t('asRegisteredCap'))
+      + row(E.t('asRegistered'), fmt(E.data.registerTotal, 0), E.t('asRegisteredCap'))
       + row(E.t('asWos'), '--', E.t('asWosCap'))
       + row(E.t('asInAlarm'), String(inAlarm.length), E.t('asInAlarmCap',{n:critAssets.length,first:critAssets[0]?critAssets[0].id:'—'}), true)
       + '</div>');
@@ -697,9 +699,9 @@ window.EKO_A = (function(){
   function heatText(z, mode){
     const v = heatValue(z, mode);
     if(v == null || !isFinite(v)) return '—';
-    if(mode === 'comfort') return Math.round(v) + ' ppm';
-    if(mode === 'hum') return Math.round(v) + '%';
-    return v.toFixed(1) + '\u00b0C';
+    if(mode === 'comfort') return fmt(v, 1) + ' ppm';
+    if(mode === 'hum') return fmt(v, 1) + '%';
+    return fmt(v, 1) + '\u00b0C';
   }
   function heatBar(z, mode){
     const v = heatValue(z, mode);
@@ -763,7 +765,7 @@ window.EKO_A = (function(){
     const foot = mode === 'comfort'
       ? E.t('hmCo2Foot', { m: co2Mean == null ? '—' : Math.round(co2Mean) })
       : mode === 'hum' ? E.t('hmOccFoot')
-      : E.t('hmTempFoot', { m: siteMean == null ? '—' : siteMean.toFixed(1) });
+      : E.t('hmTempFoot', { m: siteMean == null ? '—' : fmt(siteMean, 1) });
     const hoursCard = hourRows.length ? `<div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('hmByHour'))}</span>
         <span class="alcardm">${esc(E.t('hmByHourCap'))}</span>${chrome(E, E.t('hmByHour'), E.t('hmByHourCap'))}</div>
         ${matrix}<div class="alfoot">${esc(E.t('hmByHourFoot'))}</div></div>` : '';

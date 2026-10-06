@@ -157,6 +157,13 @@ async def realtime_loop():
             cached_alarm_data = _flatten_alarms(client.last_alarm_rows, CONFIG.get("severity_bands", {}))
             cached_facility = _compute_facility_services(realtime)
             cached_power_history = await client.fetch_power_histories(pw_endpoints)
+            if (
+                "Hourly_Energy_Consumption_his" in cached_power_history
+                and "Total_Power_Consumption_his" not in cached_power_history
+            ):
+                cached_power_history["Total_Power_Consumption_his"] = cached_power_history[
+                    "Hourly_Energy_Consumption_his"
+                ]
             cached_building_data = {
                 "status": "success",
                 "Building_Info": {
@@ -189,6 +196,8 @@ async def live_loop():
                 key: None if isinstance(val, Exception) else val
                 for key, val in zip(live_ids, values)
             }
+            if "hourly_energy" in live_results and "total_power" not in live_results:
+                live_results["total_power"] = live_results["hourly_energy"]
             cached_power_data = {
                 "timestamp": datetime.now().isoformat(),
                 **live_results,

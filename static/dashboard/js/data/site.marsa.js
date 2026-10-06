@@ -35,6 +35,7 @@ window.EKO_DATA.marsa = {
   },
 
   "metrics": {
+    "energyTodayKwh": null,
     "energyTodayMwh": null,
     "waterTodayM3": null,
     "gasTodayM3": null,
@@ -56,15 +57,15 @@ window.EKO_DATA.marsa = {
      series drawn with the shared smooth-path generator. dom = identity hue. */
   /* D135: a summary row names its measured value (metric + decimals); it never stores a second copy of the number */
   "summary": [
-    { "key": "energy", "dom": "#2DD4BF", "icon": "bolt",  "label": "kEnergyToday", "metric": "energyTodayMwh", "d": 1, "u": "MWh",
+    { "key": "energy", "dom": "#2DD4BF", "icon": "bolt",  "label": "kEnergyToday", "metric": "energyTodayKwh", "d": 1, "u": "kWh",
+      "deltaEn": null, "deltaAr": null, "spark": [], "sparkCompare": [] },
+    { "key": "water",  "dom": "#60A5FA", "icon": "drop",  "label": "kWaterToday", "metric": "waterTodayM3", "d": 1, "u": "m³",
       "deltaEn": null, "deltaAr": null, "spark": [] },
-    { "key": "water",  "dom": "#60A5FA", "icon": "drop",  "label": "kWaterToday", "metric": "waterTodayM3", "d": 0, "u": "m³",
+    { "key": "gas",    "dom": "#A78BFA", "icon": "flame", "label": "kGasToday", "metric": "gasTodayM3", "d": 1, "u": "m³",
       "deltaEn": null, "deltaAr": null, "spark": [] },
-    { "key": "gas",    "dom": "#A78BFA", "icon": "flame", "label": "kGasToday", "metric": "gasTodayM3", "d": 0, "u": "m³",
-      "deltaEn": null, "deltaAr": null, "spark": [] },
-    { "key": "comfort","dom": "#4E9C7C", "icon": "gauge", "label": "kComfortIdx", "metric": "comfortIndex", "d": 2, "u": "",
+    { "key": "comfort","dom": "#4E9C7C", "icon": "gauge", "label": "kComfortIdx", "metric": "comfortIndex", "d": 1, "u": "",
       "capEn": null, "capAr": null, "capTone": "t3" },
-    { "key": "iaq",    "dom": "#4E9C7C", "icon": "wind",  "label": "kIaq", "metric": "iaq", "d": 0, "u": "",
+    { "key": "iaq",    "dom": "#4E9C7C", "icon": "wind",  "label": "kIaq", "metric": "iaq", "d": 1, "u": "",
       "capEn": null, "capAr": null, "capTone": "pos" }
   ],
 

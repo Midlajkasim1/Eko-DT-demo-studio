@@ -820,8 +820,13 @@ class FinScramClient:
                 lambda: aggregate_and_restructure(parse_custom_response(text)["rows"])
             )
 
-        histories = await asyncio.gather(*(fetch_one(t) for t in endpoints.values()))
-        return dict(zip(endpoints, histories))
+        usable = {
+            k: v
+            for k, v in endpoints.items()
+            if not str(k).startswith("_") and isinstance(v, str) and v.startswith("/")
+        }
+        histories = await asyncio.gather(*(fetch_one(t) for t in usable.values()))
+        return dict(zip(usable, histories))
 
     async def close(self):
         await self.client.aclose()

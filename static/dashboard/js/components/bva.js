@@ -13,7 +13,17 @@ window.EKO_BVA = (function(){
   'use strict';
   const C = () => window.EKO_C;
   const esc = s => C().esc(s);
-  const fmt = (v, d) => (typeof v === 'number' && isFinite(v)) ? v.toLocaleString('en-US', { minimumFractionDigits:d, maximumFractionDigits:d }) : '—';
+  const truncDec = (n, d) => {
+    const x = Number(n); if (!isFinite(x)) return NaN;
+    if (d <= 0) return Math.trunc(x + (x < 0 ? -1e-9 : 1e-9));
+    const f = Math.pow(10, d);
+    return Math.trunc(x * f + (x < 0 ? -1e-9 : 1e-9)) / f;
+  };
+  const fmt = (v, d) => {
+    if (typeof v !== 'number' || !isFinite(v)) return '—';
+    const t = truncDec(v, d);
+    return t.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  };
   const RANGES = ['today', 'week', 'month'];
 
   function range(E){ const b = E.data.power.bva; const k = b.ranges[E.state.bvaRange] ? E.state.bvaRange : 'today'; return { key:k, r:b.ranges[k], b }; }
@@ -44,7 +54,7 @@ window.EKO_BVA = (function(){
     const adjText = (adj.weather && adj.occupancy) ? t('bvaAdjBoth') : (adj.weather ? t('bvaAdjWeather') : adj.occupancy ? t('bvaAdjOcc') : t('bvaAdjNone'));
     const prov = s.prov ? ` <span class="rpprov">${esc(t('rpB.prov'))}</span>` : '';
     const sumKey = s.avoided ? 'bvaSumAvoided' : 'bvaSumExcess';
-    const sumHtml = `<span class="bvasumv"><b class="tMono">${esc(fmt(Math.abs(s.mwh), 2))}</b> MWh</span>
+    const sumHtml = `<span class="bvasumv"><b class="tMono">${esc(fmt(Math.abs(s.mwh), 1))}</b> MWh</span>
       <span class="bvasumt">${esc(t(sumKey, { window:win }))}</span>
       <span class="bvasumaed">AED <b class="tMono">${esc(fmt(Math.abs(s.aed), 0))}</b> ${esc(t('bvaAtRate', { rate:fmt(s.rate, 2) }))}${prov}</span>
       <span class="bvasumpct" data-tip="${esc(s.pct == null ? t('bvaNoBaseWhy') : t('bvaVsTip'))}">${s.pct == null ? esc(t('bvaNoBase')) : esc(t('bvaVs', { pct:(s.pct >= 0 ? '+' : '') + fmt(s.pct, 1) }))}</span>`;
@@ -84,11 +94,11 @@ window.EKO_BVA = (function(){
     let g = `<defs><pattern id="bvahatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="var(--bd2)" stroke-width="1.5"/></pattern></defs>`;
     /* grid + left axis */
     g += ticks.map(f => `<line x1="${L}" x2="${W - R}" y1="${(T + ph - f * ph).toFixed(1)}" y2="${(T + ph - f * ph).toFixed(1)}" stroke="var(--bd1)" stroke-width="1"${f ? ' stroke-dasharray="2 3"' : ''}/>
-      <text x="${L - 8}" y="${(T + ph - f * ph + 4).toFixed(1)}" text-anchor="end" class="bvatx">${esc(fmt(yMax * f, yMax >= 100 ? 0 : 1))}</text>`).join('');
+      <text x="${L - 8}" y="${(T + ph - f * ph + 4).toFixed(1)}" text-anchor="end" class="bvatx">${esc(fmt(yMax * f, 1))}</text>`).join('');
     g += `<text x="${L - 8}" y="${T - 10}" text-anchor="end" class="bvatx bvaax">${esc(s.unit)}</text>`;
     /* right axis (cumulative) */
     if(!single){
-      g += ticks.map(f => `<text x="${W - R + 8}" y="${(T + ph - f * ph + 4).toFixed(1)}" text-anchor="start" class="bvatx">${esc(fmt(cMin + cSpan * f, cSpan >= 100 ? 0 : 1))}</text>`).join('');
+      g += ticks.map(f => `<text x="${W - R + 8}" y="${(T + ph - f * ph + 4).toFixed(1)}" text-anchor="start" class="bvatx">${esc(fmt(cMin + cSpan * f, 1))}</text>`).join('');
       g += `<text x="${W - 2}" y="${T - 10}" text-anchor="end" class="bvatx bvaax">${esc(t('bvaAxisR', { u:s.unit }))}</text>`;
       if(cMin < 0 && cMax > 0) g += `<line x1="${L}" x2="${W - R}" y1="${cy(0).toFixed(1)}" y2="${cy(0).toFixed(1)}" stroke="var(--bd2)" stroke-width="1" stroke-dasharray="1 3"/>`;
     }

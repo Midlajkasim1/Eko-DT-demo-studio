@@ -35,7 +35,7 @@ window.EKO_ADDONS = (function(){
     'energy.bench':     { module: 'energy', sub: 'bench', nameKey: 'subBench', icon: 'columns',
                           figure: E => { const n = ((window.EKO_DATA || {}).portfolio || []).length; return n > 1 ? { key: 'ad.energy.bench.fig', vars: { n } } : null; } },
     'energy.fcst':      { module: 'energy', sub: 'fcst', nameKey: 'subFcst', icon: 'spark',
-                          figure: E => { const m = ((E.data.metrics || {}).energyTodayMwh); return m == null ? null : { key: 'ad.energy.fcst.fig', vars: { v: m } }; } }
+                          figure: E => { const m = ((E.data.metrics || {}).energyTodayKwh); return m == null ? null : { key: 'ad.energy.fcst.fig', vars: { v: m } }; } }
   };
   const KEYS = Object.keys(CATALOGUE);
 

@@ -38,7 +38,7 @@ window.EKO_RV = (function(){
     const mx = Math.max(...w.values), mn = Math.min(...w.values);
     return `<figure class="rpchart"><figcaption class="rpflbl">${esc(c.t(w.labelKey))}</figcaption>
       <svg viewBox="0 0 480 60" preserveAspectRatio="none" aria-label="${esc(c.t(w.labelKey))}"><path d="${tr.line}" fill="none" stroke="var(--acc)" stroke-width="1.6"/></svg>
-      <span class="rpaxis tMonoS">${esc(R().fmt(mn, 2))} – ${esc(R().fmt(mx, 2))} ${esc(w.unit)}</span>
+      <span class="rpaxis tMonoS">${esc(R().fmt(mn, 1))} – ${esc(R().fmt(mx, 1))} ${esc(w.unit)}</span>
       ${basisHtml(E, c, w.basis)}</figure>`;
   }
   const tableHtml = (c, head, rows, label) => `${label ? `<div class="rpflbl">${esc(label)}</div>` : ''}<div class="rptw"><table class="rptable"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(x => `<td${x.cls ? ` class="${x.cls}"` : ''}>${x.html != null ? x.html : esc(x)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
@@ -70,7 +70,7 @@ window.EKO_RV = (function(){
       case 'table.boards': case 'table.waste': case 'table.anom': case 'table.bench': case 'table': {
         const tab = tableOf(E, doc, w);
         if(!tab.rows.length) return `<div class="rpflbl">${esc(c.t(w.labelKey))}</div><p class="rpmiss rpok">${esc(c.t(w.emptyKey || 'rpEmpty.rows'))}</p>`;
-        return tableHtml(c, tab.head.map(esc), tab.rows.map(r => r.map(x => typeof x === 'number' ? mono(R().fmt(x, Number.isInteger(x) ? 0 : 2)) : (/^[A-Z]{2,5}-[A-Z0-9-]+$/.test(String(x)) ? mono(x) : x))), c.t(w.labelKey))
+        return tableHtml(c, tab.head.map(esc), tab.rows.map(r => r.map(x => typeof x === 'number' ? mono(R().fmt(x, Number.isInteger(x) ? 0 : 1)) : (/^[A-Z]{2,5}-[A-Z0-9-]+$/.test(String(x)) ? mono(x) : x))), c.t(w.labelKey))
           + (tab.basis ? `<span class="rpbasis">${esc(c.t('rpBasisLbl'))}: ${esc(tab.basis)}</span>` : ''); }
       case 'kv': {
         return `<div class="rpflbl">${esc(c.t(w.labelKey))}</div><dl class="rpkv">${w.rows.map(r => `<dt>${esc(r[0])}</dt><dd>${esc(r[1])}</dd>`).join('')}</dl>${w.basis ? basisHtml(E, c, w.basis) : ''}`; }
