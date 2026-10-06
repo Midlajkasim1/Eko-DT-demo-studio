@@ -422,10 +422,10 @@ window.EKO_DATA.marsa = {
      ------------------------------------------------------------------------ */
   "systems": {
     "groups": [
-      { "id": "mechanical", "hue": "#C56A6A", "sysKey": ["Mechanical", "HVAC"], "labelEn": "Mechanical", "labelAr": "الميكانيكا",
+      { "id": "hvac", "hue": "#C56A6A", "sysKey": ["HVAC", "Mechanical"], "labelEn": "HVAC & Mechanical", "labelAr": "التكييف والميكانيكا",
         "cards": [
           { "kind": "stat", "labelEn": "OVERALL HEALTH", "labelAr": "\u0627\u0644\u062d\u0627\u0644\u0629 \u0627\u0644\u0639\u0627\u0645\u0629", "v": null, "u": "%", "capEn": null, "capAr": null, "tone": "ok" },
-          { "kind": "stat", "labelEn": "MECHANICAL EQUIPMENT", "labelAr": "المعدات الميكانيكية", "v": null, "u": "", "capEn": null, "capAr": null, "chipEn": null, "chipAr": null, "tone": "ok" },
+          { "kind": "stat", "labelEn": "HVAC EQUIPMENT", "labelAr": "معدات التكييف", "v": null, "u": "", "capEn": null, "capAr": null, "chipEn": null, "chipAr": null, "tone": "ok" },
           { "kind": "stat", "subOnly": true, "labelEn": "TEMPERATURE DEVIATION INDEX", "labelAr": "مؤشر انحراف الحرارة", "v": null, "u": "°C", "capEn": null, "capAr": null, "tone": "ok" },
           { "kind": "stat", "subOnly": true, "labelEn": "ENERGY PERFORMANCE", "labelAr": "نسبة أداء الطاقة", "v": null, "u": "", "capEn": null, "capAr": null, "tone": "ok" },
           { "kind": "stat", "subOnly": true, "labelEn": "COMFORT ENERGY INDEX", "labelAr": "مؤشر طاقة الراحة", "v": null, "u": "", "capEn": null, "capAr": null, "tone": "ok" }
@@ -438,15 +438,7 @@ window.EKO_DATA.marsa = {
           { "kind": "stat", "subOnly": true, "labelEn": "LOAD IMBALANCE INDEX", "labelAr": "مؤشر عدم اتزان الأحمال", "v": null, "u": "%", "capEn": null, "capAr": null, "tone": "ok" },
           { "kind": "stat", "subOnly": true, "labelEn": "LOAD FACTOR", "labelAr": "معامل الحمل", "v": null, "u": "%", "capEn": null, "capAr": null, "tone": "ok" },
           { "kind": "stat", "subOnly": true, "labelEn": "PEAK DEMAND", "labelAr": "ذروة الطلب", "v": null, "u": "kW", "capEn": null, "capAr": null, "tone": "ok" } ] },
-      { "id": "ems", "hue": "#4E9C7C", "sysKey": ["EMS"], "labelEn": "EMS", "labelAr": "إدارة الطاقة",
-        "cards": [
-          { "kind": "stat", "labelEn": "OVERALL HEALTH", "labelAr": "\u0627\u0644\u062d\u0627\u0644\u0629 \u0627\u0644\u0639\u0627\u0645\u0629", "v": null, "u": "%", "capEn": null, "capAr": null, "tone": "ok" },
-          { "kind": "stat", "labelEn": "EMS METERS", "labelAr": "عدادات إدارة الطاقة", "v": null, "u": "", "capEn": null, "capAr": null, "chipEn": null, "chipAr": null, "tone": "ok" } ] },
-      { "id": "utility", "hue": "#60A5FA", "sysKey": ["Utilities"], "labelEn": "Utilities", "labelAr": "المرافق",
-        "cards": [
-          { "kind": "stat", "labelEn": "OVERALL HEALTH", "labelAr": "\u0627\u0644\u062d\u0627\u0644\u0629 \u0627\u0644\u0639\u0627\u0645\u0629", "v": null, "u": "%", "capEn": null, "capAr": null, "tone": "ok" },
-          { "kind": "stat", "labelEn": "UTILITY METERS", "labelAr": "عدادات المرافق", "v": null, "u": "", "capEn": null, "capAr": null, "chipEn": null, "chipAr": null, "tone": "ok" } ] },
-      { "id": "life", "hidden": true, "hue": "#5FA8D3", "sysKey": ["Life safety"], "labelEn": "Life & Safety", "labelAr": "السلامة",
+      { "id": "life", "hue": "#5FA8D3", "sysKey": ["Life safety"], "labelEn": "Life & Safety", "labelAr": "السلامة",
         "cards": [
           { "kind": "stat", "labelEn": "OVERALL HEALTH", "labelAr": "\u0627\u0644\u062d\u0627\u0644\u0629 \u0627\u0644\u0639\u0627\u0645\u0629", "v": "97.3", "u": "%", "capEn": "Healthy", "capAr": "\u0633\u0644\u064a\u0645", "tone": "ok" },
           { "kind": "stat", "wash": "warn", "labelEn": "SMOKE DETECTORS ONLINE", "labelAr": "كواشف الدخان المتصلة", "v": "142 / 146", "u": "", "capEn": "Total: 146", "capAr": "الإجمالي: 146", "chipEn": "4 offline", "chipAr": "4 غير متصلة", "tone": "warn" } ,
@@ -454,7 +446,7 @@ window.EKO_DATA.marsa = {
           { "kind": "gauge", "subOnly": true, "labelEn": "SPRINKLER PRESSURE", "labelAr": "ضغط الرشاشات", "val": 6.2, "min": 0, "max": 10, "u": "bar", "wordEn": "Nominal", "wordAr": "اسمي", "tone": "ok" },
           { "kind": "donut", "subOnly": true, "labelEn": "EMERGENCY LIGHTING", "labelAr": "إنارة الطوارئ", "pct": 96.4, "wordEn": "Compliant", "wordAr": "مطابِقة", "tone": "ok" },
           { "kind": "stat", "subOnly": true, "labelEn": "EGRESS ROUTES", "labelAr": "مسارات الإخلاء", "v": "12 / 12", "u": "", "capEn": "All clear", "capAr": "كلها سالكة", "tone": "ok" } ] },
-      { "id": "security", "hidden": true, "hue": "#9B8AD4", "sysKey": ["Security"], "labelEn": "Security", "labelAr": "الأمن",
+      { "id": "security", "hue": "#9B8AD4", "sysKey": ["Security"], "labelEn": "Security", "labelAr": "الأمن",
         "cards": [
           { "kind": "stat", "labelEn": "OVERALL HEALTH", "labelAr": "\u0627\u0644\u062d\u0627\u0644\u0629 \u0627\u0644\u0639\u0627\u0645\u0629", "v": "95.8", "u": "%", "capEn": "Healthy", "capAr": "\u0633\u0644\u064a\u0645", "tone": "ok" },
           { "kind": "stat", "wash": "warn", "labelEn": "CAMERAS ONLINE", "labelAr": "الكاميرات المتصلة", "v": "92 / 96", "u": "", "capEn": "Total: 96", "capAr": "الإجمالي: 96", "chipEn": "4 offline", "chipAr": "4 غير متصلة", "tone": "warn" },

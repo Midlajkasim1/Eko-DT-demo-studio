@@ -1232,8 +1232,8 @@
     if (site.systems && site.systems.groups) {
       site.systems.groups.forEach(function (grp) {
         if (!grp.cards || grp.hidden) return;
-        var key = (grp.sysKey && grp.sysKey[0]) || '';
-        var list = newAssets.filter(function (a) { return a.sys === key; });
+        var keys = grp.sysKey || [];
+        var list = newAssets.filter(function (a) { return keys.indexOf(a.sys) >= 0; });
         var total = list.length;
         var alarmN = list.filter(function (a) { return a.st === 'alarm'; }).length;
         var active = total - alarmN;
