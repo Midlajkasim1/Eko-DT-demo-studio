@@ -1007,7 +1007,11 @@ async def serve_viewer():
     """Serve the viewer SPA; it shows its own sign-in overlay until a session exists."""
     viewer_path = os.path.join(STATIC_DIR, "viewer.html")
     if os.path.exists(viewer_path):
-        return FileResponse(viewer_path, media_type="text/html")
+        return FileResponse(
+            viewer_path,
+            media_type="text/html",
+            headers={"Cache-Control": "no-store, must-revalidate"},
+        )
     return {"error": "Viewer not found. Make sure static/ folder is present."}
 
 
