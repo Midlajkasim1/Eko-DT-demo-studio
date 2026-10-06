@@ -308,7 +308,7 @@ window.EKO_C = (function(){
             <polyline points="${pts}" fill="none" stroke="var(--domEnergy)" stroke-width="1.5"/></svg>
           ${perfDelta ? `<span class="ovkcap msA" data-tone="t3">${esc(perfDelta)}</span>` : ''}</div>` : ''}
           ${perfWord ? `<div class="scrow"><span class="ovkcap msA" data-tone="pos">${esc(perfWord)}</span></div>` : ''}</div>`
-      + gaugeRow(E.t('enOvernight'), d.overnightDeviationPct, 100, '%', ar?'\u062a\u062d\u0630\u064a\u0631':'Warning', 'warn')
+      + gaugeRow(E.t('enOvernight'), d.overnightDeviationPct, 100, '%', ar ? (d.overnightWordAr || '') : (d.overnightWordEn || ''), d.overnightTone || 'ok')
       + d.sumGauges.map(g2 => gaugeRow(ar?g2.labelAr:g2.labelEn, g2.val, g2.max, g2.u, ar?g2.wordAr:g2.wordEn, g2.tone)).join('')
       + '</div>');
   }
@@ -476,27 +476,34 @@ window.EKO_C = (function(){
        by its tone, with Energy Waste / Cost Impact as paired sub-cells —
        followed by the Energy Waste & Risk section (totals + share bars).
        Top opportunities and Modules do NOT live on this panel. */
-    const cards = d.kpis.map(k =>
-      `<article class="optcard2" data-tone="${k.tone}">
+    const cards = d.kpis.map(k => {
+      const st = ar ? k.stateAr : k.stateEn;
+      const cost = k.costAed != null ? k.costAed : (k.wasteKwh != null ? k.wasteKwh * b.aedPerKwh : null);
+      return `<article class="optcard2" data-tone="${k.tone}">
         <div class="optheadrow"><span class="optname">${esc(ar?k.labelAr:k.labelEn)}</span>
           <span class="optval tMonoS msA">${fmt(k.gaugeVal,1)}${k.key==='overnight'||k.key==='imbalance'?'%':''}</span></div>
-        <span class="optstate" data-tone="${k.tone}">(${esc(ar?k.stateAr:k.stateEn)})</span>
+        ${st ? `<span class="optstate" data-tone="${k.tone}">(${esc(st)})</span>` : ''}
         <p class="opttip">${esc(ar?k.tipAr:k.tipEn)}</p>
         <div class="optcells">
           <span class="optcell"><i class="optlbl">${esc(E.t('wasteLbl'))}</i><b class="tMonoS">${fmt(k.wasteKwh,1)} kWh</b></span>
-          <span class="optcell"><i class="optlbl">${esc(E.t('costLbl'))}</i><b class="tMonoS">${fmt(k.wasteKwh*b.aedPerKwh,1)} AED</b></span>
-        </div></article>`).join('');
+          <span class="optcell"><i class="optlbl">${esc(E.t('costLbl'))}</i><b class="tMonoS">${fmt(cost,1)} AED</b></span>
+        </div></article>`;
+    }).join('');
     const RAMP2 = ['#C2504B','#D07A3C','#D8A83C','#D8C63C'];
-    const rank = [...d.kpis].sort((x,y)=>y.wasteKwh-x.wasteKwh);
-    const rampOf = k => RAMP2[Math.min(rank.indexOf(k), RAMP2.length-1)];
-    const maxKwh = rank[0].wasteKwh;
+    const ranked = [...d.kpis].filter(k => k.wasteKwh != null && isFinite(k.wasteKwh)).sort((x,y)=>y.wasteKwh-x.wasteKwh);
+    const rank = ranked.length ? ranked : d.kpis;
+    const rampOf = k => RAMP2[Math.min(Math.max(rank.indexOf(k), 0), RAMP2.length-1)];
+    const totAed = d.wasteTotalAed != null ? d.wasteTotalAed : (d.wasteTotalKwh != null ? d.wasteTotalKwh * b.aedPerKwh : null);
     const wr = `<div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('ewrT'))}</span></div>
       <div class="row gap8"><span class="ewrtot tMonoS">${fmt(d.wasteTotalKwh,1)} kWh</span>
-        <span class="ewrtot tMonoS">${fmt(d.wasteTotalKwh*b.aedPerKwh,1)} AED</span></div>
-      ${d.kpis.map(k => `<div class="ewrrow">
+        <span class="ewrtot tMonoS">${fmt(totAed,1)} AED</span></div>
+      ${d.kpis.map(k => {
+        const risk = k.sharePct != null && isFinite(k.sharePct) ? Math.min(100, Math.max(0, k.sharePct)) : 0;
+        return `<div class="ewrrow">
         <span class="ewrchip" style="background:${rampOf(k)}">${esc(ar?k.labelAr:k.labelEn)}</span>
         <span class="tMonoS msA">${fmt(k.sharePct,1)}%</span>
-        <span class="ewrbar"><span style="width:${(k.wasteKwh/maxKwh*100).toFixed(0)}%;background:${rampOf(k)}"></span></span></div>`).join('')}</div>`;
+        <span class="ewrbar"><span style="width:${risk.toFixed(0)}%;background:${rampOf(k)}"></span></span></div>`;
+      }).join('')}</div>`;
     return modShell(E, E.t('modEnergy'), '', '',
       `<div class="opthead"><span class="alcardt">${esc(E.t('optT'))}</span>
         <span class="alcardm">${esc(E.t('optNote'))}</span></div>

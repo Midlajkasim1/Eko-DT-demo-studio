@@ -170,7 +170,7 @@
       
       let targetLayer = 'all';
       if (targetModule === 'systems') {
-        if (targetSub === 'hvac') targetLayer = 'mech';
+        if (targetSub === 'hvac' || targetSub === 'mechanical') targetLayer = 'mech';
         else if (targetSub === 'electrical') targetLayer = 'elec';
       }
       if (this.state.dock) this.state.dock.layer = targetLayer;

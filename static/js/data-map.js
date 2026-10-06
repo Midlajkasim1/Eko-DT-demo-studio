@@ -34,12 +34,24 @@
   }
 
   /* Systems overlay groups key on these labels: HVAC, Electrical, Life safety, Security. */
+  var FIN_SYS = { mechanical: 'Mechanical', electrical: 'Electrical', ems: 'EMS', utility: 'Utilities', utilities: 'Utilities' };
+
+  function sysFromFin(eq) {
+    var fin = String((eq && eq.system) || '').toLowerCase().trim();
+    if (FIN_SYS[fin]) return FIN_SYS[fin];
+    return classifySys(((eq && eq.name) || '') + ' ' + ((eq && eq.type) || ''), null);
+  }
+
   function classifySys(text, asset) {
+    if (asset && asset.sys && FIN_SYS[String(asset.sys).toLowerCase()]) return FIN_SYS[String(asset.sys).toLowerCase()];
+    if (asset && ['Mechanical', 'Electrical', 'EMS', 'Utilities', 'Life safety', 'Security'].indexOf(asset.sys) >= 0) return asset.sys;
     if (asset && asset.sys) {
       if (asset.sys === 'elec') return 'Electrical';
+      if (asset.sys === 'ems') return 'EMS';
+      if (asset.sys === 'util') return 'Utilities';
       if (asset.sys === 'fire') return 'Life safety';
       if (asset.sys === 'sec') return 'Security';
-      if (asset.sys === 'hvac' || asset.sys === 'vent' || asset.sys === 'pumps') return 'HVAC';
+      if (asset.sys === 'hvac' || asset.sys === 'vent' || asset.sys === 'pumps') return 'Mechanical';
     }
     var s = String(text || (asset && (asset.id + ' ' + (asset.typeEn || ''))) || '').toLowerCase();
     function hit(words) {
@@ -47,11 +59,12 @@
         return new RegExp('(?:^|[^a-z0-9])' + w + '(?:[^a-z0-9]|\\d|$)').test(s);
       });
     }
+    if (hit(['water', 'gas', 'plumbing'])) return 'Utilities';
+    if (hit(['pmu'])) return 'EMS';
+    if (hit(['mcc', 'smdb', 'lvfp', 'ats', 'edb', 'ups', 'elec', 'emcc', 'lighting']) || /(?:^|[^a-z0-9])db[-_]/.test(s)) return 'Electrical';
     if (hit(['facp', 'fm200', 'fire', 'smoke', 'sprinkler', 'detector']) || /(?:^|[^a-z0-9])fd[-_]/.test(s)) return 'Life safety';
     if (hit(['cctv', 'camera']) || /(?:^|[^a-z0-9])cam[-_]/.test(s)) return 'Security';
-    if (hit(['fahu', 'mahu', 'ahu', 'fcu', 'vav', 'chiller', 'coil', 'exhaust', 'extract', 'sump', 'pool', 'pump', 'hvac', 'valve']) || /(?:^|[^a-z0-9])(?:ef|ch)[-_]/.test(s)) return 'HVAC';
-    if (hit(['mcc', 'smdb', 'lvfp', 'ats', 'edb', 'ups', 'pmu', 'elec', 'lighting']) || /(?:^|[^a-z0-9])db[-_]/.test(s)) return 'Electrical';
-    return 'HVAC';
+    return 'Mechanical';
   }
 
   function mapAlarm(a, i) {
@@ -115,6 +128,21 @@
   function trunc1(v) {
     if (v == null || !isFinite(v)) return v;
     return Math.trunc(v * 10 + (v < 0 ? -1e-9 : 1e-9)) / 10;
+  }
+
+  function kpiStatus(v) {
+    if (v == null || v === '') return { en: null, ar: null, tone: 'ok' };
+    if (typeof v === 'number' && isFinite(v)) {
+      var pct = Math.abs(v) <= 1 ? v * 100 : v;
+      if (pct >= 80) return { en: 'Excellent', ar: 'ممتاز', tone: 'ok' };
+      if (pct >= 50) return { en: 'Fair', ar: 'مقبول', tone: 'warn' };
+      return { en: 'Poor', ar: 'ضعيف', tone: 'warn' };
+    }
+    var s = String(v).replace(/^s:/, '').replace(/^"|"$/g, '').trim();
+    if (!s) return { en: null, ar: null, tone: 'ok' };
+    var low = s.toLowerCase();
+    var tone = /poor|crit|bad|alarm|fail|deviat/.test(low) ? 'warn' : /warn|fair|caution/.test(low) ? 'warn' : 'ok';
+    return { en: s, ar: s, tone: tone };
   }
 
   function toMw(v) {
@@ -195,14 +223,18 @@
     
     // Wire live endpoints to Energy Landing summary cards
     if (el) {
-      var rawOvernight = asNum(p.after_hours_load);
+      var rawOvernight = asNum(p.after_hours_deviation != null ? p.after_hours_deviation : p.energy_performance);
       var rawEnDev = asNum(p.energy_deviation);
-      
-      var overnight = (rawOvernight != null && rawOvernight >= 0 && rawOvernight <= 100) ? rawOvernight : null;
+      var overnight = rawOvernight;
       var enDev = (rawEnDev != null && rawEnDev >= -100 && rawEnDev <= 100) ? rawEnDev : null;
-      
-      set(el, "overnightDeviationPct", overnight == null ? overnight : trunc1(overnight));
-      
+      var nightSt = kpiStatus(p.kpi_after_hours_ratio);
+
+      if (overnight != null) set(el, "overnightDeviationPct", trunc1(overnight));
+      else el.overnightDeviationPct = null;
+      set(el, "overnightWordEn", nightSt.en);
+      set(el, "overnightWordAr", nightSt.ar);
+      set(el, "overnightTone", nightSt.tone);
+
       if (el.sumGauges) {
         el.sumGauges.forEach(function(g) {
           if (g.key === "enDev" && enDev != null) {
@@ -213,12 +245,53 @@
           }
         });
       }
+
+      if (el.kpis) {
+        var lossIdle = asNum(p.energy_loss_idle);
+        var lossHvac = asNum(p.energy_loss_hvac);
+        var costIdle = asNum(p.cost_impact_idle);
+        var costHvac = asNum(p.cost_impact_hvac);
+        var eprVal = asNum(p.hvac_epr);
+        var eprSt = kpiStatus(p.kpi_hvac_epr);
+        el.kpis.forEach(function (k) {
+          if (k.key === "overnight") {
+            if (overnight != null) set(k, "gaugeVal", trunc1(overnight));
+            set(k, "stateEn", nightSt.en);
+            set(k, "stateAr", nightSt.ar);
+            set(k, "tone", nightSt.tone);
+            if (lossIdle != null) set(k, "wasteKwh", trunc1(lossIdle));
+            if (costIdle != null) set(k, "costAed", trunc1(costIdle));
+          }
+          if (k.key === "epr") {
+            if (eprVal != null) set(k, "gaugeVal", trunc1(eprVal));
+            set(k, "stateEn", eprSt.en);
+            set(k, "stateAr", eprSt.ar);
+            set(k, "tone", eprSt.tone);
+            if (lossHvac != null) set(k, "wasteKwh", trunc1(lossHvac));
+            if (costHvac != null) set(k, "costAed", trunc1(costHvac));
+          }
+        });
+        var wasteSum = 0, wasteN = 0, costSum = 0, costN = 0;
+        el.kpis.forEach(function (k) {
+          if (k.wasteKwh != null && isFinite(k.wasteKwh)) { wasteSum += k.wasteKwh; wasteN++; }
+          if (k.costAed != null && isFinite(k.costAed)) { costSum += k.costAed; costN++; }
+        });
+        if (wasteN) set(el, "wasteTotalKwh", trunc1(wasteSum));
+        if (costN) set(el, "wasteTotalAed", trunc1(costSum));
+        /* Adnocwarsan risk: KPI waste kWh / current-month kWh, bar clamped 0–100. */
+        var monthKwh = asNum(p.current_month);
+        el.kpis.forEach(function (k) {
+          if (monthKwh > 0 && k.wasteKwh != null && k.wasteKwh > 0) {
+            set(k, "sharePct", trunc1(k.wasteKwh / monthKwh * 100));
+          }
+        });
+      }
     }
     
     // Wire live endpoints to the Systems HVAC & Mechanical stat cards
     // Sanity-checked: reject any value outside a physically plausible range → stays null → shows '--'
     if (site.systems && site.systems.groups) {
-      var hvacGrp = site.systems.groups.find(function(g) { return g.id === "hvac"; });
+      var hvacGrp = site.systems.groups.find(function(g) { return g.id === "mechanical" || g.id === "hvac"; });
       if (hvacGrp && hvacGrp.cards) {
         var rawTempDev  = asNum(p.temp_deviation);
         var rawEnPerf   = asNum(p.energy_performance);
@@ -236,7 +309,7 @@
               set(c, "tone", tempDev > 2 ? "warn" : "ok");
             }
           }
-          if (c.labelEn === "ENERGY PERFORMANCE RATIO") {
+          if (c.labelEn === "ENERGY PERFORMANCE") {
             if (enPerf != null) {
               set(c, "v", trunc1(enPerf));
               set(c, "capEn", enPerf < 1.2 ? "Healthy" : "Above target");
@@ -999,13 +1072,7 @@
       if (/chiller|pump|mcc|smdb|facp/i.test(eq.type)) crit = "A";
       else if (/ahu|fahu|mahu|lift/i.test(eq.type)) crit = "B";
 
-      var sys = "hvac";
-      var typeName = String(eq.type || '') + ' ' + String(eq.name || '');
-      if (/mcc|smdb|elec|lvfp|\bats\b|edb|ups|pmu/i.test(typeName)) sys = "elec";
-      if (/facp|fm200|fire|smoke/i.test(typeName)) sys = "fire";
-      if (/cctv|camera/i.test(typeName)) sys = "sec";
-      if (/fan|exhaust|extract|vav/i.test(eq.type)) sys = "vent";
-      if (/pump|sump|pool|ahu|fahu|fcu|chiller/i.test(typeName)) sys = "hvac";
+      var sys = sysFromFin(eq);
 
       var params = (eq.points || []).filter(function(p) { return p.reporting; }).slice(0, 4).map(function(p) {
         return [p.navName, "BMS", p.currentValue];
@@ -1127,12 +1194,12 @@
           if (!site.alarms) site.alarms = [];
           site.alarms.push({
             id: 'al-live-' + asset.id.toLowerCase().replace(/\W/g, '-'),
-            fam: asset.sys || 'hvac',
+            fam: 'sys',
             asset: asset.id,
             bimId: asset.bimId,
             sev: 'high',
             cat: 'sys',
-            sys: asset.sys === 'elec' ? 'Electrical' : 'HVAC',
+            sys: asset.sys || 'Mechanical',
             ack: null,
             ageH: 0.5,
             locEn: (asset.typeEn || 'Equipment') + ' · ' + (asset.floor || 'Level'),
@@ -1162,73 +1229,38 @@
       window.EKO_HOST_ENGINE.applyStatusColors();
     }
 
-    // Dynamically update the HVAC Equipment and Overall Health cards from live data
     if (site.systems && site.systems.groups) {
-      var hvacGrp = site.systems.groups.find(function(g) { return g.id === "hvac"; });
-      if (hvacGrp && hvacGrp.cards) {
-        var hvacAssets = newAssets.filter(function(a) { return a.sys === "hvac" || a.sys === "vent"; });
-        var hvacTotal = hvacAssets.length;
-        var hvacAlarm = hvacAssets.filter(function(a) { return a.st === "alarm"; }).length;
-        var hvacActive = hvacTotal - hvacAlarm;
-        var healthPct = hvacTotal > 0 ? Math.round((hvacActive / hvacTotal) * 1000) / 10 : null;
-        var inactiveCount = hvacAlarm;
-
-        hvacGrp.cards.forEach(function(c) {
-          if (c.labelEn === "OVERALL HEALTH" && healthPct != null) {
+      site.systems.groups.forEach(function (grp) {
+        if (!grp.cards || grp.hidden) return;
+        var key = (grp.sysKey && grp.sysKey[0]) || '';
+        var list = newAssets.filter(function (a) { return a.sys === key; });
+        var total = list.length;
+        var alarmN = list.filter(function (a) { return a.st === 'alarm'; }).length;
+        var active = total - alarmN;
+        var healthPct = total > 0 ? Math.round((active / total) * 1000) / 10 : null;
+        grp.cards.forEach(function (c) {
+          if (c.labelEn === 'OVERALL HEALTH' && healthPct != null) {
             c.v = String(healthPct);
-            c.capEn = healthPct >= 95 ? "Healthy" : healthPct >= 80 ? "Fair" : "Critical";
-            c.capAr = healthPct >= 95 ? "سليم" : healthPct >= 80 ? "مقبول" : "حرج";
-            c.tone = healthPct >= 95 ? "ok" : "warn";
+            c.capEn = healthPct >= 95 ? 'Healthy' : healthPct >= 80 ? 'Fair' : 'Critical';
+            c.capAr = healthPct >= 95 ? 'سليم' : healthPct >= 80 ? 'مقبول' : 'حرج';
+            c.tone = healthPct >= 95 ? 'ok' : 'warn';
           }
-          if (c.labelEn === "HVAC EQUIPMENT") {
-            if (hvacTotal > 0) {
-              c.v = hvacActive + " / " + hvacTotal;
-              c.capEn = "Total: " + hvacTotal;
-              c.capAr = "الإجمالي: " + hvacTotal;
-              c.chipEn = inactiveCount > 0 ? inactiveCount + " inactive" : null;
-              c.chipAr = inactiveCount > 0 ? inactiveCount + " غير نشطة" : null;
-              c.tone = inactiveCount > 0 ? "warn" : "ok";
+          if (/EQUIPMENT|METERS/i.test(c.labelEn || '')) {
+            if (total > 0) {
+              c.v = active + ' / ' + total;
+              c.capEn = 'Total: ' + total;
+              c.capAr = 'الإجمالي: ' + total;
+              c.chipEn = alarmN > 0 ? alarmN + ' inactive' : null;
+              c.chipAr = alarmN > 0 ? alarmN + ' غير نشطة' : null;
+              c.tone = alarmN > 0 ? 'warn' : 'ok';
             } else {
-              c.capEn = "No equipment connected";
-              c.capAr = "لا توجد معدات متصلة";
-              c.tone = "warn";
+              c.capEn = 'No equipment connected';
+              c.capAr = 'لا توجد معدات متصلة';
+              c.tone = 'warn';
             }
           }
         });
-      }
-      
-      var elecGrp = site.systems.groups.find(function(g) { return g.id === "electrical"; });
-      if (elecGrp && elecGrp.cards) {
-        var elecAssets = newAssets.filter(function(a) { return a.sys === "elec"; });
-        var elecTotal = elecAssets.length;
-        var elecAlarm = elecAssets.filter(function(a) { return a.st === "alarm"; }).length;
-        var elecActive = elecTotal - elecAlarm;
-        var elecHealthPct = elecTotal > 0 ? Math.round((elecActive / elecTotal) * 1000) / 10 : null;
-        var elecInactiveCount = elecAlarm;
-
-        elecGrp.cards.forEach(function(c) {
-          if (c.labelEn === "OVERALL HEALTH" && elecHealthPct != null) {
-            c.v = String(elecHealthPct);
-            c.capEn = elecHealthPct >= 95 ? "Healthy" : elecHealthPct >= 80 ? "Fair" : "Critical";
-            c.capAr = elecHealthPct >= 95 ? "سليم" : elecHealthPct >= 80 ? "مقبول" : "حرج";
-            c.tone = elecHealthPct >= 95 ? "ok" : "warn";
-          }
-          if (c.labelEn === "ELECTRICAL EQUIPMENT") {
-            if (elecTotal > 0) {
-              c.v = elecActive + " / " + elecTotal;
-              c.capEn = "Total: " + elecTotal;
-              c.capAr = "الإجمالي: " + elecTotal;
-              c.chipEn = elecInactiveCount > 0 ? elecInactiveCount + " inactive" : null;
-              c.chipAr = elecInactiveCount > 0 ? elecInactiveCount + " غير نشطة" : null;
-              c.tone = elecInactiveCount > 0 ? "warn" : "ok";
-            } else {
-              c.capEn = "No equipment connected";
-              c.capAr = "لا توجد معدات متصلة";
-              c.tone = "warn";
-            }
-          }
-        });
-      }
+      });
     }
 
     applyHeat(list);

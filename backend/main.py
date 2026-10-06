@@ -183,7 +183,11 @@ async def live_loop():
     """Poll configured live points; failed reads stay null, never a fake 0."""
     global cached_power_data
 
-    live_ids = CONFIG.get("live_point_ids", {})
+    live_ids = {
+        k: v
+        for k, v in (CONFIG.get("live_point_ids") or {}).items()
+        if not str(k).startswith("_") and isinstance(v, str) and ":r:" in v
+    }
     interval = CONFIG.get("polling", {}).get("live_ms", 5000) / 1000
 
     while client and client.is_authenticated:
@@ -345,6 +349,7 @@ def _flatten_equip(realtime: dict) -> list[dict]:
                     "category": category,
                     "type": _equip_type(tags, classes.get("type_priority") or []),
                     "tags": tags,
+                    "system": str(eq.get("system") or "").strip().lower(),
                     "isSystem": bool(system_tags & set(tags)) if system_tags else True,
                     "inAlarm": len(alarms) > 0,
                     "alarms": alarms,

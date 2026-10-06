@@ -11,10 +11,10 @@ window.EKO_LAYOUTS.nav = {
     { "id": "overview",  "label": "modOverview",  "icon": "home",   "pageId": "marsa-overview", "mobile": "mobOverview" },
     { "id": "systems",   "label": "modSystems",   "icon": "grid",   "pageId": "systems",
       "subs": [
-        { "id": "hvac",       "label": "sysHvacMech", "pageId": "systems" },
+        { "id": "mechanical", "label": "sysMechanical", "pageId": "systems" },
         { "id": "electrical", "label": "sysElectrical", "pageId": "systems" },
-        { "id": "life",       "label": "sysLifeAmp", "pageId": "systems" },
-        { "id": "security",   "label": "sysSecurity", "pageId": "systems" } ] },
+        { "id": "ems",        "label": "sysEms", "pageId": "systems" },
+        { "id": "utility",    "label": "sysUtility", "pageId": "systems" } ] },
     { "id": "energy",    "label": "modEnergy",    "icon": "bolt",   "pageId": "energy", "mobile": "mobEnergy",
       "subs": [
         { "id": "power", "label": "subPower", "pageId": "power" },

@@ -556,8 +556,8 @@ class FinScramClient:
         """Replace {project} placeholder in endpoint template."""
         return template.replace("{project}", self.project_name)
 
-    def _parse_zinc_value(self, text: Optional[str], tag: str = "Zinc") -> Optional[float]:
-        """Parse a single numeric value from a Zinc grid response."""
+    def _parse_zinc_value(self, text: Optional[str], tag: str = "Zinc"):
+        """Parse a live curVal: number when numeric, else a status string."""
         if not text:
             return None
         try:
@@ -574,12 +574,22 @@ class FinScramClient:
                 return None
             data_line = lines[2] if len(lines) > 2 else ''
             parts = self._parse_csv_line(data_line)
-            if curval_idx < len(parts):
-                raw = parts[curval_idx]
-                match = re.search(r'-?[\d.]+', raw)
-                if match:
-                    return float(match.group())
-            return None
+            if curval_idx >= len(parts):
+                return None
+            raw = parts[curval_idx].strip()
+            if not raw or raw in ('N', 'NA', 'null', '—'):
+                return None
+            if raw.startswith('s:'):
+                raw = raw[2:]
+            if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith('\\"') and raw.endswith('\\"')):
+                raw = raw.strip('\\').strip('"').replace('\\"', '"')
+            num = re.fullmatch(r'-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?', raw)
+            if num:
+                return float(raw)
+            match = re.search(r'-?\d+(?:\.\d+)?', raw)
+            if match and re.fullmatch(r'-?\d+(?:\.\d+)?(?:\s*[a-zA-Z%°²³/]+)?', raw):
+                return float(match.group())
+            return raw or None
         except Exception as e:
             print(f"[{tag}] Parse Error: {e}")
             return None
@@ -785,6 +795,10 @@ class FinScramClient:
             # FIN marker tags (ahu, fcu, pump, meter, lift, facp…) classify the
             # equipment; everything was previously lumped into one "hvac" bucket
             tags = [k for k, v in equip.items() if v is True and k not in ("equip", "inAlarm")]
+            sys_raw = equip.get("system")
+            if isinstance(sys_raw, dict):
+                sys_raw = sys_raw.get("dis") or sys_raw.get("val")
+            system = str(sys_raw or "").strip().lower()
 
             equip_data = {
                 "name": nav_name,
@@ -792,6 +806,7 @@ class FinScramClient:
                 "alarms": equip_alarms,
                 "points": formatted_points,
                 "tags": tags,
+                "system": system,
             }
 
             if floor not in floor_wise:
@@ -800,7 +815,7 @@ class FinScramClient:
 
         return floor_wise
 
-    async def fetch_live_point(self, point_id_template: str) -> Optional[float]:
+    async def fetch_live_point(self, point_id_template: str):
         """Fetch a single live point value by ID template."""
         point_id = point_id_template.replace("{project}", self.project_name)
         endpoint = f"/api/{self.project_name}/eval?expr=readById(@{point_id})"
