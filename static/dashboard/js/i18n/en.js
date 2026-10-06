@@ -1247,6 +1247,7 @@ window.EKO_I18N.en = {
   "pfSevTip.one": "Worst {sev} · {n} alarm",
   "pfSevTip.other": "Worst {sev} · {n} alarms",
   "pfNever": "never",
+  "pfAgo.now": "just now",
   "pfAgo.min": "{n} min ago",
   "pfAgo.h": "{n} h ago",
   "pfAgo.d": "{n} d ago",

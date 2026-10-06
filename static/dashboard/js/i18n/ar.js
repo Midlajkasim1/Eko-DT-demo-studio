@@ -1361,6 +1361,7 @@ window.EKO_I18N.ar = {
   "pfSevTip.many": "الأسوأ {sev} · {n} تنبيهًا",
   "pfSevTip.other": "الأسوأ {sev} · {n} تنبيه",
   "pfNever": "أبداً",
+  "pfAgo.now": "الآن",
   "pfAgo.min.zero": "قبل {n} دقائق",
   "pfAgo.min.one": "قبل دقيقة",
   "pfAgo.min.two": "قبل دقيقتين",

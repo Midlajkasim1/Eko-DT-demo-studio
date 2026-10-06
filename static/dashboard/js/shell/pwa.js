@@ -75,6 +75,7 @@ window.EKO_PWA = (function(){
   const HB_TIMEOUT = 8000;
   const FAIL_N = 2;           /* one stalled poll is not a drop */
   let hbMisses = 0;
+  let finStamp = { ok: null, at: null };
   const BAD = { stale:1, disconnected:1, error:1, down:1 };
   function readFeed(body){
     /* -> { degraded, sources:[{id, status, since:Date|null}], since:Date|null } */
@@ -102,12 +103,13 @@ window.EKO_PWA = (function(){
         try { st = JSON.parse(text); } catch(e) { throw new Error('bad status'); }
         const ok = !!st.connected;
         const now = new Date().toISOString();
+        if (finStamp.ok !== ok || !finStamp.at) finStamp = { ok: ok, at: now };
         text = JSON.stringify({
           ok: ok,
           ts: now,
           feed: {
             status: ok ? 'ok' : 'disconnected',
-            sources: { fin: { status: ok ? 'ok' : 'disconnected', lastSample: now } }
+            sources: { fin: { status: ok ? 'ok' : 'disconnected', lastSample: finStamp.at } }
           }
         });
       }
@@ -120,6 +122,7 @@ window.EKO_PWA = (function(){
         hbMisses = 0;
         setMode('online');
       }
+      if(E && (E.state.dlg === 'conn' || (E.state.dlg === 'settings' && E.state.settingsTab === 'system'))) E.set({});
       return !f.degraded;
     }catch(e){
       hbMisses += 1;

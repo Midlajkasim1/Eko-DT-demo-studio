@@ -215,8 +215,13 @@
   /* HH:MM of an ISO timestamp in local time (heartbeat ts / lastSample) */
   const hhmmOf = iso => { const d = new Date(iso); return isNaN(d) ? '' : String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
   /* a relative age for a heartbeat timestamp, through the plural families; the absolute goes in the tooltip */
-  const agoOf = iso => { const d = new Date(iso); if(isNaN(d)) return ''; const m = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
-    return m < 60 ? E.t('pfAgo.min', { n: m }) : m < 48 * 60 ? E.t('pfAgo.h', { n: Math.round(m / 60) }) : E.t('pfAgo.d', { n: Math.round(m / 1440) }); };
+  const agoOf = iso => {
+    const d = new Date(iso); if(isNaN(d)) return '';
+    const sec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+    if(sec < 60) return E.t('pfAgo.now');
+    const m = Math.floor(sec / 60);
+    return m < 60 ? E.t('pfAgo.min', { n: m }) : m < 48 * 60 ? E.t('pfAgo.h', { n: Math.round(m / 60) }) : E.t('pfAgo.d', { n: Math.round(m / 1440) });
+  };
 
   /* ------------------------------- top bar -------------------------------- */
   function topbar(){
