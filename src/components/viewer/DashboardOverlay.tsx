@@ -11,6 +11,7 @@ import { disciplineOf, layersFor, layerShows } from '@/lib/modelDiscipline'
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
 import { createFcuSchematic, type FcuSchematic } from '@/lib/fcuSchematic'
+import { createAhuSchematic, type AhuSchematic } from '@/lib/ahuSchematic'
 import { useFinStore } from '@/store/useFinStore'
 import type { ProjectApiSettings } from '@/types'
 
@@ -257,11 +258,19 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     watchClipping(ghostEdge)
     let ghost: { group: THREE.Group; model: any } | null = null
     let fcu: { schematic: FcuSchematic; assetId: string; bimId: string; last: number; synced: number } | null = null
+    let ahu: { schematic: AhuSchematic; assetId: string; bimId: string; last: number; synced: number } | null = null
     const fcuAssetId = (asked: string, bimId: string): string | null => {
       const norm = normAssetId(asked)
       const rec = ASSET_BIM_MAPPING[norm] || ASSET_BIM_MAPPING[asked]
       if (rec?.type === 'FCU') return norm
       const hit = mappedList.find(m => m.bimId === bimId && (ASSET_BIM_MAPPING[m.id]?.type === 'FCU'))
+      return hit ? hit.id : null
+    }
+    const ahuAssetId = (asked: string, bimId: string): string | null => {
+      const norm = normAssetId(asked)
+      const rec = ASSET_BIM_MAPPING[norm] || ASSET_BIM_MAPPING[asked]
+      if (rec?.type === 'AHU') return norm
+      const hit = mappedList.find(m => m.bimId === bimId && (ASSET_BIM_MAPPING[m.id]?.type === 'AHU'))
       return hit ? hit.id : null
     }
     const pointsFor = (assetId: string, bimId: string) => {
@@ -288,30 +297,34 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         fcu.schematic.dispose()
         fcu = null
       }
+      if (ahu) {
+        ahu.schematic.dispose()
+        ahu = null
+      }
       ghostFill.uniforms.uOpacity.value = 0.6
       if (!ghost) return
       ghost.group.removeFromParent()
       ghost.group.traverse((o: any) => o.geometry?.dispose())
       ghost = null
     }
-    // Runs after every frame the viewer draws, whichever style drew it
     const drawGhost = () => {
       if (!ghost || !ghost.group.visible) return
-      if (fcu) {
+      const active = fcu ?? ahu
+      if (active) {
         const now = performance.now()
-        const dt = Math.min(0.05, (now - fcu.last) / 1000)
-        fcu.last = now
-        fcu.schematic.tick(dt)
-        if (now - fcu.synced > 400) {
-          fcu.synced = now
-          fcu.schematic.apply(pointsFor(fcu.assetId, fcu.bimId))
+        const dt = Math.min(0.05, (now - active.last) / 1000)
+        active.last = now
+        active.schematic.tick(dt)
+        if (now - active.synced > 400) {
+          active.synced = now
+          active.schematic.apply(pointsFor(active.assetId, active.bimId))
         }
       }
       const renderer = engine.world?.renderer?.three
       const camera = engine.world?.camera?.three
       if (!renderer || !camera) return
-      if (fcu) {
-        fcu.schematic.group.getWorldPosition(fcuAt)
+      if (active) {
+        active.schematic.group.getWorldPosition(fcuAt)
         fcuCam.copy(camera.position).sub(fcuAt)
         if (fcuCam.lengthSq() < 1e-8) fcuCam.set(0, 0.4, 1)
         fcuCam.normalize()
@@ -332,7 +345,6 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       renderer.render(overlay, camera)
       renderer.autoClear = autoClear
     }
-    // Follows the model's live transform and its visibility (model isolation)
     const syncGhost = () => {
       if (!ghost) return
       ghost.group.matrix.copy(ghost.model.object.matrixWorld)
@@ -343,7 +355,6 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const schematic = createFcuSchematic(entry.localBox, entry.model.object.matrixWorld, group)
       if (!schematic) return
       group.add(schematic.group)
-      // Depth pass is the solid casing; it would hide the parts inside.
       group.traverse((o) => {
         if (o.userData?.ekoGhostDepth) o.visible = false
       })
@@ -351,7 +362,18 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       fcu = { schematic, assetId, bimId, last: performance.now(), synced: 0 }
       schematic.apply(pointsFor(assetId, bimId))
     }
-    const buildGhost = async (entry: Located, bimId: string, seq: number, assetId: string | null) => {
+    const mountAhu = (group: THREE.Group, entry: Located, assetId: string, bimId: string) => {
+      const schematic = createAhuSchematic(entry.localBox, entry.model.object.matrixWorld, group)
+      if (!schematic) return
+      group.add(schematic.group)
+      group.traverse((o) => {
+        if (o.userData?.ekoGhostDepth) o.visible = false
+      })
+      ghostFill.uniforms.uOpacity.value = 0.22
+      ahu = { schematic, assetId, bimId, last: performance.now(), synced: 0 }
+      schematic.apply(pointsFor(assetId, bimId))
+    }
+    const buildGhost = async (entry: Located, bimId: string, seq: number, fcuId: string | null, ahuId: string | null) => {
       let meshes: any[][] = []
       try { meshes = await entry.model.getItemsGeometry([entry.localId]) } catch { return }
       if (seq !== highlightSeq || colored?.bimId !== bimId) return   // a newer selection won
@@ -373,6 +395,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           fill.renderOrder = 1
           edges.renderOrder = 2
           for (const o of [depth, fill, edges]) o.applyMatrix4(t)
+          if (!group.userData.meshTransform) {
+            group.userData.meshTransform = t.clone()
+          }
           group.add(depth, fill, edges)
         }
       }
@@ -381,7 +406,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ghost = { group, model: entry.model }
       syncGhost()
       overlay.add(group)
-      if (seq === highlightSeq && colored?.bimId === bimId && assetId) mountFcu(group, entry, assetId, bimId)
+      if (seq === highlightSeq && colored?.bimId === bimId) {
+        if (fcuId) mountFcu(group, entry, fcuId, bimId)
+        else if (ahuId) mountAhu(group, entry, ahuId, bimId)
+      }
     }
 
     /* Equipment is green or red. Anything else stays amber. */
@@ -487,10 +515,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const highlightAsset = async (assetIdOrBimId: string) => {
       const seq = ++highlightSeq
       const bimId = toBimId(assetIdOrBimId)
-      const assetId = bimId ? fcuAssetId(assetIdOrBimId, bimId) : null
+      const fcuId = bimId ? fcuAssetId(assetIdOrBimId, bimId) : null
+      const ahuId = bimId ? ahuAssetId(assetIdOrBimId, bimId) : null
       if (colored && colored.bimId === bimId && ghost) {
         syncColour()
-        if (fcu && assetId) fcu.schematic.apply(pointsFor(assetId, bimId))
+        if (fcu && fcuId) fcu.schematic.apply(pointsFor(fcuId, bimId))
+        if (ahu && ahuId) ahu.schematic.apply(pointsFor(ahuId, bimId))
         return true
       }
       colored = null
@@ -500,7 +530,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const tone = toneFor(assetIdOrBimId, bimId)
       colored = { bimId, tone }
       tintGhost(tone)
-      await buildGhost(entry, bimId, seq, assetId)
+      await buildGhost(entry, bimId, seq, fcuId, ahuId)
       return seq === highlightSeq && !!ghost
     }
 
