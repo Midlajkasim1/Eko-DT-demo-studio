@@ -1017,6 +1017,7 @@
         });
       }
     }
+    countUtilityAndEmsMeters(site, site.assets);
     if (changed) paint();
   }
 
@@ -1297,33 +1298,53 @@
       });
     }
 
-    var utilAssets = newAssets.filter(function (a) { return a.sys === 'Utilities'; });
-    var waterList = utilAssets.filter(function (a) {
-      var blob = (a.id + ' ' + (a.typeEn || '') + ' ' + (a.tags || []).join(' ')).toLowerCase();
-      return /water|wm_|plumb|grease/.test(blob);
-    });
-    var gasList = utilAssets.filter(function (a) {
-      var blob = (a.id + ' ' + (a.typeEn || '') + ' ' + (a.tags || []).join(' ')).toLowerCase();
-      return /gas|gm_/.test(blob);
-    });
-    if (site.utilLanding) {
-      set(site.utilLanding, 'waterMeters', waterList.length);
-      set(site.utilLanding, 'gasMeters', gasList.length);
-    }
-
-    var emsList = newAssets.filter(function (a) { return a.sys === 'EMS'; });
-    if (site.energyLanding) {
-      var emsEl = site.energyLanding;
-      var emsAlarm = emsList.filter(function (a) { return a.st === 'alarm'; }).length;
-      set(emsEl, 'emsTotal', emsList.length);
-      set(emsEl, 'emsActive', emsList.length - emsAlarm);
-      set(emsEl, 'emsChipEn', emsAlarm > 0 ? emsAlarm + ' inactive' : null);
-      set(emsEl, 'emsChipAr', emsAlarm > 0 ? emsAlarm + ' غير نشطة' : null);
-      set(emsEl, 'emsTone', emsAlarm > 0 ? 'warn' : 'ok');
-    }
+    countUtilityAndEmsMeters(site, newAssets);
 
     applyHeat(list);
     paint();
+  }
+
+  function assetBlob(a) {
+    return ((a && a.id) || '') + ' ' + ((a && a.typeEn) || '') + ' ' + ((a && a.tags) || []).join(' ') + ' ' + ((a && a.sys) || '');
+  }
+
+  function countUtilityAndEmsMeters(site, assets) {
+    assets = assets || (site && site.assets) || [];
+    function blob(a) { return assetBlob(a).toLowerCase(); }
+    var gasList = assets.filter(function (a) {
+      var b = blob(a);
+      return /gas[_-]?meter|(?:^|[^a-z])gm[-_]|gas-meter/.test(b) || (a.sys === 'Utilities' && /gas/.test(b) && !/water/.test(b));
+    });
+    var waterList = assets.filter(function (a) {
+      var b = blob(a);
+      if (gasList.indexOf(a) >= 0) return false;
+      if (a.sys === 'Utilities') return true;
+      return /water[_-]?meter|wm[-_]/.test(b);
+    });
+    if (site && site.utilLanding) {
+      var wAlarm = waterList.filter(function (a) { return a.st === 'alarm'; }).length;
+      var gAlarm = gasList.filter(function (a) { return a.st === 'alarm'; }).length;
+      site.utilLanding.waterMeters = waterList.length;
+      site.utilLanding.waterActive = waterList.length - wAlarm;
+      site.utilLanding.waterChipEn = wAlarm > 0 ? wAlarm + ' inactive' : null;
+      site.utilLanding.waterChipAr = wAlarm > 0 ? wAlarm + ' غير نشطة' : null;
+      site.utilLanding.gasMeters = gasList.length;
+      site.utilLanding.gasActive = gasList.length - gAlarm;
+      site.utilLanding.gasChipEn = gAlarm > 0 ? gAlarm + ' inactive' : null;
+      site.utilLanding.gasChipAr = gAlarm > 0 ? gAlarm + ' غير نشطة' : null;
+    }
+    var emsList = assets.filter(function (a) {
+      return a.sys === 'EMS' || /^pmu\d/i.test(a.id || '');
+    });
+    if (site && site.energyLanding) {
+      var emsEl = site.energyLanding;
+      var emsAlarm = emsList.filter(function (a) { return a.st === 'alarm'; }).length;
+      emsEl.emsTotal = emsList.length;
+      emsEl.emsActive = emsList.length - emsAlarm;
+      emsEl.emsChipEn = emsAlarm > 0 ? emsAlarm + ' inactive' : null;
+      emsEl.emsChipAr = emsAlarm > 0 ? emsAlarm + ' غير نشطة' : null;
+      emsEl.emsTone = emsAlarm > 0 ? 'warn' : 'ok';
+    }
   }
 
   function sensorKey(name) {

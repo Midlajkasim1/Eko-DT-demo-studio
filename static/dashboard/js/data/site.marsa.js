@@ -223,7 +223,8 @@ window.EKO_DATA.marsa = {
   /* ------------------------------------------------------------------------
      POWER analytics page.
      ------------------------------------------------------------------------ */
-  "utilLanding": { "waterMeters": null, "gasMeters": null,
+  "utilLanding": { "waterMeters": null, "waterActive": null, "waterChipEn": null, "waterChipAr": null,
+    "gasMeters": null, "gasActive": null, "gasChipEn": null, "gasChipAr": null,
     "waterSparkPath": null,
     "gasSparkPath": null,
     "chips": [ { "id": "W-01", "x": 50, "y": 70 }, { "id": "G-01", "x": 57.5, "y": 65 } ] },

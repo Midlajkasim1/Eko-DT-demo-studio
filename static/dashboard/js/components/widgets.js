@@ -311,14 +311,15 @@ window.EKO_C = (function(){
       + gaugeRow(E.t('enOvernight'), d.overnightDeviationPct, 100, '%', ar ? (d.overnightWordAr || '') : (d.overnightWordEn || ''), d.overnightTone || 'ok')
       + d.sumGauges.map(g2 => gaugeRow(ar?g2.labelAr:g2.labelEn, g2.val, g2.max, g2.u, ar?g2.wordAr:g2.wordEn, g2.tone)).join('')
       + (function () {
-          if (d.emsTotal == null) return '';
+          const total = d.emsTotal == null ? 0 : d.emsTotal;
+          const active = d.emsActive == null ? 0 : d.emsActive;
           const tone = d.emsTone === 'warn' ? 'warn' : 'ok';
           const chip = ar ? d.emsChipAr : d.emsChipEn;
-          const cap = d.emsTotal ? E.t('enEmsCap', { n: d.emsTotal }) : '';
+          const cap = total ? E.t('enEmsCap', { n: total }) : E.t('enEmsCap', { n: 0 });
           return `<div class="ovk ovkDark"><div class="ovkhead"><span class="scdot" data-tone="${tone}"></span><span class="ovklbl">${esc(E.t('enEmsMeters'))}</span>${ctl(E, E.t('enEmsMeters'), chip || cap)}</div>
-            <div class="ovkval"><span class="ovknum">${d.emsActive} / ${d.emsTotal}</span></div>
+            <div class="ovkval"><span class="ovknum">${active} / ${total}</span></div>
             ${chip ? `<div class="scrow"><span class="ovkcap msA" data-tone="warn">${esc(chip)}</span></div>`
-                   : (cap ? `<div class="scrow"><span class="ovkcap msA" data-tone="t3">${esc(cap)}</span></div>` : '')}</div>`;
+                   : `<div class="scrow"><span class="ovkcap msA" data-tone="t3">${esc(cap)}</span></div>`}</div>`;
         })()
       + '</div>');
   }
@@ -339,16 +340,24 @@ window.EKO_C = (function(){
           ? `<div class="uvspark"><svg viewBox="0 0 100 22" width="100" height="22" aria-hidden="true">
               <path d="${sparkPath}" fill="none" stroke="${icC}" stroke-width="1.5"/></svg>
             <span class="ovkcap" data-tone="${capTone||'t3'}">${esc(cap)}</span></div>`
-          : (v !== '--' && cap ? `<div class="ovkcap" data-tone="${capTone||'t3'}">${esc(cap)}</div>` : '')}</div>`;
+          : (v !== '--' && cap ? `<div class="scrow"><span class="ovkcap msA" data-tone="${capTone||'t3'}">${esc(cap)}</span></div>` : '')}</div>`;
     const W='rgba(96,165,250,.05)', G='rgba(167,139,250,.05)';
     const wVal = m.waterTodayM3 == null ? '--' : fmt(m.waterTodayM3, 1);
     const gVal = m.gasTodayM3   == null ? '--' : fmt(m.gasTodayM3, 1);
     const wDelta = ar ? srow('water').deltaAr : srow('water').deltaEn;
     const gDelta = ar ? srow('gas').deltaAr   : srow('gas').deltaEn;
+    const wTot = u.waterMeters == null ? 0 : u.waterMeters;
+    const gTot = u.gasMeters == null ? 0 : u.gasMeters;
+    const wAct = u.waterActive == null ? wTot : u.waterActive;
+    const gAct = u.gasActive == null ? gTot : u.gasActive;
+    const wCap = ar ? (u.waterChipAr || E.t('enEmsCap', { n: wTot })) : (u.waterChipEn || E.t('enEmsCap', { n: wTot }));
+    const gCap = ar ? (u.gasChipAr || E.t('enEmsCap', { n: gTot })) : (u.gasChipEn || E.t('enEmsCap', { n: gTot }));
+    const wTone = u.waterChipEn ? 'warn' : 't3';
+    const gTone = u.gasChipEn ? 'warn' : 't3';
     return summaryShell(E, E.t('utilitiesOverview'), '<div class="ovklist">'
-      + row(W,'meter','#60A5FA',E.t('kWaterMeters'), u.waterMeters == null ? '--' : fmt(u.waterMeters, 0), '', u.waterMeters != null ? E.t('wordActive') : '', 'pos')
+      + row(W,'meter','#60A5FA',E.t('kWaterMeters'), wAct + ' / ' + wTot, '', wCap, wTone)
       + row(W,'droplet','#60A5FA',E.t('kWaterConsToday'), wVal, 'm\u00b3', wDelta||'', 't3', wVal !== '--' ? u.waterSparkPath : null)
-      + row(G,'meter','#A78BFA',E.t('kGasMeters'), u.gasMeters == null ? '--' : fmt(u.gasMeters, 0), '', u.gasMeters != null ? E.t('wordActive') : '', 'pos')
+      + row(G,'meter','#A78BFA',E.t('kGasMeters'), gAct + ' / ' + gTot, '', gCap, gTone)
       + row(G,'flame','#A78BFA',E.t('kGasConsToday'), gVal, 'm\u00b3', gDelta||'', 't3', gVal !== '--' ? u.gasSparkPath : null)
       + '</div>');
   }
