@@ -197,14 +197,20 @@ window.EKO_V = (function(){
       if(!inView){ delete pop.dataset.placed; lastPop = null; return; }   /* the marker left the view: the popup waits, hidden, and returns with it */
       const par = (pop.offsetParent || host).getBoundingClientRect();
       const mx = p.x + hr.left - par.left, my = p.y + hr.top - par.top;   /* the marker in the popup's own frame */
-      const W = par.width, H = par.height, pw = pop.offsetWidth, ph = pop.offsetHeight, GAP = 18, PAD = 8, MK = 12;
+      const W = par.width, H = par.height, pw = pop.offsetWidth, ph = pop.offsetHeight, GAP = 72, PAD = 12, MK = 28;
       let left, top;
-      if(mx + GAP + pw <= W - PAD) left = mx + GAP;                    /* beside the marker, to the end side */
-      else if(mx - GAP - pw >= PAD) left = mx - GAP - pw;              /* or the start side */
-      else left = Math.max(PAD, Math.min(mx - pw / 2, W - pw - PAD));  /* or centred: then it must go above or below */
-      top = Math.max(PAD, Math.min(my - ph / 2, H - ph - PAD));
-      const covers = () => left < mx + MK && left + pw > mx - MK && top < my + MK && top + ph > my - MK;
-      if(covers()){ top = my + GAP; if(top + ph > H - PAD) top = my - GAP - ph; if(top < PAD) top = PAD; }
+      if(mx + GAP + pw <= W - PAD) left = mx + GAP;
+      else if(mx - GAP - pw >= PAD) left = mx - GAP - pw;
+      else left = Math.max(PAD, Math.min(mx - pw / 2, W - pw - PAD));
+      top = Math.max(PAD, Math.min(my - ph - 20, H - ph - PAD));
+      const covers = () => left < mx + MK + 36 && left + pw > mx - MK - 36 && top < my + MK + 36 && top + ph > my - MK - 36;
+      if(covers()){
+        if(mx + GAP + pw <= W - PAD) left = mx + GAP;
+        else if(mx - GAP - pw >= PAD) left = mx - GAP - pw;
+        top = my - GAP - ph;
+        if(top < PAD) top = my + GAP;
+        if(top + ph > H - PAD) top = Math.max(PAD, H - ph - PAD);
+      }
       pop.style.left = left.toFixed(1) + 'px'; pop.style.top = top.toFixed(1) + 'px';
       pop.dataset.placed = '1';
       lastPop = { key: E.state.mkPop, left: pop.style.left, top: pop.style.top };
