@@ -106,7 +106,7 @@
     "expr": "secureEval(projs())"
   },
   "power_endpoints": {
-    "Total_Power_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181ee6e-67dac181,2026-05-21..today()%2C%7B-limit%7D)",
+    "Hourly_Energy_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181ee6e-67dac181,2026-05-21..today()%2C%7B-limit%7D)",
     "Peak_Demand_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f788-2d229f48,2026-05-21..today()%2C%7B-limit%7D)",
     "Energy_Deviation_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f71f-2f0083d7,2026-05-21..today()%2C%7B-limit%7D)",
     "Energy_Use_Intensity_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f767-e5cb6329,2026-05-21..today()%2C%7B-limit%7D)",
@@ -138,12 +138,16 @@
     "Total_Gas_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31820148-f95561a2,2026-05-21..today()%2C%7B-limit%7D)"
   },
   "live_point_ids": {
-    "total_power": "p:{project}:r:3181ee6e-67dac181",
+    "hourly_energy": "p:{project}:r:3181ee6e-67dac181",
     "peak_demand": "p:{project}:r:3181f788-2d229f48",
     "energy_deviation": "p:{project}:r:3181f71f-2f0083d7",
     "energy_intensity": "p:{project}:r:3181f767-e5cb6329",
     "energy_performance": "p:{project}:r:3182117b-3c286f7b",
     "after_hours_load": "p:{project}:r:31afedda-1519c556",
+    "after_hours_deviation": "p:{project}:r:3182117b-3c286f7b",
+    "kpi_after_hours_ratio": "p:{project}:r:31820fc9-da2fb148",
+    "hvac_epr": "p:{project}:r:31a2ee82-319eb82f",
+    "kpi_hvac_epr": "p:{project}:r:31820fc9-580b36d6",
     "daily_energy": "p:{project}:r:31b14067-8f96ad79",
     "current_month": "p:{project}:r:3196f8dd-e4e1d2c9",
     "carbon": "p:{project}:r:3181f7a2-4652169b",

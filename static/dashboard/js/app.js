@@ -170,7 +170,7 @@
       
       let targetLayer = 'all';
       if (targetModule === 'systems') {
-        if (targetSub === 'hvac') targetLayer = 'mech';
+        if (targetSub === 'hvac' || targetSub === 'mechanical') targetLayer = 'mech';
         else if (targetSub === 'electrical') targetLayer = 'elec';
       }
       if (this.state.dock) this.state.dock.layer = targetLayer;
@@ -215,8 +215,13 @@
   /* HH:MM of an ISO timestamp in local time (heartbeat ts / lastSample) */
   const hhmmOf = iso => { const d = new Date(iso); return isNaN(d) ? '' : String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
   /* a relative age for a heartbeat timestamp, through the plural families; the absolute goes in the tooltip */
-  const agoOf = iso => { const d = new Date(iso); if(isNaN(d)) return ''; const m = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
-    return m < 60 ? E.t('pfAgo.min', { n: m }) : m < 48 * 60 ? E.t('pfAgo.h', { n: Math.round(m / 60) }) : E.t('pfAgo.d', { n: Math.round(m / 1440) }); };
+  const agoOf = iso => {
+    const d = new Date(iso); if(isNaN(d)) return '';
+    const sec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+    if(sec < 60) return E.t('pfAgo.now');
+    const m = Math.floor(sec / 60);
+    return m < 60 ? E.t('pfAgo.min', { n: m }) : m < 48 * 60 ? E.t('pfAgo.h', { n: Math.round(m / 60) }) : E.t('pfAgo.d', { n: Math.round(m / 1440) });
+  };
 
   /* ------------------------------- top bar -------------------------------- */
   function topbar(){
@@ -608,10 +613,23 @@
      scroller to the top (the alarms panel jumped when the account menu
      opened). Positions are captured before the rebuild and restored after,
      matched by selector and order. */
-  const SCROLLERS = ['#modcontent', '.ovpad', '.apbody', '.nflist', '.regscroll', '.dgscroll', '.dlg', '.aclist', '.vplist', '#ekonav', '.rpwrap', '.rphub'];
+  const SCROLLERS = ['#modcontent', '.ovpad', '.apbody', '.nflist', '.regscroll', '.dgscroll', '.dlg', '.aclist', '.vplist', '#ekonav', '.rpwrap', '.rphub', '.pagepad', '.pwarea', '.scrollY', '.pmurows'];
   function keepScroll(){
-    const saved = SCROLLERS.map(sel => [sel, [...document.querySelectorAll(sel)].map(el => el.scrollTop)]);
-    return () => saved.forEach(([sel, tops]) => document.querySelectorAll(sel).forEach((el, i) => { if(tops[i]) el.scrollTop = tops[i]; }));
+    const saved = [];
+    SCROLLERS.forEach(sel => {
+      document.querySelectorAll(sel).forEach((el, i) => {
+        saved.push({ sel, i, top: el.scrollTop, left: el.scrollLeft });
+      });
+    });
+    const apply = () => {
+      saved.forEach(s => {
+        const el = document.querySelectorAll(s.sel)[s.i];
+        if(!el) return;
+        if(s.top) el.scrollTop = s.top;
+        if(s.left) el.scrollLeft = s.left;
+      });
+    };
+    return apply;
   }
   function render(){
     if(!$('topbar') || !$('ekonav') || !$('mount') || !$('mobtabs') || !$('overlays')) return;
@@ -702,7 +720,6 @@
       place();
       requestAnimationFrame(place);
     }
-    restoreScroll();                                             /* D86 */
     if(window.EKO_BVA) window.EKO_BVA.mount(E);                   /* D96: pixel charts after the frame is built */
     if(window.EKO_DG) window.EKO_DG.mount();                       /* D100c: header fit + popovers under their opener */
     /* D87: attributes and inline sizes owned by the shell engines (panel
@@ -711,6 +728,8 @@
        300 ms tick, or the panel visibly re-lays out after every click. */
     if(window.EKO_SPLIT && window.EKO_SPLIT.sync) window.EKO_SPLIT.sync();
     if(window.EKO_SHEET && window.EKO_SHEET.sync) window.EKO_SHEET.sync();
+    restoreScroll();                                             /* D86: after layout so flex overflow does not snap to top */
+    requestAnimationFrame(() => { restoreScroll(); requestAnimationFrame(restoreScroll); });
     E.state.born = null;
     if(window.EKO_SURF) window.EKO_SURF.afterRender();          /* R5 (D67) */
     if(window.EKO_MAP && document.querySelector('.pfcard')) window.EKO_MAP.after();   /* D122: keep the marker card inside the map box */

@@ -42,7 +42,17 @@ window.EKO_R = (function(){
   'use strict';
   const T = () => (window.EKO_REPORTS && window.EKO_REPORTS.templates) || {};
   const pad = n => String(n).padStart(2, '0');
-  const fmt = (v, d) => (typeof v === 'number' && isFinite(v)) ? v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }) : String(v);
+  const truncDec = (n, d) => {
+    const x = Number(n); if (!isFinite(x)) return NaN;
+    if (d <= 0) return Math.trunc(x + (x < 0 ? -1e-9 : 1e-9));
+    const f = Math.pow(10, d);
+    return Math.trunc(x * f + (x < 0 ? -1e-9 : 1e-9)) / f;
+  };
+  const fmt = (v, d) => {
+    if (typeof v !== 'number' || !isFinite(v)) return String(v);
+    const t = truncDec(v, d);
+    return t.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  };
   const LS_STORE = 'eko-reports-v1', LS_AUDIT = 'eko-audit-v1', LS_REMOVED = 'eko-reports-removed-v1', STORE_CAP = 12, AUDIT_CAP = 300;
 
   /* ---- sources: every id a figure can cite ------------------------------ */
@@ -91,49 +101,52 @@ window.EKO_R = (function(){
           exist for today (no history feed yet, D31); 'fixed' figures state
           their own window and are valid in any report. ----------------------- */
   const FIG = {
-    'metrics.energyTodayMwh': E => ({ win:'today', value:E.data.metrics.energyTodayMwh, unit:'MWh', d:1, labelKey:'kEnergyToday', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'] }) }),
-    'metrics.waterTodayM3':   E => ({ win:'today', value:E.data.metrics.waterTodayM3, unit:'m³', d:0, labelKey:'kWaterToday', sources:['meter.W-01'], basis:basisFor(E, { sources:['meter.W-01'] }) }),
-    'metrics.gasTodayM3':     E => ({ win:'today', value:E.data.metrics.gasTodayM3, unit:'m³', d:0, labelKey:'kGasToday', sources:['meter.G-01'], basis:basisFor(E, { sources:['meter.G-01'] }) }),
-    'metrics.comfortIndex':   E => ({ win:'today', value:E.data.metrics.comfortIndex, unit:'', d:2, labelKey:'kComfortIdx', sources:['bms'], basis:basisFor(E, { sources:['bms'], averagingKey:E.data.basis.averagingKey }) }),
-    'metrics.iaq':            E => ({ win:'today', value:E.data.metrics.iaq, unit:'', d:0, labelKey:'kIaq', sources:['bms'], basis:basisFor(E, { sources:['bms'], averagingKey:E.data.basis.averagingKey }) }),
-    'metrics.loadNowMw':      E => ({ win:'fixed', value:E.data.metrics.loadNowMw, unit:'MW', d:2, labelKey:'kLoadNow', sources:['pmu'], basis:basisFor(E, Object.assign({ sources:['pmu'] }, at(E))) }),
-    'metrics.peakTodayMw':    E => ({ win:'today', value:E.data.metrics.peakTodayMw, unit:'MW', d:2, labelKey:'pwPeak', sources:['pmu'], basis:basisFor(E, { sources:['pmu'], averagingKey:E.data.basis.averagingKey }) }),
-    'metrics.pfNow':          E => ({ win:'fixed', value:E.data.metrics.pfNow, unit:'', d:2, labelKey:'kPfNow', sources:['pmu'], basis:basisFor(E, Object.assign({ sources:['pmu'] }, at(E))) }),
-    'energy.currentKw':       E => ({ win:'fixed', value:E.data.energyLanding.currentKw, unit:'kW', d:2, labelKey:'pwCurrentCons', sources:['pmu'], basis:basisFor(E, Object.assign({ sources:['pmu'] }, at(E))) }),
+    'metrics.energyTodayMwh': E => {
+      const kwh = E.data.metrics.energyTodayKwh != null ? E.data.metrics.energyTodayKwh
+        : (E.data.metrics.energyTodayMwh != null ? E.data.metrics.energyTodayMwh * 1000 : null);
+      return { win:'today', value:kwh, unit:'kWh', d:1, labelKey:'kEnergyToday', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'] }) }; },
+    'metrics.waterTodayM3':   E => ({ win:'today', value:E.data.metrics.waterTodayM3, unit:'m³', d:1, labelKey:'kWaterToday', sources:['meter.W-01'], basis:basisFor(E, { sources:['meter.W-01'] }) }),
+    'metrics.gasTodayM3':     E => ({ win:'today', value:E.data.metrics.gasTodayM3, unit:'m³', d:1, labelKey:'kGasToday', sources:['meter.G-01'], basis:basisFor(E, { sources:['meter.G-01'] }) }),
+    'metrics.comfortIndex':   E => ({ win:'today', value:E.data.metrics.comfortIndex, unit:'', d:1, labelKey:'kComfortIdx', sources:['bms'], basis:basisFor(E, { sources:['bms'], averagingKey:E.data.basis.averagingKey }) }),
+    'metrics.iaq':            E => ({ win:'today', value:E.data.metrics.iaq, unit:'', d:1, labelKey:'kIaq', sources:['bms'], basis:basisFor(E, { sources:['bms'], averagingKey:E.data.basis.averagingKey }) }),
+    'metrics.loadNowMw':      E => ({ win:'fixed', value:E.data.metrics.loadNowMw, unit:'MW', d:1, labelKey:'kLoadNow', sources:['pmu'], basis:basisFor(E, Object.assign({ sources:['pmu'] }, at(E))) }),
+    'metrics.peakTodayMw':    E => ({ win:'today', value:E.data.metrics.peakTodayKw != null ? E.data.metrics.peakTodayKw : (E.data.metrics.peakTodayMw != null ? E.data.metrics.peakTodayMw * 1000 : null), unit:'kW', d:1, labelKey:'pwPeak', sources:['pmu'], basis:basisFor(E, { sources:['pmu'], averagingKey:E.data.basis.averagingKey }) }),
+    'metrics.pfNow':          E => ({ win:'fixed', value:E.data.metrics.pfNow, unit:'', d:1, labelKey:'kPfNow', sources:['pmu'], basis:basisFor(E, Object.assign({ sources:['pmu'] }, at(E))) }),
+    'energy.currentKw':       E => ({ win:'fixed', value:E.data.energyLanding.currentKw, unit:'kW', d:1, labelKey:'pwCurrentCons', sources:['pmu'], basis:basisFor(E, Object.assign({ sources:['pmu'] }, at(E))) }),
     'energy.baselineKw':      E => ({ win:'fixed', value:E.data.energyLanding.baselineKw, unit:'kW', d:1, labelKey:'rpF.baseline', sources:['model.opt'], basis:basisFor(E, { sources:['model.opt'], windowKey:'rpWin.baseline', windowParams:{} }) }),
-    'energy.mtdKwh':          E => ({ win:'fixed', value:E.data.energyLanding.mtdKwh, unit:'kWh', d:2, labelKey:'pwMtd', sources:['meters.main'], basis:basisFor(E, Object.assign({ sources:['meters.main'] }, mtd(E))) }),
-    'power.prevMonthKwh':     E => ({ win:'fixed', value:E.data.power.prevMonthKwh, unit:'kWh', d:2, labelKey:'pwPrevMonth', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], from:null, to:null, windowKey:'rpWin.prevMonth', windowParams:{} }) }),
-    'energy.performancePct':  E => ({ win:'fixed', value:E.data.energyLanding.performancePct, unit:'%', d:2, labelKey:'rpF.performance', sources:['model.opt'], basis:basisFor(E, Object.assign({ sources:['model.opt'] }, mtd(E))) }),
+    'energy.mtdKwh':          E => ({ win:'fixed', value:E.data.energyLanding.mtdKwh, unit:'kWh', d:1, labelKey:'pwMtd', sources:['meters.main'], basis:basisFor(E, Object.assign({ sources:['meters.main'] }, mtd(E))) }),
+    'power.prevMonthKwh':     E => ({ win:'fixed', value:E.data.power.prevMonthKwh, unit:'kWh', d:1, labelKey:'pwPrevMonth', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], from:null, to:null, windowKey:'rpWin.prevMonth', windowParams:{} }) }),
+    'energy.performancePct':  E => ({ win:'fixed', value:E.data.energyLanding.performancePct, unit:'%', d:1, labelKey:'rpF.performance', sources:['model.opt'], basis:basisFor(E, Object.assign({ sources:['model.opt'] }, mtd(E))) }),
     'power.contractedKw':     E => ({ win:'fixed', value:E.data.metrics.contractedKw, unit:'kW', d:0, labelKey:'rpF.contracted', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], windowKey:'rpWin.contract', windowParams:{} }) }),
     /* derived: tariff */
     'derived.energyCostTodayAed': E => { const v = E.data.metrics.energyTodayMwh * 1000 * E.data.basis.aedPerKwh;
-      return { win:'today', value:v, unit:'AED', d:2, labelKey:'rpF.energyCostToday', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }) }; },
+      return { win:'today', value:v, unit:'AED', d:1, labelKey:'rpF.energyCostToday', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }) }; },
     'derived.energyCostMtdAed':   E => { const v = E.data.energyLanding.mtdKwh * E.data.basis.aedPerKwh;
-      return { win:'fixed', value:v, unit:'AED', d:2, labelKey:'rpF.energyCostMtd', sources:['meters.main'], basis:basisFor(E, Object.assign({ sources:['meters.main'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
+      return { win:'fixed', value:v, unit:'AED', d:1, labelKey:'rpF.energyCostMtd', sources:['meters.main'], basis:basisFor(E, Object.assign({ sources:['meters.main'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
     'derived.energyCostPrevMonthAed': E => { const v = E.data.power.prevMonthKwh * E.data.basis.aedPerKwh;
-      return { win:'fixed', value:v, unit:'AED', d:2, labelKey:'rpF.energyCostPrev', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff', from:null, to:null, windowKey:'rpWin.prevMonth', windowParams:{} }) }; },
+      return { win:'fixed', value:v, unit:'AED', d:1, labelKey:'rpF.energyCostPrev', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff', from:null, to:null, windowKey:'rpWin.prevMonth', windowParams:{} }) }; },
     'derived.avoidableAedMo':     E => { const v = E.data.metrics.avoidableKwhMo * E.data.basis.aedPerKwh;
-      return { win:'fixed', value:v, unit:'AED', d:2, labelKey:'rpF.avoidableMo', sources:['model.opt'], basis:basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
+      return { win:'fixed', value:v, unit:'AED', d:1, labelKey:'rpF.avoidableMo', sources:['model.opt'], basis:basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
     'derived.wasteAedMtd':        E => { const v = E.data.energyLanding.wasteTotalKwh * E.data.basis.aedPerKwh;
-      return { win:'fixed', value:v, unit:'AED', d:2, labelKey:'rpF.wasteMtd', sources:['model.opt'], basis:basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
+      return { win:'fixed', value:v, unit:'AED', d:1, labelKey:'rpF.wasteMtd', sources:['model.opt'], basis:basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
     /* derived: emission */
     'derived.co2TodayT':          E => { const v = E.data.metrics.energyTodayMwh * E.data.basis.co2KgPerKwh;
-      return { win:'today', value:v, unit:'t CO₂', d:2, labelKey:'rpF.co2Today', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.mwhTimesFactor' }) }; },
+      return { win:'today', value:v, unit:'t CO₂', d:1, labelKey:'rpF.co2Today', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.mwhTimesFactor' }) }; },
     'derived.co2MtdT':            E => { const v = E.data.energyLanding.mtdKwh * E.data.basis.co2KgPerKwh / 1000;
-      return { win:'fixed', value:v, unit:'t CO₂', d:2, labelKey:'pwCarbon', sources:['meters.main'], basis:basisFor(E, Object.assign({ sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.kwhTimesFactor' }, mtd(E))) }; },
+      return { win:'fixed', value:v, unit:'t CO₂', d:1, labelKey:'pwCarbon', sources:['meters.main'], basis:basisFor(E, Object.assign({ sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.kwhTimesFactor' }, mtd(E))) }; },
     'derived.co2PrevMonthT':      E => { const v = E.data.power.prevMonthKwh * E.data.basis.co2KgPerKwh / 1000;
-      return { win:'fixed', value:v, unit:'t CO₂', d:2, labelKey:'rpF.co2Prev', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.kwhTimesFactor', from:null, to:null, windowKey:'rpWin.prevMonth', windowParams:{} }) }; },
+      return { win:'fixed', value:v, unit:'t CO₂', d:1, labelKey:'rpF.co2Prev', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.kwhTimesFactor', from:null, to:null, windowKey:'rpWin.prevMonth', windowParams:{} }) }; },
     /* water / gas */
-    'water.todayM3':      E => ({ win:'today', value:E.data.water.todayM3, unit:'m³', d:0, labelKey:'kWaterToday', sources:['meter.W-01'], basis:basisFor(E, { sources:['meter.W-01'] }) }),
-    'water.tankVolumeM3': E => ({ win:'fixed', value:E.data.water.tankVolumeM3, unit:'m³', d:0, labelKey:'rpF.tankVolume', sources:['bms'], basis:basisFor(E, Object.assign({ sources:['bms'] }, at(E))) }),
+    'water.todayM3':      E => ({ win:'today', value:E.data.water.todayM3, unit:'m³', d:1, labelKey:'kWaterToday', sources:['meter.W-01'], basis:basisFor(E, { sources:['meter.W-01'] }) }),
+    'water.tankVolumeM3': E => ({ win:'fixed', value:E.data.water.tankVolumeM3, unit:'m³', d:1, labelKey:'rpF.tankVolume', sources:['bms'], basis:basisFor(E, Object.assign({ sources:['bms'] }, at(E))) }),
     'derived.waterAutonomyDays': E => { const w = E.data.water; const v = w.tankVolumeM3 / w.meterAvgM3Day;
       return { win:'fixed', value:v, unit:'d', d:1, labelKey:'rpF.autonomy', sources:['bms','meter.W-01'], basis:basisFor(E, Object.assign({ sources:['bms','meter.W-01'], formulaKey:'rpFx.volumeOverDraw' }, at(E))) }; },
     'water.meterUptimePct': E => ({ win:'fixed', value:E.data.water.meter.uptimePct, unit:'%', d:1, labelKey:'rpF.meterUptime', sources:['meter.W-01'], basis:basisFor(E, { sources:['meter.W-01'], from:null, windowKey:'rpWin.lastD', windowParams:{ n:30 } }) }),
-    'gas.todayM3':        E => ({ win:'today', value:E.data.gas.todayM3, unit:'m³', d:0, labelKey:'kGasToday', sources:['meter.G-01'], basis:basisFor(E, { sources:['meter.G-01'] }) }),
-    'gas.mtdM3':          E => ({ win:'fixed', value:E.data.gas.mtdM3, unit:'m³', d:0, labelKey:'rpF.gasMtd', sources:['meter.G-01'], basis:basisFor(E, Object.assign({ sources:['meter.G-01'] }, mtd(E))) }),
-    'gas.avg7M3':         E => ({ win:'fixed', value:E.data.gas.avg7M3, unit:'m³/d', d:0, labelKey:'rpF.gasAvg7', sources:['meter.G-01'], basis:basisFor(E, { sources:['meter.G-01'], from:null, windowKey:'rpWin.lastD', windowParams:{ n:7 } }) }),
+    'gas.todayM3':        E => ({ win:'today', value:E.data.gas.todayM3, unit:'m³', d:1, labelKey:'kGasToday', sources:['meter.G-01'], basis:basisFor(E, { sources:['meter.G-01'] }) }),
+    'gas.mtdM3':          E => ({ win:'fixed', value:E.data.gas.mtdM3, unit:'m³', d:1, labelKey:'rpF.gasMtd', sources:['meter.G-01'], basis:basisFor(E, Object.assign({ sources:['meter.G-01'] }, mtd(E))) }),
+    'gas.avg7M3':         E => ({ win:'fixed', value:E.data.gas.avg7M3, unit:'m³/d', d:1, labelKey:'rpF.gasAvg7', sources:['meter.G-01'], basis:basisFor(E, { sources:['meter.G-01'], from:null, windowKey:'rpWin.lastD', windowParams:{ n:7 } }) }),
     'derived.gasCostMtdAed': E => { const v = E.data.gas.mtdM3 * E.data.gas.tariffAedM3;
-      return { win:'fixed', value:v, unit:'AED', d:2, labelKey:'rpF.gasCostMtd', sources:['meter.G-01'], basis:basisFor(E, Object.assign({ sources:['meter.G-01'], tariff:gasTariff(E), formulaKey:'rpFx.m3TimesTariff' }, mtd(E))) }; },
+      return { win:'fixed', value:v, unit:'AED', d:1, labelKey:'rpF.gasCostMtd', sources:['meter.G-01'], basis:basisFor(E, Object.assign({ sources:['meter.G-01'], tariff:gasTariff(E), formulaKey:'rpFx.m3TimesTariff' }, mtd(E))) }; },
     /* alarms (counts derive from the one list) */
     'alarms.open':     E => ({ win:'fixed', value:E.data.alarms.length, unit:'', d:0, labelKey:'rpF.alarmsOpen', sources:['alarms'], basis:basisFor(E, Object.assign({ sources:['alarms'] }, at(E))) }),
     'alarms.critical': E => ({ win:'fixed', value:E.data.alarms.filter(a => a.sev === 'critical').length, unit:'', d:0, labelKey:'rpSev.critical', sources:['alarms'], basis:basisFor(E, Object.assign({ sources:['alarms'] }, at(E))) }),

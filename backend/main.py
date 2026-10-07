@@ -259,6 +259,13 @@ async def realtime_loop():
             cached_alarm_data = _flatten_alarms(client.last_alarm_rows, CONFIG.get("severity_bands", {}))
             cached_facility = _compute_facility_services(realtime)
             cached_power_history = await client.fetch_power_histories(pw_endpoints)
+            if (
+                "Hourly_Energy_Consumption_his" in cached_power_history
+                and "Total_Power_Consumption_his" not in cached_power_history
+            ):
+                cached_power_history["Total_Power_Consumption_his"] = cached_power_history[
+                    "Hourly_Energy_Consumption_his"
+                ]
             cached_building_data = {
                 "status": "success",
                 "Building_Info": {
@@ -278,7 +285,11 @@ async def live_loop():
     """Poll configured live points; failed reads stay null, never a fake 0."""
     global cached_power_data
 
-    live_ids = CONFIG.get("live_point_ids", {})
+    live_ids = {
+        k: v
+        for k, v in (CONFIG.get("live_point_ids") or {}).items()
+        if not str(k).startswith("_") and isinstance(v, str) and ":r:" in v
+    }
     interval = CONFIG.get("polling", {}).get("live_ms", 5000) / 1000
 
     while client and client.is_authenticated:
@@ -291,6 +302,8 @@ async def live_loop():
                 key: None if isinstance(val, Exception) else val
                 for key, val in zip(live_ids, values)
             }
+            if "hourly_energy" in live_results and "total_power" not in live_results:
+                live_results["total_power"] = live_results["hourly_energy"]
             cached_power_data = {
                 "timestamp": datetime.now().isoformat(),
                 **live_results,
@@ -335,24 +348,28 @@ def _extract_meters(realtime: dict, profile: dict) -> dict:
 
     meters: dict = {}
     for floor_data in realtime.values():
-        for eq in floor_data.get("hvac", []):
-            name = str(eq.get("name", ""))
-            if not name.upper().startswith(prefix):
+        buckets = floor_data.values() if isinstance(floor_data, dict) else []
+        for items in buckets:
+            if not isinstance(items, list):
                 continue
-            metrics: dict = {key: None for key in point_map}
-            for pt in eq.get("points", []):
-                nav = str(pt.get("navName", "")).lower().replace("-", " ").replace("_", " ")
-                best_key, best_len = None, -1
-                for key, aliases in point_map.items():
-                    for alias in aliases:
-                        if alias in nav and len(alias) > best_len:
-                            best_key, best_len = key, len(alias)
-                if not best_key:
+            for eq in items:
+                name = str(eq.get("name", ""))
+                if not name.upper().startswith(prefix):
                     continue
-                match = re.search(r"-?\d+(?:\.\d+)?", str(pt.get("currentValue", "")))
-                if match:
-                    metrics[best_key] = float(match.group())
-            meters[name] = metrics
+                metrics: dict = {key: None for key in point_map}
+                for pt in eq.get("points", []):
+                    nav = str(pt.get("navName", "")).lower().replace("-", " ").replace("_", " ")
+                    best_key, best_len = None, -1
+                    for key, aliases in point_map.items():
+                        for alias in aliases:
+                            if alias in nav and len(alias) > best_len:
+                                best_key, best_len = key, len(alias)
+                    if not best_key:
+                        continue
+                    match = re.search(r"-?\d+(?:\.\d+)?", str(pt.get("currentValue", "")))
+                    if match:
+                        metrics[best_key] = float(match.group())
+                meters[name] = metrics
     return meters
 
 
@@ -443,6 +460,7 @@ def _flatten_equip(realtime: dict) -> list[dict]:
                     "category": category,
                     "type": _equip_type(tags, classes.get("type_priority") or []),
                     "tags": tags,
+                    "system": str(eq.get("system") or "").strip().lower(),
                     "isSystem": bool(system_tags & set(tags)) if system_tags else True,
                     "inAlarm": len(alarms) > 0,
                     "alarms": alarms,
@@ -1534,7 +1552,11 @@ async def serve_viewer():
     """Serve the viewer SPA; it shows its own sign-in overlay until a session exists."""
     viewer_path = os.path.join(STATIC_DIR, "viewer.html")
     if os.path.exists(viewer_path):
-        return FileResponse(viewer_path, media_type="text/html")
+        return FileResponse(
+            viewer_path,
+            media_type="text/html",
+            headers={"Cache-Control": "no-store, must-revalidate"},
+        )
     return {"error": "Viewer not found. Make sure static/ folder is present."}
 
 

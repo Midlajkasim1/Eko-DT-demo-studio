@@ -33,6 +33,40 @@
     return m ? m[1] : (s.slice(0, 40) || 'FIN');
   }
 
+  /* Systems overlay groups key on these labels: HVAC, Electrical, Life safety, Security. */
+  var FIN_SYS = { mechanical: 'Mechanical', electrical: 'Electrical', ems: 'EMS', utility: 'Utilities', utilities: 'Utilities' };
+
+  function sysFromFin(eq) {
+    var fin = String((eq && eq.system) || '').toLowerCase().trim();
+    if (FIN_SYS[fin]) return FIN_SYS[fin];
+    return classifySys(((eq && eq.name) || '') + ' ' + ((eq && eq.type) || ''), null);
+  }
+
+  function classifySys(text, asset) {
+    if (asset && asset.sys && FIN_SYS[String(asset.sys).toLowerCase()]) return FIN_SYS[String(asset.sys).toLowerCase()];
+    if (asset && ['Mechanical', 'Electrical', 'EMS', 'Utilities', 'Life safety', 'Security'].indexOf(asset.sys) >= 0) return asset.sys;
+    if (asset && asset.sys) {
+      if (asset.sys === 'elec') return 'Electrical';
+      if (asset.sys === 'ems') return 'EMS';
+      if (asset.sys === 'util') return 'Utilities';
+      if (asset.sys === 'fire') return 'Life safety';
+      if (asset.sys === 'sec') return 'Security';
+      if (asset.sys === 'hvac' || asset.sys === 'vent' || asset.sys === 'pumps') return 'Mechanical';
+    }
+    var s = String(text || (asset && (asset.id + ' ' + (asset.typeEn || ''))) || '').toLowerCase();
+    function hit(words) {
+      return words.some(function (w) {
+        return new RegExp('(?:^|[^a-z0-9])' + w + '(?:[^a-z0-9]|\\d|$)').test(s);
+      });
+    }
+    if (hit(['water', 'gas', 'plumbing'])) return 'Utilities';
+    if (hit(['pmu'])) return 'EMS';
+    if (hit(['mcc', 'smdb', 'lvfp', 'ats', 'edb', 'ups', 'elec', 'emcc', 'lighting']) || /(?:^|[^a-z0-9])db[-_]/.test(s)) return 'Electrical';
+    if (hit(['facp', 'fm200', 'fire', 'smoke', 'sprinkler', 'detector']) || /(?:^|[^a-z0-9])fd[-_]/.test(s)) return 'Life safety';
+    if (hit(['cctv', 'camera']) || /(?:^|[^a-z0-9])cam[-_]/.test(s)) return 'Security';
+    return 'Mechanical';
+  }
+
   function mapAlarm(a, i) {
     var src = a.source || '';
     var msg = a.message || src;
@@ -50,7 +84,7 @@
       bimId: matchedAsset ? matchedAsset.bimId : null,
       sev: sev(a.severity),
       cat: a.diagnosed ? 'fdd' : 'sys',
-      sys: src || 'System',
+      sys: classifySys(src + ' ' + msg, matchedAsset),
       ack: null,
       ageH: ageH(a.occurred),
       locEn: src,
@@ -91,12 +125,28 @@
     return null;
   }
 
-  function toMw(v) {
-    return v > 50 ? v / 1000 : v;
+  function trunc1(v) {
+    if (v == null || !isFinite(v)) return v;
+    return Math.trunc(v * 10 + (v < 0 ? -1e-9 : 1e-9)) / 10;
   }
 
-  function toMwh(v) {
-    return v >= 200 ? v / 1000 : v;
+  function kpiStatus(v) {
+    if (v == null || v === '') return { en: null, ar: null, tone: 'ok' };
+    if (typeof v === 'number' && isFinite(v)) {
+      var pct = Math.abs(v) <= 1 ? v * 100 : v;
+      if (pct >= 80) return { en: 'Excellent', ar: 'ممتاز', tone: 'ok' };
+      if (pct >= 50) return { en: 'Fair', ar: 'مقبول', tone: 'warn' };
+      return { en: 'Poor', ar: 'ضعيف', tone: 'warn' };
+    }
+    var s = String(v).replace(/^s:/, '').replace(/^"|"$/g, '').trim();
+    if (!s) return { en: null, ar: null, tone: 'ok' };
+    var low = s.toLowerCase();
+    var tone = /poor|crit|bad|alarm|fail|deviat/.test(low) ? 'warn' : /warn|fair|caution/.test(low) ? 'warn' : 'ok';
+    return { en: s, ar: s, tone: tone };
+  }
+
+  function toMw(v) {
+    return v > 50 ? v / 1000 : v;
   }
 
   var ZONE_NAMES = ["MCC 1","MCC 2","Kitchen SMDB","LVFP","ATS","Sump pump"];
@@ -104,13 +154,14 @@
   var BOARD_KEYS = ["mcc1","mcc2","smdb_kit","lvfp","ats","sump_pump"];
   var PMU_IDS = ["PMU09","PMU04","PMU05","PMU06","PMU07","PMU08"];
   var PMU_HIS = {
-    PMU09: "PMU09_MCC_01_his",
-    PMU04: "PMU04_MCC_02_his",
-    PMU05: "PMU05_SMDB_KIT_his",
-    PMU06: "PMU06_LVFP_Z7_01_his",
-    PMU07: "PMU07_ATS_E_his",
-    PMU08: "PMU08_SWPS02_his"
+    PMU09: "Hourly_EC_MCC1_his",
+    PMU04: "Hourly_EC_MCC2_his",
+    PMU05: "Hourly_EC_SMDB_KIT_his",
+    PMU06: "Hourly_EC_LVFP_his",
+    PMU07: "Hourly_EC_ATS_his",
+    PMU08: "Hourly_EC_SP_his"
   };
+  var lastBoardKwh = {};
 
   function applyPower(p) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
@@ -124,15 +175,18 @@
       obj[key] = val;
       changed = true;
     }
-    var loadKw = asNum(p.total_power);
-    if (loadKw != null) { set(m, "loadNowMw", toMw(loadKw)); set(el, "currentKw", loadKw); }
-    var daily = asNum(p.daily_energy);
-    if (daily != null) set(m, "energyTodayMwh", toMwh(daily));
+    var loadKw = asNum(p.hourly_energy != null ? p.hourly_energy : p.total_power);
+    if (loadKw != null) { set(m, "loadNowMw", trunc1(toMw(loadKw))); set(el, "currentKw", trunc1(loadKw)); }
     var peak = asNum(p.peak_demand);
-    if (peak != null) set(m, "peakTodayMw", toMw(peak));
+    if (peak != null) {
+      set(m, "peakTodayKw", trunc1(peak));
+      set(m, "peakTodayMw", trunc1(peak / 1000));
+    }
+    var carbonKgH = asNum(p.carbon);
+    if (carbonKgH != null) set(el, "carbonKgH", trunc1(carbonKgH));
     var iaq = asNum(p.iaq_index);
     if (iaq != null) {
-      set(m, "iaq", iaq);
+      set(m, "iaq", trunc1(iaq));
       if (site.spaces) {
         set(site.spaces, "ieq", iaq);
         var q = iaq >= 80 ? "good" : iaq >= 60 ? "moderate" : "poor";
@@ -142,54 +196,99 @@
     }
     var comfort = asNum(p.comfort_compliance);
     if (comfort != null) {
-      set(m, "comfortIndex", comfort);
+      set(m, "comfortIndex", trunc1(comfort));
       if (site.spaces) {
-        set(site.spaces, "comfortPct", comfort);
+        set(site.spaces, "comfortPct", trunc1(comfort));
         set(site.spaces, "spComfortCap", "within target band");
       }
     }
     var water = asNum(p.total_water);
     if (water != null) {
-      set(m, "waterTodayM3", water);
+      set(m, "waterTodayM3", trunc1(water));
       if (site.landing && site.landing.water) {
-        set(site.landing.water, "headEn", Math.round(water) + " m³ today");
-        set(site.landing.water, "headAr", Math.round(water) + " م³ اليوم");
+        set(site.landing.water, "headEn", trunc1(water) + " m³ today");
+        set(site.landing.water, "headAr", trunc1(water) + " م³ اليوم");
       }
     }
     var gas = asNum(p.total_gas);
     if (gas != null) {
-      set(m, "gasTodayM3", gas);
+      set(m, "gasTodayM3", trunc1(gas));
       if (site.landing && site.landing.gas) {
-        set(site.landing.gas, "headEn", Math.round(gas) + " m³ today");
-        set(site.landing.gas, "headAr", Math.round(gas) + " م³ اليوم");
+        set(site.landing.gas, "headEn", trunc1(gas) + " m³ today");
+        set(site.landing.gas, "headAr", trunc1(gas) + " م³ اليوم");
       }
     }
     var mtd = asNum(p.current_month);
-    if (mtd != null) set(el, "mtdKwh", mtd);
+    if (mtd != null) set(el, "mtdKwh", trunc1(mtd));
     var perf = asNum(p.energy_performance);
     if (perf != null && perf >= 0 && perf <= 500) {
-      set(el, "performancePct", perf);
+      set(el, "performancePct", trunc1(perf));
     } else {
       el.performancePct = null;
     }
     
     // Wire live endpoints to Energy Landing summary cards
     if (el) {
-      var rawOvernight = asNum(p.after_hours_load);
+      var rawOvernight = asNum(p.after_hours_deviation != null ? p.after_hours_deviation : p.energy_performance);
       var rawEnDev = asNum(p.energy_deviation);
-      
-      var overnight = (rawOvernight != null && rawOvernight >= 0 && rawOvernight <= 100) ? rawOvernight : null;
+      var overnight = rawOvernight;
       var enDev = (rawEnDev != null && rawEnDev >= -100 && rawEnDev <= 100) ? rawEnDev : null;
-      
-      set(el, "overnightDeviationPct", overnight);
-      
+      var nightSt = kpiStatus(p.kpi_after_hours_ratio);
+
+      if (overnight != null) set(el, "overnightDeviationPct", trunc1(overnight));
+      else el.overnightDeviationPct = null;
+      set(el, "overnightWordEn", nightSt.en);
+      set(el, "overnightWordAr", nightSt.ar);
+      set(el, "overnightTone", nightSt.tone);
+
       if (el.sumGauges) {
         el.sumGauges.forEach(function(g) {
           if (g.key === "enDev" && enDev != null) {
-            set(g, "val", Math.trunc(enDev * 10) / 10);
+            set(g, "val", trunc1(enDev));
             set(g, "wordEn", Math.abs(enDev) <= 5 ? "Healthy" : "Deviation");
             set(g, "wordAr", Math.abs(enDev) <= 5 ? "سليم" : "انحراف");
             set(g, "tone", Math.abs(enDev) <= 5 ? "ok" : "warn");
+          }
+        });
+      }
+
+      if (el.kpis) {
+        var lossIdle = asNum(p.energy_loss_idle);
+        var lossHvac = asNum(p.energy_loss_hvac);
+        var costIdle = asNum(p.cost_impact_idle);
+        var costHvac = asNum(p.cost_impact_hvac);
+        var eprVal = asNum(p.hvac_epr);
+        var eprSt = kpiStatus(p.kpi_hvac_epr);
+        el.kpis.forEach(function (k) {
+          if (k.key === "overnight") {
+            if (overnight != null) set(k, "gaugeVal", trunc1(overnight));
+            set(k, "stateEn", nightSt.en);
+            set(k, "stateAr", nightSt.ar);
+            set(k, "tone", nightSt.tone);
+            if (lossIdle != null) set(k, "wasteKwh", trunc1(lossIdle));
+            if (costIdle != null) set(k, "costAed", trunc1(costIdle));
+          }
+          if (k.key === "epr") {
+            if (eprVal != null) set(k, "gaugeVal", trunc1(eprVal));
+            set(k, "stateEn", eprSt.en);
+            set(k, "stateAr", eprSt.ar);
+            set(k, "tone", eprSt.tone);
+            if (lossHvac != null) set(k, "wasteKwh", trunc1(lossHvac));
+            if (costHvac != null) set(k, "costAed", trunc1(costHvac));
+          }
+        });
+        var wasteSum = 0, wasteN = 0, costSum = 0, costN = 0;
+        el.kpis.forEach(function (k) {
+          if (k.wasteKwh != null && isFinite(k.wasteKwh)) { wasteSum += k.wasteKwh; wasteN++; }
+          if (k.costAed != null && isFinite(k.costAed)) { costSum += k.costAed; costN++; }
+        });
+        if (wasteN) set(el, "wasteTotalKwh", trunc1(wasteSum));
+        if (costN) set(el, "wasteTotalAed", trunc1(costSum));
+        /* Adnocwarsan risk: KPI waste kWh / current-month kWh, bar clamped 0–100. */
+        var monthKwh = asNum(p.current_month);
+        el.kpis.forEach(function (k) {
+          if (monthKwh > 0 && k.wasteKwh != null && k.wasteKwh > 0) {
+            set(k, "sharePct", trunc1(k.wasteKwh / monthKwh * 100));
           }
         });
       }
@@ -198,7 +297,7 @@
     // Wire live endpoints to the Systems HVAC & Mechanical stat cards
     // Sanity-checked: reject any value outside a physically plausible range → stays null → shows '--'
     if (site.systems && site.systems.groups) {
-      var hvacGrp = site.systems.groups.find(function(g) { return g.id === "hvac"; });
+      var hvacGrp = site.systems.groups.find(function(g) { return g.id === "mechanical" || g.id === "hvac"; });
       if (hvacGrp && hvacGrp.cards) {
         var rawTempDev  = asNum(p.temp_deviation);
         var rawEnPerf   = asNum(p.energy_performance);
@@ -210,15 +309,15 @@
         hvacGrp.cards.forEach(function(c) {
           if (c.labelEn === "TEMPERATURE DEVIATION INDEX") {
             if (tempDev != null) {
-              set(c, "v", String(Math.trunc(tempDev * 10) / 10));
+              set(c, "v", trunc1(tempDev));
               set(c, "capEn", tempDev > 2 ? "Warning" : "Normal");
               set(c, "capAr", tempDev > 2 ? "تحذير" : "طبيعي");
               set(c, "tone", tempDev > 2 ? "warn" : "ok");
             }
           }
-          if (c.labelEn === "ENERGY PERFORMANCE RATIO") {
+          if (c.labelEn === "ENERGY PERFORMANCE") {
             if (enPerf != null) {
-              set(c, "v", String(Math.trunc(enPerf * 100) / 100));
+              set(c, "v", trunc1(enPerf));
               set(c, "capEn", enPerf < 1.2 ? "Healthy" : "Above target");
               set(c, "capAr", enPerf < 1.2 ? "سليم" : "فوق الهدف");
               set(c, "tone", enPerf < 1.2 ? "ok" : "warn");
@@ -226,7 +325,7 @@
           }
           if (c.labelEn === "COMFORT ENERGY INDEX") {
             if (comfIdx != null) {
-              set(c, "v", String(Math.trunc(comfIdx * 100) / 100));
+              set(c, "v", trunc1(comfIdx));
               set(c, "capEn", comfIdx >= 60 ? "Good" : comfIdx >= 40 ? "Fair" : "Poor");
               set(c, "capAr", comfIdx >= 60 ? "جيد" : comfIdx >= 40 ? "مقبول" : "ضعيف");
               set(c, "tone", comfIdx >= 60 ? "ok" : "warn");
@@ -248,13 +347,13 @@
         
         elecGrp.cards.forEach(function(c) {
           if (c.labelEn === "ENERGY DEVIATION" && enDev != null) {
-            set(c, "v", String(Math.trunc(enDev * 10) / 10));
+            set(c, "v", trunc1(enDev));
             set(c, "capEn", Math.abs(enDev) <= 5 ? "Healthy" : "Deviation");
             set(c, "capAr", Math.abs(enDev) <= 5 ? "سليم" : "انحراف");
             set(c, "tone", Math.abs(enDev) <= 5 ? "ok" : "warn");
           }
           if (c.labelEn === "PEAK DEMAND" && peakD != null) {
-            set(c, "v", String(Math.trunc(peakD * 10) / 10));
+            set(c, "v", trunc1(peakD));
             set(c, "capEn", "Recorded");
             set(c, "capAr", "مسجل");
             set(c, "tone", "ok");
@@ -304,8 +403,8 @@
         }
       }
 
-      var enSpark = extractDaily("Total_Power_Consumption_his");
-      if (site.summary) { applySparkAndDelta(site.summary[0], enSpark); changed = true; }
+      var enSpark = extractDaily("Hourly_Energy_Consumption_his");
+      if (!enSpark.length) enSpark = extractDaily("Total_Power_Consumption_his");
       var wtSpark = extractDaily("Total_Water_Consumption_his");
       if (site.summary) { applySparkAndDelta(site.summary[1], wtSpark); changed = true; }
       var gsSpark = extractDaily("Total_Gas_Consumption_his");
@@ -409,6 +508,61 @@
           var n = new Date();
           return { y: n.getFullYear(), m: n.getMonth(), d: n.getDate(), h: n.getHours() };
         }
+      }
+
+      function shiftDay(y, m, d, delta) {
+        var dt = new Date(Date.UTC(y, m, d));
+        dt.setUTCDate(dt.getUTCDate() + delta);
+        return { y: dt.getUTCFullYear(), m: dt.getUTCMonth(), d: dt.getUTCDate() };
+      }
+
+      function hoursThrough(flat, y, m, d, maxH) {
+        var hours = [], i;
+        for (i = 0; i <= maxH; i++) hours.push(null);
+        (flat || []).forEach(function (pt) {
+          if (pt.y === y && pt.m === m && pt.d === d && pt.h >= 0 && pt.h <= maxH) hours[pt.h] = pt.val;
+        });
+        return hours;
+      }
+
+      function sumKnown(arr) {
+        var s = 0, n = 0;
+        (arr || []).forEach(function (v) {
+          if (v != null && isFinite(v)) { s += v; n++; }
+        });
+        return n ? s : null;
+      }
+
+      /* FIN nav name is Hourly_Energy_Consumption. Each sample is that hour's
+         kWh. Energy today is midnight through the current hour, Dubai time.
+         Yesterday uses the same hours so the percent and the spark match. */
+      var hourlyFlat = flattenHist(
+        p.power_history.Hourly_Energy_Consumption_his || p.power_history.Total_Power_Consumption_his
+      );
+      var nowP = nowParts();
+      var yestP = shiftDay(nowP.y, nowP.m, nowP.d, -1);
+      var todayHours = hoursThrough(hourlyFlat, nowP.y, nowP.m, nowP.d, nowP.h);
+      var yestHours = hoursThrough(hourlyFlat, yestP.y, yestP.m, yestP.d, nowP.h);
+      var todayKwh = sumKnown(todayHours);
+      var yestKwh = sumKnown(yestHours);
+      if (todayKwh != null) {
+        set(m, "energyTodayKwh", trunc1(todayKwh));
+        set(m, "energyTodayMwh", todayKwh / 1000);
+      }
+      if (site.summary && site.summary[0]) {
+        var energyRow = site.summary[0];
+        energyRow.spark = todayHours;
+        energyRow.sparkCompare = yestHours;
+        if (todayKwh != null && yestKwh != null && yestKwh > 0) {
+          var yPct = Math.round(((todayKwh - yestKwh) / yestKwh) * 100);
+          var ySign = yPct > 0 ? "+" : "";
+          energyRow.deltaEn = ySign + yPct + "% vs yesterday";
+          energyRow.deltaAr = ySign + yPct + "% مقارنة بالأمس";
+        } else {
+          energyRow.deltaEn = null;
+          energyRow.deltaAr = null;
+        }
+        changed = true;
       }
 
       function todayHourly(flat) {
@@ -730,7 +884,7 @@
             for (wi = 0; wi < wToday.length; wi++) {
               if (wToday[wi]) { wtSum += wToday[wi]; wtN++; }
             }
-            if (wtN) site.water.todayM3 = Math.trunc(wtSum * 100) / 100;
+            if (wtN) site.water.todayM3 = trunc1(wtSum);
             var dayKeys7 = [], di, ddt;
             for (di = 6; di >= 0; di--) {
               ddt = new Date(now.y, now.m, now.d - di);
@@ -742,7 +896,7 @@
             var last7 = bucket(wFlat, function (pt) { return pt.y + "-" + (pt.m + 1) + "-" + pt.d; }, dayKeys7, "sum");
             var a7 = 0, n7 = 0;
             last7.forEach(function (v) { if (v) { a7 += v; n7++; } });
-            if (n7) site.water.avgDrawM3Day = Math.trunc((a7 / n7) * 10) / 10;
+            if (n7) site.water.avgDrawM3Day = trunc1(a7 / n7);
             if (wToday.length > 1) site.water.sparkToday = wToday;
             else if (n7) site.water.sparkToday = last7;
             changed = true;
@@ -753,7 +907,7 @@
       // ---- GAS page wiring ------------------------------------------------
       if (site.gas) {
         if (p.total_gas != null) {
-          site.gas.todayM3 = Math.trunc(asNum(p.total_gas) * 100) / 100;
+          site.gas.todayM3 = trunc1(asNum(p.total_gas));
           changed = true;
         }
         if (p.power_history && p.power_history.Total_Gas_Consumption_his) {
@@ -790,7 +944,7 @@
             for (gi = 0; gi < gToday.length; gi++) {
               if (gToday[gi]) { gtSum += gToday[gi]; gtN++; }
             }
-            if (gtN) site.gas.todayM3 = Math.trunc(gtSum * 100) / 100;
+            if (gtN) site.gas.todayM3 = trunc1(gtSum);
   
             // 7-day average
             var gDay7 = [], gdi, gddt;
@@ -802,14 +956,14 @@
             var gLast7 = bucket(gFlat, function(pt){ return pt.y + "-" + (pt.m + 1) + "-" + pt.d; }, gDay7, "sum");
             var ga7 = 0, gn7 = 0;
             gLast7.forEach(function(v){ if (v) { ga7 += v; gn7++; } });
-            if (gn7) site.gas.avg7M3 = Math.trunc((ga7 / gn7) * 10) / 10;
+            if (gn7) site.gas.avg7M3 = trunc1(ga7 / gn7);
   
             // Month-to-date
             var gmtdSum = 0;
             gFlat.forEach(function(pt){
               if (pt.y === gNow.y && pt.m === gNow.m) gmtdSum += pt.val;
             });
-            if (gmtdSum > 0) site.gas.mtdM3 = Math.trunc(gmtdSum * 10) / 10;
+            if (gmtdSum > 0) site.gas.mtdM3 = trunc1(gmtdSum);
   
             // daily14 — last 14 days for the bar chart (replaces mock array)
             var g14 = [], g14i, g14dt;
@@ -849,7 +1003,21 @@
         site.power.zoneHues = ZONE_HUES;
         changed = true;
       }
+      PMU_IDS.forEach(function (id, i) {
+        var kwh = asNum(p[BOARD_KEYS[i]]);
+        if (kwh == null && site.power.boards && site.power.boards[i]) kwh = asNum(site.power.boards[i][1]);
+        if (kwh != null) lastBoardKwh[id] = kwh;
+      });
+      if (Array.isArray(site.power.pmus)) {
+        site.power.pmus.forEach(function (row) {
+          if (row && lastBoardKwh[row.id] != null) {
+            var next = trunc1(lastBoardKwh[row.id]);
+            if (row.kwh !== next) { row.kwh = next; changed = true; }
+          }
+        });
+      }
     }
+    countUtilityAndEmsMeters(site, site.assets);
     if (changed) paint();
   }
 
@@ -890,6 +1058,10 @@
       var k = pmuKey(name);
       if (k) byKey[k] = { name: name, row: meters[name] || {} };
     });
+    (site.assets || []).forEach(function (a) {
+      var k = pmuKey(a.id);
+      if (k && !byKey[k]) byKey[k] = { name: a.id, row: {} };
+    });
     function rowOf(meta, live) {
       var r = live && live.row;
       var db = meta.db;
@@ -900,13 +1072,20 @@
         kw: r ? asNum(r.active_power) : null,
         a: r ? asNum(r.current) : null,
         hz: r ? asNum(r.frequency) : null,
-        kwh: r ? asNum(r.total_energy) : null,
+        kwh: lastBoardKwh[meta.id] != null ? lastBoardKwh[meta.id] : (r ? asNum(r.total_energy) : null),
         v: r ? asNum(r.voltage) : null,
         pf: null
       };
     }
-    site.power.pmus = PMU_CANON.map(function (meta) {
-      return rowOf(meta, byKey[meta.id]);
+    var canonDb = {};
+    PMU_CANON.forEach(function (m) { canonDb[m.id] = m.db; });
+    var ids = Object.keys(byKey);
+    ids.sort(function (a, b) {
+      return (parseInt(a.replace(/\D/g, ""), 10) || 0) - (parseInt(b.replace(/\D/g, ""), 10) || 0);
+    });
+    if (!ids.length) ids = PMU_CANON.map(function (m) { return m.id; });
+    site.power.pmus = ids.map(function (id) {
+      return rowOf({ id: id, db: canonDb[id] }, byKey[id]);
     });
     paint();
   }
@@ -924,13 +1103,10 @@
       if (/chiller|pump|mcc|smdb|facp/i.test(eq.type)) crit = "A";
       else if (/ahu|fahu|mahu|lift/i.test(eq.type)) crit = "B";
 
-      var sys = "hvac";
-      if (/mcc|smdb|elec/i.test(eq.type)) sys = "elec";
-      if (/facp|fm200|is|cctv/i.test(eq.type)) sys = "sec";
-      if (/fan|exhaust|extract|vav/i.test(eq.type)) sys = "vent";
+      var sys = sysFromFin(eq);
 
-      var params = (eq.points || []).filter(function(p) { return p.reporting; }).slice(0, 4).map(function(p) {
-        return [p.navName, "BMS", p.currentValue];
+      var params = (eq.points || []).filter(function(p) { return p.reporting; }).map(function(p) {
+        return [p.navName, "", p.currentValue];
       });
 
       var alarmIds = (site.alarms || []).filter(function(a) { return namesMatch(a.asset, eq.name) || namesMatch(a.asset, eq.bimId); }).map(function(a) { return a.id; });
@@ -1049,12 +1225,12 @@
           if (!site.alarms) site.alarms = [];
           site.alarms.push({
             id: 'al-live-' + asset.id.toLowerCase().replace(/\W/g, '-'),
-            fam: asset.sys || 'hvac',
+            fam: 'sys',
             asset: asset.id,
             bimId: asset.bimId,
             sev: 'high',
             cat: 'sys',
-            sys: asset.sys === 'elec' ? 'Electrical' : 'HVAC',
+            sys: asset.sys || 'Mechanical',
             ack: null,
             ageH: 0.5,
             locEn: (asset.typeEn || 'Equipment') + ' · ' + (asset.floor || 'Level'),
@@ -1071,11 +1247,16 @@
         }
       }
       (site.alarms || []).forEach(function(al) {
-        if (namesMatch(al.asset, asset.id)) {
+        if (namesMatch(al.asset, asset.id) || (asset.bimId && al.bimId === asset.bimId)) {
           al.bimId = al.bimId || asset.bimId;
+          al.sys = classifySys(al.locEn || al.asset, asset);
         }
       });
     });
+
+    if (site.power) {
+      applyMeters((window.DashboardData && window.DashboardData.meters) || {});
+    }
 
     if (window.EKO_HOST_ENGINE && typeof window.EKO_HOST_ENGINE.resolveAllAssetPositions === 'function') {
       window.EKO_HOST_ENGINE.resolveAllAssetPositions();
@@ -1083,77 +1264,87 @@
       window.EKO_HOST_ENGINE.applyStatusColors();
     }
 
-    // Dynamically update the HVAC Equipment and Overall Health cards from live data
     if (site.systems && site.systems.groups) {
-      var hvacGrp = site.systems.groups.find(function(g) { return g.id === "hvac"; });
-      if (hvacGrp && hvacGrp.cards) {
-        var hvacAssets = newAssets.filter(function(a) { return a.sys === "hvac" || a.sys === "vent"; });
-        var hvacTotal = hvacAssets.length;
-        var hvacAlarm = hvacAssets.filter(function(a) { return a.st === "alarm"; }).length;
-        var hvacActive = hvacTotal - hvacAlarm;
-        var healthPct = hvacTotal > 0 ? Math.round((hvacActive / hvacTotal) * 1000) / 10 : null;
-        var inactiveCount = hvacAlarm;
-
-        hvacGrp.cards.forEach(function(c) {
-          if (c.labelEn === "OVERALL HEALTH" && healthPct != null) {
+      site.systems.groups.forEach(function (grp) {
+        if (!grp.cards || grp.hidden) return;
+        var keys = grp.sysKey || [];
+        var list = newAssets.filter(function (a) { return keys.indexOf(a.sys) >= 0; });
+        var total = list.length;
+        var alarmN = list.filter(function (a) { return a.st === 'alarm'; }).length;
+        var active = total - alarmN;
+        var healthPct = total > 0 ? Math.round((active / total) * 1000) / 10 : null;
+        grp.cards.forEach(function (c) {
+          if (c.labelEn === 'OVERALL HEALTH' && healthPct != null) {
             c.v = String(healthPct);
-            c.capEn = healthPct >= 95 ? "Healthy" : healthPct >= 80 ? "Fair" : "Critical";
-            c.capAr = healthPct >= 95 ? "سليم" : healthPct >= 80 ? "مقبول" : "حرج";
-            c.tone = healthPct >= 95 ? "ok" : "warn";
+            c.capEn = healthPct >= 95 ? 'Healthy' : healthPct >= 80 ? 'Fair' : 'Critical';
+            c.capAr = healthPct >= 95 ? 'سليم' : healthPct >= 80 ? 'مقبول' : 'حرج';
+            c.tone = healthPct >= 95 ? 'ok' : 'warn';
           }
-          if (c.labelEn === "HVAC EQUIPMENT") {
-            if (hvacTotal > 0) {
-              c.v = hvacActive + " / " + hvacTotal;
-              c.capEn = "Total: " + hvacTotal;
-              c.capAr = "الإجمالي: " + hvacTotal;
-              c.chipEn = inactiveCount > 0 ? inactiveCount + " inactive" : null;
-              c.chipAr = inactiveCount > 0 ? inactiveCount + " غير نشطة" : null;
-              c.tone = inactiveCount > 0 ? "warn" : "ok";
+          if (/EQUIPMENT|METERS/i.test(c.labelEn || '')) {
+            if (total > 0) {
+              c.v = active + ' / ' + total;
+              c.capEn = 'Total: ' + total;
+              c.capAr = 'الإجمالي: ' + total;
+              c.chipEn = alarmN > 0 ? alarmN + ' inactive' : null;
+              c.chipAr = alarmN > 0 ? alarmN + ' غير نشطة' : null;
+              c.tone = alarmN > 0 ? 'warn' : 'ok';
             } else {
-              c.capEn = "No equipment connected";
-              c.capAr = "لا توجد معدات متصلة";
-              c.tone = "warn";
+              c.capEn = 'No equipment connected';
+              c.capAr = 'لا توجد معدات متصلة';
+              c.tone = 'warn';
             }
           }
         });
-      }
-      
-      var elecGrp = site.systems.groups.find(function(g) { return g.id === "electrical"; });
-      if (elecGrp && elecGrp.cards) {
-        var elecAssets = newAssets.filter(function(a) { return a.sys === "elec"; });
-        var elecTotal = elecAssets.length;
-        var elecAlarm = elecAssets.filter(function(a) { return a.st === "alarm"; }).length;
-        var elecActive = elecTotal - elecAlarm;
-        var elecHealthPct = elecTotal > 0 ? Math.round((elecActive / elecTotal) * 1000) / 10 : null;
-        var elecInactiveCount = elecAlarm;
-
-        elecGrp.cards.forEach(function(c) {
-          if (c.labelEn === "OVERALL HEALTH" && elecHealthPct != null) {
-            c.v = String(elecHealthPct);
-            c.capEn = elecHealthPct >= 95 ? "Healthy" : elecHealthPct >= 80 ? "Fair" : "Critical";
-            c.capAr = elecHealthPct >= 95 ? "سليم" : elecHealthPct >= 80 ? "مقبول" : "حرج";
-            c.tone = elecHealthPct >= 95 ? "ok" : "warn";
-          }
-          if (c.labelEn === "ELECTRICAL EQUIPMENT") {
-            if (elecTotal > 0) {
-              c.v = elecActive + " / " + elecTotal;
-              c.capEn = "Total: " + elecTotal;
-              c.capAr = "الإجمالي: " + elecTotal;
-              c.chipEn = elecInactiveCount > 0 ? elecInactiveCount + " inactive" : null;
-              c.chipAr = elecInactiveCount > 0 ? elecInactiveCount + " غير نشطة" : null;
-              c.tone = elecInactiveCount > 0 ? "warn" : "ok";
-            } else {
-              c.capEn = "No equipment connected";
-              c.capAr = "لا توجد معدات متصلة";
-              c.tone = "warn";
-            }
-          }
-        });
-      }
+      });
     }
+
+    countUtilityAndEmsMeters(site, newAssets);
 
     applyHeat(list);
     paint();
+  }
+
+  function assetBlob(a) {
+    return ((a && a.id) || '') + ' ' + ((a && a.typeEn) || '') + ' ' + ((a && a.tags) || []).join(' ') + ' ' + ((a && a.sys) || '');
+  }
+
+  function countUtilityAndEmsMeters(site, assets) {
+    assets = assets || (site && site.assets) || [];
+    function blob(a) { return assetBlob(a).toLowerCase(); }
+    var gasList = assets.filter(function (a) {
+      var b = blob(a);
+      return /gas[_-]?meter|(?:^|[^a-z])gm[-_]|gas-meter/.test(b) || (a.sys === 'Utilities' && /gas/.test(b) && !/water/.test(b));
+    });
+    var waterList = assets.filter(function (a) {
+      var b = blob(a);
+      if (gasList.indexOf(a) >= 0) return false;
+      if (a.sys === 'Utilities') return true;
+      return /water[_-]?meter|wm[-_]/.test(b);
+    });
+    if (site && site.utilLanding) {
+      var wAlarm = waterList.filter(function (a) { return a.st === 'alarm'; }).length;
+      var gAlarm = gasList.filter(function (a) { return a.st === 'alarm'; }).length;
+      site.utilLanding.waterMeters = waterList.length;
+      site.utilLanding.waterActive = waterList.length - wAlarm;
+      site.utilLanding.waterChipEn = wAlarm > 0 ? wAlarm + ' inactive' : null;
+      site.utilLanding.waterChipAr = wAlarm > 0 ? wAlarm + ' غير نشطة' : null;
+      site.utilLanding.gasMeters = gasList.length;
+      site.utilLanding.gasActive = gasList.length - gAlarm;
+      site.utilLanding.gasChipEn = gAlarm > 0 ? gAlarm + ' inactive' : null;
+      site.utilLanding.gasChipAr = gAlarm > 0 ? gAlarm + ' غير نشطة' : null;
+    }
+    var emsList = assets.filter(function (a) {
+      return a.sys === 'EMS' || /^pmu\d/i.test(a.id || '');
+    });
+    if (site && site.energyLanding) {
+      var emsEl = site.energyLanding;
+      var emsAlarm = emsList.filter(function (a) { return a.st === 'alarm'; }).length;
+      emsEl.emsTotal = emsList.length;
+      emsEl.emsActive = emsList.length - emsAlarm;
+      emsEl.emsChipEn = emsAlarm > 0 ? emsAlarm + ' inactive' : null;
+      emsEl.emsChipAr = emsAlarm > 0 ? emsAlarm + ' غير نشطة' : null;
+      emsEl.emsTone = emsAlarm > 0 ? 'warn' : 'ok';
+    }
   }
 
   function sensorKey(name) {

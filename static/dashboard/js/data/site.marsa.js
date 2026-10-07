@@ -35,6 +35,7 @@ window.EKO_DATA.marsa = {
   },
 
   "metrics": {
+    "energyTodayKwh": null,
     "energyTodayMwh": null,
     "waterTodayM3": null,
     "gasTodayM3": null,
@@ -44,6 +45,7 @@ window.EKO_DATA.marsa = {
     "todayForecastEodMwh": null,
     "loadAboveBaselinePct": null,
     "baselineKw": 71.0,
+    "peakTodayKw": null,
     "peakTodayMw": null,
     "peakPctOfLimit": null,
     "contractedKw": 125,
@@ -56,15 +58,15 @@ window.EKO_DATA.marsa = {
      series drawn with the shared smooth-path generator. dom = identity hue. */
   /* D135: a summary row names its measured value (metric + decimals); it never stores a second copy of the number */
   "summary": [
-    { "key": "energy", "dom": "#2DD4BF", "icon": "bolt",  "label": "kEnergyToday", "metric": "energyTodayMwh", "d": 1, "u": "MWh",
+    { "key": "energy", "dom": "#2DD4BF", "icon": "bolt",  "label": "kEnergyToday", "metric": "energyTodayKwh", "d": 1, "u": "kWh",
+      "deltaEn": null, "deltaAr": null, "spark": [], "sparkCompare": [] },
+    { "key": "water",  "dom": "#60A5FA", "icon": "drop",  "label": "kWaterToday", "metric": "waterTodayM3", "d": 1, "u": "m³",
       "deltaEn": null, "deltaAr": null, "spark": [] },
-    { "key": "water",  "dom": "#60A5FA", "icon": "drop",  "label": "kWaterToday", "metric": "waterTodayM3", "d": 0, "u": "m³",
+    { "key": "gas",    "dom": "#A78BFA", "icon": "flame", "label": "kGasToday", "metric": "gasTodayM3", "d": 1, "u": "m³",
       "deltaEn": null, "deltaAr": null, "spark": [] },
-    { "key": "gas",    "dom": "#A78BFA", "icon": "flame", "label": "kGasToday", "metric": "gasTodayM3", "d": 0, "u": "m³",
-      "deltaEn": null, "deltaAr": null, "spark": [] },
-    { "key": "comfort","dom": "#4E9C7C", "icon": "gauge", "label": "kComfortIdx", "metric": "comfortIndex", "d": 2, "u": "",
+    { "key": "comfort","dom": "#4E9C7C", "icon": "gauge", "label": "kComfortIdx", "metric": "comfortIndex", "d": 1, "u": "",
       "capEn": null, "capAr": null, "capTone": "t3" },
-    { "key": "iaq",    "dom": "#4E9C7C", "icon": "wind",  "label": "kIaq", "metric": "iaq", "d": 0, "u": "",
+    { "key": "iaq",    "dom": "#4E9C7C", "icon": "wind",  "label": "kIaq", "metric": "iaq", "d": 1, "u": "",
       "capEn": null, "capAr": null, "capTone": "pos" }
   ],
 
@@ -179,20 +181,24 @@ window.EKO_DATA.marsa = {
     "perfWordEn": null, "perfWordAr": null,
     "currentKw": null, "baselineKw": null,
     "mtdKwh": null,
+    "carbonKgH": null,
     "overnightDeviationPct": null,
+    "overnightWordEn": null, "overnightWordAr": null, "overnightTone": "ok",
     "sumGauges": [
       { "key": "enDev", "labelEn": "ENERGY DEVIATION", "labelAr": "\u0627\u0646\u062d\u0631\u0627\u0641 \u0627\u0644\u0637\u0627\u0642\u0629", "val": null, "max": 100, "u": "%", "wordEn": null, "wordAr": null, "tone": "ok" },
       { "key": "loadFactor", "labelEn": "LOAD FACTOR", "labelAr": "\u0645\u0639\u0627\u0645\u0644 \u0627\u0644\u062d\u0645\u0644", "val": null, "max": 100, "u": "%", "wordEn": null, "wordAr": null, "tone": "ok" }
     ],
+    "emsTotal": null, "emsActive": null, "emsChipEn": null, "emsChipAr": null, "emsTone": "ok",
     "wasteTotalKwh": null,
+    "wasteTotalAed": null,
     "kpis": [
       { "key": "overnight", "labelEn": "Overnight / Idle Load", "labelAr": "حمل الليل / الخمول",
         "sharePct": null, "gaugeVal": null, "gaugeMax": 100, "stateEn": null, "stateAr": null, "tone": "ok",
-        "wasteKwh": null, "tipEn": "Schedule pumps, lighting, and HVAC during off-hours.",
+        "wasteKwh": null, "costAed": null, "tipEn": "Schedule pumps, lighting, and HVAC during off-hours.",
         "tipAr": "جدولة المضخات والإنارة والتكييف خارج ساعات التشغيل." },
       { "key": "epr", "labelEn": "HVAC / EPR", "labelAr": "التكييف / EPR",
         "sharePct": null, "gaugeVal": null, "gaugeMax": 2, "stateEn": null, "stateAr": null, "tone": "ok",
-        "wasteKwh": null, "tipEn": "Timely FDD maintenance saves energy and extends equipment life.",
+        "wasteKwh": null, "costAed": null, "tipEn": "Timely FDD maintenance saves energy and extends equipment life.",
         "tipAr": "صيانة FDD في وقتها توفر الطاقة وتطيل عمر المعدات." },
       { "key": "pf", "labelEn": "Power Factor", "labelAr": "معامل القدرة",
         "sharePct": null, "gaugeVal": null, "gaugeMax": 1, "stateEn": null, "stateAr": null, "tone": "ok",
@@ -217,7 +223,8 @@ window.EKO_DATA.marsa = {
   /* ------------------------------------------------------------------------
      POWER analytics page.
      ------------------------------------------------------------------------ */
-  "utilLanding": { "waterMeters": null, "gasMeters": null,
+  "utilLanding": { "waterMeters": null, "waterActive": null, "waterChipEn": null, "waterChipAr": null,
+    "gasMeters": null, "gasActive": null, "gasChipEn": null, "gasChipAr": null,
     "waterSparkPath": null,
     "gasSparkPath": null,
     "chips": [ { "id": "W-01", "x": 50, "y": 70 }, { "id": "G-01", "x": 57.5, "y": 65 } ] },
@@ -419,12 +426,12 @@ window.EKO_DATA.marsa = {
      ------------------------------------------------------------------------ */
   "systems": {
     "groups": [
-      { "id": "hvac", "hue": "#C56A6A", "sysKey": ["HVAC"], "labelEn": "HVAC & Mechanical", "labelAr": "التكييف والميكانيكا",
+      { "id": "hvac", "hue": "#C56A6A", "sysKey": ["HVAC", "Mechanical"], "labelEn": "HVAC & Mechanical", "labelAr": "التكييف والميكانيكا",
         "cards": [
           { "kind": "stat", "labelEn": "OVERALL HEALTH", "labelAr": "\u0627\u0644\u062d\u0627\u0644\u0629 \u0627\u0644\u0639\u0627\u0645\u0629", "v": null, "u": "%", "capEn": null, "capAr": null, "tone": "ok" },
           { "kind": "stat", "labelEn": "HVAC EQUIPMENT", "labelAr": "معدات التكييف", "v": null, "u": "", "capEn": null, "capAr": null, "chipEn": null, "chipAr": null, "tone": "ok" },
           { "kind": "stat", "subOnly": true, "labelEn": "TEMPERATURE DEVIATION INDEX", "labelAr": "مؤشر انحراف الحرارة", "v": null, "u": "°C", "capEn": null, "capAr": null, "tone": "ok" },
-          { "kind": "stat", "subOnly": true, "labelEn": "ENERGY PERFORMANCE RATIO", "labelAr": "نسبة أداء الطاقة", "v": null, "u": "", "capEn": null, "capAr": null, "tone": "ok" },
+          { "kind": "stat", "subOnly": true, "labelEn": "ENERGY PERFORMANCE", "labelAr": "نسبة أداء الطاقة", "v": null, "u": "", "capEn": null, "capAr": null, "tone": "ok" },
           { "kind": "stat", "subOnly": true, "labelEn": "COMFORT ENERGY INDEX", "labelAr": "مؤشر طاقة الراحة", "v": null, "u": "", "capEn": null, "capAr": null, "tone": "ok" }
           ] },
       { "id": "electrical", "hue": "#C2955A", "sysKey": ["Electrical"], "labelEn": "Electrical", "labelAr": "الكهرباء",

@@ -13,7 +13,18 @@ window.EKO_MT = (function(){
   'use strict';
   const C = () => window.EKO_C;
   const esc = s => C().esc(s);
-  const fmt = (v, d) => (typeof v === 'number' && isFinite(v)) ? v.toLocaleString('en-US', { minimumFractionDigits:d == null ? 0 : d, maximumFractionDigits:d == null ? 2 : d }) : '—';
+  const truncDec = (n, d) => {
+    const x = Number(n); if (!isFinite(x)) return NaN;
+    if (d <= 0) return Math.trunc(x + (x < 0 ? -1e-9 : 1e-9));
+    const f = Math.pow(10, d);
+    return Math.trunc(x * f + (x < 0 ? -1e-9 : 1e-9)) / f;
+  };
+  const fmt = (v, d) => {
+    if (typeof v !== 'number' || !isFinite(v)) return '—';
+    const dd = d == null ? 1 : d;
+    const t = truncDec(v, dd);
+    return t.toLocaleString('en-US', { minimumFractionDigits: dd, maximumFractionDigits: dd });
+  };
   const HUE = { energy:'var(--domEnergy)', water:'var(--domWater)', gas:'var(--domGas)' };
   const meters = E => E.data.meters || [];
   function counts(E){ const c = { n:0, ok:0, intermittent:0, offline:0, unconfirmed:0 }; meters(E).forEach(m => { c.n++; c[m.quality] = (c[m.quality] || 0) + 1; }); return c; }
@@ -46,7 +57,7 @@ window.EKO_MT = (function(){
       return `<tr data-act="openAsset" data-asset="${esc(m.id)}" data-on="${E.state.assetSel === m.id}" tabindex="0">
         <td class="mtm"><span class="mono">${esc(m.id)}</span><span class="mtname" data-tip="${esc(name)}" data-tipif="trunc">${esc(name)}</span></td>
         <td class="mtt"><i class="mtdot" style="background:${HUE[m.domain] || 'var(--t3)'}" aria-hidden="true"></i>${esc(t('mtType.' + m.domain))}</td>
-        <td class="mtl"><span class="mono">${esc(fmt(m.last, m.last >= 1000 ? 0 : 1))}</span> <span class="tCap">${esc(m.unit)}</span></td>
+        <td class="mtl"><span class="mono">${esc(fmt(m.last, 1))}</span> <span class="tCap">${esc(m.unit)}</span></td>
         <td class="mtr"><span data-tip="${esc(t('mtRecvTip', { t:m.lastAt }))}">${esc(recv(E, m))}</span></td>
         <td class="mtq"><span class="statchip" data-q="${esc(m.quality)}" data-tip="${esc(qualityTip(E, m))}">${esc(t('mtQ.' + m.quality))}</span></td>
         <td class="mts">${spark(E, m)}</td></tr>`; }).join('');
@@ -65,7 +76,7 @@ window.EKO_MT = (function(){
     return { id:m.id, isMeter:true, st: m.quality === 'offline' ? 'stale' : 'ok', staleH:m.sinceAgeH || 0, alarms:[], wos:0, wost:null,
       floor:'', level:t('mtType.' + m.domain), levelAr:t('mtType.' + m.domain), zone:m.nameEn, zoneAr:m.nameAr || m.nameEn,
       typeEn:t('mtAssetType.' + m.domain), typeAr:t('mtAssetType.' + m.domain),
-      params:[[t('mtColLast'), t('mtSrcMeter'), fmt(m.last, m.last >= 1000 ? 0 : 1) + ' ' + m.unit], [t('mtColRecv'), m.lastAt, recv(E, m)], [t('mtColQuality'), t('mtSrcDerived'), q]],
+      params:[[t('mtColLast'), t('mtSrcMeter'), fmt(m.last, 1) + ' ' + m.unit], [t('mtColRecv'), m.lastAt, recv(E, m)], [t('mtColQuality'), t('mtSrcDerived'), q]],
       activity:[], make:'', serial:'', svc:'', cafm:'' };
   }
   return { panel, counts, metaText, qualityTip, meterAsAsset, recv };

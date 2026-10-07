@@ -345,8 +345,14 @@ window.EKO_DG = (function(){
     });
   }
   function mount(){ fit(); place();
-    document.querySelectorAll('.dgwrap[data-grid]').forEach(w => { const spec = specs[w.dataset.grid]; const s = spec && st(E, spec); const sc = w.querySelector('.dgscroll'); if(s && sc && s.scrollTop && sc.scrollTop === 0) sc.scrollTop = s.scrollTop; }); }   /* D103: a grid remembers where it was scrolled across navigation */
-  function onScroll(ev){ const el = ev.target; if(el instanceof Element && el.classList.contains('dgscroll')){ const c = cur(el); if(c) c.s.scrollTop = el.scrollTop; } }
+    document.querySelectorAll('.dgwrap[data-grid]').forEach(w => {
+      const spec = specs[w.dataset.grid]; const s = spec && st(E, spec); const sc = w.querySelector('.dgscroll');
+      if(s && sc){
+        if(s.scrollTop && sc.scrollTop === 0) sc.scrollTop = s.scrollTop;
+        if(s.scrollLeft && sc.scrollLeft === 0) sc.scrollLeft = s.scrollLeft;
+      }
+    }); }   /* D103: a grid remembers where it was scrolled across navigation */
+  function onScroll(ev){ const el = ev.target; if(el instanceof Element && el.classList.contains('dgscroll')){ const c = cur(el); if(c){ c.s.scrollTop = el.scrollTop; c.s.scrollLeft = el.scrollLeft; } } }
   function refreshGrid(c, focusSel){
     const w = c.w; if(!document.contains(w)) return;
     const html = render(E, c.spec); const tmp = document.createElement('div'); tmp.innerHTML = html;

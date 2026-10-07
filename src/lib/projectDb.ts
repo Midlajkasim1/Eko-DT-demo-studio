@@ -506,6 +506,7 @@ export async function exportProjectAsZip(handle: FileSystemDirectoryHandle, meta
   const backendFiles = [
     { name: 'main.py', url: '/backend/main.py' },
     { name: 'fin_client.py', url: '/backend/fin_client.py' },
+    { name: 'start_viewer.py', url: '/backend/start_viewer.py' },
     { name: 'requirements.txt', url: '/backend/requirements.txt' },
     { name: 'login.html', url: '/backend/login.html' },
   ]
@@ -552,12 +553,9 @@ export async function exportProjectAsZip(handle: FileSystemDirectoryHandle, meta
     'echo   This device:    http://127.0.0.1:8000/',
     'echo   Other devices:  http://[this-machine-ip]:8000/',
     'echo.',
-    'echo Sign in with your server credentials when the page opens.',
-    'echo Press Ctrl+C to stop.',
+    'echo Sign in when the page opens. Press Ctrl+C to stop.',
     'echo.',
-    'start http://127.0.0.1:8000/',
-    // Bind all interfaces so other machines on the LAN can reach the viewer.
-    'python -m uvicorn main:app --host 0.0.0.0 --port 8000',
+    'python start_viewer.py',
     'pause',
   ].join('\r\n')
 

@@ -72,7 +72,10 @@ window.EKO_PWA = (function(){
   let HB_URL = '/static/dashboard/heartbeat.json';
   if (window.DASHBOARD_OVERLAY) HB_URL = '/api/fin/status';
   else if (window.EKO_BUILD && window.EKO_BUILD.demo && /simDegraded=1/.test(location.search)) HB_URL = '/static/dashboard/heartbeat-degraded.json';
-  const HB_TIMEOUT = 5000;
+  const HB_TIMEOUT = 8000;
+  const FAIL_N = 2;           /* one stalled poll is not a drop */
+  let hbMisses = 0;
+  let finStamp = { ok: null, at: null };
   const BAD = { stale:1, disconnected:1, error:1, down:1 };
   function readFeed(body){
     /* -> { degraded, sources:[{id, status, since:Date|null}], since:Date|null } */
@@ -100,20 +103,32 @@ window.EKO_PWA = (function(){
         try { st = JSON.parse(text); } catch(e) { throw new Error('bad status'); }
         const ok = !!st.connected;
         const now = new Date().toISOString();
+        if (finStamp.ok !== ok || !finStamp.at) finStamp = { ok: ok, at: now };
         text = JSON.stringify({
           ok: ok,
           ts: now,
           feed: {
             status: ok ? 'ok' : 'disconnected',
-            sources: { fin: { status: ok ? 'ok' : 'disconnected', lastSample: now } }
+            sources: { fin: { status: ok ? 'ok' : 'disconnected', lastSample: finStamp.at } }
           }
         });
       }
       const f = readFeed(text);
       s.feed = { ts: f.ts, status: f.status, sources: f.all };   /* the last heartbeat body, for the connection popover (D130) */
-      if(f.degraded) setMode('degraded', f); else setMode('online');
+      if(f.degraded){
+        hbMisses += 1;
+        if(hbMisses >= FAIL_N) setMode('degraded', f);
+      } else {
+        hbMisses = 0;
+        setMode('online');
+      }
+      if(E && (E.state.dlg === 'conn' || (E.state.dlg === 'settings' && E.state.settingsTab === 'system'))) E.set({});
       return !f.degraded;
-    }catch(e){ setMode('offline'); return false; }
+    }catch(e){
+      hbMisses += 1;
+      if(hbMisses >= FAIL_N) setMode('offline');
+      return false;
+    }
     finally{ if(timer) clearTimeout(timer); }
   }
   function srcLabel(id){ const k = 'src.' + id; const t = E.t(k); return t === k ? id.toUpperCase() : t; }
@@ -132,7 +147,11 @@ window.EKO_PWA = (function(){
     E.state.degradedSince = s.degradedSince ? hhmm(s.degradedSince) : null;
     E.state.degradedSrc = srcTxt;
     if(changed){
-      if(mode === 'online' && prev !== 'online'){ s.backOnline = true; (window.DASHBOARD_ROOT||document.documentElement).toggleAttribute('data-backonline', true); setTimeout(() => { s.backOnline = false; (window.DASHBOARD_ROOT||document.documentElement).toggleAttribute('data-backonline', false); E.set({}); }, 2500); }   /* D121: the confirmation takes the same band */
+      if(mode === 'online' && prev !== 'online'){
+        s.backOnline = true;
+        (window.DASHBOARD_ROOT||document.documentElement).toggleAttribute('data-backonline', true);
+        setTimeout(() => { s.backOnline = false; (window.DASHBOARD_ROOT||document.documentElement).toggleAttribute('data-backonline', false); E.set({}); }, 2500);
+      }
       E.set({});
     }
   }
