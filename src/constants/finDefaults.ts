@@ -1,7 +1,7 @@
 import type { FinEquipmentClasses, FinMeterProfile, FinSeverityBands } from '@/types'
 
-// Marsa Al Arab presets for the Data Mapping tab. Copied from backend/config.json — keep
-// them in step. Loading one copies it into the open project; it is never shared.
+// Marsa Al Arab's values, copied from backend/config.json. Test fixtures only: the Data Mapping
+// tab does not offer them, so they never reach a project's settings.
 
 export const SITE_FIN_EQUIPMENT_CLASSES: FinEquipmentClasses = {
   system_tags: ['ahu', 'fahu', 'mahu', 'fcu', 'pump', 'sumpPump'],

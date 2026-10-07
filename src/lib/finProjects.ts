@@ -58,6 +58,20 @@ export async function fetchFinResources(projectId: string): Promise<{ resources:
   return { resources: Array.isArray(body.resources) ? body.resources : [], truncated: !!body.truncated }
 }
 
+/** The keys each Data Mapping block can have (Eko-DT's own, from the backend's config.json),
+ *  as names only. Blocks the backend does not describe are left out. */
+export type MappingSchema = Partial<Record<'finLivePoints' | 'finEndpoints' | 'finEquipmentClasses' | 'finMeterProfile', string[]>>
+
+export async function fetchMappingSchema(): Promise<MappingSchema> {
+  const body = await getJson<Record<string, unknown>>('/api/fin/mapping-schema', 'the mapping keys')
+  const out: MappingSchema = {}
+  for (const field of ['finLivePoints', 'finEndpoints', 'finEquipmentClasses', 'finMeterProfile'] as const) {
+    const keys = body[field]
+    if (Array.isArray(keys)) out[field] = keys.filter((k): k is string => typeof k === 'string')
+  }
+  return out
+}
+
 export type SavedProjectState = 'none' | 'available' | 'missing'
 
 /** What the dropdown shows for the project this Eko-DT project saved. A saved id the server no

@@ -110,4 +110,15 @@ test('FIN project dropdown: shows the name, stores the identifier, never swaps a
   assert.strictEqual(toBackendSettings(reload(applyMappingValues({}, {}))).finProjectName, undefined)
 })
 
+test('offered dashboard keys without a value are not part of the mapping', () => {
+  const offered = ['k1', 'k2', 'k3'].map((key, i) => ({ id: 100 + i, key, text: '', suggested: true }))
+  assert.strictEqual(objectFromRows(offered, 'string').value, undefined)
+  assert.strictEqual(objectFromRows(offered, 'string').error, undefined)
+  // the user's choice for one key is saved; the blank keys are not, and nothing is guessed for them
+  const chosen = offered.map(r => (r.key === 'k2' ? { ...r, text: 'p:{project}:r:chosen' } : r))
+  same(objectFromRows(chosen, 'string').value, { k2: 'p:{project}:r:chosen' })
+  // a saved mapping is unaffected, and a blank row the user added themselves is still a (blank) entry
+  same(objectFromRows([...rowsFromObject({ a: '1' }, 'string'), { id: 7, key: 'b', text: '' }], 'string').value, { a: '1', b: '' })
+})
+
 console.log(`\n${passed} logic tests passed`)

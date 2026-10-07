@@ -4,7 +4,7 @@ import { useProjectStore } from '@/store/useProjectStore'
 import { useFinStore } from '@/store/useFinStore'
 import { writeJson } from '@/lib/projectDb'
 import { FinProjectPicker } from '@/components/project/FinProjectPicker'
-import { fetchFinResources, type FinResource } from '@/lib/finProjects'
+import { fetchFinResources, fetchMappingSchema, type FinResource, type MappingSchema } from '@/lib/finProjects'
 import {
   KeyValueEditor,
   MappingSection,
@@ -12,7 +12,6 @@ import {
   SeverityEditor,
   type EditorState,
 } from '@/components/project/FinMappingEditors'
-import { SITE_FIN_EQUIPMENT_CLASSES, SITE_FIN_METER_PROFILE, SITE_FIN_SEVERITY_BANDS } from '@/constants/finDefaults'
 import {
   MAPPING_FIELDS,
   MAPPING_TITLES,
@@ -23,94 +22,6 @@ import {
 import type { JsonObject } from '@/lib/mappingRows'
 import { validateMappings, type ValidationResponse } from '@/lib/mappingValidation'
 import type { ProjectApiSettings } from '@/types'
-
-const DEFAULT_FIN_LIVE_POINTS = {
-  "total_power": "p:{project}:r:31034e49-1f300fe1",
-  "carbon": "p:{project}:r:3105de9e-0091a3a6",
-  "current_month": "p:{project}:r:31034e49-4c6c035e",
-  "previous_month": "p:{project}:r:3105c5a1-a272e1a7",
-  "target_monthly": "p:{project}:r:3105c687-98bd4374",
-  "ahu": "p:{project}:r:31034e49-b986583a",
-  "fcu": "p:{project}:r:3105c687-8436b4e7",
-  "boiler": "p:{project}:r:3105cf6b-faa023ca",
-  "chiller": "p:{project}:r:3105cf6b-d483c5f7",
-  "cooling_tower": "p:{project}:r:3105cf6b-ae5752c0",
-  "vav": "p:{project}:r:31034e49-efdd0bc0",
-  "lighting": "p:{project}:r:3105c687-d66c2275",
-  "power_sockets": "p:{project}:r:3105c687-d5277330",
-  "pumps": "p:{project}:r:3105cf6b-c3032a1e"
-}
-
-const DEFAULT_FIN_ENDPOINTS = {
-  "Total_Power_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31034e49-1f300fe1,2026-01-01..today()%2C%7B-limit%7D)",
-  "AHU_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31034e49-b986583a,2026-01-01..today()%2C%7B-limit%7D)",
-  "BOILER_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105cf6b-faa023ca,2026-01-01..today()%2C%7B-limit%7D)",
-  "CHILLER_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105cf6b-d483c5f7,2026-01-01..today()%2C%7B-limit%7D)",
-  "COOLING_TOWER_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105cf6b-ae5752c0,2026-01-01..today()%2C%7B-limit%7D)",
-  "FCU_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105c687-8436b4e7,2026-01-01..today()%2C%7B-limit%7D)",
-  "Lighting_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105c687-d66c2275,2026-01-01..today()%2C%7B-limit%7D)",
-  "PUMPs_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105cf6b-c3032a1e,2026-01-01..today()%2C%7B-limit%7D)",
-  "Power_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105c687-d5277330,2026-01-01..today()%2C%7B-limit%7D)",
-  "VAV_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31034e49-efdd0bc0,2026-01-01..today()%2C%7B-limit%7D)",
-  "Water_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:310346fb-95c42637,2026-01-01..today()%2C%7B-limit%7D)",
-  "Carbon_Emission_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105de9e-0091a3a6,2026-01-01..today()%2C%7B-limit%7D)"
-}
-
-// Site preset — must stay in sync with backend/config.json (single source of truth)
-const SITE_FIN_LIVE_POINTS = {
-  "total_power": "p:{project}:r:3181ee6e-67dac181",
-  "peak_demand": "p:{project}:r:3181f788-2d229f48",
-  "energy_deviation": "p:{project}:r:3181f71f-2f0083d7",
-  "energy_intensity": "p:{project}:r:3181f767-e5cb6329",
-  "energy_performance": "p:{project}:r:3182117b-3c286f7b",
-  "carbon": "p:{project}:r:3181f7a2-4652169b",
-  "water_consumption": "p:{project}:r:310346fb-95c42637",
-  "current_month": "p:{project}:r:31034e49-4c6c035e",
-  "previous_month": "p:{project}:r:3105c5a1-a272e1a7",
-  "target_monthly": "p:{project}:r:31a06992-90fb9d52",
-  "target_current": "p:{project}:r:3196cd3e-505a1625",
-  "comfort_compliance": "p:{project}:r:319d6f6b-b5411f43",
-  "ra_co2": "p:{project}:r:318b19b8-0df2b231",
-  "ahu": "p:{project}:r:31034e49-b986583a",
-  "fcu": "p:{project}:r:3105c687-8436b4e7",
-  "boiler": "p:{project}:r:3105cf6b-faa023ca",
-  "chiller": "p:{project}:r:3105cf6b-d483c5f7",
-  "cooling_tower": "p:{project}:r:3105cf6b-ae5752c0",
-  "vav": "p:{project}:r:31034e49-efdd0bc0",
-  "lighting": "p:{project}:r:3105c687-d66c2275",
-  "power_sockets": "p:{project}:r:3105c687-d5277330",
-  "pumps": "p:{project}:r:3105cf6b-c3032a1e",
-  "mcc1": "p:{project}:r:3195bbf6-c7b4de9a",
-  "mcc2": "p:{project}:r:3195bc40-ac80ac08"
-}
-
-const SITE_FIN_ENDPOINTS = {
-  "Total_Power_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181ee6e-67dac181,2026-05-21..today()%2C%7B-limit%7D)",
-  "Power_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181ee6e-67dac181,2026-05-21..today()%2C%7B-limit%7D)",
-  "Peak_Demand_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f788-2d229f48,2026-05-21..today()%2C%7B-limit%7D)",
-  "Energy_Deviation_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f71f-2f0083d7,2026-05-21..today()%2C%7B-limit%7D)",
-  "Energy_Use_Intensity_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f767-e5cb6329,2026-05-21..today()%2C%7B-limit%7D)",
-  "VAV_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31034e49-efdd0bc0,2026-01-01..today()%2C%7B-limit%7D)",
-  "Water_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:310346fb-95c42637,2026-01-01..today()%2C%7B-limit%7D)",
-  "Carbon_Emission_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105de9e-0091a3a6,2026-01-01..today()%2C%7B-limit%7D)",
-  "Carbon_Points_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f7a2-4652169b,2026-05-21..today()%2C%7B-limit%7D)",
-  "Consumption_Level1_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:310346fb-ce2c6cd5,2025-01-01..today()%2C%7B-limit%7D)",
-  "Consumption_Level2_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31034e49-cd80ee43,2025-01-01..today()%2C%7B-limit%7D)",
-  "Consumption_Level3_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31034e49-2b40797d,2025-01-01..today()%2C%7B-limit%7D)",
-  "PMU04_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3195bc40-ac80ac08,2026-05-21..today()%2C%7B-limit%7D)",
-  "PMU05_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3195bc40-9a32d7b7,2026-05-21..today()%2C%7B-limit%7D)",
-  "PMU06_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3195bc40-6c15d0fe,2026-05-21..today()%2C%7B-limit%7D)",
-  "PMU07_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3195bc40-eede63ec,2026-05-21..today()%2C%7B-limit%7D)",
-  "PMU08_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3195bc40-ff5411e5,2026-05-21..today()%2C%7B-limit%7D)",
-  "PMU09_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3195bbf6-c7b4de9a,2026-05-21..today()%2C%7B-limit%7D)",
-  "WM_BF_Cold_Wtr_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31b02214-cfdc6152,2026-05-21..today()%2C%7B-limit%7D)",
-  "WM_FF_Ret_Hot_Wtr_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31b02287-41e84804,2026-05-21..today()%2C%7B-limit%7D)",
-  "WM_FF_Sup_Cold_Wtr_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31b02287-f021f2a0,2026-05-21..today()%2C%7B-limit%7D)",
-  "WM_FF_Sup_Hot_Wtr_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31b02287-40064c83,2026-05-21..today()%2C%7B-limit%7D)",
-  "GM_GF_01_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31b02287-febfc212,2026-05-21..today()%2C%7B-limit%7D)",
-  "GM_GF_02_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31b022c7-cd184ea5,2026-05-21..today()%2C%7B-limit%7D)",
-  "GM_GF_03_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31b022c7-06dbd6f5,2026-05-21..today()%2C%7B-limit%7D)"
-}
 
 interface ProjectSettingsModalProps {
   visible: boolean
@@ -132,38 +43,28 @@ type MappingStates = Record<MappingField, EditorState>
 const mappingStatesFrom = (s: ProjectApiSettings): MappingStates =>
   Object.fromEntries(MAPPING_FIELDS.map(f => [f, { value: s[f] as JsonObject | undefined }])) as MappingStates
 
-// What each Data Mapping block controls, and the presets that can be copied into it
-const MAPPING_SECTIONS: { field: MappingField; hint: string; presets: { label: string; value: object }[] }[] = [
+// What each Data Mapping block controls. No other site's values are offered here: a project's
+// mapping is only what the user enters for it.
+const MAPPING_SECTIONS: { field: MappingField; hint: string }[] = [
   {
     field: 'finLivePoints',
     hint: 'Maps dashboard metrics (e.g. total_power) to FIN point IDs. Use {project} for the FIN project name.',
-    presets: [
-      { label: 'Load Default (EkoMedical)', value: DEFAULT_FIN_LIVE_POINTS },
-      { label: 'Load Marsa Al Arab', value: SITE_FIN_LIVE_POINTS },
-    ],
   },
   {
     field: 'finEndpoints',
     hint: 'Maps history queries (e.g. Total_Power_Consumption_his) to FIN API expressions.',
-    presets: [
-      { label: 'Load Default (EkoMedical)', value: DEFAULT_FIN_ENDPOINTS },
-      { label: 'Load Marsa Al Arab', value: SITE_FIN_ENDPOINTS },
-    ],
   },
   {
     field: 'finEquipmentClasses',
     hint: 'Which equipment tags count as plant systems or meters, and the order used to pick an equipment type.',
-    presets: [{ label: 'Load Marsa Al Arab', value: SITE_FIN_EQUIPMENT_CLASSES }],
   },
   {
     field: 'finMeterProfile',
     hint: 'The name prefix that identifies power meters, and the point-name aliases for each meter metric.',
-    presets: [{ label: 'Load Marsa Al Arab', value: SITE_FIN_METER_PROFILE }],
   },
   {
     field: 'finSeverityBands',
     hint: 'How a FIN alarm priority maps to critical / warning / info. "desc": a higher number is more severe.',
-    presets: [{ label: 'Load Marsa Al Arab', value: SITE_FIN_SEVERITY_BANDS }],
   },
 ]
 
@@ -253,6 +154,16 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
     }, 300)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [visible, finConnected, selectedFinProject, currentProject?.projectId])
+
+  // The keys each block can have, offered as blank rows in a block this project has not set.
+  // Names only: no value from config.json or from any other project reaches the editor.
+  const [schema, setSchema] = useState<MappingSchema>({})
+  useEffect(() => {
+    if (!visible) return
+    let cancelled = false
+    fetchMappingSchema().then(s => { if (!cancelled) setSchema(s) }, () => { /* rows can still be added by hand */ })
+    return () => { cancelled = true }
+  }, [visible])
 
   useEffect(() => {
     if (visible && currentProject) {
@@ -574,14 +485,13 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                     key={field}
                     title={MAPPING_TITLES[field]}
                     hint={section.hint}
-                    presets={section.presets}
                     hasValue={!!mappings[field].value}
                     error={mappings[field].error}
                     onLoad={value => loadMapping(field, value)}
                     result={validation?.blocks[field]}
                   >
                     {field === 'finMeterProfile' ? (
-                      <MeterProfileEditor key={editorKey} value={mappings[field].value} onChange={onChange} results={validation?.blocks[field]?.items} />
+                      <MeterProfileEditor key={editorKey} value={mappings[field].value} onChange={onChange} results={validation?.blocks[field]?.items} suggestedKeys={schema.finMeterProfile} />
                     ) : field === 'finSeverityBands' ? (
                       <SeverityEditor key={editorKey} value={mappings[field].value} onChange={onChange} />
                     ) : (
@@ -591,6 +501,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                         kind={field === 'finEquipmentClasses' ? 'list' : 'string'}
                         suggestions={field === 'finLivePoints' && resources?.state === 'ready' && resources.project === selectedFinProject
                           ? resources.items : undefined}
+                        suggestedKeys={schema[field]}
                         onChange={onChange}
                         results={validation?.blocks[field]?.items}
                       />

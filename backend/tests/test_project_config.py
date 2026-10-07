@@ -5,6 +5,7 @@ No FIN server needed: FinScramClient is replaced by tests/fake_fin.py.
 """
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -35,6 +36,24 @@ PROJECT_B = {
     "finMeterProfile": {"prefix": "MTR", "point_map": {"active_power": ["active power"]}},
     "finSeverityBands": {"order": "asc", "critical": 300, "warning": 250},    # priority 200 -> critical
 }
+
+
+BLOCKS = ("live_point_ids", "power_endpoints", "equipment_classes", "meter_profile", "severity_bands")
+
+
+# /power-live always carries these, read from equipment rather than from a live-point mapping
+DERIVED_LIVE = {"timestamp", "carbon_emission", "avg_temp", "avg_hum", "avg_co2", "unit", "fdd", "facilityServices"}
+
+
+def live_points(payload: dict) -> dict:
+    """The live-point values in a /power-live answer (one per mapped key)."""
+    return {k: v for k, v in payload.items() if k not in DERIVED_LIVE}
+
+
+def site_ids() -> set:
+    """Every point ID config.json's own site mappings name (live points and history endpoints)."""
+    text = json.dumps([main.BASE_CONFIG["live_point_ids"], main.BASE_CONFIG["power_endpoints"]])
+    return set(re.findall(r"r:([0-9a-f]{8}-[0-9a-f]{8})", text))
 
 
 def wait_for(fn, timeout=6.0):
@@ -90,6 +109,25 @@ class ProjectConfigTests(unittest.TestCase):
             "severity": wait_for(lambda: self.get("/api/fin/alarms").get("alarms"))[0]["severity"],
         }
 
+    def runtime(self):
+        """Everything the polling loops serve, once the first realtime poll has landed."""
+        equip = wait_for(lambda: self.get("/api/fin/equip-live").get("equipment"))
+        alarms = wait_for(lambda: self.get("/api/fin/alarms").get("alarms"))
+        time.sleep(0.2)                           # one live poll after the switch
+        return {
+            "power_live": self.get("/api/fin/power-live"),
+            "history": self.get("/api/fin/power-history"),
+            "meters": self.get("/api/fin/pmu-live"),
+            "eq1_type": next(e["type"] for e in equip if e["name"] == "EQ-1"),
+            "severity": alarms[0]["severity"],
+            "config": self.get("/api/fin/project-settings"),
+        }
+
+    def assert_no_site_values(self, served):
+        text = json.dumps(served)
+        leaked = [i for i in site_ids() if i in text]
+        self.assertEqual(leaked, [], "config.json site point IDs reached a Studio project")
+
     def assert_serves_a(self):
         self.power(111)
         self.assertEqual(self.observed(), {
@@ -128,26 +166,72 @@ class ProjectConfigTests(unittest.TestCase):
         self.assertEqual(cfg["severity_bands"]["order"], "desc")
         self.assertEqual(cfg["meter_profile"]["prefix"], "PMU")
 
-    # --- fallback to config.json ------------------------------------------------------
+    # --- Studio projects: only their own mappings, never config.json's -----------------
 
-    def test_project_without_mappings_falls_back_to_defaults_not_previous_project(self):
+    def assert_not_configured(self, cfg, blocks):
+        for block in blocks:
+            self.assertEqual(cfg["source"][block], "not_configured", block)
+            self.assertEqual(cfg["config"][block], {}, block)
+
+    def test_new_project_with_no_mappings_gets_no_site_values(self):
+        self.login({"finProjectName": "khaznaDataCenter"}, "proj-new")
+        served = self.runtime()
+        self.assert_not_configured(served["config"], BLOCKS)
+        self.assertEqual(live_points(served["power_live"]), {})        # no live point is read
+        self.assertEqual(served["history"], {})           # no history endpoint is read
+        self.assertEqual(served["meters"], {})            # no meter prefix, so no meters
+        self.assertEqual(served["eq1_type"], "other")     # no type_priority to classify with
+        self.assertEqual(served["severity"], "info")      # no bands: not graded on a site's numbers
+        self.assert_no_site_values(served)
+
+    def test_fin_project_named_like_the_default_site_still_gets_no_site_mappings(self):
+        # the FIN project being the default site's does not make config.json this project's mapping
+        self.login({"finProjectName": main.BASE_CONFIG["project_name"]}, "proj-same-fin")
+        served = self.runtime()
+        self.assert_not_configured(served["config"], BLOCKS)
+        self.assertEqual(live_points(served["power_live"]), {})
+        self.assert_no_site_values(served)
+
+    def test_project_with_only_live_points(self):
+        self.login({"finProjectName": "khaznaDataCenter", "finLivePoints": PROJECT_A["finLivePoints"]}, "proj-live")
+        self.power(111)                                   # its own live point works
+        served = self.runtime()
+        self.assertEqual(served["config"]["source"]["live_point_ids"], "project")
+        self.assertEqual(served["config"]["config"]["live_point_ids"], PROJECT_A["finLivePoints"])
+        self.assert_not_configured(served["config"], [b for b in BLOCKS if b != "live_point_ids"])
+        self.assertEqual((served["history"], served["meters"], served["severity"]), ({}, {}, "info"))
+        self.assert_no_site_values(served)
+
+    def test_partial_projects_a_b_a_never_fall_back_to_each_other(self):
+        a = {"finProjectName": "khaznaDataCenter", "finLivePoints": PROJECT_A["finLivePoints"]}
+        b = {"finProjectName": "marsaAlArab", "finEndpoints": PROJECT_B["finEndpoints"],
+             "finSeverityBands": PROJECT_B["finSeverityBands"]}
+        self.login(a, "proj-A")
+        for settings, pid in ((a, "proj-A"), (b, "proj-B"), (a, "proj-A")):
+            self.switch(settings, pid)
+            cfg = self.get("/api/fin/project-settings")
+            self.assertEqual(cfg["project_id"], pid)
+            own = {main.PROJECT_DICT_SETTINGS[k] for k in settings if k in main.PROJECT_DICT_SETTINGS}
+            for block in BLOCKS:
+                if block in own:
+                    self.assertEqual(cfg["source"][block], "project", (pid, block))
+                else:
+                    self.assertEqual((cfg["source"][block], cfg["config"][block]), ("not_configured", {}), (pid, block))
+            if pid == "proj-A":
+                self.power(111)
+                self.assertEqual(self.runtime()["history"], {})          # B's endpoints never reach A
+            else:
+                self.assertEqual(wait_for(lambda: sorted(self.get("/api/fin/power-history")) or None), ["B_his"])
+                time.sleep(0.2)
+                self.assertEqual(live_points(self.get("/api/fin/power-live")), {})    # A's live points never reach B
+
+    def test_switching_to_an_unmapped_project_clears_the_previous_projects_mappings(self):
         self.login(PROJECT_A, "proj-A")
-        self.switch({}, "proj-empty")            # e.g. a normal project with no Data Mapping
+        self.assert_serves_a()
+        self.switch({}, "proj-empty")             # e.g. a normal project with no Data Mapping
         cfg = self.get("/api/fin/project-settings")
         self.assertEqual(cfg["project_id"], "proj-empty")
-        self.assertTrue(all(v == "default" for v in cfg["source"].values()))
-        base = main.BASE_CONFIG
-        self.assertEqual(cfg["config"]["live_point_ids"], base["live_point_ids"])
-        self.assertEqual(cfg["config"]["severity_bands"], base["severity_bands"])
-        self.assertNotEqual(cfg["config"]["live_point_ids"], PROJECT_A["finLivePoints"])
-
-    def test_block_level_override_leaves_other_blocks_on_defaults(self):
-        self.login({"finSeverityBands": PROJECT_B["finSeverityBands"]}, "proj-sev")
-        cfg = self.get("/api/fin/project-settings")
-        self.assertEqual(cfg["source"]["severity_bands"], "project")
-        for block in ("live_point_ids", "power_endpoints", "equipment_classes", "meter_profile"):
-            self.assertEqual(cfg["source"][block], "default")
-            self.assertEqual(cfg["config"][block], main.BASE_CONFIG[block])
+        self.assert_not_configured(cfg, BLOCKS)
 
     def test_invalid_values_are_ignored(self):
         merged = main.merge_project_settings(main.BASE_CONFIG, {
@@ -194,6 +278,33 @@ class ProjectConfigTests(unittest.TestCase):
                 cfg = fresh.get("/api/fin/config")
                 self.assertEqual(cfg.json()["project_id"], "proj-B")
                 self.assertEqual(main.CONFIG["live_point_ids"], PROJECT_B["finLivePoints"])
+
+    def test_bundled_project_keeps_config_json_for_blocks_it_does_not_set(self):
+        # an exported backend ships config.json as the site's own configuration
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "project.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"projectId": "proj-sev", "apiSettings": {"finSeverityBands": PROJECT_B["finSeverityBands"]}}, f)
+            main.PROJECT_JSON = path
+            with TestClient(main.app) as fresh:
+                self.assertEqual(main.CONFIG["severity_bands"], PROJECT_B["finSeverityBands"])
+                for block in ("live_point_ids", "power_endpoints", "equipment_classes", "meter_profile"):
+                    self.assertEqual(main.CONFIG[block], main.BASE_CONFIG[block], block)
+                # the bundled sign-in page sends no settings, so that configuration stays in force
+                fresh.post("/api/fin/login", json={"username": "u", "password": "p"})
+                cfg = fresh.get("/api/fin/project-settings").json()
+                self.assertEqual(cfg["source"]["severity_bands"], "project")
+                for block in ("live_point_ids", "power_endpoints", "equipment_classes", "meter_profile"):
+                    self.assertEqual((cfg["source"][block], cfg["config"][block]), ("default", main.BASE_CONFIG[block]))
+                fresh.post("/api/fin/logout")
+
+    def test_default_site_without_a_project_uses_config_json(self):
+        main.apply_project_settings(None)
+        self.http.post("/api/fin/login", json={"username": "u", "password": "p"})
+        cfg = self.get("/api/fin/project-settings")
+        self.assertTrue(all(v == "default" for v in cfg["source"].values()))
+        for block in BLOCKS:
+            self.assertEqual(cfg["config"][block], main.BASE_CONFIG[block])
 
     def test_missing_bundle_uses_config_json(self):
         main.PROJECT_JSON = os.path.join(tempfile.gettempdir(), "definitely-missing-project.json")

@@ -183,17 +183,26 @@ class MappingValidationTests(unittest.TestCase):
         for name, block in res["blocks"].items():
             self.assertEqual(block["status"], "not_configured", name)
             self.assertEqual(block["items"], {}, name)           # nothing from config.json
-            self.assertTrue(block["backend_default"], name)      # but the UI is told a default applies
+            self.assertFalse(block["backend_default"], name)     # and no config.json default applies
         self.assertNotIn("p:", str(res))                         # no point ID of the default config
         # empty values are the same as no mapping
         res = self.validate("C", {"finLivePoints": {}, "finEndpoints": None})
         self.assertEqual(res["blocks"]["finLivePoints"]["status"], "not_configured")
 
-    def test_project_that_sets_a_block_is_not_backend_default(self):
+    def test_studio_project_never_has_a_backend_default(self):
         self.login(PROJECT_B, "B")
         res = self.validate("B", {})
         self.assertFalse(res["blocks"]["finLivePoints"]["backend_default"])
-        self.assertTrue(res["blocks"]["finSeverityBands"]["backend_default"])
+        self.assertFalse(res["blocks"]["finSeverityBands"]["backend_default"])   # unset: not configured
+
+    def test_default_site_reports_its_config_json_default(self):
+        # the plain backend (no Studio project) serves config.json, and says so
+        main.apply_project_settings(None)
+        self.http.post("/api/fin/login", json={"username": "u", "password": "p"})
+        res = self.validate(None, {})
+        for name, block in res["blocks"].items():
+            self.assertEqual(block["status"], "not_configured", name)
+            self.assertTrue(block["backend_default"], name)
 
     def test_meter_profile_validated_against_equipment(self):
         self.login(PROJECT_A, "A")

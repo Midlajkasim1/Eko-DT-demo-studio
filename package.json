@@ -15,6 +15,7 @@
     "test:logic": "node scripts/test-mapping-logic.mts",
     "test:backend": "python -m unittest discover -s backend/tests -t backend -v",
     "test:isolation": "node scripts/test-project-isolation.mjs",
+    "test:fin-switch": "node scripts/test-fin-project-switch.mjs",
     "build:renders": "node scripts/buildBuiltinRenders.mjs"
   },
   "dependencies": {

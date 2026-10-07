@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import type { FinResource } from '@/lib/finProjects'
 import {
   mergeEntries,
@@ -66,17 +66,30 @@ interface KeyValueEditorProps {
   /** Points of the selected FIN project, offered as choices for a Value field. Typing is still
    *  free: a suggestion is never applied on its own, and nothing is matched to a key by guessing. */
   suggestions?: FinResource[]
+  /** Eko-DT's own keys for this block, offered as blank rows when it has no mapping yet, so there
+   *  is a Value field to fill. A blank row is not saved and is never given a value: that is the
+   *  user's choice. */
+  suggestedKeys?: string[]
 }
 
 /** One configuration entry per row. Edits, deletes, adds and pasted imports all rebuild the
  *  same object the backend already expects. Remount (change `key`) to load a new value. */
-export function KeyValueEditor({ value, kind, onChange, results, suggestions }: KeyValueEditorProps) {
+export function KeyValueEditor({ value, kind, onChange, results, suggestions, suggestedKeys }: KeyValueEditorProps) {
   const listId = useId()
   const [rows, setRows] = useState<MappingRow[]>(() => rowsFromObject(value, kind))
   const [importing, setImporting] = useState(false)
   const [importText, setImportText] = useState('')
   const [importError, setImportError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+
+  // Offer the keys once, and only into a block with no mapping: a saved mapping is never extended
+  const keysOffered = useRef(!!value && Object.keys(value).length > 0)
+  useEffect(() => {
+    if (keysOffered.current || !suggestedKeys?.length) return
+    keysOffered.current = true
+    // the keys can arrive after the user has started adding rows; those are kept as they are
+    setRows(prev => prev.length ? prev : suggestedKeys.map(key => ({ id: newRowId(), key, text: '', suggested: true })))
+  }, [suggestedKeys])
 
   const commit = (next: MappingRow[]) => {
     setRows(next)
@@ -120,7 +133,20 @@ export function KeyValueEditor({ value, kind, onChange, results, suggestions }: 
           ))}
         </datalist>
       ) : null}
-      {rows.length === 0 && <p className="ds-hint" style={{ margin: '0 0 8px' }}>Not Configured. This project has no mapping here.</p>}
+      {rows.length === 0 && <p className="ds-hint" style={{ margin: '0 0 8px' }}>No entries yet. Add one below.</p>}
+      {suggestions?.length ? (
+        <>
+          <p className="ds-hint" style={{ margin: '0 0 6px' }} data-testid="fin-points-hint">
+            {suggestions.length} FIN points can be chosen for a Value. Click a Value field to list them; a key left blank is not saved.
+          </p>
+          {rows.length > 0 && (
+            <div className="ds-hint" style={{ display: 'flex', gap: '8px', margin: '0 0 4px' }}>
+              <span style={{ flex: '0 0 32%' }}>Eko-DT mapping key</span>
+              <span style={{ flex: 1 }}>FIN point chosen (Value)</span>
+            </div>
+          )}
+        </>
+      ) : null}
 
       {rows.map(row => (
         <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
@@ -135,7 +161,7 @@ export function KeyValueEditor({ value, kind, onChange, results, suggestions }: 
           <input
             type="text"
             aria-label="Value"
-            placeholder={kind === 'list' ? 'comma, separated, values' : 'value'}
+            placeholder={kind === 'list' ? 'comma, separated, values' : suggestions?.length ? 'choose a FIN point' : 'value'}
             value={row.text}
             list={suggestions?.length ? listId : undefined}
             onChange={e => edit(row.id, { text: e.target.value })}
@@ -203,10 +229,12 @@ interface MeterProfileEditorProps {
   onChange: (state: EditorState) => void
   /** "prefix" and each metric key -> validation result */
   results?: Record<string, ItemResult>
+  /** Metric keys offered as blank alias rows when the profile has no point_map yet */
+  suggestedKeys?: string[]
 }
 
 /** prefix + point_map. Any other key in the saved profile is carried through untouched. */
-export function MeterProfileEditor({ value, onChange, results }: MeterProfileEditorProps) {
+export function MeterProfileEditor({ value, onChange, results, suggestedKeys }: MeterProfileEditorProps) {
   const [prefix, setPrefix] = useState(() => (typeof value?.prefix === 'string' ? value.prefix : ''))
   const [extras] = useState<JsonObject>(() => withoutKeys(value, ['prefix', 'point_map']))
   const initialMap = value?.point_map && typeof value.point_map === 'object' && !Array.isArray(value.point_map)
@@ -240,6 +268,7 @@ export function MeterProfileEditor({ value, onChange, results }: MeterProfileEdi
         value={initialMap}
         kind="list"
         results={results}
+        suggestedKeys={suggestedKeys}
         onChange={state => { setMap(state); emit(prefix, state) }}
       />
     </div>
@@ -290,15 +319,9 @@ export function SeverityEditor({ value, onChange }: MeterProfileEditorProps) {
   )
 }
 
-interface Preset {
-  label: string
-  value: object
-}
-
 interface MappingSectionProps {
   title: string
   hint: string
-  presets: Preset[]
   hasValue: boolean
   error?: string
   onLoad: (value: JsonObject | undefined) => void
@@ -307,18 +330,19 @@ interface MappingSectionProps {
   children: ReactNode
 }
 
-/** Title, description, presets and Clear around one mapping editor. Presets and Clear call
- *  onLoad; the parent remounts the editor so its rows show the new value. */
-export function MappingSection({ title, hint, presets, hasValue, error, onLoad, result, children }: MappingSectionProps) {
+/** Title, description and Clear around one mapping editor. Clear calls onLoad; the parent
+ *  remounts the editor so it shows the block as unset. */
+export function MappingSection({ title, hint, hasValue, error, onLoad, result, children }: MappingSectionProps) {
   return (
     <div className="ds-field" style={{ marginTop: '28px' }}>
       <h3 className="ds-section-title">{title}</h3>
       <p className="ds-hint">{hint}</p>
       {/* Only the open project's own mapping is shown here. A backend default is never loaded into the editor. */}
       {!hasValue && (
-        <p className="ds-hint" style={{ margin: '0 0 8px' }}>
+        <p className="ds-hint" style={{ margin: '0 0 8px' }} data-testid="block-unset">
           <StatusBadge status="not_configured" />
-          {result?.backend_default && " The backend uses its own default for this block. It is not shown here and is not this project's mapping."}
+          {' Not set for this project yet. Fill in the fields below and Save Settings; blank fields are not saved.'}
+          {result?.backend_default && " Until then the backend reads this block from its own config.json, which is not this project's mapping."}
         </p>
       )}
       {hasValue && result && (result.items && Object.keys(result.items).length === 0) && (
@@ -328,12 +352,6 @@ export function MappingSection({ title, hint, presets, hasValue, error, onLoad, 
         </p>
       )}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
-        {presets.map(p => (
-          <button key={p.label} type="button" className="ds-btn ds-btn-secondary" style={smallBtn}
-            onClick={() => onLoad(JSON.parse(JSON.stringify(p.value)))}>
-            {p.label}
-          </button>
-        ))}
         <button type="button" className="ds-btn ds-btn-secondary" style={smallBtn} disabled={!hasValue}
           title="Remove this project's setting so the backend default applies"
           onClick={() => onLoad(undefined)}>

@@ -33,7 +33,6 @@ from fin_client import (
     parse_fin_projects,
     parse_zinc_csv,
     safe_get,
-    zinc_string_body,
 )
 
 # ─── Load Config ─────────────────────────────────────────────────────────────
@@ -43,9 +42,10 @@ CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.j
 with open(CONFIG_PATH, "r") as f:
     BASE_CONFIG = json.load(f)
 
-# CONFIG is what the polling loops and parsers read. It starts as the file defaults and
-# is replaced by BASE_CONFIG overlaid with the open project's settings (see below), so
-# config.json stays the fallback for anything a project does not set itself.
+# CONFIG is what the polling loops and parsers read. It starts as the file defaults and is
+# replaced by BASE_CONFIG overlaid with the open project's settings (see below). Whether
+# config.json's FIN mappings are a fallback depends on who supplied the settings: see
+# apply_project_settings.
 CONFIG = copy.deepcopy(BASE_CONFIG)
 
 PROJECT_NAME = CONFIG["project_name"]
@@ -90,13 +90,18 @@ def project_overrides(settings: Optional[dict]) -> dict:
     return out
 
 
-def merge_project_settings(base: dict, settings: Optional[dict]) -> dict:
+def merge_project_settings(base: dict, settings: Optional[dict], isolated: bool = False) -> dict:
     """Overlay a project's apiSettings onto the config.json defaults.
 
     A project value replaces the default whole (never a key-by-key merge, so one
-    site's point IDs cannot leak into another's).
+    site's point IDs cannot leak into another's). With `isolated`, the five FIN mapping
+    blocks start empty instead of from config.json: a block the project did not set is
+    not configured, and config.json's own site mappings are never used for it.
     """
     merged = copy.deepcopy(base)
+    if isolated:
+        for key in PROJECT_DICT_SETTINGS.values():
+            merged[key] = {}
     for key, value in project_overrides(settings).items():
         if key == "polling.live_ms":
             merged["polling"] = {**(merged.get("polling") or {}), "live_ms": value}
@@ -109,16 +114,35 @@ def merge_project_settings(base: dict, settings: Optional[dict]) -> dict:
 # config.json keys that project replaces. Lets a client confirm what the backend is serving.
 ACTIVE_PROJECT_ID: Optional[str] = None
 ACTIVE_OVERRIDES: list = []
+# True while a Studio project is served: its mappings are only its own (no config.json fallback)
+ACTIVE_ISOLATED = False
 
 
-def apply_project_settings(settings: Optional[dict], project_id: Optional[str] = None) -> None:
-    """Make `settings` the active configuration; None restores the config.json defaults."""
-    global CONFIG, PROJECT_NAME, FIN_SERVER_URL, ACTIVE_PROJECT_ID, ACTIVE_OVERRIDES
-    CONFIG = merge_project_settings(BASE_CONFIG, settings)
+def apply_project_settings(settings: Optional[dict], project_id: Optional[str] = None,
+                           isolated: bool = False) -> None:
+    """Make `settings` the active configuration; None restores the config.json defaults.
+
+    Two runtimes, kept apart on purpose:
+    * Studio (isolated=True): the settings come from an Eko-DT project's project.json, sent by
+      the Studio at sign-in or on a project switch. That project's mappings are the only ones;
+      a block it did not save is not configured.
+    * Standalone / exported backend and the plain default site (isolated=False): config.json is
+      the site's own configuration, and it fills any block the bundled project.json leaves out.
+    """
+    global CONFIG, PROJECT_NAME, FIN_SERVER_URL, ACTIVE_PROJECT_ID, ACTIVE_OVERRIDES, ACTIVE_ISOLATED
+    CONFIG = merge_project_settings(BASE_CONFIG, settings, isolated)
+    ACTIVE_ISOLATED = isolated
     PROJECT_NAME = CONFIG["project_name"]
     FIN_SERVER_URL = CONFIG.get("fin_server_url", "https://localhost")
     ACTIVE_PROJECT_ID = project_id or None
     ACTIVE_OVERRIDES = sorted(project_overrides(settings))
+
+
+def _block_source(key: str) -> str:
+    """Where the active value of a mapping block comes from (config.json key)."""
+    if key in ACTIVE_OVERRIDES:
+        return "project"
+    return "not_configured" if ACTIVE_ISOLATED else "default"
 
 
 def _documents_path() -> str:
@@ -339,20 +363,25 @@ def severity_for(priority, bands: dict) -> str:
     number as most urgent; Marsa is the opposite — 250 is control-engine FD&D
     output and 50-150 is connector chatter — so `severity_bands.order` declares
     the direction rather than the code assuming one.
+
+    A threshold that is not configured never matches: with no bands at all every alarm is
+    "info", rather than being graded against one site's numbers.
     """
     if not isinstance(priority, (int, float)):
         return "info"
-    crit = bands.get("critical", 250)
-    warn = bands.get("warning", 150)
+    crit = bands.get("critical")
+    warn = bands.get("warning")
+    crit = crit if isinstance(crit, (int, float)) and not isinstance(crit, bool) else None
+    warn = warn if isinstance(warn, (int, float)) and not isinstance(warn, bool) else None
     if str(bands.get("order", "desc")).lower() == "asc":
         # low number = most urgent; thresholds are inclusive upper bounds
-        if priority <= crit:
+        if crit is not None and priority <= crit:
             return "critical"
-        return "warning" if priority <= warn else "info"
+        return "warning" if warn is not None and priority <= warn else "info"
     # high number = most urgent; thresholds are inclusive lower bounds
-    if priority >= crit:
+    if crit is not None and priority >= crit:
         return "critical"
-    return "warning" if priority >= warn else "info"
+    return "warning" if warn is not None and priority >= warn else "info"
 
 
 def _flatten_alarms(rows: list, bands: dict) -> dict:
@@ -729,11 +758,12 @@ async def login(req: LoginRequest):
     """Authenticate with FIN server using SCRAM-SHA-256."""
     global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK, TYPED_NAME
 
-    # Settings sent with the login belong to the project being opened; without them the
-    # configuration already active (bundled project or config.json) stays in force
+    # Settings sent with the login belong to the Studio project being opened, and only they
+    # configure it. Without them the configuration already active (bundled project or
+    # config.json) stays in force
     managed = req.settings is not None
     if managed:
-        apply_project_settings(req.settings, req.project_id)
+        apply_project_settings(req.settings, req.project_id, isolated=True)
 
     server_url = req.server_url or FIN_SERVER_URL
     typed = (req.project_name or "").strip()
@@ -788,7 +818,7 @@ async def set_project_settings(req: ProjectSettingsRequest):
     global FIN_SERVER_URL, PROJECT_CHECK, PROJECT_NAME, TYPED_NAME
     _require_client()
 
-    apply_project_settings(req.settings, req.project_id)
+    apply_project_settings(req.settings, req.project_id, isolated=True)
     # A project without its own FIN Project Name is unconfigured, except for the name typed at
     # sign-in for this same project. Never the config.json default, never another project's name.
     if TYPED_NAME and TYPED_NAME[0] != (req.project_id or None):
@@ -829,7 +859,8 @@ async def get_project_settings():
     """The configuration the backend is serving right now, and where each block comes from.
 
     Needs a session: it returns point IDs. `source` is "project" when the open project
-    supplies the block and "default" when config.json does.
+    supplies the block, "default" when config.json does (standalone / default site only), and
+    "not_configured" when a Studio project has not set it (its config is then empty).
     """
     _require_client()
     blocks = ["live_point_ids", "power_endpoints", "equipment_classes", "meter_profile", "severity_bands"]
@@ -837,7 +868,7 @@ async def get_project_settings():
         "project_id": ACTIVE_PROJECT_ID,
         "project_name": PROJECT_NAME,
         "config": {key: CONFIG.get(key) for key in blocks},
-        "source": {key: "project" if key in ACTIVE_OVERRIDES else "default" for key in blocks},
+        "source": {key: _block_source(key) for key in blocks},
     }
 
 
@@ -865,12 +896,11 @@ def _block(items: dict, detail: Optional[str] = None, status: Optional[str] = No
 
 
 def _not_configured(block: str) -> dict:
-    # backend_default: this block is not set by the open project, so the backend serves its own
-    # default for it. Reported so the UI can say so; the default itself is never returned.
-    key = {"finLivePoints": "live_point_ids", "finEndpoints": "power_endpoints",
-           "finEquipmentClasses": "equipment_classes", "finMeterProfile": "meter_profile",
-           "finSeverityBands": "severity_bands"}[block]
-    return {"status": "not_configured", "items": {}, "backend_default": key not in ACTIVE_OVERRIDES}
+    # backend_default: this block is not set by the open project and the backend serves
+    # config.json's for it (standalone / default site only, never a Studio project). Reported so
+    # the UI can say so; the default itself is never returned.
+    key = PROJECT_DICT_SETTINGS[block]
+    return {"status": "not_configured", "items": {}, "backend_default": _block_source(key) == "default"}
 
 
 async def _point_results(c, pids: list[str]) -> dict[str, dict]:
@@ -1011,19 +1041,20 @@ def _fin_failure(status: Optional[int], text: Optional[str], what: str) -> HTTPE
 async def get_fin_projects():
     """The projects on the FIN server: [{"id": "marsaAlArab", "name": "..."}].
 
-    `id` is the identifier FIN uses in `/api/{id}/...`; `name` is only for display. The request
-    is the one the FIN Host page makes (POST /api/sys/eval); its expression comes from
-    config.json `project_discovery`, so a server that answers differently needs no code change.
+    `id` is the identifier FIN uses in `/api/{id}/...`; `name` is only for display. The request is
+    GET /api/sys/eval?expr=secureEval(projs()) with the signed-in session. (The POST the FIN Host
+    page makes needs a browser-issued Attest-Key, which a backend session does not have.) The
+    endpoint and expression come from config.json `project_discovery`.
     """
     _require_client()
     cfg = CONFIG.get("project_discovery") or {}
     endpoint = str(cfg.get("endpoint") or "").strip()
     expr = str(cfg.get("expr") or "").strip()
-    if not endpoint or not expr:
+    if not endpoint or not expr or str(cfg.get("method") or "GET").upper() != "GET":
         raise HTTPException(
             status_code=503,
-            detail="FIN project discovery is not configured (config.json project_discovery.endpoint and .expr).")
-    status, text = await client.post_probe(endpoint, zinc_string_body(expr))
+            detail="FIN project discovery is not configured (config.json project_discovery: GET endpoint and expr).")
+    status, text = await client.get_probe(endpoint, {"expr": expr})
     if status != 200 or text is None:
         raise _fin_failure(status, text, "project list")
     if _is_error_grid(text):
@@ -1067,6 +1098,24 @@ async def get_fin_resources(project: str):
             "his": row.get("his") is True,
         })
     return {"project": project, "resources": items, "truncated": len(rows) > MAX_RESOURCES}
+
+
+@app.get("/api/fin/mapping-schema")
+async def get_mapping_schema():
+    """The keys each Data Mapping block can have, read from config.json: names only, never values.
+
+    These are Eko-DT's own keys (what the dashboard and this backend read), the same for every
+    project. The editor offers them as blank rows; no point ID, endpoint, tag or alias is sent.
+    """
+    def keys(obj) -> list:
+        return [k for k in (obj if isinstance(obj, dict) else {}) if not k.startswith("_")]
+
+    return {
+        "finLivePoints": keys(BASE_CONFIG.get("live_point_ids")),
+        "finEndpoints": keys(BASE_CONFIG.get("power_endpoints")),
+        "finEquipmentClasses": keys(BASE_CONFIG.get("equipment_classes")),
+        "finMeterProfile": keys((BASE_CONFIG.get("meter_profile") or {}).get("point_map")),
+    }
 
 
 @app.get("/api/fin/status", response_model=StatusResponse)

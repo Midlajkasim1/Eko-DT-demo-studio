@@ -40,8 +40,9 @@ class FakeFinClient:
     # (FIN project the client was bound to, endpoint) for every probe, so a test can prove which
     # FIN project identifier each request carried
     probe_log: list = []
-    # What POST /api/sys/eval answers with (a FIN Host project grid), and the POSTs it received.
-    # post_status makes every POST answer that status instead (e.g. 500, 403).
+    # What GET /api/sys/eval?expr=secureEval(projs()) answers with (a FIN Host project grid), and the
+    # (endpoint, params) of each discovery GET received. discovery_status makes it answer that
+    # status instead (e.g. 500, 403).
     # The header is the one captured from the FIN Host (`dis` is the display name); the ids and
     # `dis` values are the confirmed ones. Cells after `dis` were not captured and are empty.
     projects_text = (
@@ -53,10 +54,10 @@ class FakeFinClient:
         '@p:khaznaDataCenter,"local","KHAZNA DATA CENTER"' + ',' * 12 + '\n'
         '@p:marsaAlArab,"local","marsaAlArab"' + ',' * 12 + '\n'
     )
-    post_status = None
-    post_log: list = []
-    # unreachable: the POST fails like a FIN that is down (status None)
-    post_unreachable = False
+    discovery_status = None
+    discovery_log: list = []
+    # unreachable: the GET fails like a FIN that is down (status None)
+    discovery_unreachable = False
 
     def __init__(self, base_url, project_name):
         self.base_url = base_url.rstrip("/")
@@ -81,12 +82,12 @@ class FakeFinClient:
         self.last_point_rows = [{"id": {"val": "@p:x:r:1", "dis": "pt"}, "his": True, "navName": "pt"}]
         return _equipment()
 
-    async def post_probe(self, endpoint, body):
-        FakeFinClient.post_log.append((self.project_name, endpoint, body))
-        if FakeFinClient.post_unreachable:
+    async def get_probe(self, endpoint, params):
+        FakeFinClient.discovery_log.append((self.project_name, endpoint, params))
+        if FakeFinClient.discovery_unreachable:
             return None, None
-        if FakeFinClient.post_status:
-            return FakeFinClient.post_status, ""
+        if FakeFinClient.discovery_status:
+            return FakeFinClient.discovery_status, ""
         return 200, FakeFinClient.projects_text
 
     async def fetch_probe(self, endpoint):

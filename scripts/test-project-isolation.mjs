@@ -169,10 +169,13 @@ try {
   const tabs = await page.$$eval('.ds-tab', e => e.map(x => x.textContent.trim()))
   check(tabs.length === 5 && tabs.includes('FIN Config') && tabs.includes('Data Mapping'), 'C (normal project): Dashboard Settings shows all five tabs')
   await page.click('.ds-tab:has-text("Data Mapping")')
-  check((await rows('FIN Live Points Mapping')).length === 0 && (await rows('Equipment Classes')).length === 0, 'C: Data Mapping empty (no mappings from A or B)')
+  // an unset block lists its keys as blank rows; no value from A or B is filled in
+  const blank = async t => { const r = await rows(t); return r.length > 0 && r.every(([, v]) => v === '') }
+  check(await blank('FIN Live Points Mapping') && await blank('Equipment Classes'), 'C: Data Mapping has only blank rows (no mappings from A or B)')
   await close()
   const cfgC = await until(async () => { const c = await backend('/api/fin/project-settings'); return c.project_id === 'iso-C' && c }, 'backend to serve C')
-  check(Object.values(cfgC.source).every(v => v === 'default') && !JSON.stringify(cfgC.config).includes('iso-'), 'C: backend fell back to config.json defaults, not B\'s mappings')
+  check(Object.values(cfgC.source).every(v => v === 'not_configured') && Object.values(cfgC.config).every(v => JSON.stringify(v) === '{}'),
+    'C: backend serves no mapping for C: neither B\'s nor config.json\'s')
   const stC = await backend('/api/fin/status')
   check(stC.project_name === '' && stC.project_source === 'unset' && stC.display_name === '' && stC.project_validated === null,
     'C: no FIN project name is shown as unconfigured, not as the default site (' + JSON.stringify([stC.project_name, stC.project_source]) + ')')
@@ -260,11 +263,11 @@ try {
   await openData()
   const body = () => page.locator('.dashboard-settings-modal').innerText()
   check((await body()).includes('No project-specific mappings configured'), 'C: "No project-specific mappings configured" is shown')
-  check(await badges(liveT, 'not_configured').count() === 1 && (await rows(liveT)).length === 0, 'C: Live Points reads — Not Configured with no rows')
+  check(await badges(liveT, 'not_configured').count() === 1 && (await rows(liveT)).every(([, v]) => v === ''), 'C: Live Points reads — Not Configured, with blank rows only')
   check(!(await body()).includes('3181ee6e') && !(await body()).includes('r:111'), 'C: no config.json / other-project point IDs are displayed')
   await validate()
   check(await page.locator('.dashboard-settings-modal [data-status="not_configured"]').count() >= 5 &&
-    (await body()).includes('backend uses its own default'), 'C: after Validate every block is Not Configured and the backend default is only mentioned, never shown')
+    !(await body()).includes('config.json'), 'C: after Validate every block is Not Configured, with no config.json default behind it')
   check(!(await body()).includes('3181ee6e'), 'C: still no default point IDs after validating')
   await close()
 
@@ -277,7 +280,7 @@ try {
     await page.fill('#fin-project', name)
     await page.click('button:has-text("Connect")')
   }
-  const nameField = () => page.locator('.ds-field', { has: page.locator('label:text-is("FIN Project")') }).locator('input')
+  const nameField = () => page.locator('.ds-field', { has: page.locator('label:text-is("FIN Project")') }).locator('input, select').first()
   const openFin = async () => { await page.click('text=Dashboard Settings'); await page.waitForSelector('.dashboard-settings-modal'); await page.click('.ds-tab:has-text("FIN Config")') }
 
   await open(D, true)

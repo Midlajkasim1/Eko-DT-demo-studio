@@ -7,6 +7,8 @@ export interface MappingRow {
   text: string
   /** The value as loaded. Kept while the text is untouched, so nothing is re-encoded on save. */
   original?: unknown
+  /** An Eko-DT dashboard key offered with no value yet. Blank, it is not part of the mapping. */
+  suggested?: boolean
 }
 
 export type JsonObject = Record<string, unknown>
@@ -56,6 +58,7 @@ export interface RowsResult {
 export function objectFromRows(rows: MappingRow[], kind: ValueKind): RowsResult {
   const out: JsonObject = {}
   for (const row of rows) {
+    if (row.suggested && !row.text.trim()) continue
     const key = row.key.trim()
     if (!key) return { error: 'Every mapping needs a key.' }
     if (key in out) return { error: `Duplicate key "${key}".` }
@@ -63,7 +66,7 @@ export function objectFromRows(rows: MappingRow[], kind: ValueKind): RowsResult 
     if (parsed.error) return { error: parsed.error }
     out[key] = parsed.value
   }
-  return rows.length ? { value: out } : {}
+  return Object.keys(out).length ? { value: out } : {}
 }
 
 export interface ImportResult {

@@ -100,7 +100,8 @@
     "alarms": "/api/{project}/eval?expr=readAll(equip+or+point).alarms(today)"
   },
   "project_discovery": {
-    "_comment": "How the FIN project list is read: the POST /api/sys/eval request the FIN Host page makes. 'expr' is the Axon expression in that request's payload, confirmed from the Network tab of the FIN Host page.",
+    "_comment": "How the FIN project list is read: GET {endpoint}?expr={expr} with the signed-in backend session. The POST the FIN Host page makes needs a browser-issued Attest-Key; this GET does not (confirmed with fin_discovery_diag.py).",
+    "method": "GET",
     "endpoint": "/api/sys/eval",
     "expr": "secureEval(projs())"
   },

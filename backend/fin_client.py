@@ -372,12 +372,6 @@ PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
 PROJECT_NAME_COLUMNS = ("dis",)
 
 
-def zinc_string_body(expr: str) -> str:
-    """The Zinc grid a Haystack `eval` POST carries: one `expr` column, one row."""
-    escaped = expr.replace("\\", "\\\\").replace('"', '\\"')
-    return 'ver:"3.0"\nexpr\n"' + escaped + '"\n'
-
-
 def parse_fin_projects(text: str) -> list[dict]:
     """Project records from a FIN grid: every row whose id is `@p:<projectId>`.
 
@@ -630,33 +624,15 @@ class FinScramClient:
             print(f"[FIN] Probe error {url}: {e}")
             return None, None
 
-    async def post_probe(self, endpoint: str, body: str) -> tuple[Optional[int], Optional[str]]:
-        """POST a Zinc body with the signed-in session: (status, text), or (None, None) if FIN is
-        unreachable. Like fetch_probe it never ends the session."""
+    async def get_probe(self, endpoint: str, params: dict[str, str]) -> tuple[Optional[int], Optional[str]]:
+        """fetch_probe with query parameters, which httpx URL-encodes: (status, text), or
+        (None, None) if FIN is unreachable. The session's auth headers are reused."""
         url = endpoint if endpoint.startswith("http") else f"{self.base_url}{endpoint}"
-
-        print("[FIN] POST URL:", url)
-        print("[FIN] POST BODY:")
-        print(body)
-
         try:
-            resp = await self.client.post(
-                url,
-                content=body.encode("utf-8"),
-                headers={
-                    **self.auth_headers,
-                    "Content-Type": "text/zinc; charset=utf-8",
-                    "Accept": "text/zinc",
-                },
-            )
-
-            print("[FIN] POST STATUS:", resp.status_code)
-            print("[FIN] POST RESPONSE:", resp.text)
-
+            resp = await self.client.get(url, params=params, headers=self.auth_headers)
             return resp.status_code, resp.text
-
         except Exception as e:
-            print(f"[FIN] Post error {url}: {e}")
+            print(f"[FIN] Probe error {url}: {e}")
             return None, None
 
     def _resolve_endpoint(self, template: str) -> str:
