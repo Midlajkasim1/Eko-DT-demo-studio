@@ -310,6 +310,16 @@ window.EKO_C = (function(){
           ${perfWord ? `<div class="scrow"><span class="ovkcap msA" data-tone="pos">${esc(perfWord)}</span></div>` : ''}</div>`
       + gaugeRow(E.t('enOvernight'), d.overnightDeviationPct, 100, '%', ar ? (d.overnightWordAr || '') : (d.overnightWordEn || ''), d.overnightTone || 'ok')
       + d.sumGauges.map(g2 => gaugeRow(ar?g2.labelAr:g2.labelEn, g2.val, g2.max, g2.u, ar?g2.wordAr:g2.wordEn, g2.tone)).join('')
+      + (function () {
+          if (d.emsTotal == null) return '';
+          const tone = d.emsTone === 'warn' ? 'warn' : 'ok';
+          const chip = ar ? d.emsChipAr : d.emsChipEn;
+          const cap = d.emsTotal ? E.t('enEmsCap', { n: d.emsTotal }) : '';
+          return `<div class="ovk ovkDark"><div class="ovkhead"><span class="scdot" data-tone="${tone}"></span><span class="ovklbl">${esc(E.t('enEmsMeters'))}</span>${ctl(E, E.t('enEmsMeters'), chip || cap)}</div>
+            <div class="ovkval"><span class="ovknum">${d.emsActive} / ${d.emsTotal}</span></div>
+            ${chip ? `<div class="scrow"><span class="ovkcap msA" data-tone="warn">${esc(chip)}</span></div>`
+                   : (cap ? `<div class="scrow"><span class="ovkcap msA" data-tone="t3">${esc(cap)}</span></div>` : '')}</div>`;
+        })()
       + '</div>');
   }
 

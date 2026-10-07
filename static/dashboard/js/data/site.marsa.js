@@ -188,6 +188,7 @@ window.EKO_DATA.marsa = {
       { "key": "enDev", "labelEn": "ENERGY DEVIATION", "labelAr": "\u0627\u0646\u062d\u0631\u0627\u0641 \u0627\u0644\u0637\u0627\u0642\u0629", "val": null, "max": 100, "u": "%", "wordEn": null, "wordAr": null, "tone": "ok" },
       { "key": "loadFactor", "labelEn": "LOAD FACTOR", "labelAr": "\u0645\u0639\u0627\u0645\u0644 \u0627\u0644\u062d\u0645\u0644", "val": null, "max": 100, "u": "%", "wordEn": null, "wordAr": null, "tone": "ok" }
     ],
+    "emsTotal": null, "emsActive": null, "emsChipEn": null, "emsChipAr": null, "emsTone": "ok",
     "wasteTotalKwh": null,
     "wasteTotalAed": null,
     "kpis": [

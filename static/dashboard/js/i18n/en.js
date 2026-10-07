@@ -663,6 +663,8 @@ window.EKO_I18N.en = {
   "aboveBaseline": "Above Baseline",
   "enMtd": "THIS MONTH UP TO DATE",
   "enOvernight": "OVERNIGHT LOAD DEVIATION",
+  "enEmsMeters": "ENERGY METERS",
+  "enEmsCap": "Total: {n}",
   "enWasteRisk": "ENERGY WASTE & RISK FROM KPIs",
   "optT": "Optimization & Action for Energy Saving",
   "optNote": "Note: action to be taken on Warning/Alarms",

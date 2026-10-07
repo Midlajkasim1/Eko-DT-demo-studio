@@ -1297,6 +1297,31 @@
       });
     }
 
+    var utilAssets = newAssets.filter(function (a) { return a.sys === 'Utilities'; });
+    var waterList = utilAssets.filter(function (a) {
+      var blob = (a.id + ' ' + (a.typeEn || '') + ' ' + (a.tags || []).join(' ')).toLowerCase();
+      return /water|wm_|plumb|grease/.test(blob);
+    });
+    var gasList = utilAssets.filter(function (a) {
+      var blob = (a.id + ' ' + (a.typeEn || '') + ' ' + (a.tags || []).join(' ')).toLowerCase();
+      return /gas|gm_/.test(blob);
+    });
+    if (site.utilLanding) {
+      set(site.utilLanding, 'waterMeters', waterList.length);
+      set(site.utilLanding, 'gasMeters', gasList.length);
+    }
+
+    var emsList = newAssets.filter(function (a) { return a.sys === 'EMS'; });
+    if (site.energyLanding) {
+      var emsEl = site.energyLanding;
+      var emsAlarm = emsList.filter(function (a) { return a.st === 'alarm'; }).length;
+      set(emsEl, 'emsTotal', emsList.length);
+      set(emsEl, 'emsActive', emsList.length - emsAlarm);
+      set(emsEl, 'emsChipEn', emsAlarm > 0 ? emsAlarm + ' inactive' : null);
+      set(emsEl, 'emsChipAr', emsAlarm > 0 ? emsAlarm + ' غير نشطة' : null);
+      set(emsEl, 'emsTone', emsAlarm > 0 ? 'warn' : 'ok');
+    }
+
     applyHeat(list);
     paint();
   }
