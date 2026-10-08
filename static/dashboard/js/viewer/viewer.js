@@ -165,6 +165,11 @@ window.EKO_V = (function(){
     const lr = layer && layer.getBoundingClientRect();
     const dx = lr ? hr.left - lr.left : 0, dy = lr ? hr.top - lr.top : 0;
     if(layer){ layer.querySelectorAll('.mk').forEach(el => project(el, lr)); layer.dataset.proj = '1'; }
+    document.querySelectorAll('.hmlayer').forEach(lay => {
+      const hlr = lay.getBoundingClientRect();
+      lay.querySelectorAll('.hmzone3d').forEach(el => project(el, hlr));
+      lay.dataset.proj = '1';
+    });
     /* Chips offset against their OWN layer: .pmulayer spans the whole
        viewer column in the stacked layout, so borrowing the marker layer's
        rectangle (a 0×0 anchor there) would misplace them. */
@@ -452,7 +457,11 @@ window.EKO_V = (function(){
       ${config.markers ? markers(E) : ''}
       ${config.pmuChips ? (cacheOK = lastSig !== '' && hostSig(E) === lastSig, chipLayer(E.data.power.pmuChips||[])) : ''}
       ${config.utilChips ? (cacheOK = lastSig !== '' && hostSig(E) === lastSig, chipLayer(E.data.utilLanding.chips||[])) : ''}
-      ${config.heat ? window.EKO_A.heatOverlay(E) : ''}
+      ${config.heat ? (cacheOK = lastSig !== '' && hostSig(E) === lastSig, window.EKO_A.heatOverlay(E, (bimId, key) => {
+        const c = cacheOK && lastProj[projKey(null, null, key)];
+        const st = c ? ` style="left:${c.left};top:${c.top}${c.on ? '' : ';display:none'}"` : (cacheOK ? ' style="display:none"' : '');
+        return `data-bimid="${C().esc(bimId)}" data-key="${C().esc(key)}"${st}`;
+      })) : ''}
       ${mkPop(E)}
       ${summaryHtml || ''}
       ${config.dock === 'none' ? '' : `<div id="vbottom">${window.EKO_VT.readout(E)}${dock(E)}</div>`}

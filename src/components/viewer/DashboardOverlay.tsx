@@ -188,6 +188,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
        occlusion, ink, grade, tone mapping, x-ray) changes how it looks, and
        with the depth cleared first it shows through walls, pipes and slabs.
        The model's own materials are left alone. */
+    const heatRoots = new Map<any, THREE.Group>()
     const overlay = new THREE.Scene()
     // Standard-material parts need lights. The ghost shader ignores them.
     const fcuHemi = new THREE.HemisphereLight(0xf5f7fa, 0x7d858f, 0.42)
@@ -308,8 +309,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ghost = null
     }
     const drawGhost = () => {
-      if (!ghost || !ghost.group.visible) return
-      const active = fcu ?? ahu
+      const hasHeat = heatRoots.size > 0
+      if ((!ghost || !ghost.group.visible) && !hasHeat) return
+      const active = ghost && ghost.group.visible ? (fcu ?? ahu) : null
       if (active) {
         const now = performance.now()
         const dt = Math.min(0.05, (now - active.last) / 1000)
@@ -346,10 +348,17 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       renderer.autoClear = autoClear
     }
     const syncGhost = () => {
-      if (!ghost) return
-      ghost.group.matrix.copy(ghost.model.object.matrixWorld)
-      ghost.group.matrixWorldNeedsUpdate = true
-      ghost.group.visible = ghost.model.object.visible !== false
+      if (ghost) {
+        ghost.group.matrix.copy(ghost.model.object.matrixWorld)
+        ghost.group.matrixWorldNeedsUpdate = true
+        ghost.group.visible = ghost.model.object.visible !== false
+      }
+      heatRoots.forEach((root, model) => {
+        if (!model?.object) return
+        root.matrix.copy(model.object.matrixWorld)
+        root.matrixWorldNeedsUpdate = true
+        root.visible = model.object.visible !== false
+      })
     }
     const mountFcu = (group: THREE.Group, entry: Located, assetId: string, bimId: string) => {
       const schematic = createFcuSchematic(entry.localBox, entry.model.object.matrixWorld, group)
@@ -734,7 +743,14 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       levels = next
       try { (window as any).EKO?.set?.({}) } catch { /* dashboard not up yet */ }
     }
-    const isolateLevel = async (levelId: string) => {
+    let lastLevelId: string | null = null
+    const isolateLevel = async (levelId: string, force?: boolean) => {
+      if (levelId === 'Ground floor' && !floorCatalog.get(levelId)) {
+        const gf = [...floorCatalog.values()].find(f => /ground/i.test(f.name) || f.rank === 0)
+        if (gf) levelId = gf.id
+      }
+      if (!force && levelId === lastLevelId) return
+      lastLevelId = levelId
       const seq = ++levelSeq
       for (const model of engine.fragments?.models?.list?.values() ?? []) {
         const m = model as any
@@ -769,19 +785,144 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (seq === levelSeq) repositionMarkers()
     }
 
+    const heatGeoms = new Map<string, THREE.BufferGeometry[]>()
+    const heatByBim = new Map<string, { mat: THREE.MeshBasicMaterial; model: any; localId: number }>()
+    let heatSig = ''
+    const heatColor = (mode: string, v: number | null) => {
+      if (v == null || !isFinite(v)) return new THREE.Color(0x94a3b8)
+      let t: number
+      if (mode === 'comfort') t = (v - 600) / 600
+      else if (mode === 'hum') t = (v - 40) / 40
+      else t = (v - 21) / 4
+      t = Math.max(0, Math.min(1, t))
+      if (t <= 0.5) return new THREE.Color(0x2E5B92).lerp(new THREE.Color(0xE3E8F0), t / 0.5)
+      return new THREE.Color(0xE3E8F0).lerp(new THREE.Color(0x8A661F), (t - 0.5) / 0.5)
+    }
+    const round1 = (n: number | null | undefined) => (n == null || !isFinite(Number(n)) ? '' : (Math.round(Number(n) * 10) / 10).toFixed(1))
+    const heatRootOf = (model: any) => {
+      let root = heatRoots.get(model)
+      if (root) return root
+      root = new THREE.Group()
+      root.matrixAutoUpdate = false
+      overlay.add(root)
+      heatRoots.set(model, root)
+      return root
+    }
+    const geomsFor = async (bimId: string, entry: Located) => {
+      const hit = heatGeoms.get(bimId)
+      if (hit) return hit
+      let meshes: any[][] = []
+      try { meshes = await entry.model.getItemsGeometry([entry.localId]) } catch { meshes = [] }
+      const geoms: THREE.BufferGeometry[] = []
+      for (const item of meshes || []) {
+        for (const g of item || []) {
+          if (!g?.positions || !g.indices) continue
+          const geom = new THREE.BufferGeometry()
+          geom.setAttribute('position', new THREE.Float32BufferAttribute(g.positions, 3))
+          geom.setIndex(Array.from(g.indices as ArrayLike<number>))
+          const t = g.transform instanceof THREE.Matrix4 ? g.transform
+            : new THREE.Matrix4().fromArray(g.transform?.elements ?? g.transform ?? new THREE.Matrix4().elements)
+          geom.applyMatrix4(t)
+          geoms.push(geom)
+        }
+      }
+      if (!geoms.length && entry.localBox && !entry.localBox.isEmpty()) {
+        const size = entry.localBox.getSize(new THREE.Vector3())
+        const center = entry.localBox.getCenter(new THREE.Vector3())
+        const box = new THREE.BoxGeometry(Math.max(size.x, 0.2), Math.max(size.y, 0.2), Math.max(size.z, 0.2))
+        box.translate(center.x, center.y, center.z)
+        geoms.push(box)
+      }
+      heatGeoms.set(bimId, geoms)
+      return geoms
+    }
+    const clearSpaceHeat = async () => {
+      heatSig = ''
+      heatByBim.forEach(rec => {
+        unwatchClipping(rec.mat)
+        rec.mat.dispose()
+        try {
+          if (typeof rec.model.resetColor === 'function') void rec.model.resetColor([rec.localId])
+          if (typeof rec.model.setOpacity === 'function') void rec.model.setOpacity([rec.localId], 0.01)
+        } catch { /* */ }
+      })
+      heatByBim.clear()
+      heatRoots.forEach(root => {
+        root.removeFromParent()
+        root.clear()
+      })
+      heatRoots.clear()
+    }
+    const applySpaceHeat = async (zones: { bimId?: string; bimIds?: string[]; tempC?: number | null; rh?: number | null; co2?: number | null }[], mode?: string) => {
+      const md = mode === 'comfort' || mode === 'hum' ? mode : 'temp'
+      const idsOf = (z: { bimId?: string; bimIds?: string[] }) =>
+        (z.bimIds && z.bimIds.length ? z.bimIds : (z.bimId ? [z.bimId] : [])).filter(id => isGuid(id))
+      const sig = md + '|' + (zones || []).map(z => `${idsOf(z).join(',')}:${round1(z.tempC)}:${round1(z.rh)}:${round1(z.co2)}`).join(';')
+      if (sig === heatSig) return
+      heatSig = sig
+      const keep = new Set<string>()
+      for (const z of zones || []) {
+        const v = md === 'comfort' ? z.co2 : md === 'hum' ? z.rh : z.tempC
+        const color = heatColor(md, v == null ? null : Number(v))
+        for (const bimId of idsOf(z)) {
+        const entry = await locate(bimId)
+        if (!entry) continue
+        keep.add(bimId)
+        const existing = heatByBim.get(bimId)
+        if (existing) {
+          existing.mat.color.copy(color)
+          continue
+        }
+        const geoms = await geomsFor(bimId, entry)
+        if (!geoms.length) continue
+        const mat = new THREE.MeshBasicMaterial({
+          color, transparent: true, opacity: 0.88,
+          depthTest: true, depthWrite: true, side: THREE.DoubleSide, toneMapped: false,
+        })
+        watchClipping(mat)
+        const root = heatRootOf(entry.model)
+        for (const geom of geoms) root.add(new THREE.Mesh(geom, mat))
+        heatByBim.set(bimId, { mat, model: entry.model, localId: entry.localId })
+        }
+      }
+      heatByBim.forEach((rec, bimId) => {
+        if (keep.has(bimId)) return
+        rec.mat.dispose()
+        heatByBim.delete(bimId)
+      })
+      syncGhost()
+    }
+
     /* Whole models, by the discipline in the file name. Item visibility
        (the floor filter) is left as it is. */
-    const isolateLayer = (layerId: string | string[]) => {
+    let lastLayerKey = ''
+    const isolateLayer = (layerId: string | string[], force?: boolean) => {
+      const key = Array.isArray(layerId) ? layerId.slice().sort().join('|') : String(layerId || '')
+      if (!force && key === lastLayerKey) return
+      lastLayerKey = key
       const models = useModelStore.getState().models
       const present = new Set(
         models.map(m => disciplineOf(m.originalFileName || '')).filter((d): d is NonNullable<typeof d> => !!d)
       )
+      const hideStr = Array.isArray(layerId) && !layerId.includes('str')
+      const fragList = engine.fragments?.models?.list
       for (const m of models) {
-        const visible = layerShows(disciplineOf(m.originalFileName || ''), layerId, present)
+        const name = m.originalFileName || ''
+        const disc = disciplineOf(name)
+        let visible = layerShows(disc, layerId, present)
+        if (hideStr && (disc === 'str' || /struct|(?:^|[^A-Z0-9])ST(?:[^A-Z0-9]|$)/i.test(name.toUpperCase()))) visible = false
         useModelStore.getState().setModelVisibility(m.modelId, visible)
-        const object3D = m.type === 'glb'
+        let object3D = m.type === 'glb'
           ? engine.world?.scene?.three?.children?.find((c: any) => c.userData?.modelId === m.modelId)
-          : engine.fragments?.models?.list?.get(m.modelId)?.object
+          : fragList?.get(m.modelId)?.object
+        if (!object3D && fragList) {
+          for (const [, mod] of fragList) {
+            if ((mod as any)?.object?.userData?.modelId === m.modelId) {
+              object3D = (mod as any).object
+              break
+            }
+          }
+        }
         if (object3D) object3D.visible = visible
       }
       repositionMarkers()
@@ -805,6 +946,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         useModelStore.getState().models.map(m => disciplineOf(m.originalFileName || ''))
       ).map(id => ({ id, name: id })),
       isolateLayer,
+      applySpaceHeat,
+      clearSpaceHeat,
       startMeasure: () => measureTool()?.start(),
       cancelMeasure: () => measureTool()?.cancel(),
       finishMeasure: () => measureTool()?.finish(),
@@ -853,6 +996,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
       void resolveAllAssetPositions()
       if (modelsChanged) {
+        lastLevelId = null
+        lastLayerKey = ''
         void refreshLevels()
         const layer = (window as any).EKO?.state?.dock?.layer
         if (layer && layer !== 'all') isolateLayer(layer)
@@ -867,6 +1012,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       engine.world?.renderer?.onAfterUpdate?.remove(drawGhost)
       clearInterval(resolveTimer)
       void clearHighlight()
+      void clearSpaceHeat()
       removeGhost()
       unwatchClipping(ghostDepth)
       unwatchClipping(ghostFill)

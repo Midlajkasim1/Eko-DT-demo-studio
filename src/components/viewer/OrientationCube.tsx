@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import { resetCameraToHome } from '@/lib/cameraUtils'
+import { useModelStore } from '@/store/useModelStore'
 import * as THREE from 'three'
 
 interface OrientationCubeProps {
@@ -61,29 +62,83 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
   const [isDragging, setIsDragging] = useState(false)
   const dragStartRef = useRef<{ x: number, y: number } | null>(null)
 
-  /** Scale snap position to actual model size and fly there */
-  const snapTo = useCallback((posOffset: number[], _tgt: number[]) => {
+  /** Point the camera along a cube face and frame the loaded model, not the sky. */
+  const snapTo = useCallback((posOffset: number[], _tgt: number[], closer?: boolean) => {
     const engine = engineRef.current
     if (!engine?.world?.camera?.controls) return
     const box = new THREE.Box3()
-    engine.world.scene.three.traverse((obj: any) => {
-      if (obj.isMesh && obj.name !== 'SkyDome' && obj.name !== 'CloudsDome') {
-        box.expandByObject(obj)
+    const models = engine.fragments?.models?.list
+    if (closer) {
+      const spaceIds = useModelStore.getState().models
+        .filter(m => /space/i.test(m.originalFileName || ''))
+        .map(m => m.modelId)
+      for (const id of spaceIds) {
+        const frag = models?.get(id) as any
+        const obj = frag?.object
+        if (obj) box.expandByObject(obj)
       }
-    })
-    const size = new THREE.Vector3()
-    box.getSize(size)
-    const scale = box.isEmpty() ? 30 : Math.max(size.x, size.y, size.z) * 0.7
+    }
+    if (box.isEmpty() && models && models.size) {
+      for (const model of models.values()) {
+        const obj = (model as any).object || model
+        if (obj && typeof obj.updateWorldMatrix === 'function') box.expandByObject(obj)
+      }
+    }
+    if (box.isEmpty()) {
+      engine.world.scene.three.traverse((obj: any) => {
+        if (obj.isMesh && obj.name !== 'SkyDome' && obj.name !== 'CloudsDome') {
+          box.expandByObject(obj)
+        }
+      })
+    }
+    const size = box.isEmpty() ? new THREE.Vector3(20, 10, 20) : box.getSize(new THREE.Vector3())
     const center = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3())
-    const f = scale / D
-    engine.world.camera.controls.setLookAt(
-      center.x + posOffset[0] * f,
-      center.y + posOffset[1] * f,
-      center.z + posOffset[2] * f,
+    const dir = new THREE.Vector3(posOffset[0], posOffset[1], posOffset[2]).normalize()
+    const cam = engine.world.camera.three as THREE.PerspectiveCamera
+    const fov = THREE.MathUtils.degToRad(cam.fov || 50)
+    const aspect = Math.max(cam.aspect || 1, 0.25)
+    const ax = Math.abs(dir.x), ay = Math.abs(dir.y), az = Math.abs(dir.z)
+    let spanW: number, spanH: number
+    if (ay >= ax && ay >= az) {
+      spanW = size.x
+      spanH = size.z
+    } else if (ax >= az) {
+      spanW = size.z
+      spanH = size.y
+    } else {
+      spanW = size.x
+      spanH = size.y
+    }
+    const distV = (spanH / 2) / Math.tan(fov / 2)
+    const distH = (spanW / 2) / (Math.tan(fov / 2) * aspect)
+    const topOrBottom = ay > 0.9
+    const dist = topOrBottom
+      ? Math.max(distV, distH, 8) * (closer ? 1.25 : 0.82)
+      : Math.max(size.x, size.y, size.z, 8) * 0.7
+    /* Keep world Y-up. A true vertical look locks orbit and mouse rotates the wrong way. */
+    if (topOrBottom) dir.set(dir.x, dir.y, dir.z + (dir.y >= 0 ? 0.14 : -0.14)).normalize()
+    cam.up.set(0, 1, 0)
+    const controls = engine.world.camera.controls as { setLookAt: Function; updateCameraUp?: Function }
+    controls.updateCameraUp?.()
+    controls.setLookAt(
+      center.x + dir.x * dist,
+      center.y + dir.y * dist,
+      center.z + dir.z * dist,
       center.x, center.y, center.z,
       true
     )
   }, [engineRef])
+
+  useEffect(() => {
+    const onLook = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {}
+      const face = detail.face as keyof typeof FACE_VIEWS
+      const v = face && FACE_VIEWS[face]
+      if (v) snapTo(v[0], v[1], !!detail.closer)
+    }
+    window.addEventListener('eko-look-face', onLook)
+    return () => window.removeEventListener('eko-look-face', onLook)
+  }, [snapTo])
 
   /** Sync cube rotation to the live camera */
   useEffect(() => {
@@ -198,6 +253,43 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
           <polyline points="9 22 9 12 15 12 15 22"></polyline>
+        </svg>
+      </div>
+
+      <div
+        title="Bottom view"
+        onClick={(e) => {
+          e.stopPropagation()
+          if (isDragging) return
+          const v = FACE_VIEWS.Bottom
+          if (v) snapTo(v[0], v[1])
+        }}
+        style={{
+          position: 'absolute',
+          top: '-12px', right: '-28px', left: 'auto',
+          width: '24px', height: '24px',
+          borderRadius: '50%',
+          background: 'transparent',
+          cursor: 'pointer',
+          zIndex: 40,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#6a7a8a',
+        }}
+        onMouseEnter={e => {
+          const el = e.currentTarget as HTMLElement
+          el.style.color = '#2a334d'
+          el.style.background = 'rgba(235, 240, 245, 0.8)'
+        }}
+        onMouseLeave={e => {
+          const el = e.currentTarget as HTMLElement
+          el.style.color = '#6a7a8a'
+          el.style.background = 'transparent'
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="6 9 12 15 18 9" />
         </svg>
       </div>
 

@@ -56,9 +56,14 @@
       setAssetColor: noop,
       clearAssetColors: noop,
 
-      isolateLevel: function (levelId) {
+      isolateLevel: function (levelId, force) {
         if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.isolateLevel) {
-          window.EKO_HOST_ENGINE.isolateLevel(levelId);
+          window.EKO_HOST_ENGINE.isolateLevel(levelId, force);
+        }
+      },
+      isolateLayer: function (layerId, force) {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.isolateLayer) {
+          window.EKO_HOST_ENGINE.isolateLayer(layerId, force);
         }
       },
       showAllLevels: function () {
@@ -66,9 +71,9 @@
           window.EKO_HOST_ENGINE.isolateLevel('ALL');
         }
       },
-      setLayerVisibility: function (layerId) {
+      setLayerVisibility: function (layerId, force) {
         if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.isolateLayer) {
-          window.EKO_HOST_ENGINE.isolateLayer(layerId);
+          window.EKO_HOST_ENGINE.isolateLayer(layerId, force);
         }
       },
 

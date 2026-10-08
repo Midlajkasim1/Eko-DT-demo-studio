@@ -24,7 +24,11 @@ export function resetCameraToHome(engine: FragmentsEngine | null) {
     const ty = Array.isArray(tgt) ? tgt[1] : tgt.y
     const tz = Array.isArray(tgt) ? tgt[2] : tgt.z
 
-    engine.world.camera.controls.setLookAt(px, py, pz, tx, ty, tz, true)
+    const cam = engine.world.camera.three as THREE.PerspectiveCamera
+    cam.up.set(0, 1, 0)
+    const controls = engine.world.camera.controls as { setLookAt: Function; updateCameraUp?: Function }
+    controls.updateCameraUp?.()
+    controls.setLookAt(px, py, pz, tx, ty, tz, true)
     return
   }
 
@@ -40,8 +44,9 @@ export function resetCameraToHome(engine: FragmentsEngine | null) {
   box.getSize(size)
   const scale = box.isEmpty() ? 30 : Math.max(size.x, size.y, size.z) * 0.7
   const center = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3())
-  
-  // Isometric offset: normalized 0.58 on each axis
+  const cam = engine.world.camera.three as THREE.PerspectiveCamera
+  cam.up.set(0, 1, 0)
+  ;(engine.world.camera.controls as { updateCameraUp?: Function }).updateCameraUp?.()
   const f = scale
   engine.world.camera.controls.setLookAt(
     center.x + 0.58 * f,

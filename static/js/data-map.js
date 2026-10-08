@@ -1360,10 +1360,35 @@
     return '';
   }
 
+  /* IfcSpace GlobalIds from docs/Models/...Spaces_metadata.json.
+     IS-01..07 → Space 22..28 one-to-one. IAQ-01..04 → two rooms each. */
+  var SPACE_22 = { bimId: '0xfWWQLhfFUfSseiBChrCj', space: 'Space 22' };
+  var SPACE_23 = { bimId: '0xfWWQLhfFUfSseiBChrCg', space: 'Space 23' };
+  var SPACE_24 = { bimId: '0xfWWQLhfFUfSseiBChrCh', space: 'Space 24' };
+  var SPACE_25 = { bimId: '0xfWWQLhfFUfSseiBChrCe', space: 'Space 25' };
+  var SPACE_26 = { bimId: '0xfWWQLhfFUfSseiBChrCf', space: 'Space 26' };
+  var SPACE_27 = { bimId: '0xfWWQLhfFUfSseiBChr3M', space: 'Space 27' };
+  var SPACE_28 = { bimId: '0xfWWQLhfFUfSseiBChr3N', space: 'Space 28' };
+  var SPACE_GUID = {
+    IS01: [SPACE_22], IS02: [SPACE_23], IS03: [SPACE_24], IS04: [SPACE_25],
+    IS05: [SPACE_26], IS06: [SPACE_27], IS07: [SPACE_28],
+    IAQ01: [SPACE_22, SPACE_23],
+    IAQ02: [SPACE_24, SPACE_25],
+    IAQ03: [SPACE_26, SPACE_27],
+    IAQ04: [SPACE_28]
+  };
+
   function blankZone(key) {
     var kind = key.indexOf('IAQ') === 0 ? 'iaq' : 'is';
     var name = key.slice(0, kind === 'iaq' ? 3 : 2) + '-' + key.slice(kind === 'iaq' ? 3 : 2);
-    return { nameEn: name, nameAr: name, floor: '', kind: kind, tempC: null, rh: null, co2: null, hours: [] };
+    var pins = SPACE_GUID[key] || [];
+    return {
+      nameEn: name, nameAr: name, floor: '', kind: kind,
+      tempC: null, rh: null, co2: null, hours: [],
+      bimId: pins[0] ? pins[0].bimId : '',
+      bimIds: pins.map(function (p) { return p.bimId; }),
+      spaceName: pins.map(function (p) { return p.space; }).join(' · ')
+    };
   }
 
   function pointRef(eq, test) {

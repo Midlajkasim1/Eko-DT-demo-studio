@@ -167,14 +167,31 @@
       if(window.EKO_SURF) window.EKO_SURF.closeAll();          /* R4 (D67) */
       const targetModule = module ?? this.state.module;
       const targetSub = sub ?? null;
-      
-      let targetLayer = 'all';
-      if (targetModule === 'systems') {
-        if (targetSub === 'hvac' || targetSub === 'mechanical') targetLayer = 'mech';
-        else if (targetSub === 'electrical') targetLayer = 'elec';
+      const enteringHeat = pageId === 'heatmap' && this.state.pageId !== 'heatmap';
+      const leavingHeat = this.state.pageId === 'heatmap' && pageId !== 'heatmap';
+      const HEAT_LAYERS = ['arch','elec','int','mech'];
+
+      if (enteringHeat) {
+        if (this.state.dock) { this.state.dock.level = 'Ground floor'; this.state.dock.layer = HEAT_LAYERS; }
+        if (this.engine && this.engine.isolateLevel) this.engine.isolateLevel('Ground floor', true);
+        if (this.engine && this.engine.isolateLayer) this.engine.isolateLayer(HEAT_LAYERS, true);
+        this.state._heatViewed = true;
+        window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true } }));
+      } else if (leavingHeat) {
+        if (this.state.dock) { this.state.dock.level = 'ALL'; this.state.dock.layer = 'all'; }
+        if (this.engine && this.engine.isolateLevel) this.engine.isolateLevel('ALL', true);
+        if (this.engine && this.engine.setLayerVisibility) this.engine.setLayerVisibility('all');
+        if (this.engine && typeof this.engine.resetView === 'function') this.engine.resetView();
+        this.state._heatViewed = false;
+      } else {
+        let targetLayer = 'all';
+        if (targetModule === 'systems') {
+          if (targetSub === 'hvac' || targetSub === 'mechanical') targetLayer = 'mech';
+          else if (targetSub === 'electrical') targetLayer = 'elec';
+        }
+        if (this.state.dock) this.state.dock.layer = targetLayer;
+        if (this.engine && this.engine.setLayerVisibility) this.engine.setLayerVisibility(targetLayer);
       }
-      if (this.state.dock) this.state.dock.layer = targetLayer;
-      if (this.engine && this.engine.setLayerVisibility) this.engine.setLayerVisibility(targetLayer);
 
       this.set({ born: this.state.born || 'nav',
                  pageId, module: targetModule, sub: targetSub,
@@ -732,6 +749,15 @@
     requestAnimationFrame(() => { restoreScroll(); requestAnimationFrame(restoreScroll); });
     E.state.born = null;
     if(window.EKO_SURF) window.EKO_SURF.afterRender();          /* R5 (D67) */
+    if(window.EKO_HOST_ENGINE){
+      if(E.state.pageId === 'heatmap' && typeof window.EKO_HOST_ENGINE.applySpaceHeat === 'function'){
+        const mode = E.state.hmMode === 'comfort' ? 'comfort' : (E.state.hmMode === 'hum' || E.state.hmMode === 'occ' ? 'hum' : 'temp');
+        window.EKO_HOST_ENGINE.applySpaceHeat((E.data.heat && E.data.heat.zones) || [], mode);
+      } else if(E.state._heatOn && typeof window.EKO_HOST_ENGINE.clearSpaceHeat === 'function'){
+        window.EKO_HOST_ENGINE.clearSpaceHeat();
+      }
+      E.state._heatOn = E.state.pageId === 'heatmap';
+    }
     if(window.EKO_MAP && document.querySelector('.pfcard')) window.EKO_MAP.after();   /* D122: keep the marker card inside the map box */
     if(window.EKO_AI) window.EKO_AI.after();                     /* D132: the conversation panel's geometry and scroll */
     syncPaint();
@@ -1002,13 +1028,28 @@
       if(k === 'closeMore'){ d.bloom = null; render(); return; }
       /* Reset is everything back to how the viewer opens: camera, floor, style,
          layers, and the selection too (popup, equipment colour, asset panel). */
-      if(k === 'reset'){ E.engine.resetView();
-        if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
-        if(E.engine.setLayerVisibility) E.engine.setLayerVisibility('all');
+      if(k === 'reset'){
+        if(E.state.pageId === 'heatmap'){
+          if(E.engine.isolateLevel) E.engine.isolateLevel('Ground floor', true);
+          if(E.engine.isolateLayer) E.engine.isolateLayer(['arch','elec','int','mech'], true);
+          window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true } }));
+        } else if(E.engine.resetView){
+          E.engine.resetView();
+          if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
+          if(E.engine.setLayerVisibility) E.engine.setLayerVisibility('all');
+        } else {
+          if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
+          if(E.engine.setLayerVisibility) E.engine.setLayerVisibility('all');
+        }
         if(E.engine.clearMeasure) E.engine.clearMeasure();
         if(E.engine.clearSection) E.engine.clearSection();
-        E.set(Object.assign({ dock:{ tool:null, slice:false, bloom:null, style:'default', tone:'blue',
-        level:'ALL', layer:'all', alerts:'all', minimap:false }, histAge:null, measureResult:null }, NO_SEL)); return; }
+        const heat = E.state.pageId === 'heatmap';
+        E.set(Object.assign({
+          dock: heat
+            ? Object.assign({}, E.state.dock, { tool:null, slice:false, bloom:null, style:'default', tone:'blue', minimap:false, level:'Ground floor', layer:['arch','elec','int','mech'] })
+            : { tool:null, slice:false, bloom:null, style:'default', tone:'blue', level:'ALL', layer:'all', alerts:'all', minimap:false },
+          histAge:null, measureResult:null
+        }, NO_SEL)); return; }
       if(!def) return;
       if(def.kind === 'tool'){
         /* Select and Measure take clicks. Slice is a latch: it stays on beside them.

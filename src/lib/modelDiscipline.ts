@@ -2,7 +2,7 @@ export type LayerId = 'all' | 'arch' | 'elec' | 'int' | 'mech' | 'str'
 
 const TOKEN: Record<string, Exclude<LayerId, 'all'>> = {
   AR: 'arch', ARCH: 'arch', ARC: 'arch',
-  ST: 'str', STR: 'str',
+  ST: 'str', STR: 'str', STRUCT: 'str', STRUCTURAL: 'str', STEEL: 'str',
   EL: 'elec', EE: 'elec', ELEC: 'elec',
   IN: 'int', INT: 'int', ID: 'int',
   ME: 'mech', MEP: 'mech', HVAC: 'mech', HV: 'mech',
@@ -32,5 +32,6 @@ export function layersFor(disciplines: Array<string | null>): LayerId[] {
 export function layerShows(discipline: string | null, layer: string | string[], present: Set<string>): boolean {
   const selected = Array.isArray(layer) ? layer.filter(id => id && id !== 'all') : (!layer || layer === 'all' ? [] : [layer])
   if (!selected.length) return true
+  if (!discipline) return true
   return selected.some(id => discipline === id || (id === 'elec' && discipline === 'mech' && !present.has('elec')))
 }

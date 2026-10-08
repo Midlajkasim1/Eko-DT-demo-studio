@@ -3363,6 +3363,18 @@
   pointer-events:none
 }
 
+.dashboard-native-container .hmzone.hmzone3d {
+  width:auto;
+  min-width:72px;
+  min-height:0;
+  padding:6px 10px;
+  transform:translate(-50%,-110%);
+  background:rgba(248,250,252,.88);
+  visibility:hidden
+}
+.dashboard-native-container .hmlayer[data-proj] .hmzone3d {
+  visibility:visible
+}
 .dashboard-native-container .hmzone {
   position:absolute;
   border:1px solid rgba(255,255,255,.25);
