@@ -811,11 +811,20 @@ window.EKO_A = (function(){
         ${s.hmLayers.values?`<span class="hmzv">${esc(label)}</span>`:''}</button>`;
       });
     }).join('');
+    const dots = !s.hmLayers.sensors ? '' : heatZones(d, s, mode).flatMap(z => {
+      const ids = (z.bimIds && z.bimIds.length) ? z.bimIds : (z.bimId ? [z.bimId] : []);
+      return ids.map((bimId, i) => {
+        if (!bimId) return '';
+        const key = 'hms:' + z.nameEn + ':' + i;
+        const pin = pinFn ? pinFn(bimId, key) : `data-bimid="${esc(bimId)}" data-key="${esc(key)}"`;
+        return `<button class="hmsensor hmzone3d" data-act="hmSel" data-v="${esc(z.nameEn)}" ${pin} aria-label="${esc(z.nameEn)}"></button>`;
+      });
+    }).join('');
     const legend = mode === 'comfort' ? E.t('hmLegend') : mode === 'hum' ? E.t('hmLegendHum') : E.t('hmLegendTemp');
     const range = s.hmRange === 'week' || s.hmRange === 'month' ? s.hmRange : 'today';
     const seg = (lbl, v) => `<button class="seg" data-on="${range===v}" data-act="hmRange" data-v="${v}">${esc(lbl)}</button>`;
     const rangeLabel = range === 'week' ? E.t('rangeWeekly') : range === 'month' ? E.t('rangeMonthly') : E.t('tlLive');
-    return `<div class="hmlayer">${tiles}</div>
+    return `<div class="hmlayer">${tiles}${dots}</div>
       <div class="heatbar mzglass">
         <span class="tMonoS cT3">${esc(legend)}</span>
         <span class="hmgrad" data-mode="comfort"></span>

@@ -3388,6 +3388,27 @@
   backdrop-filter:blur(1px)
 }
 
+.dashboard-native-container .hmsensor {
+  position:absolute;
+  width:10px;
+  height:10px;
+  min-width:0;
+  min-height:0;
+  padding:0;
+  border-radius:50%;
+  background:var(--acc);
+  border:2px solid #fff;
+  box-shadow:0 1px 2px rgba(0,0,0,.35);
+  transform:translate(-50%,-50%);
+  pointer-events:auto;
+  visibility:hidden
+}
+.dashboard-native-container .hmlayer[data-proj] .hmsensor {
+  visibility:visible
+}
+.dashboard-native-container .hmsensor:hover {
+  border-color:var(--acc)
+}
 .dashboard-native-container .hmzone:hover {
   border-color:rgba(255,255,255,.6)
 }
