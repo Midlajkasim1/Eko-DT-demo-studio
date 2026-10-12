@@ -1030,10 +1030,66 @@ window.EKO_C = (function(){
     if (!rows.length) return '';
     return rows.map(row => `<div class="aprow"><dt>${esc(row[0])}</dt><dd>${esc(row[1])}</dd></div>`).join('');
   }
+  /* The air-handler family as a whole word of the id or type: "MAHU-ANC09-BF-01" is MAHU,
+     never AHU, and FAHU is its own kind (no rows of its own yet). */
+  function airKind(asset) {
+    const s = (String(asset && asset.id || '') + ' ' + String(asset && asset.typeEn || '')).toUpperCase();
+    const m = s.match(/(?:^|[^A-Z])(AHU|MAHU|FAHU)(?=[^A-Z]|$)/);
+    return m ? m[1] : null;
+  }
+  /* Same names as readMauPoints. Every row is shown, a missing point as "—",
+     so the panel says which MAHU points FIN is not sending. */
+  function mauPointRows(asset) {
+    if (airKind(asset) !== 'MAHU') return '';
+    const points = (asset && asset.points) || [];
+    if (!points.length) return '';
+    const val = (...names) => {
+      for (const n of names) {
+        const p = fcuFind(points, k => k.endsWith(n));
+        const v = fcuClean(p && p.currentValue);
+        if (v != null) return v;
+      }
+      return null;
+    };
+    /* On/Off readings in the words of the part they describe */
+    const said = (raw, unit, on, off) => {
+      const s = fcuShown(raw, unit);
+      return s === 'On' ? on : s === 'Off' ? off : (s || '—');
+    };
+    /* A status point: T/F or 1/0 in words, never a number or a percentage */
+    const flag = (raw, on, off) => {
+      const s = said(raw, '', on, off);
+      const n = raw == null ? null : fcuNumber(raw);
+      return s !== on && s !== off && n != null ? (n > 0 ? on : off) : s;
+    };
+    const rows = [
+      ['FA_DAMPER_STS', flag(val('fadampersts'), 'Open', 'Closed')],
+      ['PRE_FILTER', flag(val('prefilter'), 'Dirty', 'Clean')],
+      ['BAG_FILTER', flag(val('bagfilter'), 'Dirty', 'Clean')],
+      ['TEMP_BEFORE_HEATPIPE', said(val('tempbeforeheatpipe'), ' °C')],
+      ['HUM_BEFORE_HEATPIPE', said(val('humbeforeheatpipe'), ' %')],
+      ['TEMP_AFTER_HEATPIPE', said(val('tempafterheatpipe'), ' °C')],
+      ['HUM_AFTER_HEATPIPE', said(val('humafterheatpipe'), ' %')],
+      ['COOLING_VALVE_POS', said(val('coolingvalvepos'), ' %')],
+      ['COOLING_VALVE_CMD', said(val('coolingvalvecmd'), ' %')],
+      ['CHW_SUP_TEMP', said(val('chwsuptemp'), ' °C')],
+      ['CHW_RET_TEMP', said(val('chwrettemp'), ' °C')],
+      ['SF_VFD_RUN_STS', flag(val('sfvfdrunsts', 'sfairflowsts'), 'On', 'Off')],
+      ['SF_VFD_SPD_POS', said(val('sfvfdspdpos', 'sfvfdspdcmd'), ' %')],
+      ['SF_TRIP_ALARM', flag(val('sftripalarm'), 'Trip', 'Normal')],
+      ['SA_TEMP', said(val('satemp'), ' °C')],
+      ['SA_TEMP_SP', said(val('satempsp'), ' °C')],
+      ['SA_HUM', said(val('sahum'), ' %')],
+      ['SA_PRESSURE', said(val('sapressure'), ' Pa')],
+      ['SA_PRESSURE_SP', said(val('sapressuresp'), ' Pa')],
+    ];
+    return rows.map(row => `<div class="aprow"><dt>${esc(row[0])}</dt><dd>${esc(row[1])}</dd></div>`).join('');
+  }
   function ahuPointRows(asset) {
     const id = String(asset && asset.id || '').toUpperCase();
     const type = String(asset && asset.typeEn || '').toUpperCase();
     if (id.indexOf('AHU') !== 0 && type.indexOf('AHU') === -1) return '';
+    if (airKind(asset) === 'MAHU' || airKind(asset) === 'FAHU') return '';
     const points = (asset && asset.points) || [];
     if (!points.length) return '';
     const raTemp = fcuFind(points, k => k.indexOf('ratemp') !== -1 && k.indexOf('set') === -1 && !/sp$/.test(k));
@@ -1079,7 +1135,7 @@ window.EKO_C = (function(){
     const tr7 = r.trend7 && Array.isArray(r.trend7.vals) && r.trend7.vals.length >= 2 ? r.trend7 : null;
     const reason = r.st === 'stale' ? 'dgNoTrend.stale' : (r.trendKind === 'state' ? 'dgNoTrend.state' : 'dgNoTrend.none');
     const fcuRows = fcuPointRows(r);
-    const ahuRows = ahuPointRows(r);
+    const ahuRows = ahuPointRows(r) || mauPointRows(r);
     const full = `<div class="apfull"><div class="row gap8"><h4 class="tLbl grow">${esc(t('apFullT'))}</h4><button class="statlink" data-act="disclose" data-k="full" aria-expanded="${fullOn}">${esc(t(fullOn ? 'hideFull' : 'discloseFull'))}</button></div>
       ${fcuRows}
       ${ahuRows}
