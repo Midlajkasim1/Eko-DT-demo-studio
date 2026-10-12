@@ -208,13 +208,37 @@ export interface RecentProjectCard {
   thumbnail?: string
 }
 
+/** Same shapes as the backend config.json blocks of the same name */
+export interface FinEquipmentClasses {
+  system_tags?: string[]
+  meter_tags?: string[]
+  type_priority?: string[]
+}
+
+export interface FinMeterProfile {
+  prefix?: string
+  point_map?: Record<string, string[]>
+}
+
+export interface FinSeverityBands {
+  order?: 'asc' | 'desc'
+  critical?: number
+  warning?: number
+}
+
+/** Per-project FIN settings live here. A field a project does not set falls back to the
+ *  backend config.json default, so projects saved before a field existed keep working. */
 export interface ProjectApiSettings {
   finBaseUrl?: string
   finProjectName?: string
+  finDisplayName?: string
   finInterval?: number
   finDirectMode?: boolean
   finLivePoints?: Record<string, string>
   finEndpoints?: Record<string, string>
+  finEquipmentClasses?: FinEquipmentClasses
+  finMeterProfile?: FinMeterProfile
+  finSeverityBands?: FinSeverityBands
   weatherApiKey?: string
   weatherLat?: number
   weatherLon?: number

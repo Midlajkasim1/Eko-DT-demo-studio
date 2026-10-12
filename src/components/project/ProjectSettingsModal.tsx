@@ -1,105 +1,72 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useProjectStore } from '@/store/useProjectStore'
+import { useFinStore } from '@/store/useFinStore'
 import { writeJson } from '@/lib/projectDb'
+import { FinProjectPicker } from '@/components/project/FinProjectPicker'
+import { fetchFinResources, fetchMappingSchema, type FinResource, type MappingSchema } from '@/lib/finProjects'
+import {
+  KeyValueEditor,
+  MappingSection,
+  MeterProfileEditor,
+  SeverityEditor,
+  type EditorState,
+} from '@/components/project/FinMappingEditors'
+import {
+  MAPPING_FIELDS,
+  MAPPING_TITLES,
+  applyMappingValues,
+  mappingProblem,
+  type MappingField,
+} from '@/lib/finSettings'
+import type { JsonObject } from '@/lib/mappingRows'
+import { validateMappings, type ValidationResponse } from '@/lib/mappingValidation'
 import type { ProjectApiSettings } from '@/types'
-
-const DEFAULT_FIN_LIVE_POINTS = {
-  "total_power": "p:{project}:r:31034e49-1f300fe1",
-  "carbon": "p:{project}:r:3105de9e-0091a3a6",
-  "current_month": "p:{project}:r:31034e49-4c6c035e",
-  "previous_month": "p:{project}:r:3105c5a1-a272e1a7",
-  "target_monthly": "p:{project}:r:3105c687-98bd4374",
-  "ahu": "p:{project}:r:31034e49-b986583a",
-  "fcu": "p:{project}:r:3105c687-8436b4e7",
-  "boiler": "p:{project}:r:3105cf6b-faa023ca",
-  "chiller": "p:{project}:r:3105cf6b-d483c5f7",
-  "cooling_tower": "p:{project}:r:3105cf6b-ae5752c0",
-  "vav": "p:{project}:r:31034e49-efdd0bc0",
-  "lighting": "p:{project}:r:3105c687-d66c2275",
-  "power_sockets": "p:{project}:r:3105c687-d5277330",
-  "pumps": "p:{project}:r:3105cf6b-c3032a1e"
-}
-
-const DEFAULT_FIN_ENDPOINTS = {
-  "Total_Power_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31034e49-1f300fe1,2026-01-01..today()%2C%7B-limit%7D)",
-  "AHU_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31034e49-b986583a,2026-01-01..today()%2C%7B-limit%7D)",
-  "BOILER_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105cf6b-faa023ca,2026-01-01..today()%2C%7B-limit%7D)",
-  "CHILLER_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105cf6b-d483c5f7,2026-01-01..today()%2C%7B-limit%7D)",
-  "COOLING_TOWER_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105cf6b-ae5752c0,2026-01-01..today()%2C%7B-limit%7D)",
-  "FCU_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105c687-8436b4e7,2026-01-01..today()%2C%7B-limit%7D)",
-  "Lighting_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105c687-d66c2275,2026-01-01..today()%2C%7B-limit%7D)",
-  "PUMPs_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105cf6b-c3032a1e,2026-01-01..today()%2C%7B-limit%7D)",
-  "Power_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105c687-d5277330,2026-01-01..today()%2C%7B-limit%7D)",
-  "VAV_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31034e49-efdd0bc0,2026-01-01..today()%2C%7B-limit%7D)",
-  "Water_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:310346fb-95c42637,2026-01-01..today()%2C%7B-limit%7D)",
-  "Carbon_Emission_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105de9e-0091a3a6,2026-01-01..today()%2C%7B-limit%7D)"
-}
-
-// Site preset — must stay in sync with backend/config.json (single source of truth)
-const SITE_FIN_LIVE_POINTS = {
-  "hourly_energy": "p:{project}:r:3181ee6e-67dac181",
-  "peak_demand": "p:{project}:r:3181f788-2d229f48",
-  "energy_deviation": "p:{project}:r:3181f71f-2f0083d7",
-  "energy_intensity": "p:{project}:r:3181f767-e5cb6329",
-  "energy_performance": "p:{project}:r:3182117b-3c286f7b",
-  "after_hours_deviation": "p:{project}:r:3182117b-3c286f7b",
-  "kpi_after_hours_ratio": "p:{project}:r:31820fc9-da2fb148",
-  "hvac_epr": "p:{project}:r:31a2ee82-319eb82f",
-  "kpi_hvac_epr": "p:{project}:r:31820fc9-580b36d6",
-  "carbon": "p:{project}:r:3181f7a2-4652169b",
-  "water_consumption": "p:{project}:r:310346fb-95c42637",
-  "current_month": "p:{project}:r:31034e49-4c6c035e",
-  "previous_month": "p:{project}:r:3105c5a1-a272e1a7",
-  "target_monthly": "p:{project}:r:31a06992-90fb9d52",
-  "target_current": "p:{project}:r:3196cd3e-505a1625",
-  "comfort_compliance": "p:{project}:r:319d6f6b-b5411f43",
-  "ra_co2": "p:{project}:r:318b19b8-0df2b231",
-  "ahu": "p:{project}:r:31034e49-b986583a",
-  "fcu": "p:{project}:r:3105c687-8436b4e7",
-  "boiler": "p:{project}:r:3105cf6b-faa023ca",
-  "chiller": "p:{project}:r:3105cf6b-d483c5f7",
-  "cooling_tower": "p:{project}:r:3105cf6b-ae5752c0",
-  "vav": "p:{project}:r:31034e49-efdd0bc0",
-  "lighting": "p:{project}:r:3105c687-d66c2275",
-  "power_sockets": "p:{project}:r:3105c687-d5277330",
-  "pumps": "p:{project}:r:3105cf6b-c3032a1e",
-  "mcc1": "p:{project}:r:3195bbf6-c7b4de9a",
-  "mcc2": "p:{project}:r:3195bc40-ac80ac08"
-}
-
-const SITE_FIN_ENDPOINTS = {
-  "Hourly_Energy_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181ee6e-67dac181,2026-05-21..today()%2C%7B-limit%7D)",
-  "Power_Usage_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181ee6e-67dac181,2026-05-21..today()%2C%7B-limit%7D)",
-  "Peak_Demand_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f788-2d229f48,2026-05-21..today()%2C%7B-limit%7D)",
-  "Energy_Deviation_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f71f-2f0083d7,2026-05-21..today()%2C%7B-limit%7D)",
-  "Energy_Use_Intensity_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f767-e5cb6329,2026-05-21..today()%2C%7B-limit%7D)",
-  "VAV_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31034e49-efdd0bc0,2026-01-01..today()%2C%7B-limit%7D)",
-  "Water_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:310346fb-95c42637,2026-01-01..today()%2C%7B-limit%7D)",
-  "Carbon_Emission_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3105de9e-0091a3a6,2026-01-01..today()%2C%7B-limit%7D)",
-  "Carbon_Points_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f7a2-4652169b,2026-05-21..today()%2C%7B-limit%7D)",
-  "Consumption_Level1_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:310346fb-ce2c6cd5,2025-01-01..today()%2C%7B-limit%7D)",
-  "Consumption_Level2_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31034e49-cd80ee43,2025-01-01..today()%2C%7B-limit%7D)",
-  "Consumption_Level3_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31034e49-2b40797d,2025-01-01..today()%2C%7B-limit%7D)",
-  "PMU04_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3195bc40-ac80ac08,2026-05-21..today()%2C%7B-limit%7D)",
-  "PMU05_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3195bc40-9a32d7b7,2026-05-21..today()%2C%7B-limit%7D)",
-  "PMU06_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3195bc40-6c15d0fe,2026-05-21..today()%2C%7B-limit%7D)",
-  "PMU07_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3195bc40-eede63ec,2026-05-21..today()%2C%7B-limit%7D)",
-  "PMU08_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3195bc40-ff5411e5,2026-05-21..today()%2C%7B-limit%7D)",
-  "PMU09_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3195bbf6-c7b4de9a,2026-05-21..today()%2C%7B-limit%7D)",
-  "WM_BF_Cold_Wtr_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31b02214-cfdc6152,2026-05-21..today()%2C%7B-limit%7D)",
-  "WM_FF_Ret_Hot_Wtr_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31b02287-41e84804,2026-05-21..today()%2C%7B-limit%7D)",
-  "WM_FF_Sup_Cold_Wtr_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31b02287-f021f2a0,2026-05-21..today()%2C%7B-limit%7D)",
-  "WM_FF_Sup_Hot_Wtr_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31b02287-40064c83,2026-05-21..today()%2C%7B-limit%7D)",
-  "GM_GF_01_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31b02287-febfc212,2026-05-21..today()%2C%7B-limit%7D)",
-  "GM_GF_02_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31b022c7-cd184ea5,2026-05-21..today()%2C%7B-limit%7D)",
-  "GM_GF_03_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:31b022c7-06dbd6f5,2026-05-21..today()%2C%7B-limit%7D)"
-}
 
 interface ProjectSettingsModalProps {
   visible: boolean
   onClose: () => void
 }
+
+// Connection values the modal starts from. A project that never set them is not given them on save.
+const CONNECTION_DEFAULTS = {
+  finBaseUrl: 'https://localhost',
+  finProjectName: '',
+  finInterval: 5000,
+  weatherApiKey: '',
+  weatherLat: 24.469,
+  weatherLon: 54.358,
+}
+
+type MappingStates = Record<MappingField, EditorState>
+
+const mappingStatesFrom = (s: ProjectApiSettings): MappingStates =>
+  Object.fromEntries(MAPPING_FIELDS.map(f => [f, { value: s[f] as JsonObject | undefined }])) as MappingStates
+
+// What each Data Mapping block controls. No other site's values are offered here: a project's
+// mapping is only what the user enters for it.
+const MAPPING_SECTIONS: { field: MappingField; hint: string }[] = [
+  {
+    field: 'finLivePoints',
+    hint: 'Maps dashboard metrics (e.g. total_power) to FIN point IDs. Use {project} for the FIN project name.',
+  },
+  {
+    field: 'finEndpoints',
+    hint: 'Maps history queries (e.g. Total_Power_Consumption_his) to FIN API expressions.',
+  },
+  {
+    field: 'finEquipmentClasses',
+    hint: 'Which equipment tags count as plant systems or meters, and the order used to pick an equipment type.',
+  },
+  {
+    field: 'finMeterProfile',
+    hint: 'The name prefix that identifies power meters, and the point-name aliases for each meter metric.',
+  },
+  {
+    field: 'finSeverityBands',
+    hint: 'How a FIN alarm priority maps to critical / warning / info. "desc": a higher number is more severe.',
+  },
+]
 
 const DEFAULT_DASHBOARD_CONFIG = {
   navButtons: [
@@ -147,22 +114,81 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   const [activeTab, setActiveTab] = useState<'nav'|'info'|'side'|'fin'|'data'>('fin')
   
   const [settings, setSettings] = useState<ProjectApiSettings>({
-    finBaseUrl: 'https://localhost',
-    finProjectName: '',
-    finInterval: 5000,
-    weatherApiKey: '',
-    weatherLat: 24.469,
-    weatherLon: 54.358,
+    ...CONNECTION_DEFAULTS,
     ...DEFAULT_DASHBOARD_CONFIG
   })
   const [saving, setSaving] = useState(false)
+  // What each Data Mapping editor last reported (undefined value = not set). `revs` remounts an
+  // editor when its content is replaced from outside: opening a project, a preset or Clear.
+  const [mappings, setMappings] = useState<MappingStates>(() => mappingStatesFrom({}))
+  const [revs, setRevs] = useState<Record<MappingField, number>>(
+    () => Object.fromEntries(MAPPING_FIELDS.map(f => [f, 0])) as Record<MappingField, number>
+  )
+  const [saveError, setSaveError] = useState<string | null>(null)
+  // The latest Validate Mapping answer for the open project. Never saved, never edits the mappings.
+  const [validation, setValidation] = useState<ValidationResponse | null>(null)
+  const [validating, setValidating] = useState(false)
+  const [validateError, setValidateError] = useState<string | null>(null)
+  const finConnected = useFinStore(s => s.isConnected)
+  const finStatus = useFinStore(s => s.status)
+  const openProjectId = useRef<string | undefined>(undefined)
+  useEffect(() => { openProjectId.current = currentProject?.projectId }, [currentProject?.projectId])
+
+  // The points of the FIN project selected in FIN Config, read from that project (not from the
+  // session's). Keyed by the project they were loaded for, so a late answer for a previously
+  // selected project, or for another Eko-DT project, is dropped and never shown.
+  const selectedFinProject = settings.finProjectName || ''
+  const [resources, setResources] = useState<
+    { project: string; state: 'ready' | 'error'; items: FinResource[]; truncated?: boolean; message?: string } | null
+  >(null)
+  useEffect(() => {
+    if (!visible || !finConnected || !selectedFinProject) return
+    let cancelled = false
+    const project = selectedFinProject
+    // typing an identifier by hand must not query FIN for every keystroke
+    const timer = setTimeout(() => {
+      fetchFinResources(project).then(
+        r => { if (!cancelled) setResources({ project, state: 'ready', items: r.resources, truncated: r.truncated }) },
+        (e: unknown) => { if (!cancelled) setResources({ project, state: 'error', items: [], message: e instanceof Error ? e.message : 'Unknown error' }) }
+      )
+    }, 300)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [visible, finConnected, selectedFinProject, currentProject?.projectId])
+
+  // The keys each block can have, offered as blank rows in a block this project has not set.
+  // Names only: no value from config.json or from any other project reaches the editor.
+  const [schema, setSchema] = useState<MappingSchema>({})
+  useEffect(() => {
+    if (!visible) return
+    let cancelled = false
+    fetchMappingSchema().then(s => { if (!cancelled) setSchema(s) }, () => { /* rows can still be added by hand */ })
+    return () => { cancelled = true }
+  }, [visible])
 
   useEffect(() => {
     if (visible && currentProject) {
       const savedSettings = currentProject.apiSettings || {}
+      setMappings(mappingStatesFrom(savedSettings))
+      setRevs(prev => Object.fromEntries(MAPPING_FIELDS.map(f => [f, prev[f] + 1])) as typeof prev)
+      setSaveError(null)
+      setValidation(null)
+      setValidateError(null)
       const mergedSettings: any = { 
         ...DEFAULT_DASHBOARD_CONFIG,
         ...savedSettings 
+      }
+
+      // FIN never returns a project name. The one name that is known to work is the one this
+      // project was just connected with, so offer it, but only into an empty field of the project
+      // that made the connection. It is saved with Save Settings like any other edit.
+      const fin = useFinStore.getState()
+      const connectedName = fin.status?.project_name
+      if (
+        currentProject.isFinProject && !savedSettings.finProjectName && connectedName &&
+        fin.isConnected && fin.status?.project_validated === true &&
+        fin.status.project_source === 'request' && fin.status.project_id === currentProject.projectId
+      ) {
+        mergedSettings.finProjectName = connectedName
       }
       
       // Ensure any newly added default items that aren't in the saved database are appended
@@ -175,45 +201,114 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
         }
       })
 
-      setSettings(prev => ({ 
-        ...prev, 
-        ...mergedSettings 
-      }))
+      // Start from this project's own settings. Carrying the previous project's state
+      // over (the modal stays mounted) would leak its mappings into this one on save.
+      setSettings({ ...CONNECTION_DEFAULTS, ...mergedSettings })
     }
-  }, [visible, currentProject])
+    // Re-read on open or project switch only; other changes to the project (a new thumbnail)
+    // must not wipe edits in progress
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, currentProject?.projectId])
 
   if (!visible || !currentProject) return null
 
+  // isFin only decides FIN-specific side effects below; every settings tab is for every project
+  const isFin = !!currentProject.isFinProject
+  // Validation reads the FIN project the backend session serves. A project picked here but not
+  // saved yet is not that project, so it would be checked against the wrong one.
+  const validateBlocked = (finStatus?.project_name ?? '') !== selectedFinProject
+
+  const setMapping = (field: MappingField, state: EditorState) => {
+    const problem = state.value ? mappingProblem(field, state.value) : null
+    setMappings(prev => ({ ...prev, [field]: { value: state.value, error: state.error ?? problem ?? undefined } }))
+    // An edited block no longer matches what was checked
+    setValidation(prev => {
+      if (!prev?.blocks[field]) return prev
+      const blocks = { ...prev.blocks }
+      delete blocks[field]
+      return { ...prev, blocks }
+    })
+  }
+
+  const handleValidate = async () => {
+    const projectId = currentProject.projectId
+    setValidating(true)
+    setValidateError(null)
+    try {
+      // Make sure the backend session is on this project before asking it to check anything
+      await useFinStore.getState().syncProjectSettings()
+      const result = await validateMappings(
+        projectId,
+        Object.fromEntries(MAPPING_FIELDS.map(f => [f, mappings[f].error ? undefined : mappings[f].value]))
+      )
+      // The user may have switched project while FIN was answering
+      if (openProjectId.current === projectId && result.project_id === projectId) setValidation(result)
+    } catch (e) {
+      if (openProjectId.current === projectId) setValidateError(e instanceof Error ? e.message : 'Validation failed.')
+    } finally {
+      setValidating(false)
+    }
+  }
+  // A preset or Clear replaces the editor's content, so it is remounted to show it
+  const loadMapping = (field: MappingField, value: JsonObject | undefined) => {
+    setMapping(field, { value })
+    setRevs(prev => ({ ...prev, [field]: prev[field] + 1 }))
+  }
+
   const handleSave = async () => {
     if (!folderHandle) return
+    // Nothing malformed is written; say which sections need fixing
+    const invalid = MAPPING_FIELDS.filter(f => mappings[f].error)
+    if (invalid.length) {
+      setActiveTab('data')
+      setSaveError(`Not saved. Fix ${invalid.map(f => MAPPING_TITLES[f]).join(', ')}.`)
+      return
+    }
+    const validSettings = applyMappingValues(
+      settings,
+      Object.fromEntries(MAPPING_FIELDS.map(f => [f, mappings[f].value]))
+    )
+    if (!isFin) {
+      // Opening and saving must not stamp a normal project with the defaults the modal starts from
+      const saved = (currentProject.apiSettings || {}) as Record<string, unknown>
+      const out = validSettings as Record<string, unknown>
+      for (const [key, def] of Object.entries(CONNECTION_DEFAULTS)) {
+        if (!(key in saved) && out[key] === def) delete out[key]
+      }
+    }
+    setSaveError(null)
     setSaving(true)
     try {
       const updatedMeta = {
         ...currentProject,
-        apiSettings: settings,
+        apiSettings: validSettings,
         updatedAt: Date.now(),
       }
       await writeJson(folderHandle, 'project.json', updatedMeta)
       useProjectStore.setState({ currentProject: updatedMeta })
 
       // Always write api-config.json for FIN projects so the standalone viewer has it
-      if (currentProject.isFinProject) {
+      if (isFin) {
         const apiConfig = {
-          project_name: settings.finProjectName || currentProject.name,
-          fin_server_url: settings.finBaseUrl || 'https://localhost',
+          project_name: validSettings.finProjectName || currentProject.name,
+          fin_server_url: validSettings.finBaseUrl || 'https://localhost',
+          display_name: validSettings.finDisplayName,
           direct_mode: true, // Always true for FIN standalone viewer
-          polling_interval: settings.finInterval || 5000,
-          live_point_ids: settings.finLivePoints || {},
-          power_endpoints: settings.finEndpoints || {},
+          polling_interval: validSettings.finInterval || 5000,
+          live_point_ids: validSettings.finLivePoints || {},
+          power_endpoints: validSettings.finEndpoints || {},
+          equipment_classes: validSettings.finEquipmentClasses,
+          meter_profile: validSettings.finMeterProfile,
+          severity_bands: validSettings.finSeverityBands,
           weather: {
-            lat: settings.weatherLat ?? 24.469,
-            lon: settings.weatherLon ?? 54.358,
-            apiKey: settings.weatherApiKey || '88214bff7aa566e9f6ff1ba5db38f65f',
+            lat: validSettings.weatherLat ?? 24.469,
+            lon: validSettings.weatherLon ?? 54.358,
+            apiKey: validSettings.weatherApiKey || '88214bff7aa566e9f6ff1ba5db38f65f',
           },
-          navButtons: settings.navButtons,
-          leftCards: settings.leftCards,
-          rightCards: settings.rightCards,
-          sideButtons: settings.sideButtons,
+          navButtons: validSettings.navButtons,
+          leftCards: validSettings.leftCards,
+          rightCards: validSettings.rightCards,
+          sideButtons: validSettings.sideButtons,
         }
         await writeJson(folderHandle, 'api-config.json', apiConfig)
       }
@@ -283,8 +378,16 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 <input type="text" value={settings.finBaseUrl || ''} onChange={e => update('finBaseUrl', e.target.value)} />
               </div>
               <div className="ds-field">
-                <label>FIN Project Name</label>
-                <input type="text" value={settings.finProjectName || ''} onChange={e => update('finProjectName', e.target.value)} />
+                <label>FIN Project</label>
+                <FinProjectPicker
+                  value={settings.finProjectName || ''}
+                  connected={finConnected}
+                  onChange={id => update('finProjectName', id)}
+                />
+              </div>
+              <div className="ds-field">
+                <label>Display Name</label>
+                <input type="text" value={settings.finDisplayName || ''} onChange={e => update('finDisplayName', e.target.value)} placeholder="Shown on the sign-in screen" />
               </div>
               <div className="ds-field">
                 <label>Polling Interval (ms)</label>
@@ -309,8 +412,9 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
             </div>
           )}
 
-          {activeTab === 'data' && (
-            <div className="ds-pane">
+          {/* Kept mounted (just hidden) so rows being edited survive a switch of tab */}
+          {(
+            <div className="ds-pane" style={activeTab === 'data' ? undefined : { display: 'none' }}>
               <h3 className="ds-section-title">Standalone Mode (Direct API)</h3>
               <p className="ds-hint">Enable this to bypass the Python backend and fetch data directly from FIN (useful when hosting this viewer inside the FIN framework).</p>
               <div className="ds-field">
@@ -325,75 +429,86 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 </label>
               </div>
 
-              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>FIN Live Points Mapping</h3>
-              <p className="ds-hint">Map your dashboard metrics (e.g. total_power) to specific FIN point IDs.</p>
-              
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                <button 
-                  className="ds-btn ds-btn-secondary" 
+              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Mapping validation</h3>
+              {MAPPING_FIELDS.every(f => !mappings[f].value) && (
+                <p className="ds-hint">
+                  — Not Configured. No project-specific mappings configured for this {isFin ? 'FIN ' : ''}project.
+                </p>
+              )}
+              {!selectedFinProject && (
+                <p className="ds-hint">No FIN project selected. Choose one in FIN Config to load its points here.</p>
+              )}
+              {selectedFinProject && finConnected && resources?.project !== selectedFinProject && (
+                <p className="ds-hint" data-testid="fin-resources-status">Loading the points of FIN project {selectedFinProject}...</p>
+              )}
+              {selectedFinProject && finConnected && resources?.project === selectedFinProject && (
+                <p className="ds-hint" data-testid="fin-resources-status">
+                  {resources.state === 'ready' && (
+                    `${resources.items.length} points available from FIN project ${resources.project}${resources.truncated ? ' (list cut short)' : ''}. ` +
+                    'In FIN Live Points, click a Value field and choose a point; which point is which stays your decision.'
+                  )}
+                  {resources.state === 'error' && `Could not load the points of ${resources.project}: ${resources.message}. Mappings can still be typed.`}
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '8px' }}>
+                <button
+                  type="button"
+                  className="ds-btn ds-btn-secondary"
                   style={{ padding: '4px 12px', fontSize: '12px' }}
-                  onClick={() => update('finLivePoints', DEFAULT_FIN_LIVE_POINTS)}
+                  disabled={!finConnected || validating || validateBlocked}
+                  title={finConnected ? 'Check these mappings against the connected FIN project' : 'Connect to FIN first'}
+                  onClick={handleValidate}
                 >
-                  Load Default (EkoMedical)
+                  {validating ? 'Validating…' : 'Validate Mapping'}
                 </button>
-                <button 
-                  className="ds-btn ds-btn-secondary" 
-                  style={{ padding: '4px 12px', fontSize: '12px' }}
-                  onClick={() => update('finLivePoints', SITE_FIN_LIVE_POINTS)}
-                >
-                  Load Marsa Al Arab
-                </button>
+                {!finConnected && <span className="ds-hint" style={{ margin: 0 }}>Connect to FIN to validate.</span>}
+                {finConnected && validateBlocked && (
+                  <span className="ds-hint" style={{ margin: 0 }}>
+                    Save Settings first: validation checks the FIN project this session serves
+                    ({finStatus?.project_name || 'none'}), not the one just selected.
+                  </span>
+                )}
+                {validation && (
+                  <span className="ds-hint" style={{ margin: 0 }}>
+                    Checked against FIN project {validation.project_name}. Nothing was changed.
+                  </span>
+                )}
               </div>
+              {validateError && <div style={{ color: 'var(--red)', fontSize: '12px', marginBottom: '8px' }}>{validateError}</div>}
 
-              <div className="ds-field">
-                <textarea 
-                  rows={12}
-                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '10px 12px', borderRadius: '6px', fontSize: '13px', fontFamily: 'monospace' }}
-                  value={settings.finLivePoints ? JSON.stringify(settings.finLivePoints, null, 2) : JSON.stringify(DEFAULT_FIN_LIVE_POINTS, null, 2)}
-                  onChange={e => {
-                    try {
-                      update('finLivePoints', JSON.parse(e.target.value))
-                    } catch(err) {
-                      // ignore parse errors while typing
-                    }
-                  }}
-                />
-              </div>
-
-              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>FIN Endpoints Mapping</h3>
-              <p className="ds-hint">Map history queries (e.g. AHU_Usage_his) to API expressions.</p>
-
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                <button 
-                  className="ds-btn ds-btn-secondary" 
-                  style={{ padding: '4px 12px', fontSize: '12px' }}
-                  onClick={() => update('finEndpoints', DEFAULT_FIN_ENDPOINTS)}
-                >
-                  Load Default (EkoMedical)
-                </button>
-                <button 
-                  className="ds-btn ds-btn-secondary" 
-                  style={{ padding: '4px 12px', fontSize: '12px' }}
-                  onClick={() => update('finEndpoints', SITE_FIN_ENDPOINTS)}
-                >
-                  Load Marsa Al Arab
-                </button>
-              </div>
-
-              <div className="ds-field">
-                <textarea 
-                  rows={12}
-                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '10px 12px', borderRadius: '6px', fontSize: '13px', fontFamily: 'monospace' }}
-                  value={settings.finEndpoints ? JSON.stringify(settings.finEndpoints, null, 2) : JSON.stringify(DEFAULT_FIN_ENDPOINTS, null, 2)}
-                  onChange={e => {
-                    try {
-                      update('finEndpoints', JSON.parse(e.target.value))
-                    } catch(err) {
-                      // ignore parse errors while typing
-                    }
-                  }}
-                />
-              </div>
+              {MAPPING_SECTIONS.map(section => {
+                const { field } = section
+                const editorKey = `${currentProject.projectId}-${field}-${revs[field]}`
+                const onChange = (state: EditorState) => setMapping(field, state)
+                return (
+                  <MappingSection
+                    key={field}
+                    title={MAPPING_TITLES[field]}
+                    hint={section.hint}
+                    hasValue={!!mappings[field].value}
+                    error={mappings[field].error}
+                    onLoad={value => loadMapping(field, value)}
+                    result={validation?.blocks[field]}
+                  >
+                    {field === 'finMeterProfile' ? (
+                      <MeterProfileEditor key={editorKey} value={mappings[field].value} onChange={onChange} results={validation?.blocks[field]?.items} suggestedKeys={schema.finMeterProfile} />
+                    ) : field === 'finSeverityBands' ? (
+                      <SeverityEditor key={editorKey} value={mappings[field].value} onChange={onChange} />
+                    ) : (
+                      <KeyValueEditor
+                        key={editorKey}
+                        value={mappings[field].value}
+                        kind={field === 'finEquipmentClasses' ? 'list' : 'string'}
+                        suggestions={field === 'finLivePoints' && resources?.state === 'ready' && resources.project === selectedFinProject
+                          ? resources.items : undefined}
+                        suggestedKeys={schema[field]}
+                        onChange={onChange}
+                        results={validation?.blocks[field]?.items}
+                      />
+                    )}
+                  </MappingSection>
+                )
+              })}
             </div>
           )}
 
@@ -497,6 +612,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
         </div>
 
         <div className="dashboard-settings-footer">
+          {saveError && <span style={{ color: 'var(--red)', fontSize: '12px', marginRight: 'auto' }}>{saveError}</span>}
           <button className="ds-btn ds-btn-secondary" onClick={onClose}>Cancel</button>
           <button className="ds-btn ds-btn-primary" onClick={handleSave} disabled={saving}>
             {saving ? 'Saving...' : 'Save Settings'}

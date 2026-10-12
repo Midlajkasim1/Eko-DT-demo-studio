@@ -10,8 +10,10 @@ import { resetCameraToHome } from '@/lib/cameraUtils'
 import { disciplineOf, layersFor, layerShows } from '@/lib/modelDiscipline'
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
-import { createFcuSchematic, type FcuSchematic } from '@/lib/fcuSchematic'
-import { createAhuSchematic, type AhuSchematic } from '@/lib/ahuSchematic'
+import { createFcuSchematic } from '@/lib/fcuSchematic'
+import { createAhuSchematic } from '@/lib/ahuSchematic'
+import { createMauSchematic } from '@/lib/mauSchematic'
+import type { HvacSchematic } from '@/lib/hvacGeometry'
 import { useFinStore } from '@/store/useFinStore'
 import type { ProjectApiSettings } from '@/types'
 
@@ -22,6 +24,13 @@ interface DashboardOverlayProps {
   engineRef?: React.MutableRefObject<FragmentsEngine | null>
   /** Flips true once the fragments engine exists. A ref write does not re-render. */
   engineReady?: boolean
+}
+
+/* Equipment type (ASSET_BIM_MAPPING) -> the internals drawn inside its casing on selection */
+const SCHEMATICS: Record<string, (localBox: THREE.Box3, modelMatrix: THREE.Matrix4, casing?: THREE.Object3D) => HvacSchematic | null> = {
+  FCU:  createFcuSchematic,
+  AHU:  createAhuSchematic,
+  MAHU: createMauSchematic,
 }
 
 function loadScripts(scripts: HTMLScriptElement[], signal: { mounted: boolean }) {
@@ -258,21 +267,16 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     watchClipping(ghostFill)
     watchClipping(ghostEdge)
     let ghost: { group: THREE.Group; model: any } | null = null
-    let fcu: { schematic: FcuSchematic; assetId: string; bimId: string; last: number; synced: number } | null = null
-    let ahu: { schematic: AhuSchematic; assetId: string; bimId: string; last: number; synced: number } | null = null
-    const fcuAssetId = (asked: string, bimId: string): string | null => {
+    type Internals = { assetId: string; type: string }
+    let active: (Internals & { schematic: HvacSchematic; bimId: string; last: number; synced: number }) | null = null
+    /* The asset whose internals to draw: the asked one if its type has a
+       schematic, else any mapped asset on the same element that has one. */
+    const internalsFor = (asked: string, bimId: string): Internals | null => {
       const norm = normAssetId(asked)
       const rec = ASSET_BIM_MAPPING[norm] || ASSET_BIM_MAPPING[asked]
-      if (rec?.type === 'FCU') return norm
-      const hit = mappedList.find(m => m.bimId === bimId && (ASSET_BIM_MAPPING[m.id]?.type === 'FCU'))
-      return hit ? hit.id : null
-    }
-    const ahuAssetId = (asked: string, bimId: string): string | null => {
-      const norm = normAssetId(asked)
-      const rec = ASSET_BIM_MAPPING[norm] || ASSET_BIM_MAPPING[asked]
-      if (rec?.type === 'AHU') return norm
-      const hit = mappedList.find(m => m.bimId === bimId && (ASSET_BIM_MAPPING[m.id]?.type === 'AHU'))
-      return hit ? hit.id : null
+      if (rec && SCHEMATICS[rec.type]) return { assetId: norm, type: rec.type }
+      const hit = mappedList.find(m => m.bimId === bimId && SCHEMATICS[ASSET_BIM_MAPPING[m.id]?.type])
+      return hit ? { assetId: hit.id, type: ASSET_BIM_MAPPING[hit.id].type } : null
     }
     const pointsFor = (assetId: string, bimId: string) => {
       const want = fold(assetId)
@@ -294,13 +298,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ghostEdge.color.copy(c).multiplyScalar(0.45)   // a darker line of the same hue reads on light and dark styles
     }
     const removeGhost = () => {
-      if (fcu) {
-        fcu.schematic.dispose()
-        fcu = null
-      }
-      if (ahu) {
-        ahu.schematic.dispose()
-        ahu = null
+      if (active) {
+        active.schematic.dispose()
+        active = null
       }
       ghostFill.uniforms.uOpacity.value = 0.6
       if (!ghost) return
@@ -311,22 +311,23 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const drawGhost = () => {
       const hasHeat = heatRoots.size > 0
       if ((!ghost || !ghost.group.visible) && !hasHeat) return
-      const active = ghost && ghost.group.visible ? (fcu ?? ahu) : null
-      if (active) {
+      // The selected equipment's internals, while its highlight is on screen
+      const shown = ghost && ghost.group.visible ? active : null
+      if (shown) {
         const now = performance.now()
-        const dt = Math.min(0.05, (now - active.last) / 1000)
-        active.last = now
-        active.schematic.tick(dt)
-        if (now - active.synced > 400) {
-          active.synced = now
-          active.schematic.apply(pointsFor(active.assetId, active.bimId))
+        const dt = Math.min(0.05, (now - shown.last) / 1000)
+        shown.last = now
+        shown.schematic.tick(dt)
+        if (now - shown.synced > 400) {
+          shown.synced = now
+          shown.schematic.apply(pointsFor(shown.assetId, shown.bimId))
         }
       }
       const renderer = engine.world?.renderer?.three
       const camera = engine.world?.camera?.three
       if (!renderer || !camera) return
-      if (active) {
-        active.schematic.group.getWorldPosition(fcuAt)
+      if (shown) {
+        shown.schematic.group.getWorldPosition(fcuAt)
         fcuCam.copy(camera.position).sub(fcuAt)
         if (fcuCam.lengthSq() < 1e-8) fcuCam.set(0, 0.4, 1)
         fcuCam.normalize()
@@ -360,29 +361,18 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         root.visible = model.object.visible !== false
       })
     }
-    const mountFcu = (group: THREE.Group, entry: Located, assetId: string, bimId: string) => {
-      const schematic = createFcuSchematic(entry.localBox, entry.model.object.matrixWorld, group)
+    const mountInternals = (group: THREE.Group, entry: Located, internals: Internals, bimId: string) => {
+      const schematic = SCHEMATICS[internals.type](entry.localBox, entry.model.object.matrixWorld, group)
       if (!schematic) return
       group.add(schematic.group)
       group.traverse((o) => {
         if (o.userData?.ekoGhostDepth) o.visible = false
       })
       ghostFill.uniforms.uOpacity.value = 0.22
-      fcu = { schematic, assetId, bimId, last: performance.now(), synced: 0 }
-      schematic.apply(pointsFor(assetId, bimId))
+      active = { ...internals, schematic, bimId, last: performance.now(), synced: 0 }
+      schematic.apply(pointsFor(internals.assetId, bimId))
     }
-    const mountAhu = (group: THREE.Group, entry: Located, assetId: string, bimId: string) => {
-      const schematic = createAhuSchematic(entry.localBox, entry.model.object.matrixWorld, group)
-      if (!schematic) return
-      group.add(schematic.group)
-      group.traverse((o) => {
-        if (o.userData?.ekoGhostDepth) o.visible = false
-      })
-      ghostFill.uniforms.uOpacity.value = 0.22
-      ahu = { schematic, assetId, bimId, last: performance.now(), synced: 0 }
-      schematic.apply(pointsFor(assetId, bimId))
-    }
-    const buildGhost = async (entry: Located, bimId: string, seq: number, fcuId: string | null, ahuId: string | null) => {
+    const buildGhost = async (entry: Located, bimId: string, seq: number, internals: Internals | null) => {
       let meshes: any[][] = []
       try { meshes = await entry.model.getItemsGeometry([entry.localId]) } catch { return }
       if (seq !== highlightSeq || colored?.bimId !== bimId) return   // a newer selection won
@@ -416,8 +406,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       syncGhost()
       overlay.add(group)
       if (seq === highlightSeq && colored?.bimId === bimId) {
-        if (fcuId) mountFcu(group, entry, fcuId, bimId)
-        else if (ahuId) mountAhu(group, entry, ahuId, bimId)
+        if (internals) mountInternals(group, entry, internals, bimId)
       }
     }
 
@@ -524,12 +513,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const highlightAsset = async (assetIdOrBimId: string) => {
       const seq = ++highlightSeq
       const bimId = toBimId(assetIdOrBimId)
-      const fcuId = bimId ? fcuAssetId(assetIdOrBimId, bimId) : null
-      const ahuId = bimId ? ahuAssetId(assetIdOrBimId, bimId) : null
+      const internals = bimId ? internalsFor(assetIdOrBimId, bimId) : null
       if (colored && colored.bimId === bimId && ghost) {
         syncColour()
-        if (fcu && fcuId) fcu.schematic.apply(pointsFor(fcuId, bimId))
-        if (ahu && ahuId) ahu.schematic.apply(pointsFor(ahuId, bimId))
+        if (active && internals) active.schematic.apply(pointsFor(internals.assetId, bimId))
         return true
       }
       colored = null
@@ -539,7 +526,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const tone = toneFor(assetIdOrBimId, bimId)
       colored = { bimId, tone }
       tintGhost(tone)
-      await buildGhost(entry, bimId, seq, fcuId, ahuId)
+      await buildGhost(entry, bimId, seq, internals)
       return seq === highlightSeq && !!ghost
     }
 

@@ -99,6 +99,12 @@
     "equipment": "/api/{project}/read?filter=equip",
     "alarms": "/api/{project}/eval?expr=readAll(equip+or+point).alarms(today)"
   },
+  "project_discovery": {
+    "_comment": "How the FIN project list is read: GET {endpoint}?expr={expr} with the signed-in backend session. The POST the FIN Host page makes needs a browser-issued Attest-Key; this GET does not (confirmed with fin_discovery_diag.py).",
+    "method": "GET",
+    "endpoint": "/api/sys/eval",
+    "expr": "secureEval(projs())"
+  },
   "power_endpoints": {
     "Hourly_Energy_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181ee6e-67dac181,2026-05-21..today()%2C%7B-limit%7D)",
     "Peak_Demand_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f788-2d229f48,2026-05-21..today()%2C%7B-limit%7D)",

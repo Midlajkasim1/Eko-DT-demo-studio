@@ -153,7 +153,7 @@ export function Sidebar({ onFiles, engineRef }: SidebarProps) {
             
             {currentProject && (
               <>
-                <button 
+                <button
                   id="save-camera-btn"
                   className="download-btn" 
                   style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)', marginBottom: '8px' }} 
@@ -165,16 +165,13 @@ export function Sidebar({ onFiles, engineRef }: SidebarProps) {
                   </svg>
                   Save Camera & Render View
                 </button>
-                {currentProject.isFinProject && (
-                  <button 
-                    className="download-btn"
-                    style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)', marginBottom: '8px' }} 
-                    onClick={() => setShowSettings(true)}
-                  >
-                    <i className="bx bx-slider-alt" style={{ marginRight: '8px', fontSize: '16px' }}></i>
-                    Dashboard Settings
-                  </button>
-                )}
+                <button
+                  className="download-btn"
+                  style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)', marginBottom: '8px' }}
+                  onClick={() => setShowSettings(true)}>
+                  <i className="bx bx-slider-alt" style={{ marginRight: '8px', fontSize: '16px' }}></i>
+                  Dashboard Settings
+                </button>
                 <button
                   className="download-btn"
                   style={{ background: 'var(--text-primary)', marginBottom: '8px' }}

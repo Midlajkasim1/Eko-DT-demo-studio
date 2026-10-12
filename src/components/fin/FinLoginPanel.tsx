@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useFinStore } from '@/store/useFinStore'
+import { useProjectStore } from '@/store/useProjectStore'
 
 export function FinLoginPanel() {
   const isConnected = useFinStore(s => s.isConnected)
@@ -16,10 +17,20 @@ export function FinLoginPanel() {
   const [projectName, setProjectName] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
 
+  const syncProjectSettings = useFinStore(s => s.syncProjectSettings)
+  const projectId = useProjectStore(s => s.currentProject?.projectId)
+  const apiSettings = useProjectStore(s => s.currentProject?.apiSettings)
+
   // Check backend status on mount
   useEffect(() => {
     fetchStatus()
   }, [fetchStatus])
+
+  // A connected session follows the open project: switching projects or saving
+  // Dashboard Settings points the backend at that project's FIN configuration
+  useEffect(() => {
+    if (isConnected) syncProjectSettings()
+  }, [isConnected, projectId, apiSettings, syncProjectSettings])
 
   const handleLogin = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
@@ -36,15 +47,39 @@ export function FinLoginPanel() {
   }, [logout])
 
   if (isConnected) {
+    // false = signed in, but the project name did not resolve on this FIN server.
+    // null/undefined = not checked (e.g. an older backend): shown as before.
+    const notValidated = status?.project_validated === false
+    // The session is signed in, but the open project names no FIN project: nothing is read for it
+    const unset = status?.project_source === 'unset'
     return (
       <div className="fin-login-panel fin-connected">
         <div className="fin-status-badge">
-          <span className="fin-status-dot connected" />
-          <span className="fin-status-label">Connected</span>
+          <span className="fin-status-dot connected" style={notValidated || unset ? { background: '#d9a400' } : undefined} />
+          <span className="fin-status-label">{unset ? 'No FIN project set' : notValidated ? 'Not validated' : 'FIN Connected'}</span>
         </div>
+        {status?.project_validated === true && (
+          <div className="fin-validated" style={{ fontSize: '12px', opacity: 0.85 }}>✓ Project validated</div>
+        )}
+        {unset && (
+          <div className="fin-error" role="alert">
+            Signed in to FIN, but this project has no FIN Project Name. Set it in Dashboard Settings → FIN Config.
+          </div>
+        )}
+        {notValidated && (
+          <div className="fin-error" role="alert">
+            FIN connection succeeded, but the selected FIN project could not be validated.
+            {status?.project_name ? ` Check the FIN Project Name (${status.project_name}).` : ''}
+          </div>
+        )}
         <div className="fin-connected-info">
           <span className="fin-project-name">{status?.display_name || status?.project_name || 'FIN'}</span>
           <span className="fin-server-url">{status?.server_url || serverUrl}</span>
+          {status?.project_source === 'default' && (
+            <span className="fin-server-url" title="This project sets no FIN Project Name, so the backend default is used">
+              Project: {status.project_name} (backend default)
+            </span>
+          )}
         </div>
         <button className="fin-btn fin-btn-disconnect" onClick={handleLogout}>
           Disconnect
@@ -116,7 +151,7 @@ export function FinLoginPanel() {
               type="text"
               value={projectName}
               onChange={e => setProjectName(e.target.value)}
-              placeholder="ekoMedical (from config)"
+              placeholder="Blank = this project's FIN Project Name"
             />
           </div>
         )}

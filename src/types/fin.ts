@@ -80,6 +80,14 @@ export interface FinStatusResponse {
   project_name: string
   server_url: string
   display_name: string
+  /** null/absent = not checked. true = the project name resolved on the FIN server and was readable. */
+  project_validated?: boolean | null
+  /** Where project_name came from. FIN never supplies it: "request" (typed at sign-in),
+   *  "project" (the open project's FIN Project Name), "default" (backend config.json, standalone
+   *  viewer only) or "unset" (the open project has no FIN Project Name, so nothing is polled). */
+  project_source?: 'request' | 'project' | 'default' | 'unset' | null
+  /** The Digital Twin project the backend session currently serves */
+  project_id?: string | null
 }
 
 export interface FinLoginRequest {
@@ -87,4 +95,7 @@ export interface FinLoginRequest {
   password: string
   server_url?: string
   project_name?: string
+  /** The open project's FIN configuration, set by the store; never credentials */
+  settings?: Record<string, unknown>
+  project_id?: string
 }

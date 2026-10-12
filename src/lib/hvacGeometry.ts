@@ -6,8 +6,20 @@ export const COIL_OPEN   = new THREE.Color(0xb56a3c)
 export const COIL_IDLE   = new THREE.Color(0x8d939b)
 export const FAN_ON      = new THREE.Color(0xc0392b)
 export const FAN_OFF     = new THREE.Color(0x4b5563)
+export const FILTER_CLEAN = new THREE.Color(0xc8d6df)
+export const FILTER_DIRTY = new THREE.Color(0x9c6b2e)
+/** A part whose reading is missing: neither the healthy nor the fault colour. */
+export const NO_DATA      = new THREE.Color(0x9aa3ab)
 
 export type HvacPoint = { navName?: string; currentValue?: string | null }
+
+/** What the viewer needs from any equipment schematic. */
+export interface HvacSchematic {
+  group:   THREE.Group
+  apply:   (points: HvacPoint[]) => unknown
+  tick:    (dt: number) => void
+  dispose: () => void
+}
 
 // eslint-disable-next-line @typescript-eslint/no-empty-function
 export const noRaycast: THREE.Mesh['raycast'] = () => {}
@@ -51,13 +63,26 @@ export function shown(raw: string | null, unit: string): string {
   return raw
 }
 
-export function isRunning(raw: string | null): boolean {
-  if (!raw) return false
+/** On / off, or null when the reading is missing or unreadable — never a guessed "off". */
+export function stateOf(raw: string | null): boolean | null {
+  if (!raw) return null
   const upper = raw.trim().toUpperCase()
   if (['ON', 'RUN', 'RUNNING', 'TRUE', 'T', 'START', 'YES', 'OPEN'].includes(upper)) return true
   if (['OFF', 'STOP', 'STOPPED', 'FALSE', 'F', 'NO', 'CLOSED'].includes(upper)) return false
   const n = numberOf(raw)
-  return n != null && n > 0
+  return n == null ? null : n > 0
+}
+
+export function isRunning(raw: string | null): boolean {
+  return stateOf(raw) === true
+}
+
+/** A 0..1 fraction from "0.4", "40" or "40 %". */
+export function fractionOf(raw: string | null): number | null {
+  const n = numberOf(raw)
+  if (n == null) return null
+  const frac = n <= 1 && !raw!.includes('%')
+  return Math.min(1, Math.max(0, frac ? n : n / 100))
 }
 
 export interface CasingFrame {
@@ -706,4 +731,211 @@ export function buildCentrifugalFan(ctx: HvacCtx, p: FanParams): FanResult {
   ctx.add(hub, housingMat, rotor)
 
   return { rotor, bladeMat, fanR }
+}
+
+export function addPictureFrame(
+  ctx:    HvacCtx,
+  parent: THREE.Object3D,
+  x:      number,
+  h:      number,
+  w:      number,
+  bar:    number,
+  depth:  number,
+  mat:    THREE.Material,
+) {
+  ctx.add(new THREE.BoxGeometry(depth, bar, w), mat, parent).position.set(x,  h / 2 - bar / 2, 0)
+  ctx.add(new THREE.BoxGeometry(depth, bar, w), mat, parent).position.set(x, -h / 2 + bar / 2, 0)
+  const sideH = h - bar * 2
+  ctx.add(new THREE.BoxGeometry(depth, sideH, bar), mat, parent).position.set(x, 0,  w / 2 - bar / 2)
+  ctx.add(new THREE.BoxGeometry(depth, sideH, bar), mat, parent).position.set(x, 0, -w / 2 + bar / 2)
+}
+
+export function buildDamper(
+  ctx:     HvacCtx,
+  parent:  THREE.Object3D,
+  hy:      number,
+  hz:      number,
+  centerX: number,
+): THREE.Mesh[] {
+  const frameMat = ctx.metal(0x3a424b, 0.6,  0.4)
+  const bladeMat = ctx.metal(0xb7c0c7, 0.45, 0.4)
+  const frameH = hy * 0.95
+  const frameW = hz * 1.05
+  const bar    = Math.min(hy, hz) * 0.07
+  const depth  = bar * 0.85
+  addPictureFrame(ctx, parent, centerX, frameH, frameW, bar, depth, frameMat)
+
+  // Thin slats with a wide gap, so the damper does not read as a solid panel.
+  const count  = 5
+  const innerH = frameH - bar * 2
+  const stride = innerH / count
+  const chord  = stride * 0.28
+  const bladeW = frameW - bar * 2.4
+  const blades: THREE.Mesh[] = []
+  const geo = new THREE.BoxGeometry(Math.max(depth * 0.18, chord * 0.22), chord, bladeW)
+  for (let i = 0; i < count; i++) {
+    const y = -innerH / 2 + (i + 0.5) * stride
+    const b = ctx.add(geo, bladeMat, parent)
+    b.position.set(centerX, y, 0)
+    blades.push(b)
+  }
+
+  const actMat  = ctx.metal(0x5c6770, 0.45, 0.4)
+  const dialMat = ctx.metal(0xf5c542, 0.35, 0.45)
+  const act  = Math.min(hy, hz) * 0.14
+  const actX = centerX - depth * 0.9
+  const actY = -frameH * 0.28
+  const actZ = -frameW * 0.32
+  ctx.add(new THREE.BoxGeometry(depth * 1.4, act, act * 0.72), actMat, parent)
+    .position.set(actX, actY, actZ)
+  const dial = new THREE.CylinderGeometry(act * 0.34, act * 0.34, depth * 0.35, 16)
+  dial.rotateZ(Math.PI / 2)
+  ctx.add(dial, dialMat, parent).position.set(actX - depth * 0.7, actY, actZ)
+  return blades
+}
+
+export function buildPanelFilter(
+  ctx:     HvacCtx,
+  parent:  THREE.Object3D,
+  hy:      number,
+  hz:      number,
+  centerX: number,
+): THREE.MeshStandardMaterial {
+  const frameMat = ctx.metal(0x4a5568, 0.5,  0.45)
+  const mediaMat = ctx.metal(FILTER_CLEAN, 0.12, 0.72)
+  const crossMat = ctx.metal(0x3d4650, 0.45, 0.5)
+  const frameH = hy * 0.9
+  const frameW = hz * 1.05
+  const bar    = Math.min(hy, hz) * 0.07
+  const depth  = bar * 0.9
+  addPictureFrame(ctx, parent, centerX, frameH, frameW, bar, depth, frameMat)
+
+  const innerH = frameH - bar * 2
+  const innerW = frameW - bar * 2
+  ctx.add(new THREE.BoxGeometry(depth * 0.35, innerH * 0.98, innerW * 0.98), mediaMat, parent)
+    .position.set(centerX, 0, 0)
+
+  const span = Math.hypot(innerH, innerW) * 0.9
+  const thick = Math.min(innerH, innerW) * 0.045
+  const arm = new THREE.BoxGeometry(depth * 0.55, span, thick)
+  const tilt = Math.atan2(innerW, innerH)
+  const d1 = ctx.add(arm, crossMat, parent)
+  d1.position.set(centerX + depth * 0.2, 0, 0)
+  d1.rotation.x = tilt
+  const d2 = ctx.add(arm, crossMat, parent)
+  d2.position.set(centerX + depth * 0.2, 0, 0)
+  d2.rotation.x = -tilt
+  return mediaMat
+}
+
+export function buildBagFilter(
+  ctx:     HvacCtx,
+  parent:  THREE.Object3D,
+  hy:      number,
+  hz:      number,
+  hx:      number,
+  centerX: number,
+): THREE.MeshStandardMaterial {
+  const frameMat = ctx.metal(0x4a5568, 0.5,  0.45)
+  const mediaMat = ctx.metal(FILTER_CLEAN, 0.18, 0.68)
+  const frameH = hy * 0.9
+  const frameW = hz * 1.05
+  const bar    = Math.min(hy, hz) * 0.07
+  const depth  = bar * 0.9
+  addPictureFrame(ctx, parent, centerX, frameH, frameW, bar, depth, frameMat)
+
+  // Shallow vertical pleats, one panel. Deep pockets were reading as steps on the coil.
+  const pleats = 7
+  const innerH = frameH - bar * 2.4
+  const innerW = frameW - bar * 2.2
+  const stride = innerW / pleats
+  const pleatD = Math.min(hx * 0.04, hy * 0.09)
+  const geo = new THREE.BoxGeometry(pleatD, innerH, stride * 0.55)
+  for (let i = 0; i < pleats; i++) {
+    const z = -innerW / 2 + (i + 0.5) * stride
+    const x = centerX + (i % 2 === 0 ? pleatD * 0.35 : -pleatD * 0.15)
+    ctx.add(geo, mediaMat, parent).position.set(x, 0, z)
+  }
+  return mediaMat
+}
+
+export function buildSensorProbe(
+  ctx:    HvacCtx,
+  parent: THREE.Object3D,
+  x:      number,
+  y:      number,
+  z:      number,
+  hy:     number,
+  tint:   number,
+) {
+  const headMat = ctx.metal(tint, 0.25, 0.4)
+  const stemMat = ctx.metal(0xe5e7eb, 0.55, 0.35)
+  const s = Math.max(hy * 0.11, 0.03)
+  ctx.add(new THREE.BoxGeometry(s, s * 0.5, s * 0.72), headMat, parent).position.set(x, y, z)
+  const probeLen = hy * 0.14
+  ctx.add(new THREE.CylinderGeometry(s * 0.06, s * 0.06, probeLen, 8), stemMat, parent)
+    .position.set(x, y - probeLen / 2 - s * 0.25, z)
+}
+
+/** The square frame a supply fan sits in, so the wheel reads from above. */
+export function buildFanOpening(
+  ctx:    HvacCtx,
+  parent: THREE.Object3D,
+  fanX:   number,
+  fanR:   number,
+) {
+  const frameMat = ctx.metal(0x2a313a, 0.5, 0.45)
+  const opening = fanR * 2.15
+  const rail = fanR * 0.14
+  const railD = fanR * 0.28
+  ctx.add(new THREE.BoxGeometry(railD, rail, opening), frameMat, parent).position.set(fanX,  opening / 2 - rail / 2, 0)
+  ctx.add(new THREE.BoxGeometry(railD, rail, opening), frameMat, parent).position.set(fanX, -opening / 2 + rail / 2, 0)
+  ctx.add(new THREE.BoxGeometry(railD, opening - rail * 2, rail), frameMat, parent).position.set(fanX, 0,  opening / 2 - rail / 2)
+  ctx.add(new THREE.BoxGeometry(railD, opening - rail * 2, rail), frameMat, parent).position.set(fanX, 0, -opening / 2 + rail / 2)
+}
+
+/**
+ * A heat-pipe coil: vertical copper pipes in two rows through horizontal fins,
+ * with a header box top and bottom. Reads differently from the cooling coil,
+ * whose tubes run across the duct.
+ */
+export function buildHeatPipe(
+  ctx:     HvacCtx,
+  parent:  THREE.Object3D,
+  hy:      number,
+  hz:      number,
+  centerX: number,
+) {
+  const frameMat  = ctx.metal(0x4a5568, 0.5, 0.45)
+  const pipeMat   = ctx.metal(0xb87333, 0.7, 0.32)
+  const finMat    = ctx.metal(0xe2e8ee, 0.3, 0.45)
+  const headerMat = ctx.metal(0x8a5a2b, 0.6, 0.4)
+  const frameH = hy * 0.9
+  const frameW = hz * 1.05
+  const bar    = Math.min(hy, hz) * 0.07
+  const depth  = bar * 2.4
+  addPictureFrame(ctx, parent, centerX, frameH, frameW, bar, bar * 0.9, frameMat)
+
+  const innerH = frameH - bar * 2
+  const innerW = frameW - bar * 2
+  const pipes  = 9
+  const pipeR  = Math.min(innerW / pipes * 0.16, depth * 0.14)
+  const pipeH  = innerH * 0.94
+  const pipe   = new THREE.CylinderGeometry(pipeR, pipeR, pipeH, 10)
+  for (const dx of [-depth * 0.22, depth * 0.22]) {
+    for (let i = 0; i < pipes; i++) {
+      const z = -innerW / 2 + (i + 0.5) * (innerW / pipes) + (dx > 0 ? innerW / pipes * 0.25 : 0)
+      ctx.add(pipe, pipeMat, parent).position.set(centerX + dx, 0, z)
+    }
+  }
+
+  const fins = 14
+  const fin  = new THREE.BoxGeometry(depth, Math.max(pipeR * 0.25, innerH * 0.006), innerW * 0.97)
+  for (let i = 0; i < fins; i++) {
+    ctx.add(fin, finMat, parent).position.set(centerX, -pipeH / 2 + (i + 0.5) * (pipeH / fins), 0)
+  }
+
+  const header = new THREE.BoxGeometry(depth * 0.9, bar * 0.8, innerW * 0.98)
+  ctx.add(header, headerMat, parent).position.set(centerX,  pipeH / 2, 0)
+  ctx.add(header, headerMat, parent).position.set(centerX, -pipeH / 2, 0)
 }
