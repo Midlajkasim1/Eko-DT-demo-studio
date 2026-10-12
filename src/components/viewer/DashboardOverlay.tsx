@@ -12,6 +12,7 @@ import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
 import { createFcuSchematic, type FcuSchematic } from '@/lib/fcuSchematic'
 import { createAhuSchematic, type AhuSchematic } from '@/lib/ahuSchematic'
+import { createFahuSchematic, type FahuSchematic } from '@/lib/fahuSchematic'
 import { useFinStore } from '@/store/useFinStore'
 import type { ProjectApiSettings } from '@/types'
 
@@ -260,6 +261,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     let ghost: { group: THREE.Group; model: any } | null = null
     let fcu: { schematic: FcuSchematic; assetId: string; bimId: string; last: number; synced: number } | null = null
     let ahu: { schematic: AhuSchematic; assetId: string; bimId: string; last: number; synced: number } | null = null
+    let fahu: { schematic: FahuSchematic; assetId: string; bimId: string; last: number; synced: number } | null = null
     const fcuAssetId = (asked: string, bimId: string): string | null => {
       const norm = normAssetId(asked)
       const rec = ASSET_BIM_MAPPING[norm] || ASSET_BIM_MAPPING[asked]
@@ -272,6 +274,13 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const rec = ASSET_BIM_MAPPING[norm] || ASSET_BIM_MAPPING[asked]
       if (rec?.type === 'AHU') return norm
       const hit = mappedList.find(m => m.bimId === bimId && (ASSET_BIM_MAPPING[m.id]?.type === 'AHU'))
+      return hit ? hit.id : null
+    }
+    const fahuAssetId = (asked: string, bimId: string): string | null => {
+      const norm = normAssetId(asked)
+      const rec = ASSET_BIM_MAPPING[norm] || ASSET_BIM_MAPPING[asked]
+      if (rec?.type === 'FAHU') return norm
+      const hit = mappedList.find(m => m.bimId === bimId && (ASSET_BIM_MAPPING[m.id]?.type === 'FAHU'))
       return hit ? hit.id : null
     }
     const pointsFor = (assetId: string, bimId: string) => {
@@ -302,6 +311,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         ahu.schematic.dispose()
         ahu = null
       }
+      if (fahu) {
+        fahu.schematic.dispose()
+        fahu = null
+      }
       ghostFill.uniforms.uOpacity.value = 0.6
       if (!ghost) return
       ghost.group.removeFromParent()
@@ -311,7 +324,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const drawGhost = () => {
       const hasHeat = heatRoots.size > 0
       if ((!ghost || !ghost.group.visible) && !hasHeat) return
-      const active = ghost && ghost.group.visible ? (fcu ?? ahu) : null
+      const active = ghost && ghost.group.visible ? (fcu ?? ahu ?? fahu) : null
       if (active) {
         const now = performance.now()
         const dt = Math.min(0.05, (now - active.last) / 1000)
@@ -382,7 +395,18 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ahu = { schematic, assetId, bimId, last: performance.now(), synced: 0 }
       schematic.apply(pointsFor(assetId, bimId))
     }
-    const buildGhost = async (entry: Located, bimId: string, seq: number, fcuId: string | null, ahuId: string | null) => {
+    const mountFahu = (group: THREE.Group, entry: Located, assetId: string, bimId: string) => {
+      const schematic = createFahuSchematic(entry.localBox, entry.model.object.matrixWorld, group)
+      if (!schematic) return
+      group.add(schematic.group)
+      group.traverse((o) => {
+        if (o.userData?.ekoGhostDepth) o.visible = false
+      })
+      ghostFill.uniforms.uOpacity.value = 0.22
+      fahu = { schematic, assetId, bimId, last: performance.now(), synced: 0 }
+      schematic.apply(pointsFor(assetId, bimId))
+    }
+    const buildGhost = async (entry: Located, bimId: string, seq: number, fcuId: string | null, ahuId: string | null, fahuId: string | null) => {
       let meshes: any[][] = []
       try { meshes = await entry.model.getItemsGeometry([entry.localId]) } catch { return }
       if (seq !== highlightSeq || colored?.bimId !== bimId) return   // a newer selection won
@@ -418,6 +442,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (seq === highlightSeq && colored?.bimId === bimId) {
         if (fcuId) mountFcu(group, entry, fcuId, bimId)
         else if (ahuId) mountAhu(group, entry, ahuId, bimId)
+        else if (fahuId) mountFahu(group, entry, fahuId, bimId)
       }
     }
 
@@ -526,10 +551,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const bimId = toBimId(assetIdOrBimId)
       const fcuId = bimId ? fcuAssetId(assetIdOrBimId, bimId) : null
       const ahuId = bimId ? ahuAssetId(assetIdOrBimId, bimId) : null
+      const fahuId = bimId ? fahuAssetId(assetIdOrBimId, bimId) : null
       if (colored && colored.bimId === bimId && ghost) {
         syncColour()
         if (fcu && fcuId) fcu.schematic.apply(pointsFor(fcuId, bimId))
         if (ahu && ahuId) ahu.schematic.apply(pointsFor(ahuId, bimId))
+        if (fahu && fahuId) fahu.schematic.apply(pointsFor(fahuId, bimId))
         return true
       }
       colored = null
@@ -539,7 +566,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const tone = toneFor(assetIdOrBimId, bimId)
       colored = { bimId, tone }
       tintGhost(tone)
-      await buildGhost(entry, bimId, seq, fcuId, ahuId)
+      await buildGhost(entry, bimId, seq, fcuId, ahuId, fahuId)
       return seq === highlightSeq && !!ghost
     }
 
