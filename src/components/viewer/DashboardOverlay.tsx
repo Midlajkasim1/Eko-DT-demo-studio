@@ -13,6 +13,7 @@ import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
 import { createFcuSchematic } from '@/lib/fcuSchematic'
 import { createAhuSchematic } from '@/lib/ahuSchematic'
 import { createMauSchematic } from '@/lib/mauSchematic'
+import { createEcoSchematic } from '@/lib/ecoSchematic'
 import type { HvacSchematic } from '@/lib/hvacGeometry'
 import { useFinStore } from '@/store/useFinStore'
 import type { ProjectApiSettings } from '@/types'
@@ -31,6 +32,7 @@ const SCHEMATICS: Record<string, (localBox: THREE.Box3, modelMatrix: THREE.Matri
   FCU:  createFcuSchematic,
   AHU:  createAhuSchematic,
   MAHU: createMauSchematic,
+  ECO:  createEcoSchematic,
 }
 
 function loadScripts(scripts: HTMLScriptElement[], signal: { mounted: boolean }) {

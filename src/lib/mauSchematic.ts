@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import {
   HvacPoint,
   COIL_CLOSED, COIL_OPEN, COIL_IDLE, FAN_ON, FAN_OFF, FILTER_CLEAN, FILTER_DIRTY, NO_DATA,
-  clean, findPoint, shown, stateOf, fractionOf,
+  clean, findPoint, shown, stateOf, fractionOf, dirtyOf, bayCentres,
   resolveFrame, makeHvacCtx,
   buildCoil, buildValve, buildCentrifugalFan, buildFanOpening,
   buildDamper, buildPanelFilter, buildBagFilter, buildSensorProbe, buildHeatPipe,
@@ -71,14 +71,6 @@ export function readMauPoints(points: MauPoint[]): MauReading {
       if (v != null) return v
     }
     return null
-  }
-  // "Dirty"/"Clean" text, or a pressure switch's T/F (T = high DP = dirty).
-  // ponytail: T-means-dirty is unconfirmed until FIN shows a dirty filter; flip here if not.
-  const dirtyOf = (raw: string | null): boolean | null => {
-    if (!raw) return null
-    if (/dirty|alarm|fault|high/i.test(raw)) return true
-    if (/clean|normal|ok|low/i.test(raw)) return false
-    return stateOf(raw)
   }
   const filterText = (d: boolean | null) => d == null ? '—' : d ? 'Dirty' : 'Clean'
 
@@ -161,14 +153,7 @@ export function createMauSchematic(
     ['damper', 1], ['preFilter', 1], ...(bagFilter ? [['bagFilter', 1] as [Bay, number]] : []),
     ['coil', 1.2], ...(heatPipe ? [['heatPipe', 1] as [Bay, number]] : []), ['fan', 1.6],
   ]
-  const x0 = -hx * 0.88
-  const unit = hx * 1.78 / bays.reduce((s, [, w]) => s + w, 0)
-  const xs = {} as Record<Bay, number>
-  let at = x0
-  for (const [bay, w] of bays) {
-    xs[bay] = at + unit * w / 2
-    at += unit * w
-  }
+  const { xs, unit } = bayCentres(hx, bays)
 
   const damperBlades = buildDamper(ctx, group, hy, hz, xs.damper)
   const preFilterMat = buildPanelFilter(ctx, group, hy, hz, xs.preFilter)
