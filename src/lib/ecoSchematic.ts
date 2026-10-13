@@ -5,7 +5,7 @@ import {
   clean, findPoint, shown, stateOf, fractionOf, dirtyOf, bayCentres,
   resolveFrame, makeHvacCtx,
   buildCentrifugalFan, buildFanOpening,
-  buildPanelFilter, buildBagFilter, buildBoxFilter, buildUvLamps,
+  buildPanelFilter, buildUvCanister,
 } from '@/lib/hvacGeometry'
 
 export type EcoPoint = HvacPoint
@@ -31,6 +31,17 @@ export type EcoReading = {
   commonAlarm:    string
   kefRate:        number
 }
+
+/** The FIN filter points; each physical filter frame in the schematic shows one of them. */
+export type EcoFilterPoint = 'PRE_FILTER' | 'BAG_FILTER' | 'BOX_FILTER'
+
+export type EcoOptions = {
+  /** One entry per physical filter, in airflow order. */
+  filters?: EcoFilterPoint[]
+}
+
+/** The three X-braced filter frames on the FIN graphic, in airflow order. */
+export const ECO_FILTERS: EcoFilterPoint[] = ['PRE_FILTER', 'BAG_FILTER', 'BOX_FILTER']
 
 export type EcoAnchor = {
   key:      'preFilter' | 'bagFilter' | 'boxFilter' | 'uv1' | 'uv2' | 'kefStatus'
@@ -107,7 +118,9 @@ export function createEcoSchematic(
   localBox:    THREE.Box3,
   modelMatrix: THREE.Matrix4,
   casing?:     THREE.Object3D,
+  options:     EcoOptions = {},
 ): EcoSchematic | null {
+  const { filters = ECO_FILTERS } = options
   const frame = resolveFrame(localBox, modelMatrix, casing)
   if (!frame) return null
   const { center, long, up, width, hx, hy, hz } = frame
@@ -126,35 +139,33 @@ export function createEcoSchematic(
 
   const ctx = makeHvacCtx('ekoEco')
 
-  // ponytail: section order is assumed (filters coarse to fine, then the two UV stages, then the
-  // exhaust fan); the FIN points only say these sections exist. Reorder here once the drawing is confirmed.
-  type Bay = 'preFilter' | 'bagFilter' | 'boxFilter' | 'uv1' | 'uv2' | 'fan'
-  const { xs } = bayCentres<Bay>(hx, [
-    ['preFilter', 1], ['bagFilter', 1], ['boxFilter', 1.3], ['uv1', 1], ['uv2', 1], ['fan', 1.6],
-  ])
+  // The FIN graphic's order: filters, then the two UV stages, then the exhaust fan.
+  const bays: [string, number][] = [
+    ...filters.map((_, i) => [`filter${i}`, 1] as [string, number]),
+    ['uv1', 1], ['uv2', 1], ['fan', 1.6],
+  ]
+  const { xs } = bayCentres(hx, bays)
 
-  const preFilterMat = buildPanelFilter(ctx, group, hy, hz, xs.preFilter)
-  const bagFilterMat = buildBagFilter(ctx, group, hy, hz, hx, xs.bagFilter)
-  const boxFilterMat = buildBoxFilter(ctx, group, hy, hz, hx, xs.boxFilter)
-  const uv1Mat = buildUvLamps(ctx, group, hy, hz, xs.uv1)
-  const uv2Mat = buildUvLamps(ctx, group, hy, hz, xs.uv2)
+  // X-braced panel frames, as drawn on the FIN page.
+  const filterMats = filters.map((_, i) => buildPanelFilter(ctx, group, hy, hz, xs[`filter${i}`]))
+  const uv1Mat = buildUvCanister(ctx, group, hy, hz, xs.uv1)
+  const uv2Mat = buildUvCanister(ctx, group, hy, hz, xs.uv2)
 
   const fanHy = hy * 0.72
   const fanHz = Math.min(hz * 0.9, hy * 1.1)
   const { rotor, bladeMat, fanR } = buildCentrifugalFan(ctx, { group, hy: fanHy, hz: fanHz, fanX: xs.fan })
   buildFanOpening(ctx, group, xs.fan, fanR)
 
+  const ANCHOR_KEY = { PRE_FILTER: 'preFilter', BAG_FILTER: 'bagFilter', BOX_FILTER: 'boxFilter' } as const
   const anchors: EcoAnchor[] = [
-    { key: 'preFilter', position: new THREE.Vector3(xs.preFilter,  hy * 0.9, 0), side: 'above' },
-    { key: 'bagFilter', position: new THREE.Vector3(xs.bagFilter,  hy * 0.9, 0), side: 'above' },
-    { key: 'boxFilter', position: new THREE.Vector3(xs.boxFilter,  hy * 0.9, 0), side: 'above' },
-    { key: 'uv1',       position: new THREE.Vector3(xs.uv1,       -hy * 0.9, 0), side: 'below' },
-    { key: 'uv2',       position: new THREE.Vector3(xs.uv2,       -hy * 0.9, 0), side: 'below' },
-    { key: 'kefStatus', position: new THREE.Vector3(xs.fan,       -hy * 0.9, 0), side: 'below' },
+    ...filters.map((f, i) => ({ key: ANCHOR_KEY[f], position: new THREE.Vector3(xs[`filter${i}`], hy * 0.9, 0), side: 'above' as const })),
+    { key: 'uv1',       position: new THREE.Vector3(xs.uv1, -hy * 0.9, 0), side: 'below' },
+    { key: 'uv2',       position: new THREE.Vector3(xs.uv2, -hy * 0.9, 0), side: 'below' },
+    { key: 'kefStatus', position: new THREE.Vector3(xs.fan, -hy * 0.9, 0), side: 'below' },
   ]
 
   const filterColour = (d: boolean | null) => d == null ? NO_DATA : d ? FILTER_DIRTY : FILTER_CLEAN
-  // Lamps glow violet when healthy, red in alarm, and stay unlit grey with no reading.
+  // The canister glows violet when healthy, red in alarm, and stays unlit grey with no reading.
   const lamp = (mat: THREE.MeshStandardMaterial, alarm: boolean | null) => {
     mat.color.copy(alarm == null ? NO_DATA : alarm ? UV_ALARM : UV_ON)
     mat.emissive.copy(alarm == null ? new THREE.Color(0) : alarm ? UV_ALARM : UV_ON)
@@ -164,9 +175,8 @@ export function createEcoSchematic(
   let rate = 0
   const apply = (points: EcoPoint[]): EcoReading => {
     const r = readEcoPoints(points || [])
-    preFilterMat.color.copy(filterColour(r.preFilterDirty))
-    bagFilterMat.color.copy(filterColour(r.bagFilterDirty))
-    boxFilterMat.color.copy(filterColour(r.boxFilterDirty))
+    const dirty = { PRE_FILTER: r.preFilterDirty, BAG_FILTER: r.bagFilterDirty, BOX_FILTER: r.boxFilterDirty }
+    filters.forEach((f, i) => filterMats[i].color.copy(filterColour(dirty[f])))
     lamp(uv1Mat, r.uv1Alarm)
     lamp(uv2Mat, r.uv2Alarm)
     bladeMat.color.copy(r.kefOn == null ? NO_DATA : r.kefOn ? FAN_ON : FAN_OFF)

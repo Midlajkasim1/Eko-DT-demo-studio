@@ -963,63 +963,29 @@ export function buildHeatPipe(
   ctx.add(header, headerMat, parent).position.set(centerX, -pipeH / 2, 0)
 }
 
-/** A deep box (compact) filter: V-banks of media between two frames. Returns the media material. */
-export function buildBoxFilter(
-  ctx:     HvacCtx,
-  parent:  THREE.Object3D,
-  hy:      number,
-  hz:      number,
-  hx:      number,
-  centerX: number,
-): THREE.MeshStandardMaterial {
-  const frameMat = ctx.metal(0x4a5568, 0.5,  0.45)
-  const mediaMat = ctx.metal(FILTER_CLEAN, 0.15, 0.7)
-  const frameH = hy * 0.9
-  const frameW = hz * 1.05
-  const bar    = Math.min(hy, hz) * 0.07
-  const depth  = Math.min(hx * 0.12, hy * 0.35)
-  addPictureFrame(ctx, parent, centerX - depth / 2, frameH, frameW, bar, bar * 0.9, frameMat)
-  addPictureFrame(ctx, parent, centerX + depth / 2, frameH, frameW, bar, bar * 0.9, frameMat)
-
-  // Each bank is two media panels meeting at the downstream face, so it reads as a box, not a panel.
-  const banks  = 4
-  const innerH = frameH - bar * 2
-  const innerW = frameW - bar * 2
-  const stride = innerW / banks
-  const tilt   = Math.atan2(stride / 2, depth)
-  const panel  = new THREE.BoxGeometry(Math.hypot(depth, stride / 2), innerH * 0.96, bar * 0.18)
-  for (let i = 0; i < banks; i++) {
-    const z = -innerW / 2 + (i + 0.5) * stride
-    for (const s of [-1, 1]) {
-      const m = ctx.add(panel, mediaMat, parent)
-      m.position.set(centerX, 0, z + s * stride / 4)
-      m.rotation.y = s * tilt
-    }
-  }
-  return mediaMat
-}
-
-/** A UV-C lamp bank: lamp tubes across the airstream in a frame. Returns the lamp material. */
-export function buildUvLamps(
+/** A UV-C canister standing in the airstream: lamp body, dark cap and a gauge on top. Returns the body material. */
+export function buildUvCanister(
   ctx:     HvacCtx,
   parent:  THREE.Object3D,
   hy:      number,
   hz:      number,
   centerX: number,
 ): THREE.MeshStandardMaterial {
-  const frameMat = ctx.metal(0x3a424b, 0.6, 0.4)
-  const lampMat  = ctx.metal(NO_DATA, 0.1, 0.25)
-  const frameH = hy * 0.9
-  const frameW = hz * 1.05
-  const bar    = Math.min(hy, hz) * 0.06
-  addPictureFrame(ctx, parent, centerX, frameH, frameW, bar, bar * 0.8, frameMat)
-  const count  = 6
-  const innerH = frameH - bar * 2
-  const r      = Math.min(innerH / count * 0.16, hz * 0.03)
-  const tube   = new THREE.CylinderGeometry(r, r, frameW - bar * 2.2, 12)
-  tube.rotateX(Math.PI / 2)
-  for (let i = 0; i < count; i++) {
-    ctx.add(tube, lampMat, parent).position.set(centerX, -innerH / 2 + (i + 0.5) * (innerH / count), 0)
-  }
-  return lampMat
+  const bodyMat  = ctx.metal(NO_DATA, 0.3, 0.35)
+  const capMat   = ctx.metal(0x1f2933, 0.5, 0.4)
+  const gaugeMat = ctx.metal(0xe5e7eb, 0.4, 0.4)
+  const r     = Math.min(hz * 0.22, hy * 0.28)
+  const bodyH = hy * 1.3
+  const bodyY = -hy * 0.15
+  ctx.add(new THREE.CylinderGeometry(r, r, bodyH, 24), bodyMat, parent).position.set(centerX, bodyY, 0)
+  const capH = bodyH * 0.12
+  const capY = bodyY + bodyH / 2 + capH / 2
+  ctx.add(new THREE.CylinderGeometry(r * 1.15, r * 1.15, capH, 24), capMat, parent).position.set(centerX, capY, 0)
+  const neckH = r * 0.3
+  ctx.add(new THREE.CylinderGeometry(r * 0.12, r * 0.12, neckH, 10), capMat, parent)
+    .position.set(centerX, capY + capH / 2 + neckH / 2, 0)
+  const dial = new THREE.CylinderGeometry(r * 0.28, r * 0.28, r * 0.14, 20)
+  dial.rotateX(Math.PI / 2)
+  ctx.add(dial, gaugeMat, parent).position.set(centerX, capY + capH / 2 + neckH + r * 0.28, 0)
+  return bodyMat
 }
