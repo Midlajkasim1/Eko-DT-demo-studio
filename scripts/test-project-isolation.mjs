@@ -36,7 +36,7 @@ const settingsFor = (n, prefix, order, critical, warning, fin) => ({
   finMeterProfile: { prefix: prefix === 'A' ? 'PMU' : 'MTR', point_map: { active_power: [`power ${prefix}`] } },
   finSeverityBands: { order, critical, warning },
 })
-const A = { ...base, projectId: 'iso-A', name: 'Project A', isFinProject: true, apiSettings: settingsFor(111, 'A', 'desc', 250, 150, 'marsaAlArab') }
+const A = { ...base, projectId: 'iso-A', name: 'Project A', isFinProject: true, apiSettings: settingsFor(111, 'A', 'desc', 250, 150, 'adnocWarsan') }   // not config.json's own site: that one is served the standard mappings (main.PROJECT_MAPPINGS_DYNAMIC)
 const B = { ...base, projectId: 'iso-B', name: 'Project B', isFinProject: true, apiSettings: settingsFor(222, 'B', 'asc', 300, 250, 'ellisdonDemo') }
 const C = { ...base, projectId: 'iso-C', name: 'Project C (normal)' }
 // a FIN project that has not been given a FIN Project Name yet

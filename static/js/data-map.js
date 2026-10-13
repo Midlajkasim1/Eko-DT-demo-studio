@@ -906,7 +906,7 @@
 
       // ---- GAS page wiring ------------------------------------------------
       if (site.gas) {
-        if (p.total_gas != null) {
+        if (asNum(p.total_gas) != null) {   // a non-numeric reading must not erase the last valid one
           site.gas.todayM3 = trunc1(asNum(p.total_gas));
           changed = true;
         }

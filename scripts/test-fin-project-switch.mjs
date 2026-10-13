@@ -26,7 +26,7 @@ const until = async (fn, what, ms = 10000) => {
 }
 
 // The FIN project this Eko-DT project saved. The other projects come from the (fake) FIN server.
-const SAVED = 'marsaAlArab'
+const SAVED = 'adnocWarsan'   // not config.json's own site: that one is served the standard mappings (main.PROJECT_MAPPINGS_DYNAMIC)
 const meta = {
   version: 1, createdAt: 1, updatedAt: 1, models: [], geolocation: null,
   projectId: 'switch-1', name: 'Switch test', isFinProject: true,

@@ -20,8 +20,10 @@ from fake_fin import FakeFinClient  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 # Two projects that disagree on every Data Mapping block
+# per-project mappings are tested on FIN projects other than config.json's own site, which is
+# served config.json's standard mappings while main.PROJECT_MAPPINGS_DYNAMIC is off
 PROJECT_A = {
-    "finProjectName": "marsaAlArab",
+    "finProjectName": "adnocWarsan",
     "finLivePoints": {"total_power": "p:{project}:r:111"},
     "finEndpoints": {"A_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:1,today())"},
     "finEquipmentClasses": {"system_tags": ["ahu"], "meter_tags": ["meter"], "type_priority": ["ahu"]},
@@ -184,13 +186,60 @@ class ProjectConfigTests(unittest.TestCase):
         self.assertEqual(served["severity"], "info")      # no bands: not graded on a site's numbers
         self.assert_no_site_values(served)
 
-    def test_fin_project_named_like_the_default_site_still_gets_no_site_mappings(self):
-        # the FIN project being the default site's does not make config.json this project's mapping
-        self.login({"finProjectName": main.BASE_CONFIG["project_name"]}, "proj-same-fin")
+    # --- config.json's own site: standard mappings while PROJECT_MAPPINGS_DYNAMIC is off --------
+
+    def assert_standard(self, cfg):
+        for block in BLOCKS:
+            self.assertEqual((cfg["source"][block], cfg["config"][block]), ("default", main.BASE_CONFIG[block]), block)
+
+    def test_per_project_mappings_are_off(self):
+        self.assertIs(main.PROJECT_MAPPINGS_DYNAMIC, False)
+
+    def test_default_site_project_is_served_the_standard_mappings(self):
+        # saved, partial and empty blocks alike: none of them replaces config.json's mapping
+        for pid, settings in (("proj-none", {}), ("proj-partial", {"finLivePoints": {"total_power": "p:{project}:r:111"}}),
+                              ("proj-empty", {"finLivePoints": {}, "finEndpoints": {}})):
+            self.login({"finProjectName": main.BASE_CONFIG["project_name"], **settings}, pid)
+            cfg = self.get("/api/fin/project-settings")
+            self.assertEqual((cfg["project_id"], cfg["project_name"]), (pid, main.BASE_CONFIG["project_name"]))
+            self.assert_standard(cfg)
+        # the live loop polls config.json's keys (the fake FIN answers none of its IDs: null, never 0)
+        live = wait_for(lambda: self.get("/api/fin/power-live").get("timestamp") and self.get("/api/fin/power-live"))
+        self.assertIsNone(live["iaq_index"])
+        self.assertTrue({"iaq_index", "comfort_compliance", "total_water", "total_gas", "hourly_energy"} <= set(live))
+
+    def test_name_typed_at_sign_in_also_gets_the_standard_mappings(self):
+        r = self.http.post("/api/fin/login", json={"username": "u", "password": "p", "project_id": "proj-typed",
+                                                   "project_name": main.BASE_CONFIG["project_name"], "settings": {}})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assert_standard(self.get("/api/fin/project-settings"))
+
+    def test_same_name_on_another_server_gets_no_site_mappings(self):
+        # another server may be another tenant: its "marsaAlArab" is not config.json's
+        self.login({"finProjectName": main.BASE_CONFIG["project_name"], "finBaseUrl": "https://fin.other.example"}, "proj-elsewhere")
         served = self.runtime()
         self.assert_not_configured(served["config"], BLOCKS)
         self.assertEqual(live_points(served["power_live"]), {})
         self.assert_no_site_values(served)
+
+    def test_switching_site_other_site_never_mixes_mappings(self):
+        site = {"finProjectName": main.BASE_CONFIG["project_name"]}
+        self.login(site, "proj-site")
+        for settings, pid in ((PROJECT_B, "proj-B"), (site, "proj-site")):
+            self.switch(settings, pid)
+            cfg = self.get("/api/fin/project-settings")
+            if pid == "proj-B":
+                self.assertEqual(cfg["config"]["live_point_ids"], PROJECT_B["finLivePoints"])   # B's own, no Marsa IDs
+            else:
+                self.assert_standard(cfg)
+
+    def test_dynamic_on_restores_per_project_mappings(self):
+        main.PROJECT_MAPPINGS_DYNAMIC = True
+        try:
+            self.login({"finProjectName": main.BASE_CONFIG["project_name"]}, "proj-dyn")
+            self.assert_not_configured(self.get("/api/fin/project-settings"), BLOCKS)
+        finally:
+            main.PROJECT_MAPPINGS_DYNAMIC = False
 
     def test_project_with_only_live_points(self):
         self.login({"finProjectName": "khaznaDataCenter", "finLivePoints": PROJECT_A["finLivePoints"]}, "proj-live")
@@ -204,7 +253,7 @@ class ProjectConfigTests(unittest.TestCase):
 
     def test_partial_projects_a_b_a_never_fall_back_to_each_other(self):
         a = {"finProjectName": "khaznaDataCenter", "finLivePoints": PROJECT_A["finLivePoints"]}
-        b = {"finProjectName": "marsaAlArab", "finEndpoints": PROJECT_B["finEndpoints"],
+        b = {"finProjectName": "ellisdonDemo", "finEndpoints": PROJECT_B["finEndpoints"],
              "finSeverityBands": PROJECT_B["finSeverityBands"]}
         self.login(a, "proj-A")
         for settings, pid in ((a, "proj-A"), (b, "proj-B"), (a, "proj-A")):

@@ -117,6 +117,33 @@ ACTIVE_OVERRIDES: list = []
 # True while a Studio project is served: its mappings are only its own (no config.json fallback)
 ACTIVE_ISOLATED = False
 
+# Per-project ("dynamic") FIN mappings from a Studio project's apiSettings. Off for now, by client
+# decision: a project on config.json's own site is served config.json's standard mappings.
+# True restores per-project mappings for it too. Other FIN projects are always per-project.
+PROJECT_MAPPINGS_DYNAMIC = False
+
+
+def _norm_url(url: Optional[str]) -> str:
+    return str(url or "").strip().rstrip("/").lower()
+
+
+def site_defaults_apply(project_name: Optional[str], server_url: Optional[str]) -> bool:
+    """config.json's mappings are the point IDs of ONE FIN project on ONE server: true only for that
+    very project on that very server, never another project or the same name on another server."""
+    site_url = BASE_CONFIG.get("fin_server_url", "https://localhost")
+    return (bool(project_name) and project_name == BASE_CONFIG.get("project_name")
+            and _norm_url(server_url or site_url) == _norm_url(site_url))
+
+
+def apply_studio_settings(settings: dict, project_id: Optional[str], target: tuple) -> None:
+    """A Studio project's settings. On config.json's own site, with PROJECT_MAPPINGS_DYNAMIC off, its
+    FIN name/server/interval apply but the mappings are config.json's: a saved, partial or empty
+    block cannot replace them. Anywhere else the project's own mappings are the only ones."""
+    if not PROJECT_MAPPINGS_DYNAMIC and site_defaults_apply(*target):
+        apply_project_settings({k: v for k, v in settings.items() if k not in PROJECT_DICT_SETTINGS}, project_id)
+    else:
+        apply_project_settings(settings, project_id, isolated=True)
+
 
 def apply_project_settings(settings: Optional[dict], project_id: Optional[str] = None,
                            isolated: bool = False) -> None:
@@ -125,7 +152,7 @@ def apply_project_settings(settings: Optional[dict], project_id: Optional[str] =
     Two runtimes, kept apart on purpose:
     * Studio (isolated=True): the settings come from an Eko-DT project's project.json, sent by
       the Studio at sign-in or on a project switch. That project's mappings are the only ones;
-      a block it did not save is not configured.
+      a block it did not save is not configured (see apply_studio_settings for config.json's site).
     * Standalone / exported backend and the plain default site (isolated=False): config.json is
       the site's own configuration, and it fills any block the bundled project.json leaves out.
     """
@@ -780,11 +807,14 @@ async def login(req: LoginRequest):
     # configure it. Without them the configuration already active (bundled project or
     # config.json) stays in force
     managed = req.settings is not None
+    typed = (req.project_name or "").strip()
     if managed:
-        apply_project_settings(req.settings, req.project_id, isolated=True)
+        # what this sign-in will read: the name typed here or the project's own, on the server asked for
+        target = (typed or str(req.settings.get("finProjectName") or "").strip(),
+                  req.server_url or str(req.settings.get("finBaseUrl") or "").strip() or None)
+        apply_studio_settings(req.settings, req.project_id, target)
 
     server_url = req.server_url or FIN_SERVER_URL
-    typed = (req.project_name or "").strip()
     if managed and not typed and "project_name" not in ACTIVE_OVERRIDES:
         project = ""   # this project has no FIN Project Name: unconfigured, not the default site
     else:
@@ -836,12 +866,14 @@ async def set_project_settings(req: ProjectSettingsRequest):
     global FIN_SERVER_URL, PROJECT_CHECK, PROJECT_NAME, TYPED_NAME
     _require_client()
 
-    apply_project_settings(req.settings, req.project_id, isolated=True)
     # A project without its own FIN Project Name is unconfigured, except for the name typed at
     # sign-in for this same project. Never the config.json default, never another project's name.
     if TYPED_NAME and TYPED_NAME[0] != (req.project_id or None):
         TYPED_NAME = None
     kept = TYPED_NAME[1] if TYPED_NAME else ""
+    # the session stays on the server it signed in to, so that is the server this project reads
+    target = (str(req.settings.get("finProjectName") or "").strip() or kept, client.base_url)
+    apply_studio_settings(req.settings, req.project_id, target)
     if "project_name" not in ACTIVE_OVERRIDES:
         PROJECT_NAME = kept
     wanted_url = str(req.settings.get("finBaseUrl") or "").strip().rstrip("/")
