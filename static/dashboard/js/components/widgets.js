@@ -1103,13 +1103,23 @@ window.EKO_C = (function(){
       return shown ? [p[0], shown] : null;
     }).filter(Boolean);
     const analogRows = analogPointRows(r);
-    const tr7 = r.trend7 && Array.isArray(r.trend7.vals) && r.trend7.vals.length >= 2 ? r.trend7 : null;
+    const cmp = r.compare || null;
     const reason = r.st === 'stale' ? 'dgNoTrend.stale' : (r.trendKind === 'state' ? 'dgNoTrend.state' : 'dgNoTrend.none');
-    const graphBlock = tr7 ? (() => { const p = window.ekoTrend(tr7.vals, 240, 56); const lo = Math.min(...tr7.vals), hi = Math.max(...tr7.vals);
-      return `<p class="tCap">${esc(trP(tr7.point))} · ${esc(t('apTrendPts', { n: tr7.vals.length }))} · ${lo}–${hi} ${esc(tr7.unit || '')}</p>
-        <div class="systrend"><svg viewBox="0 0 240 56" preserveAspectRatio="none"><path d="${p.area}" fill="var(--accT)"/><path d="${p.line}" fill="none" stroke="var(--acc)" stroke-width="1.5"/></svg></div>
-        <table class="rawtbl"><thead><tr><th>${esc(t('rawPoint'))}</th><th>${esc(t('rawValue'))}</th></tr></thead><tbody>${tr7.vals.map((v, i) => `<tr><td>${t('rawDay', { n: i + 1 - tr7.vals.length })}</td><td class="tMonoS">${v} ${esc(tr7.unit || '')}</td></tr>`).join('')}</tbody></table>`; })()
-      : `<p class="tCap">${esc(t('emptyDash'))} · ${esc(t(reason))}</p>`;
+    const graphBlock = (() => {
+      const dayGroups = cmp && Array.isArray(cmp.days) ? cmp.days.filter(d => d && (d.actual != null || d.sp != null)).map(d => ({ label: d.label, a: d.actual, b: d.sp })) : [];
+      const pairGroups = cmp && Array.isArray(cmp.pairs) ? cmp.pairs.filter(p => p.actual != null || p.sp != null).map(p => ({ label: t(p.key), a: p.actual, b: p.sp, unit: p.unit })) : [];
+      const groups = dayGroups.length >= 2 ? dayGroups : pairGroups;
+      if (!groups.length || typeof window.ekoCompareBars !== 'function') {
+        return `<p class="tCap">${esc(t('emptyDash'))} · ${esc(t(reason))}</p>`;
+      }
+      const cap = dayGroups.length >= 2
+        ? `${esc(trP(cmp.actName || t('apCmpActual')))} · ${esc(t('apCmpDays'))}`
+        : esc(t('apCmpCap'));
+      const bars = window.ekoCompareBars(groups, 240, 88);
+      return `<p class="tCap">${cap}</p>
+        <div class="apcmpleg"><span class="apcmpdot" data-k="act"></span>${esc(t('apCmpActual'))}<span class="apcmpdot" data-k="sp"></span>${esc(t('apCmpSp'))}</div>
+        <div class="systrend apcmpchart"><svg viewBox="0 0 240 88" preserveAspectRatio="xMidYMid meet">${bars.svg}</svg></div>`;
+    })();
     const pack = docsFor(E, r);
     const omDocs = pack ? (pack.om ? [pack.om] : []) : (r.omDocs || []);
     const warranty = pack ? (pack.warranty || null) : (r.warranty || null);

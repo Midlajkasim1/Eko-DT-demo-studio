@@ -1198,6 +1198,105 @@
 
   
   var historyCache = {};
+  var HIST_MONTHS = { january:0, february:1, march:2, april:3, may:4, june:5, july:6, august:7, september:8, october:9, november:10, december:11 };
+  function foldPtName(n) {
+    return String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  }
+  function ptNumVal(p) {
+    if (!p) return null;
+    var m = String(p.currentValue == null ? "" : p.currentValue).replace(/,/g, "").match(/-?\d+(?:\.\d+)?/);
+    if (!m) return null;
+    var n = parseFloat(m[0]);
+    return isFinite(n) ? n : null;
+  }
+  function isSpName(k) {
+    return k.indexOf("set") !== -1 || /sp$/.test(k);
+  }
+  function findPt(points, test) {
+    for (var i = 0; i < (points || []).length; i++) {
+      if (test(foldPtName(points[i].navName), points[i])) return points[i];
+    }
+    return null;
+  }
+  function makePair(points, key, actTest, spTest, unit) {
+    var a = findPt(points, actTest);
+    var s = findPt(points, spTest);
+    var av = ptNumVal(a);
+    var sv = ptNumVal(s);
+    if (av == null && sv == null) return null;
+    return {
+      key: key,
+      actual: av,
+      sp: sv,
+      unit: unit,
+      actId: a && a.id,
+      spId: s && s.id,
+      actName: a && a.navName,
+      spName: s && s.navName,
+      actHis: !!(a && a.his && a.id),
+      spHis: !!(s && s.his && s.id)
+    };
+  }
+  function comparePairs(eq) {
+    var points = eq.points || [];
+    var id = String(eq.name || "").toUpperCase();
+    var type = String(eq.type || "").toUpperCase();
+    var kind = "gen";
+    if (id.indexOf("FAHU") === 0 || type.indexOf("FAHU") !== -1) kind = "fahu";
+    else if (id.indexOf("AHU") === 0 || type.indexOf("AHU") !== -1) kind = "ahu";
+    else if (id.indexOf("FCU") === 0 || type.indexOf("FCU") !== -1) kind = "fcu";
+    var specs = [];
+    if (kind === "fcu") {
+      specs = [
+        makePair(points, "apCmpZone", function (k) { return k.indexOf("zonetemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("zonetemp") !== -1 && isSpName(k); }, "°C")
+      ];
+    } else if (kind === "ahu") {
+      specs = [
+        makePair(points, "apCmpRA", function (k) { return k.indexOf("ratemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("ratemp") !== -1 && isSpName(k); }, "°C"),
+        makePair(points, "apCmpSA", function (k) { return k.indexOf("satemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("satemp") !== -1 && isSpName(k); }, "°C"),
+        makePair(points, "apCmpRAHum", function (k) { return k.indexOf("rahum") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("rahum") !== -1 && isSpName(k); }, "%"),
+        makePair(points, "apCmpRACO2", function (k) { return (k.indexOf("raco2") !== -1 || k === "raco2" || (k.indexOf("co2") !== -1 && k.indexOf("ra") !== -1)) && !isSpName(k); }, function (k) { return k.indexOf("co2") !== -1 && isSpName(k); }, "ppm")
+      ];
+    } else if (kind === "fahu") {
+      specs = [
+        makePair(points, "apCmpFA", function (k) { return k.indexOf("fatemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("fatemp") !== -1 && isSpName(k); }, "°C"),
+        makePair(points, "apCmpRA", function (k) { return k.indexOf("ratemp") !== -1 && k.indexOf("sensible") === -1 && !isSpName(k); }, function (k) { return k.indexOf("ratemp") !== -1 && k.indexOf("sensible") === -1 && isSpName(k); }, "°C"),
+        makePair(points, "apCmpSA", function (k) { return k.indexOf("satemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("satemp") !== -1 && isSpName(k); }, "°C"),
+        makePair(points, "apCmpOffCoil", function (k) { return (k.indexOf("offcoil") !== -1 || (k.indexOf("off") !== -1 && k.indexOf("temp") !== -1 && k.indexOf("hum") === -1 && k.indexOf("sensible") === -1)) && !isSpName(k); }, function (k) { return (k.indexOf("offcoil") !== -1 || k.indexOf("offtemp") !== -1) && isSpName(k); }, "°C")
+      ];
+    } else {
+      specs = [
+        makePair(points, "apCmpTemp", function (k) { return k.indexOf("temp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("temp") !== -1 && isSpName(k); }, "°C")
+      ];
+    }
+    return specs.filter(Boolean);
+  }
+  function histDaily(hist) {
+    var rows = [];
+    if (!hist) return rows;
+    Object.keys(hist).forEach(function (year) {
+      Object.keys(hist[year] || {}).forEach(function (month) {
+        Object.keys(hist[year][month] || {}).forEach(function (day) {
+          var hData = hist[year][month][day];
+          var sum = 0, count = 0;
+          Object.keys(hData || {}).forEach(function (hr) {
+            var n = parseFloat(hData[hr]);
+            if (isFinite(n)) { sum += n; count++; }
+          });
+          if (!count) return;
+          var mi = HIST_MONTHS[String(month).toLowerCase()];
+          var dnum = parseInt(String(day).replace(/\D/g, ""), 10);
+          rows.push({
+            t: Date.UTC(+year, mi == null ? 0 : mi, dnum || 1),
+            avg: Math.trunc((sum / count) * 100) / 100,
+            label: String(dnum || day)
+          });
+        });
+      });
+    });
+    rows.sort(function (a, b) { return a.t - b.t; });
+    return rows.slice(-7);
+  }
   function applyEquipment(payload) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     var list = payload && payload.equipment;
@@ -1261,6 +1360,7 @@
         svc: "--",
         cafm: "--",
         trend7: null,
+        compare: null,
         params: params,
         analog: analog,
         alarmPts: alarmPts,
@@ -1269,69 +1369,75 @@
         spark7: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
       };
 
-      if (historyCache[eq.name] && historyCache[eq.name].trend7) {
-        assetData.trend7 = historyCache[eq.name].trend7;
-        assetData.spark7 = historyCache[eq.name].spark7;
-      } else {
-        var hisPoints = (eq.points || []).filter(function(p) { return p.his; });
-        var target = null;
-        if (hisPoints.length > 0) {
-           var prio = /temp|valve|power|co2|flow/i;
-           target = hisPoints.find(function(p) { return prio.test(p.navName); }) || hisPoints[0];
-        }
+      var pairs = comparePairs(eq);
+      var cached = historyCache[eq.name];
+      assetData.compare = {
+        pairs: pairs,
+        days: (cached && cached.compareV === 1 && cached.compare && cached.compare.days) || [],
+        unit: (cached && cached.compare && cached.compare.unit) || ((pairs[0] && pairs[0].unit) || "°C"),
+        actName: (cached && cached.compare && cached.compare.actName) || (pairs[0] && pairs[0].actName) || "",
+        spName: (cached && cached.compare && cached.compare.spName) || (pairs[0] && pairs[0].spName) || ""
+      };
+      if (cached && cached.trend7) {
+        assetData.trend7 = cached.trend7;
+        assetData.spark7 = cached.spark7;
+      }
 
-        if (target) {
-          historyCache[eq.name] = { fetching: true };
-                    if (window.DashboardData && window.DashboardData.getPointHistory) {
-            window.DashboardData.getPointHistory(target.id, 7).then(function(res) {
-              if (res && res.history) {
-                var dailyAverages = [];
-                var hist = res.history;
-                // Parse nested year->month->day->hour structure
-                for (var year in hist) {
-                  for (var month in hist[year]) {
-                    for (var day in hist[year][month]) {
-                      var hData = hist[year][month][day];
-                      var sum = 0, count = 0;
-                      for (var hr in hData) {
-                        if (hData[hr] != null) {
-                          sum += parseFloat(hData[hr]);
-                          count++;
-                        }
-                      }
-                      if (count > 0) {
-                        var avg = sum / count;
-                        // Truncate to 2 decimal places without rounding (e.g. 88.469 -> 88.46)
-                        dailyAverages.push(Math.trunc(avg * 100) / 100);
-                      }
-                    }
-                  }
-                }
-                
-                var vals = dailyAverages.slice(-7); // take last 7 days
-                
-                if (vals.length >= 1) {
-                  var min = Math.min.apply(null, vals);
-                  var max = Math.max.apply(null, vals);
-                  var range = max - min || 1;
-                  var spark7 = vals.map(function(v) { return (v - min) / range; });
-                  
-                  historyCache[eq.name] = {
-                    trend7: { point: target.navName, unit: res.unit || "", vals: vals },
-                    spark7: spark7
-                  };
-                                    paint();
-                } else {
-                                    historyCache[eq.name] = { failed: true };
-                }
-              } else {
-                                  historyCache[eq.name] = { failed: true };
-              }
-            }).catch(function(err) {
-                            historyCache[eq.name] = { failed: true };
+      var primary = pairs.filter(function (p) { return p.actHis; })[0] || pairs[0];
+      if (primary && primary.actId && window.DashboardData && window.DashboardData.getPointHistory && !(cached && (cached.compareV === 1 || cached.fetching))) {
+        historyCache[eq.name] = { fetching: true };
+        var liveSp = primary.sp;
+        var actP = window.DashboardData.getPointHistory(primary.actId, 7);
+        var spP = (primary.spHis && primary.spId)
+          ? window.DashboardData.getPointHistory(primary.spId, 7)
+          : Promise.resolve(null);
+        Promise.all([actP, spP]).then(function (both) {
+          var actDays = histDaily(both[0] && both[0].history);
+          var spDays = histDaily(both[1] && both[1].history);
+          var spByT = {};
+          spDays.forEach(function (d) { spByT[d.t] = d.avg; });
+          var days = actDays.map(function (d) {
+            var spv = spByT[d.t];
+            if (spv == null && liveSp != null) spv = liveSp;
+            return { label: d.label, actual: d.avg, sp: spv };
+          });
+          var vals = actDays.map(function (d) { return d.avg; });
+          var spark7 = assetData.spark7;
+          if (vals.length) {
+            var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals), range = mx - mn || 1;
+            spark7 = vals.map(function (v) { return (v - mn) / range; });
+          }
+          var packed = {
+            compareV: 1,
+            compare: {
+              days: days,
+              unit: (both[0] && both[0].unit) || primary.unit || "°C",
+              actName: primary.actName || "",
+              spName: primary.spName || ""
+            },
+            trend7: vals.length ? { point: primary.actName, unit: (both[0] && both[0].unit) || primary.unit || "", vals: vals } : null,
+            spark7: spark7
+          };
+          historyCache[eq.name] = packed;
+          var live = window.EKO_DATA && window.EKO_DATA.marsa;
+          if (live && Array.isArray(live.assets)) {
+            live.assets.forEach(function (a) {
+              if (a.id !== eq.name) return;
+              a.compare = {
+                pairs: (a.compare && a.compare.pairs) || pairs,
+                days: packed.compare.days,
+                unit: packed.compare.unit,
+                actName: packed.compare.actName,
+                spName: packed.compare.spName
+              };
+              a.trend7 = packed.trend7;
+              a.spark7 = packed.spark7;
             });
           }
-        }
+          paint();
+        }).catch(function () {
+          historyCache[eq.name] = { compareV: 1, failed: true, compare: { days: [], unit: primary.unit, actName: primary.actName, spName: primary.spName } };
+        });
       }
 
       return assetData;
