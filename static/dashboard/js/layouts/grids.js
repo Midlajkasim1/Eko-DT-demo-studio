@@ -52,10 +52,16 @@
     { section:'dgr.sRef', act:'none', attr:'asset', labelKey:'dgr.cafm', icon:'expand' }
   ];
   const expand = (E, r) => { const t = E.t.bind(E); const als = (r.alarms || []).map(id => E.alarm(id)).filter(Boolean);
-    const live = (r.params || []).length ? `<dl class="dgxl">${r.params.map(p => `<div class="aprow"><dt>${esc(pAr(E, p[0]))}${p[1] ? `<span class="apsrc">${esc(pAr(E, p[1]))}</span>` : ''}</dt><dd>${esc(p[2])}</dd></div>`).join('')}</dl>` : `<p class="tCap">${esc(t('emptyDash'))}</p>`;
+    const foldN = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const isFdd = n => { const k = foldN(n); return k.indexOf('fdd') === 0 || k.indexOf('rule') === 0; };
+    const isBool = v => { const s = String(v == null ? '' : v).trim().toUpperCase(); return s === 'T' || s === 'F' || s === 'TRUE' || s === 'FALSE'; };
+    const analogParams = (r.analog && r.analog.length ? r.analog : (r.params || [])).filter(p => !isFdd(p[0]) && !isBool(p[2]) && foldN(p[0]).indexOf('warrant') === -1);
+    const liveParams = (r.params || []).filter(p => isFdd(p[0]) && !isBool(p[2]));
+    const analog = analogParams.length ? `<dl class="dgxl">${analogParams.map(p => `<div class="aprow"><dt>${esc(pAr(E, p[0]))}</dt><dd>${esc(p[2])}</dd></div>`).join('')}</dl>` : '';
+    const live = liveParams.length ? `<dl class="dgxl">${liveParams.map(p => `<div class="aprow"><dt>${esc(pAr(E, p[0]))}${p[1] ? `<span class="apsrc">${esc(pAr(E, p[1]))}</span>` : ''}</dt><dd>${esc(p[2])}</dd></div>`).join('')}</dl>` : `<p class="tCap">${esc(t('emptyDash'))}</p>`;
     const al = als.length ? als.map(a => `<div class="alref"><div class="alrefh"><span class="statchip" data-sev="${a.sev}">${esc(t('rib' + a.sev[0].toUpperCase() + a.sev.slice(1)).toLowerCase())}</span><span class="alrefage tMonoS msA">${esc(a.age)}</span></div>
       <div class="alreft">${esc(E.alarmLines(a).main)}</div>${E.alarmLines(a).sub ? `<div class="alreftech">${esc(E.alarmLines(a).sub)}</div>` : ''}<div class="alrefack">${a.ack ? esc(t('ackShort', { time:a.ack.time, who:a.ack.who })) : esc(t('apUnack'))}</div></div>`).join('') : `<p class="tCap">${esc(t('apNoAlarms'))}</p>`;
-    return `<div class="dgxg"><section><h4 class="tLbl">${esc(t('apLiveParams'))}</h4>${live}</section><section><h4 class="tLbl">${esc(t('dgxAlarms'))}</h4>${al}</section></div>`; };
+    return `<div class="dgxg"><section><h4 class="tLbl">${esc(t('apFullT'))}</h4>${analog || `<p class="tCap">${esc(t('emptyDash'))}</p>`}</section><section><h4 class="tLbl">${esc(t('apLiveParams'))}</h4>${live}</section><section><h4 class="tLbl">${esc(t('dgxAlarms'))}</h4>${al}</section></div>`; };
 
   const assets = E => ({
     id:'assets', titleKey:'regTitle', exportName:'asset-register', rowKey:'id', rowAct:{ act:'openAsset', attr:'asset' }, searchKeys:['id', 'zone', 'type'],

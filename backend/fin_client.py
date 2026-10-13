@@ -758,9 +758,12 @@ class FinScramClient:
                 unit = p.get("unit", "") or ""
                 if val is None:
                     display_val = "—"
+                    kind = "Null"
                 elif isinstance(val, bool):
                     display_val = "T" if val else "F"
+                    kind = "Bool"
                 elif isinstance(val, (int, float)):
+                    kind = "Number"
                     if unit == "%" or any(x in nav_lower for x in ["valve", "coil", "demand"]):
                         val = int(val)
                         unit = "%"
@@ -771,6 +774,7 @@ class FinScramClient:
                             display_val = f"{display_val}{unit}"
                 else:
                     display_val = clip_decimals(str(val))
+                    kind = str(p.get("kind") or "Str")
 
                 nav_key = nav_lower.replace(" ", "_")
                 if nav_key in seen_navs:
@@ -786,6 +790,7 @@ class FinScramClient:
                     "his": is_his,
                     "reporting": reporting,
                     "unit": unit,
+                    "kind": kind,
                 })
 
             floor = safe_get(equip.get("floorRef"), "dis", "Unknown Floor")

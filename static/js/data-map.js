@@ -1105,8 +1105,23 @@
 
       var sys = sysFromFin(eq);
 
-      var params = (eq.points || []).filter(function(p) { return p.reporting; }).map(function(p) {
-        return [p.navName, "", p.currentValue];
+      var wtyStart = null;
+      var wtyEnd = null;
+      var params = [];
+      var analog = [];
+      (eq.points || []).forEach(function (p) {
+        if (!p || !p.reporting) return;
+        var folded = String(p.navName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (folded.indexOf("warrant") !== -1) {
+          if (folded.indexOf("start") !== -1) { wtyStart = p.currentValue; return; }
+          if (folded.indexOf("end") !== -1) { wtyEnd = p.currentValue; return; }
+        }
+        if (p.kind === "Bool") return;
+        var raw = String(p.currentValue == null ? "" : p.currentValue).trim().toUpperCase();
+        if (raw === "T" || raw === "F" || raw === "TRUE" || raw === "FALSE") return;
+        var row = [p.navName, "", p.currentValue];
+        if (folded.indexOf("fdd") === 0 || folded.indexOf("rule") === 0) params.push(row);
+        else analog.push(row);
       });
 
       var alarmIds = (site.alarms || []).filter(function(a) { return namesMatch(a.asset, eq.name) || namesMatch(a.asset, eq.bimId); }).map(function(a) { return a.id; });
@@ -1115,7 +1130,8 @@
         bimId: eq.bimId,
         sys: sys,
         crit: crit,
-        wtyEnd: null,
+        wtyStart: wtyStart,
+        wtyEnd: wtyEnd,
         tags: eq.tags || [],
         st: (alarmIds.length || eq.inAlarm) ? "alarm" : "ok",
         alarms: alarmIds,
@@ -1134,6 +1150,7 @@
         cafm: "--",
         trend7: null,
         params: params,
+        analog: analog,
         points: eq.points || [],
         activity: [],
         spark7: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]

@@ -6395,6 +6395,23 @@
   font-weight:var(--txValueW)
 }
 
+.dashboard-native-container #assetpanel .apwtyrow dd {
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:2px;
+  text-align:right
+}
+
+.dashboard-native-container #assetpanel .apwtypair {
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:2px;
+  font-family:'JetBrains Mono',monospace;
+  font-size:var(--txCapSz)
+}
+
 .dashboard-native-container .apsrc {
   font-size:var(--txSubSz);
   color:var(--txSubC)

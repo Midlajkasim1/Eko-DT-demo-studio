@@ -5,6 +5,7 @@ export interface FinEquipmentPoint {
   navName: string
   currentValue: string
   status: string
+  kind?: 'Bool' | 'Number' | 'Str' | 'Null'
 }
 
 export interface FinAlarm {
