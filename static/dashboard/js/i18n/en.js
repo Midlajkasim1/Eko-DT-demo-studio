@@ -99,6 +99,7 @@ window.EKO_I18N.en = {
   "apInfo": "Info",
   "apAlarms": "Alarms",
   "apAnalytics": "Analytics",
+  "apFdd": "FDD",
   "apFloor": "Floor",
   "apZone": "Zone",
   "apSystem": "System",

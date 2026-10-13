@@ -100,6 +100,111 @@
     };
   }
 
+  function isOnVal(v) {
+    var u = String(v == null ? '' : v).trim().toUpperCase();
+    return u === 'T' || u === 'TRUE' || u === 'ON';
+  }
+  function isOffVal(v) {
+    var u = String(v == null ? '' : v).trim().toUpperCase();
+    return u === 'F' || u === 'FALSE' || u === 'OFF';
+  }
+  function fddLooksNormal(v) {
+    var s = String(v == null ? '' : v).trim();
+    if (!s || isOffVal(s)) return true;
+    if (isOnVal(s)) return false;
+    return /[-–]\s*normal\s*$/i.test(s) || /^normal$/i.test(s);
+  }
+  function fddLooksFault(v) {
+    var s = String(v == null ? '' : v).trim();
+    if (!s || fddLooksNormal(s)) return false;
+    if (isOnVal(s)) return true;
+    return /possible\s+fault|not\s+maintaining|no\s+response|not\s+working|\bfault\b|\balarm\b|energy\s+waste/i.test(s);
+  }
+  function fddGroup(name) {
+    var u = String(name || '').toUpperCase();
+    var m = u.match(/^(FD&D[_-]?\d+|FDD[_-]?\d+|RULE[_-][A-Z0-9]+)/);
+    return m ? m[1].replace(/-/g, '_') : u;
+  }
+  function pointFaultsFor(asset) {
+    var groups = {};
+    var extra = [];
+    (asset.points || []).forEach(function (p) {
+      if (!p || !p.reporting) return;
+      var name = p.navName || '';
+      var folded = String(name).toLowerCase().replace(/[^a-z0-9]/g, '');
+      var val = p.currentValue;
+      if (folded.indexOf('fdd') === 0 || folded.indexOf('rule') === 0) {
+        var g = fddGroup(name);
+        if (!groups[g]) groups[g] = { names: [], strings: [], on: false, off: false };
+        groups[g].names.push(name);
+        if (isOnVal(val)) groups[g].on = true;
+        else if (isOffVal(val)) groups[g].off = true;
+        else if (String(val == null ? '' : val).trim()) groups[g].strings.push(String(val).trim());
+        return;
+      }
+      if (folded.indexOf('alarm') !== -1 && isOnVal(val)) extra.push({ group: name, msg: name.replace(/_/g, ' '), tech: name });
+    });
+    var out = [];
+    Object.keys(groups).forEach(function (g) {
+      var fam = groups[g];
+      var active = fam.on || (!fam.off && fam.strings.some(fddLooksFault));
+      if (!active) return;
+      var faultStr = fam.strings.filter(fddLooksFault);
+      var msg = (faultStr.sort(function (a, b) { return b.length - a.length; })[0]
+        || fam.strings.sort(function (a, b) { return b.length - a.length; })[0]
+        || fam.names[0]);
+      out.push({ group: g, msg: msg, tech: fam.names.join(' · ') });
+    });
+    return out.concat(extra);
+  }
+  function slugId(s) {
+    return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  }
+  function syncPointAlarms(site) {
+    if (!site || !Array.isArray(site.assets)) return;
+    var kept = (site.alarms || []).filter(function (a) { return String(a.id || '').indexOf('fdd-') !== 0; });
+    site.assets.forEach(function (asset) {
+      pointFaultsFor(asset).forEach(function (fault) {
+        var dup = kept.some(function (a) {
+          if (!namesMatch(a.asset, asset.id) && !(asset.bimId && a.bimId === asset.bimId)) return false;
+          var t = String(a.plainEn || a.techEn || '').toLowerCase();
+          var m = String(fault.msg || '').toLowerCase();
+          return t && m && (t.indexOf(m.slice(0, 48)) !== -1 || m.indexOf(t.slice(0, 48)) !== -1);
+        });
+        if (dup) return;
+        kept.push({
+          id: 'fdd-' + slugId(asset.id) + '-' + slugId(fault.group),
+          fam: 'sys',
+          asset: asset.id,
+          bimId: asset.bimId,
+          sev: 'high',
+          cat: 'fdd',
+          sys: asset.sys || 'Mechanical',
+          ack: null,
+          ageH: 0,
+          locEn: (asset.typeEn || 'Equipment') + ' · ' + (asset.floor || 'Level'),
+          locAr: (asset.typeAr || 'معدات') + ' · ' + (asset.floor || 'الطابق'),
+          plainEn: fault.msg,
+          plainAr: fault.msg,
+          techEn: fault.tech,
+          techAr: fault.tech,
+          impactAedMo: null,
+          raised: 'Live',
+          untimed: true,
+          lifecycle: []
+        });
+      });
+    });
+    site.alarms = kept;
+    site.assets.forEach(function (asset) {
+      asset.alarms = kept.filter(function (a) {
+        return namesMatch(a.asset, asset.id) || (asset.bimId && a.bimId === asset.bimId);
+      }).map(function (a) { return a.id; });
+      if (asset.alarms.length && asset.st !== 'stale') asset.st = 'alarm';
+      else if (asset.st === 'alarm' && !asset.alarms.length) asset.st = 'ok';
+    });
+  }
+
   function applyAlarms(payload) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !payload || !Array.isArray(payload.alarms)) return;
@@ -109,6 +214,7 @@
         asset.alarms = site.alarms.filter(function (a) { return namesMatch(a.asset, asset.id) || (asset.bimId && a.bimId === asset.bimId); }).map(function (a) { return a.id; });
         if (asset.alarms.length && asset.st !== 'stale') asset.st = 'alarm';
       });
+      syncPointAlarms(site);
     }
     if (window.EKO_HOST_ENGINE && typeof window.EKO_HOST_ENGINE.resolveAllAssetPositions === 'function') {
       window.EKO_HOST_ENGINE.resolveAllAssetPositions();
@@ -1109,6 +1215,7 @@
       var wtyEnd = null;
       var params = [];
       var analog = [];
+      var alarmPts = [];
       (eq.points || []).forEach(function (p) {
         if (!p || !p.reporting) return;
         var folded = String(p.navName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -1116,11 +1223,16 @@
           if (folded.indexOf("start") !== -1) { wtyStart = p.currentValue; return; }
           if (folded.indexOf("end") !== -1) { wtyEnd = p.currentValue; return; }
         }
-        if (p.kind === "Bool") return;
-        var raw = String(p.currentValue == null ? "" : p.currentValue).trim().toUpperCase();
-        if (raw === "T" || raw === "F" || raw === "TRUE" || raw === "FALSE") return;
+        var raw = String(p.currentValue == null ? "" : p.currentValue).trim();
+        if (!raw || raw === "—" || raw === "--") return;
+        var rawU = raw.toUpperCase();
+        var isFdd = folded.indexOf("fdd") === 0 || folded.indexOf("rule") === 0;
+        var isAlarmPt = folded.indexOf("alarm") !== -1 || /(?:^|_)alm(?:$|_)/.test(String(p.navName || "").toLowerCase());
+        var isFlag = p.kind === "Bool" || rawU === "T" || rawU === "F" || rawU === "TRUE" || rawU === "FALSE";
+        if (isFdd && isFlag) return;
         var row = [p.navName, "", p.currentValue];
-        if (folded.indexOf("fdd") === 0 || folded.indexOf("rule") === 0) params.push(row);
+        if (isAlarmPt) alarmPts.push(row);
+        else if (isFdd) params.push(row);
         else analog.push(row);
       });
 
@@ -1151,6 +1263,7 @@
         trend7: null,
         params: params,
         analog: analog,
+        alarmPts: alarmPts,
         points: eq.points || [],
         activity: [],
         spark7: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
@@ -1270,6 +1383,7 @@
         }
       });
     });
+    syncPointAlarms(site);
 
     if (site.power) {
       applyMeters((window.DashboardData && window.DashboardData.meters) || {});

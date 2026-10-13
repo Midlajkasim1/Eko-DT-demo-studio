@@ -931,9 +931,10 @@ window.EKO_C = (function(){
      Reference anatomy (D43 rulings): header = asset CODE + chip + expand +
      close; context = location · zone · plain-language type; action pills
      Locate in 3D (primary) / Work order / CAFM (Analytics is a tab, dropped
-     from pills); tabs Alarms / Activity / O&M / Warranty (+ Control only when
-     the data contract, site flag and role permit). LIVE PARAMETERS persists
-     above every tab. Desktop has no footer; the PHONE SHEET keeps a sticky
+     from pills); tabs Alarms / Analytics / O&M / Warranty (+ Control only when
+     the data contract, site flag and role permit). Alarms holds FDD and open
+     alarms; Analytics holds analog live values and the trend graph.
+     Desktop has no footer; the PHONE SHEET keeps a sticky
      footer (intentional responsive divergence, logged). */
   /* The minimum the panel needs, built from the alarms that name the asset */
   function alarmAsAsset(E, id){
@@ -996,8 +997,9 @@ window.EKO_C = (function(){
     const upper = raw.trim().toUpperCase();
     if (upper === 'T' || upper === 'TRUE' || upper === 'ON' || upper === 'RUN' || upper === 'RUNNING') return 'On';
     if (upper === 'F' || upper === 'FALSE' || upper === 'OFF' || upper === 'STOP' || upper === 'STOPPED') return 'Off';
+    if (/[a-zA-Z°%]/.test(raw)) return raw;
     const n = fcuNumber(raw);
-    if (n != null && unit && raw.indexOf(unit) === -1 && !/[a-zA-Z°]/.test(raw)) {
+    if (n != null && unit && raw.indexOf(unit.trim()) === -1) {
       const text = fmt(n, 1);
       return text + unit;
     }
@@ -1006,6 +1008,10 @@ window.EKO_C = (function(){
   function isFddNav(name) {
     const k = fcuFold(name);
     return k.indexOf('fdd') === 0 || k.indexOf('rule') === 0;
+  }
+  function isAlarmNav(name) {
+    const k = fcuFold(name);
+    return k.indexOf('alarm') !== -1 || /(?:^|_)alm(?:$|_)/.test(String(name || '').toLowerCase());
   }
   function analogUnit(name, unit) {
     if (unit) {
@@ -1030,10 +1036,7 @@ window.EKO_C = (function(){
     };
     if (listed && listed.length) {
       listed.forEach(p => {
-        if (!p || !p[0]) return;
-        if (isFddNav(p[0])) return;
-        const upper = String(p[2] == null ? '' : p[2]).trim().toUpperCase();
-        if (upper === 'T' || upper === 'F' || upper === 'TRUE' || upper === 'FALSE') return;
+        if (!p || !p[0] || isFddNav(p[0]) || isAlarmNav(p[0])) return;
         push(p[0], p[2], p[3]);
       });
     } else {
@@ -1041,21 +1044,16 @@ window.EKO_C = (function(){
       if (fromPts.length) {
         fromPts.forEach(p => {
           if (!p || !p.reporting) return;
-          if (isFddNav(p.navName)) return;
+          if (isFddNav(p.navName) || isAlarmNav(p.navName)) return;
           const folded = fcuFold(p.navName);
           if (folded.indexOf('warrant') !== -1) return;
-          if (p.kind === 'Bool') return;
-          const upper = String(p.currentValue == null ? '' : p.currentValue).trim().toUpperCase();
-          if (upper === 'T' || upper === 'F' || upper === 'TRUE' || upper === 'FALSE') return;
           push(p.navName, p.currentValue, p.unit);
         });
       } else {
         ((asset && asset.params) || []).forEach(p => {
-          if (!p || !p[0] || isFddNav(p[0])) return;
+          if (!p || !p[0] || isFddNav(p[0]) || isAlarmNav(p[0])) return;
           const folded = fcuFold(p[0]);
           if (folded.indexOf('warrant') !== -1) return;
-          const upper = String(p[2] == null ? '' : p[2]).trim().toUpperCase();
-          if (upper === 'T' || upper === 'F' || upper === 'TRUE' || upper === 'FALSE') return;
           push(p[0], p[2], p[3]);
         });
       }
@@ -1077,29 +1075,35 @@ window.EKO_C = (function(){
     const sevChips = ['critical','high','medium'].filter(s => sevN[s]).map(s => `<span class="statchip" data-sev="${s}">${sevN[s]} ${esc(t('rib'+s[0].toUpperCase()+s.slice(1)))}</span>`).join('');
     const ctl = window.EKO_CTL && window.EKO_CTL.showsControl(E, r);
     let tab = E.state.apTab;
-    if(!['alarms','activity','om','warranty','control'].includes(tab)) tab = 'alarms';
+    if (tab === 'activity') tab = 'analytics';
+    if(!['alarms','analytics','om','warranty','control'].includes(tab)) tab = 'alarms';
     if(tab === 'control' && !ctl) tab = 'alarms';
     const trP = x => E.ph(x);
     const foldNav = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const isBoolLive = v => { const s = String(v == null ? '' : v).trim().toUpperCase(); return s === 'T' || s === 'F' || s === 'TRUE' || s === 'FALSE'; };
+    const isBoolLive = v => { const s = String(v == null ? '' : v).trim().toUpperCase(); return s === 'T' || s === 'F' || s === 'TRUE' || s === 'FALSE' || s === 'ON' || s === 'OFF'; };
     const wtySlot = n => { const f = foldNav(n); if (f.indexOf('warrant') === -1) return null; if (f.indexOf('start') !== -1) return 'start'; if (f.indexOf('end') !== -1) return 'end'; return null; };
-    const liveRows = (r.params || []).filter(p => isFddNav(p[0]) && !wtySlot(p[0]) && !isBoolLive(p[2]));
-    const live = `<h4 class="tLbl">${esc(t('apLiveParams'))}</h4>
-      ${liveRows.map(p =>
-        `<div class="aprow"><dt>${esc(trP(p[0]))}${p[1] ? `<span class="apsrc">${esc(trP(p[1]))}</span>` : ''}</dt><dd>${esc(E.clip2 ? E.clip2(p[2]) : p[2])}</dd></div>`).join('')
-        || `<p class="alempty">${esc(t('emptyDash'))}</p>`}`;
-    /* D105: progressive disclosure replaces the old Pro depth — a labelled expansion in place, per user */
-    const fullOn = E.disclose('full');
+    const alsText = als.map(a => String((a && (a.plainEn || a.techEn)) || '').toLowerCase());
+    const fddRows = (r.params || []).filter(p => {
+      if (!isFddNav(p[0]) || wtySlot(p[0]) || isBoolLive(p[2])) return false;
+      const msg = String(p[2] || '').toLowerCase();
+      if (!msg) return false;
+      return !alsText.some(t => t && (t.indexOf(msg.slice(0, 48)) !== -1 || msg.indexOf(t.slice(0, 48)) !== -1));
+    });
+    const alarmPtSrc = Array.isArray(r.alarmPts) && r.alarmPts.length
+      ? r.alarmPts
+      : ((r.points || []).filter(p => p && p.reporting && isAlarmNav(p.navName)).map(p => [p.navName, '', p.currentValue]));
+    const alarmPtRows = alarmPtSrc.filter(p => fcuClean(p[2])).map(p => {
+      const shown = fcuShown(fcuClean(p[2]), '');
+      return shown ? [p[0], shown] : null;
+    }).filter(Boolean);
+    const analogRows = analogPointRows(r);
     const tr7 = r.trend7 && Array.isArray(r.trend7.vals) && r.trend7.vals.length >= 2 ? r.trend7 : null;
     const reason = r.st === 'stale' ? 'dgNoTrend.stale' : (r.trendKind === 'state' ? 'dgNoTrend.state' : 'dgNoTrend.none');
-    const analogRows = analogPointRows(r);
-    const full = `<div class="apfull"><div class="row gap8"><h4 class="tLbl grow">${esc(t('apFullT'))}</h4><button class="statlink" data-act="disclose" data-k="full" aria-expanded="${fullOn}">${esc(t(fullOn ? 'hideFull' : 'discloseFull'))}</button></div>
-      ${analogRows}
-      ${fullOn ? (tr7 ? (() => { const p = window.ekoTrend(tr7.vals, 240, 56); const lo = Math.min(...tr7.vals), hi = Math.max(...tr7.vals);
-        return `<p class="tCap">${esc(trP(tr7.point))} · ${esc(t('apTrendPts', { n: tr7.vals.length }))} · ${lo}–${hi} ${esc(tr7.unit || '')}</p>
+    const graphBlock = tr7 ? (() => { const p = window.ekoTrend(tr7.vals, 240, 56); const lo = Math.min(...tr7.vals), hi = Math.max(...tr7.vals);
+      return `<p class="tCap">${esc(trP(tr7.point))} · ${esc(t('apTrendPts', { n: tr7.vals.length }))} · ${lo}–${hi} ${esc(tr7.unit || '')}</p>
         <div class="systrend"><svg viewBox="0 0 240 56" preserveAspectRatio="none"><path d="${p.area}" fill="var(--accT)"/><path d="${p.line}" fill="none" stroke="var(--acc)" stroke-width="1.5"/></svg></div>
         <table class="rawtbl"><thead><tr><th>${esc(t('rawPoint'))}</th><th>${esc(t('rawValue'))}</th></tr></thead><tbody>${tr7.vals.map((v, i) => `<tr><td>${t('rawDay', { n: i + 1 - tr7.vals.length })}</td><td class="tMonoS">${v} ${esc(tr7.unit || '')}</td></tr>`).join('')}</tbody></table>`; })()
-        : `<p class="tCap">${esc(t('emptyDash'))} · ${esc(t(reason))}</p>`) : ''}</div>`;
+      : `<p class="tCap">${esc(t('emptyDash'))} · ${esc(t(reason))}</p>`;
     const pack = docsFor(E, r);
     const omDocs = pack ? (pack.om ? [pack.om] : []) : (r.omDocs || []);
     const warranty = pack ? (pack.warranty || null) : (r.warranty || null);
@@ -1162,22 +1166,25 @@ window.EKO_C = (function(){
       + (wtyLeftTxt ? `<div class="aprow"><dt>${esc(t('apWtyRemain'))}</dt><dd>${esc(wtyLeftTxt)}</dd></div>` : '');
     let body = '';
     if(tab === 'alarms'){
-      body = (als.length ? als.map(a => `<div class="alref">
+      const fddHtml = fddRows.length
+        ? fddRows.map(p => `<div class="aprow"><dt>${esc(trP(p[0]))}</dt><dd>${esc(E.clip2 ? E.clip2(p[2]) : p[2])}</dd></div>`).join('')
+        : '';
+      const alarmPtHtml = alarmPtRows.length
+        ? alarmPtRows.map(p => `<div class="aprow"><dt>${esc(trP(p[0]))}</dt><dd>${esc(p[1])}</dd></div>`).join('')
+        : '';
+      body = (fddHtml ? `<h4 class="tLbl">${esc(t('apFdd'))}</h4>${fddHtml}` : '')
+        + alarmPtHtml
+        + (als.length ? als.map(a => `<div class="alref">
         <div class="alrefh"><span class="statchip" data-sev="${a.sev}">${esc(t('rib'+a.sev[0].toUpperCase()+a.sev.slice(1)).toLowerCase())}</span>
           <span class="alrefage tMonoS msA">${esc(a.age)}</span></div>
         <div class="alreft">${esc(E.alarmLines(a).main)}</div>${E.alarmLines(a).sub ? `<div class="alreftech">${esc(E.alarmLines(a).sub)}</div>` : ''}
         <div class="alrefack">${a.ack ? esc(t('ackShort',{time:a.ack.time,who:a.ack.who})) : esc(t('apUnack'))}</div>
       </div>`).join('') : `<p class="alempty">${esc(t('apNoAlarms'))}</p>`)
       + `<p class="apnote">${esc(t('finNote'))}</p>`;
-    } else if(tab === 'activity'){
-      const act = r.activity || [];
-      body = `<h4 class="tLbl seclbl">${esc(t('apActivity'))}</h4>`
-        + (act.length ? act.map(a2 => `<div class="actref">
-          <div class="actrefh"><span class="tMonoS fw6">${esc(a2[0])}</span>
-            <span class="row gap6 msA"><span class="wodot" data-st="${a2[3]||'prog'}"></span>${esc(t('wo'+(a2[3]||'prog')[0].toUpperCase()+(a2[3]||'prog').slice(1)))}</span></div>
-          <div class="actreft">${esc(trP(a2[1]))}</div>
-          <div class="actrefd">${esc(trP(a2[2]||''))}</div></div>`).join('')
-        : `<p class="alempty">${esc(t('emptyDash'))}</p>`);
+    } else if(tab === 'analytics'){
+      body = `<h4 class="tLbl">${esc(t('apLiveParams'))}</h4>`
+        + (analogRows || `<p class="alempty">${esc(t('emptyDash'))}</p>`)
+        + `<h4 class="tLbl seclbl">${esc(t('apFullT'))}</h4>${graphBlock}`;
     } else if(tab === 'om'){
       body = `<h4 class="tLbl seclbl">${esc(t('omLib'))}</h4>`
         + (omDocs.length ? omDocs.map(docRow).join('')
@@ -1224,8 +1231,8 @@ window.EKO_C = (function(){
         ${woBtn(E, id)}
         <button class="btnG btnSm" data-act="none">⧉ ${esc(t('apCafm'))}</button>
       </div>
-      <div class="aptabs">${tabBtn('alarms', t('apAlarms'), als.length||'')}${tabBtn('activity', t('apActivityTab'))}${tabBtn('om', t('apOmTab'))}${tabBtn('warranty', t('apWtyTab'))}${ctl?tabBtn('control', t('apControlTab')):''}</div>
-      <div class="apbody">${live}${full}${body}</div>
+      <div class="aptabs">${tabBtn('alarms', t('apAlarms'), als.length||'')}${tabBtn('analytics', t('apAnalytics'))}${tabBtn('om', t('apOmTab'))}${tabBtn('warranty', t('apWtyTab'))}${ctl?tabBtn('control', t('apControlTab')):''}</div>
+      <div class="apbody">${body}</div>
       <div class="apfoot apfootmob">
         ${E.state.woRaised[id] || (E.state.woPhase||{})[id]
           ? `${woBtn(E, id)}<button class="btnG" data-act="locate" data-asset="${esc(id)}">${esc(t('locate3d'))}</button>`

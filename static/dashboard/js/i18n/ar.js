@@ -96,6 +96,7 @@ window.EKO_I18N.ar = {
 
   "apInfo": "معلومات",
   "apAlarms": "التنبيهات",
+  "apFdd": "FDD",
   "apAnalytics": "التحليلات",
   "apFloor": "الطابق",
   "apZone": "المنطقة",

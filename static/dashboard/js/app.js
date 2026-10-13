@@ -1010,7 +1010,7 @@
       E.state.woPhase[id] = 'raising'; render();
       if(window.EKO_CMMS) window.EKO_CMMS.createWorkOrder({ assetId: id });
       else { delete E.state.woPhase[id]; render(); } },
-    woOpen(el){ E.set({ assetSel: el.dataset.asset, apTab: 'activity' }); },
+    woOpen(el){ E.set({ assetSel: el.dataset.asset, apTab: 'alarms' }); },
     locate(el){ const id = el.dataset.asset;
       const a = E.data.alarms.find(x => x.asset === id);
       if(!document.getElementById('vpmain'))
