@@ -7,7 +7,7 @@ window.EKO_LAYOUTS.utilities = {
     { "id": "summary", "type": "utilitiesSummary", "grid": { "x": 0, "y": 0, "w": 5, "h": 12 },
       "binding": { "metrics": ["waterToday", "gasToday", "utilCost"] } },
     { "id": "model", "type": "viewer3d", "grid": { "x": 5, "y": 0, "w": 13, "h": 12 },
-      "config": { "markers": true, "timeline": true, "utilChips": true } },
+      "config": { "markers": true, "timeline": true } },
     { "id": "panel", "type": "utilitiesPanel", "grid": { "x": 18, "y": 0, "w": 6, "h": 12 },
       "binding": { "alarms": ["water.alarms", "gas.alarms"] } }
   ]

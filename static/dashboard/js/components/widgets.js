@@ -362,19 +362,25 @@ window.EKO_C = (function(){
       + '</div>');
   }
 
-  /* Utilities module panel (D40, Final mock): ACTIVE ALARMS grouped WATER /
-     GAS from the water+gas monitoring lists (never the canonical ribbon
-     twelve), then the two footer rows into the sub-pages. */
+  /* Utilities module panel: ACTIVE ALARMS grouped WATER / GAS from live
+     utility alarms only, then the two footer rows into the sub-pages. */
   function utilitiesPanel(E){
     const ar = E.lang==='ar';
-    const wa = E.data.water.alarms, ga = E.data.gas.alarms;
+    const sub = E.state.sub;
+    const live = E.visAlarms().filter(a => {
+      const d = E.utilDomain(a);
+      if (!d) return false;
+      return sub === 'water' || sub === 'gas' ? d === sub : true;
+    });
+    const wa = live.filter(a => E.utilDomain(a) === 'water');
+    const ga = live.filter(a => E.utilDomain(a) === 'gas');
     const n = wa.length + ga.length;                     /* count derives */
-    const row = (i, sub, page) => `<button class="uprow" data-act="goSub" data-mod="utilities" data-sub="${sub}" data-page="${page}">
-      <span class="uadot" data-sev="${i.sev}"></span>
+    const row = (a, subName, page) => `<button class="uprow" data-act="goSub" data-mod="utilities" data-sub="${subName}" data-page="${page}">
+      <span class="uadot" data-sev="${esc(a.sev)}"></span>
       <span class="col grow minw0 taS gap1">
-        <span class="uploc">${esc(ar?i.locAr:i.locEn)}</span>
-        <span class="uptit">${esc(ar?i.tAr:i.tEn)}</span></span>
-      <span class="uaage">${esc(E.ph(i.age))}</span></button>`;
+        <span class="uploc">${esc(ar ? (a.locAr || a.locEn) : a.locEn)}</span>
+        <span class="uptit">${esc(ar ? (a.plainAr || a.plainEn || a.tAr) : (a.plainEn || a.tEn || ''))}</span></span>
+      <span class="uaage">${esc(a.ageH != null ? E.fmtAge(a.ageH) : E.ph(a.age))}</span></button>`;
     const foot = (lblKey, key, sub, page) => `<button class="upfoot" data-act="goSub" data-mod="utilities" data-sub="${sub}" data-page="${page}">
       <span class="upfl">${esc(E.t(lblKey))}</span>
       <span class="tMonoS cT2">${esc(ar?E.data.landing[key].headAr:E.data.landing[key].headEn)}</span>${icon('chevR',12)}</button>`;

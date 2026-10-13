@@ -227,7 +227,7 @@ window.EKO_DATA.marsa = {
     "gasMeters": null, "gasActive": null, "gasChipEn": null, "gasChipAr": null,
     "waterSparkPath": null,
     "gasSparkPath": null,
-    "chips": [ { "id": "W-01", "x": 50, "y": 70 }, { "id": "G-01", "x": 57.5, "y": 65 } ] },
+    "chips": [] },
 
   /* Signed-in user + site capability flags (D43). Marsa carries control as a
      DEMO capability (the demo switch); Khazna carries it live. canControl is
