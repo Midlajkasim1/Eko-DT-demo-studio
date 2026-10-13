@@ -9952,7 +9952,11 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   border-inline-start-color:var(--posB)
 }
 
-.dashboard-native-container #rpprint {
+/* #rpprint is its own .dashboard-native-container[data-theme=light] scope
+   (js/reports/export.js), so it is addressed by id: the descendant form
+   never matched in the embedded viewer, where it sits outside the app's
+   container — the print came out as unstyled text. */
+#rpprint {
   display:none
 }
 
@@ -9960,25 +9964,35 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   body[data-print="1"] > :not(#rpprint) {
     display:none
   }
+  /* the dashboard shell is a fixed 100%-high, overflow:hidden box; the
+     print document must flow onto as many pages as it needs */
+  html:has(body[data-print="1"]),body[data-print="1"],body[data-print="1"] #rpprint {
+    height:auto;
+    overflow:visible
+  }
   body[data-print="1"] #rpprint {
-    display:block
+    display:block;
+    background:#fff;
+    color:#0E1930;
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact
   }
   @page {
     size:A4;
     margin:12mm
   }
-  .dashboard-native-container .rpprintt {
+  #rpprint .rpprintt {
     width:100%;
     border-collapse:collapse
   }
-  .dashboard-native-container .rpprintt td {
+  #rpprint .rpprintt td {
     padding:0;
     vertical-align:top
   }
-  .dashboard-native-container .rpfootspace {
+  #rpprint .rpfootspace {
     height:26mm
   }
-  .dashboard-native-container #rpprint .rpdoc {
+  #rpprint .rpdoc {
     max-width:none;
     border:0;
     border-radius:0;
@@ -9987,7 +10001,7 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
     color:#0E1930;
     gap:14px
   }
-  .dashboard-native-container #rpprint .rpfoot {
+  #rpprint .rpfoot {
     position:fixed;
     bottom:0;
     left:0;
@@ -9997,14 +10011,20 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
     padding-block-start:6px;
     font-size:9.5pt
   }
-  .dashboard-native-container #rpprint .rpfig,.dashboard-native-container #rpprint .rpnarrb,.dashboard-native-container #rpprint tr,.dashboard-native-container #rpprint .rpmiss {
+  #rpprint .rphead,#rpprint .rpfig,#rpprint .rpnarrb,#rpprint tr,#rpprint .rpmiss,#rpprint .rpchart,#rpprint .rpkv {
     break-inside:avoid
   }
-  .dashboard-native-container #rpprint .rph3,.dashboard-native-container #rpprint .rpflbl {
+  #rpprint .rph3,#rpprint .rpflbl {
     break-after:avoid
   }
-  .dashboard-native-container #rpprint .rptw {
+  #rpprint .rptw {
     overflow:visible
+  }
+  #rpprint .rptable thead {
+    display:table-header-group
+  }
+  #rpprint .rptable td,#rpprint .rptable th {
+    overflow-wrap:anywhere
   }
 }
 

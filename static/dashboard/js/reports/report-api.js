@@ -48,11 +48,22 @@ window.EKO_R = (function(){
     const f = Math.pow(10, d);
     return Math.trunc(x * f + (x < 0 ? -1e-9 : 1e-9)) / f;
   };
+  /* A reading is a finite number or it is MISSING: never "null", "NaN" or a
+     silent 0. Zero and negatives are readings; null, NaN, ±Infinity, '' and
+     non-numeric strings are not. */
+  const MISSING = '—';
+  const num = v => { const x = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN); return Number.isFinite(x) ? x : null; };
+  /* derived figures: any missing input makes the result missing (null × rate is not 0 AED) */
+  const mul = (...xs) => { const n = xs.map(num); return n.includes(null) ? null : n.reduce((a, b) => a * b, 1); };
+  const div = (a, b) => { const x = num(a), y = num(b); return x == null || !y ? null : x / y; };
   const fmt = (v, d) => {
-    if (typeof v !== 'number' || !isFinite(v)) return String(v);
-    const t = truncDec(v, d);
+    const x = num(v); if (x == null) return MISSING;
+    const t = truncDec(x, d);
     return t.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
   };
+  /* translator for document text: a missing parameter prints MISSING, not "null" */
+  const clean = v => { if(!v) return v; const o = {}; for(const k in v){ const x = v[k]; o[k] = x == null || (typeof x === 'number' && !isFinite(x)) ? MISSING : x; } return o; };
+  const tr = (E, lang) => (k, v) => E.t.call({ lang: lang || E.lang }, k, clean(v));
   const LS_STORE = 'eko-reports-v1', LS_AUDIT = 'eko-audit-v1', LS_REMOVED = 'eko-reports-removed-v1', STORE_CAP = 12, AUDIT_CAP = 300;
 
   /* ---- sources: every id a figure can cite ------------------------------ */
@@ -119,33 +130,33 @@ window.EKO_R = (function(){
     'energy.performancePct':  E => ({ win:'fixed', value:E.data.energyLanding.performancePct, unit:'%', d:1, labelKey:'rpF.performance', sources:['model.opt'], basis:basisFor(E, Object.assign({ sources:['model.opt'] }, mtd(E))) }),
     'power.contractedKw':     E => ({ win:'fixed', value:E.data.metrics.contractedKw, unit:'kW', d:0, labelKey:'rpF.contracted', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], windowKey:'rpWin.contract', windowParams:{} }) }),
     /* derived: tariff */
-    'derived.energyCostTodayAed': E => { const v = E.data.metrics.energyTodayMwh * 1000 * E.data.basis.aedPerKwh;
+    'derived.energyCostTodayAed': E => { const v = mul(E.data.metrics.energyTodayMwh, 1000, E.data.basis.aedPerKwh);
       return { win:'today', value:v, unit:'AED', d:1, labelKey:'rpF.energyCostToday', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }) }; },
-    'derived.energyCostMtdAed':   E => { const v = E.data.energyLanding.mtdKwh * E.data.basis.aedPerKwh;
+    'derived.energyCostMtdAed':   E => { const v = mul(E.data.energyLanding.mtdKwh, E.data.basis.aedPerKwh);
       return { win:'fixed', value:v, unit:'AED', d:1, labelKey:'rpF.energyCostMtd', sources:['meters.main'], basis:basisFor(E, Object.assign({ sources:['meters.main'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
-    'derived.energyCostPrevMonthAed': E => { const v = E.data.power.prevMonthKwh * E.data.basis.aedPerKwh;
+    'derived.energyCostPrevMonthAed': E => { const v = mul(E.data.power.prevMonthKwh, E.data.basis.aedPerKwh);
       return { win:'fixed', value:v, unit:'AED', d:1, labelKey:'rpF.energyCostPrev', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff', from:null, to:null, windowKey:'rpWin.prevMonth', windowParams:{} }) }; },
-    'derived.avoidableAedMo':     E => { const v = E.data.metrics.avoidableKwhMo * E.data.basis.aedPerKwh;
+    'derived.avoidableAedMo':     E => { const v = mul(E.data.metrics.avoidableKwhMo, E.data.basis.aedPerKwh);
       return { win:'fixed', value:v, unit:'AED', d:1, labelKey:'rpF.avoidableMo', sources:['model.opt'], basis:basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
-    'derived.wasteAedMtd':        E => { const v = E.data.energyLanding.wasteTotalKwh * E.data.basis.aedPerKwh;
+    'derived.wasteAedMtd':        E => { const v = mul(E.data.energyLanding.wasteTotalKwh, E.data.basis.aedPerKwh);
       return { win:'fixed', value:v, unit:'AED', d:1, labelKey:'rpF.wasteMtd', sources:['model.opt'], basis:basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
     /* derived: emission */
-    'derived.co2TodayT':          E => { const v = E.data.metrics.energyTodayMwh * E.data.basis.co2KgPerKwh;
+    'derived.co2TodayT':          E => { const v = mul(E.data.metrics.energyTodayMwh, E.data.basis.co2KgPerKwh);
       return { win:'today', value:v, unit:'t CO₂', d:1, labelKey:'rpF.co2Today', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.mwhTimesFactor' }) }; },
-    'derived.co2MtdT':            E => { const v = E.data.energyLanding.mtdKwh * E.data.basis.co2KgPerKwh / 1000;
+    'derived.co2MtdT':            E => { const v = mul(E.data.energyLanding.mtdKwh, E.data.basis.co2KgPerKwh, 0.001);
       return { win:'fixed', value:v, unit:'t CO₂', d:1, labelKey:'pwCarbon', sources:['meters.main'], basis:basisFor(E, Object.assign({ sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.kwhTimesFactor' }, mtd(E))) }; },
-    'derived.co2PrevMonthT':      E => { const v = E.data.power.prevMonthKwh * E.data.basis.co2KgPerKwh / 1000;
+    'derived.co2PrevMonthT':      E => { const v = mul(E.data.power.prevMonthKwh, E.data.basis.co2KgPerKwh, 0.001);
       return { win:'fixed', value:v, unit:'t CO₂', d:1, labelKey:'rpF.co2Prev', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.kwhTimesFactor', from:null, to:null, windowKey:'rpWin.prevMonth', windowParams:{} }) }; },
     /* water / gas */
     'water.todayM3':      E => ({ win:'today', value:E.data.water.todayM3, unit:'m³', d:1, labelKey:'kWaterToday', sources:['meter.W-01'], basis:basisFor(E, { sources:['meter.W-01'] }) }),
     'water.tankVolumeM3': E => ({ win:'fixed', value:E.data.water.tankVolumeM3, unit:'m³', d:1, labelKey:'rpF.tankVolume', sources:['bms'], basis:basisFor(E, Object.assign({ sources:['bms'] }, at(E))) }),
-    'derived.waterAutonomyDays': E => { const w = E.data.water; const v = w.tankVolumeM3 / w.meterAvgM3Day;
+    'derived.waterAutonomyDays': E => { const w = E.data.water; const v = div(w.tankVolumeM3, w.avgDrawM3Day);   /* the data layer fills avgDrawM3Day (static/js/data-map.js) */
       return { win:'fixed', value:v, unit:'d', d:1, labelKey:'rpF.autonomy', sources:['bms','meter.W-01'], basis:basisFor(E, Object.assign({ sources:['bms','meter.W-01'], formulaKey:'rpFx.volumeOverDraw' }, at(E))) }; },
     'water.meterUptimePct': E => ({ win:'fixed', value:E.data.water.meter.uptimePct, unit:'%', d:1, labelKey:'rpF.meterUptime', sources:['meter.W-01'], basis:basisFor(E, { sources:['meter.W-01'], from:null, windowKey:'rpWin.lastD', windowParams:{ n:30 } }) }),
     'gas.todayM3':        E => ({ win:'today', value:E.data.gas.todayM3, unit:'m³', d:1, labelKey:'kGasToday', sources:['meter.G-01'], basis:basisFor(E, { sources:['meter.G-01'] }) }),
     'gas.mtdM3':          E => ({ win:'fixed', value:E.data.gas.mtdM3, unit:'m³', d:1, labelKey:'rpF.gasMtd', sources:['meter.G-01'], basis:basisFor(E, Object.assign({ sources:['meter.G-01'] }, mtd(E))) }),
     'gas.avg7M3':         E => ({ win:'fixed', value:E.data.gas.avg7M3, unit:'m³/d', d:1, labelKey:'rpF.gasAvg7', sources:['meter.G-01'], basis:basisFor(E, { sources:['meter.G-01'], from:null, windowKey:'rpWin.lastD', windowParams:{ n:7 } }) }),
-    'derived.gasCostMtdAed': E => { const v = E.data.gas.mtdM3 * E.data.gas.tariffAedM3;
+    'derived.gasCostMtdAed': E => { const v = mul(E.data.gas.mtdM3, E.data.gas.tariffAedM3);
       return { win:'fixed', value:v, unit:'AED', d:1, labelKey:'rpF.gasCostMtd', sources:['meter.G-01'], basis:basisFor(E, Object.assign({ sources:['meter.G-01'], tariff:gasTariff(E), formulaKey:'rpFx.m3TimesTariff' }, mtd(E))) }; },
     /* alarms (counts derive from the one list) */
     'alarms.open':     E => ({ win:'fixed', value:E.data.alarms.length, unit:'', d:0, labelKey:'rpF.alarmsOpen', sources:['alarms'], basis:basisFor(E, Object.assign({ sources:['alarms'] }, at(E))) }),
@@ -154,8 +165,8 @@ window.EKO_R = (function(){
     'alarms.medium':   E => ({ win:'fixed', value:E.data.alarms.filter(a => a.sev === 'medium').length, unit:'', d:0, labelKey:'rpSev.medium', sources:['alarms'], basis:basisFor(E, Object.assign({ sources:['alarms'] }, at(E))) }),
     'alarms.acked':    E => ({ win:'fixed', value:E.data.alarms.filter(a => a.ack).length, unit:'', d:0, labelKey:'rpF.alarmsAcked', sources:['alarms'], basis:basisFor(E, Object.assign({ sources:['alarms'] }, at(E))) }),
     'derived.ackRatePct': E => { const n = E.data.alarms.length, k = E.data.alarms.filter(a => a.ack).length;
-      return { win:'fixed', value:n ? k / n * 100 : 0, unit:'%', d:1, labelKey:'rpF.ackRate', sources:['alarms'], basis:basisFor(E, Object.assign({ sources:['alarms'], formulaKey:'rpFx.ackedOverOpen' }, at(E))) }; },
-    'alarms.oldestH':  E => ({ win:'fixed', value:Math.max(...E.data.alarms.map(a => a.ageH)), unit:'h', d:0, labelKey:'rpF.oldest', sources:['alarms'], basis:basisFor(E, Object.assign({ sources:['alarms'] }, at(E))) }),
+      return { win:'fixed', value:n ? k / n * 100 : null, unit:'%', d:1, labelKey:'rpF.ackRate', sources:['alarms'], basis:basisFor(E, Object.assign({ sources:['alarms'], formulaKey:'rpFx.ackedOverOpen' }, at(E))) }; },
+    'alarms.oldestH':  E => ({ win:'fixed', value:E.data.alarms.length ? Math.max(...E.data.alarms.map(a => a.ageH)) : null, unit:'h', d:0, labelKey:'rpF.oldest', sources:['alarms'], basis:basisFor(E, Object.assign({ sources:['alarms'] }, at(E))) }),
     'alarms.inWindow': (E, per) => { const h = hoursOf(per); return { win:'fixed', value:E.data.alarms.filter(a => a.ageH <= h).length, unit:'', d:0, labelKey:'rpF.alarmsRaised', sources:['alarms'], basis:basisFor(E, { sources:['alarms'], from:null, windowKey:'rpWin.lastH', windowParams:{ h, to:E.data.basis.asOf } }) }; },
     /* assets / work orders */
     'assets.inAlarm':  E => ({ win:'fixed', value:E.data.assets.filter(a => a.st === 'alarm').length, unit:'', d:0, labelKey:'rpF.assetsInAlarm', sources:['assets'], basis:basisFor(E, Object.assign({ sources:['assets'] }, at(E))) }),
@@ -198,7 +209,7 @@ window.EKO_R = (function(){
       else if(m.quality === 'unconfirmed') out.push({ sourceId:'meter.' + m.id, state:'unconfirmed', from:since, to:asOf, noteKey:'rpDQ.unconfirmed', params:{} });
     });
     const stale = (E.data.assets || []).filter(a => a.st === 'stale');
-    if(stale.length) out.push({ sourceId:'assets', state:'stale', from:stale[0].staleH + ' h', to:asOf, noteKey:'rpDQ.staleAssets', params:{ n:stale.length, ids:stale.map(a => a.id).join(', ') } });
+    if(stale.length) out.push({ sourceId:'assets', state:'stale', from:stale[0].staleH != null ? stale[0].staleH + ' h' : '', to:asOf, noteKey:'rpDQ.staleAssets', params:{ n:stale.length, ids:stale.map(a => a.id).join(', ') } });
     return out;
   }
 
@@ -234,7 +245,8 @@ window.EKO_R = (function(){
       if(figures[id]) return figures[id];
       const r = FIG[id] ? FIG[id](E, per, params) : null;
       if(!r) return null;
-      const f = Object.assign({ id, fmt: fmt(r.value, r.d) }, r);
+      const value = num(r.value);
+      const f = Object.assign({ id }, r, { value, fmt: fmt(value, r.d) });
       f.flagged = (f.sources || []).some(s => flagged.has(s));
       figures[id] = f; return f;
     };
@@ -267,7 +279,7 @@ window.EKO_R = (function(){
         if(w.type === 'table.waste') return Object.assign({}, w, { rows: E.data.energyLanding.kpis, tariff: tariff(E), basis: basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) });
         if(w.type === 'table.anom') return Object.assign({}, w, { rows: E.data.anom.items, tariff: tariff(E), basis: basisFor(E, Object.assign({ sources:['model.anom'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) });
         if(w.type === 'table.bench') return Object.assign({}, w, { rows: E.data.bench.rows, basis: basisFor(E, Object.assign({ sources:['bench'] }, mtd(E))) });
-        if(w.type === 'status.leak'){ const l = E.data.water.leak; return Object.assign({}, w, { ready: l.nightsCollected >= l.nightsNeeded, params:{ got:l.nightsCollected, need:l.nightsNeeded } }); }
+        if(w.type === 'status.leak'){ const l = E.data.water.leak; return Object.assign({}, w, { ready: num(l.nightsCollected) != null && num(l.nightsNeeded) != null && l.nightsCollected >= l.nightsNeeded, params:{ got:l.nightsCollected, need:l.nightsNeeded } }); }
         if(w.type === 'period.energy'){
           return Object.assign({}, w, { available: per.kind === 'today', figures: per.kind === 'today' ? [fig('metrics.energyTodayMwh'), fig('derived.energyCostTodayAed'), fig('derived.co2TodayT')] : [] });
         }
@@ -334,20 +346,23 @@ window.EKO_R = (function(){
       site: { key: E.data.key, nameEn: E.data.nameEn, nameAr: E.data.nameAr },
       period: per, generatedAt: now.toISOString(), generatedAtLabel: now.toLocaleString(E.lang === 'ar' ? 'ar-AE' : 'en-GB'),
       generatedBy: (E.data.user && (E.lang === 'ar' ? E.data.user.nameAr : E.data.user.name)) || '',
-      basisVersions: { tariff: b.tariffId + ' ' + b.tariffVersion, emission: b.co2FactorId, tariffProvisional: b.tariffStatus === 'provisional', emissionProvisional: b.co2FactorStatus === 'provisional' },
+      basisVersions: { tariff: [b.tariffId, b.tariffVersion].filter(x => x != null && x !== '').join(' ') || null, emission: b.co2FactorId != null && b.co2FactorId !== '' ? b.co2FactorId : null, tariffProvisional: b.tariffStatus === 'provisional', emissionProvisional: b.co2FactorStatus === 'provisional' },
       provisional, ekoVersion: window.EKO_VERSION || '', sources: tpl.sources, sections, dataQuality: dq, figures, narration: null
     };
   }
 
   /* basis line text for a figure/widget (the one honest sentence). A
      provisional tariff or factor is SAID to be provisional, every time. */
+  /* a rate that is not configured reads "—", not "— AED/kWh" */
+  const tariffText = (t, x) => t('rpB.tariff', { id:x.id, v:x.version || '', rate:fmt(x.rate, 2), unit:num(x.rate) == null ? '' : x.unit }).trim() + (x.provisional ? ' ' + t('rpB.prov') : '');
+  const emissionText = (t, x) => t('rpB.emission', { id:x.id, f:fmt(x.factor, 2), unit:num(x.factor) == null ? '' : x.unit }).trim() + (x.provisional ? ' ' + t('rpB.prov') : '');
   function basisText(E, b, flagged, lang){
-    const t = (k, v) => E.t.call({ lang: lang || E.lang }, k, v), parts = [];
+    const t = tr(E, lang), parts = [];
     if(b.windowKey) parts.push(t(b.windowKey, b.windowParams || {}));
     if(b.sources && b.sources.length) parts.push(b.sources.map(s => sourceLabel(E, s, lang)).join(' + '));
     if(b.averagingKey) parts.push(t(b.averagingKey));
-    if(b.tariff) parts.push(t('rpB.tariff', { id:b.tariff.id, v:b.tariff.version || '', rate:fmt(b.tariff.rate, 2), unit:b.tariff.unit }) + (b.tariff.provisional ? ' ' + t('rpB.prov') : ''));
-    if(b.emission) parts.push(t('rpB.emission', { id:b.emission.id, f:fmt(b.emission.factor, 2), unit:b.emission.unit }) + (b.emission.provisional ? ' ' + t('rpB.prov') : ''));
+    if(b.tariff) parts.push(tariffText(t, b.tariff));
+    if(b.emission) parts.push(emissionText(t, b.emission));
     if(b.formulaKey) parts.push(t(b.formulaKey));
     if(flagged) parts.push(t('rpB.flagged'));
     return parts.join(' · ');
@@ -400,5 +415,5 @@ window.EKO_R = (function(){
     return doc;
   }
 
-  return { build, generate, period, periodOf, periodId, PERIODS, dataQuality, basisText, sourceLabel, fmt, SOURCES, FIG, templates: T, store, audit, auditFor, title, lockedIds, hoursOf };
+  return { build, generate, period, periodOf, periodId, PERIODS, dataQuality, basisText, sourceLabel, fmt, num, mul, div, tr, MISSING, tariffText, emissionText, SOURCES, FIG, templates: T, store, audit, auditFor, title, lockedIds, hoursOf };
 })();

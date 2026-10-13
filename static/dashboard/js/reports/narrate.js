@@ -26,11 +26,12 @@ window.EKO_RN = (function(){
     numbersIn(text).forEach(n => { if(!allowed.has(n)) out.push(n); });
     return out;
   }
-  const tl = (E, lang) => (k, v) => E.t.call({ lang }, k, v);
+  const tl = (E, lang) => window.EKO_R.tr(E, lang);
 
   function figCtx(E, doc, f){
     const t = tl(E, doc.lang);
-    return { id:f.id, label:t(f.labelKey), fmt:f.fmt, unit:f.unit, basis:window.EKO_R.basisText(E, f.basis, f.flagged, doc.lang), flagged:!!f.flagged };
+    const missing = window.EKO_R.num(f.value) == null;   /* "—", never "— kWh" */
+    return { id:f.id, label:t(f.labelKey), fmt:f.fmt, unit:missing ? '' : f.unit, missing, basis:window.EKO_R.basisText(E, f.basis, f.flagged, doc.lang), flagged:!!f.flagged };
   }
   function sectionFigures(s){
     const out = [];
@@ -41,8 +42,8 @@ window.EKO_RN = (function(){
     const t = tl(E, doc.lang);
     const points = [...new Set(figs.flatMap(f => f.sources || []))];
     const bases = [];
-    figs.forEach(f => { if(f.basis.tariff) bases.push(t('rpB.tariff', { id:f.basis.tariff.id, v:f.basis.tariff.version || '', rate:window.EKO_R.fmt(f.basis.tariff.rate, 2), unit:f.basis.tariff.unit }) + (f.basis.tariff.provisional ? ' ' + t('rpB.prov') : ''));
-      if(f.basis.emission) bases.push(t('rpB.emission', { id:f.basis.emission.id, f:window.EKO_R.fmt(f.basis.emission.factor, 2), unit:f.basis.emission.unit }) + (f.basis.emission.provisional ? ' ' + t('rpB.prov') : '')); });
+    figs.forEach(f => { if(f.basis.tariff) bases.push(window.EKO_R.tariffText(t, f.basis.tariff));
+      if(f.basis.emission) bases.push(window.EKO_R.emissionText(t, f.basis.emission)); });
     return { points, windowKey:doc.period.labelKey, windowParams:doc.period.params, bases:[...new Set(bases)] };
   }
   function prompt(E, doc, ctx, attempt){

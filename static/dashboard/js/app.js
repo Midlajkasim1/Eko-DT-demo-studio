@@ -1348,6 +1348,13 @@
       E.lang = E.lang === 'en' ? 'ar' : 'en'; ls.set('eko-lang', E.lang); applyLang(); render(); }
     if(ev.key === 'End' && E.state.histAge != null) E.set({ histAge:null });
   });
+  /* Ctrl+P / the browser's Print on an open report prints the report document
+     through the same print view as the PDF button — no server involved */
+  window.addEventListener('beforeprint', () => {
+    if(E.state.pageId === 'report-preview' && E.state.report && window.EKO_RX && !document.getElementById('rpprint') && document.querySelector('.rpwrap .rpdoc'))
+      window.EKO_RX.printView(E, E.state.report);
+  });
+  window.addEventListener('afterprint', () => { if(window.EKO_RX) window.EKO_RX.removePrintView(); });
   document.addEventListener('keydown', ev => {
     if(ev.key === 'Enter' && ev.target.matches && ev.target.matches('tr[data-act]')){
       if(window.EKO_SURF) window.EKO_SURF.noteClick(ev.target); ACTS.openAsset(ev.target); }

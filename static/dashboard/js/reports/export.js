@@ -19,10 +19,21 @@ window.EKO_RX = (function(){
 
   /* ------------------------------- PDF ------------------------------------- */
   let printState = null;
+  /* The host sits directly under <body> (so print CSS can hide everything
+     else), which in the embedded viewer is OUTSIDE the .dashboard-native-
+     container div every report style and token is scoped to. The host is
+     its own scope, always light, so the printed document is styled the same
+     whether the dashboard is embedded or served standalone. */
+  function printHost(lang){
+    const host = document.createElement('div');
+    host.id = 'rpprint'; host.className = 'dashboard-native-container';
+    host.setAttribute('data-theme', 'light');
+    host.dir = lang === 'ar' ? 'rtl' : 'ltr'; host.lang = lang;
+    return host;
+  }
   function printView(E, doc){
     removePrintView();
-    const host = document.createElement('div');
-    host.id = 'rpprint'; host.dir = doc.lang === 'ar' ? 'rtl' : 'ltr'; host.lang = doc.lang;
+    const host = printHost(doc.lang);
     host.innerHTML = `<table class="rpprintt"><thead><tr><td><div class="rpprinthead"></div></td></tr></thead><tfoot><tr><td><div class="rpfootspace"></div></td></tr></tfoot><tbody><tr><td>${RV().doc(E, doc, { print:true })}</td></tr></tbody></table>`;
     document.body.appendChild(host);
     const html = (window.DASHBOARD_ROOT||document.documentElement);
@@ -40,8 +51,7 @@ window.EKO_RX = (function(){
   /* D132: any HTML (the Ask EKO conversation) through the same print path as a report */
   function printHtml(E, o){
     removePrintView();
-    const host = document.createElement('div');
-    host.id = 'rpprint'; host.dir = o.lang === 'ar' ? 'rtl' : 'ltr'; host.lang = o.lang;
+    const host = printHost(o.lang);
     host.innerHTML = `<table class="rpprintt"><thead><tr><td><div class="rpprinthead"></div></td></tr></thead><tfoot><tr><td><div class="rpfootspace"></div></td></tr></tfoot><tbody><tr><td><div class="rpdoc">${o.html}</div></td></tr></tbody></table>`;
     document.body.appendChild(host);
     const html = (window.DASHBOARD_ROOT||document.documentElement);
@@ -76,25 +86,25 @@ window.EKO_RX = (function(){
   const safeName = s => String(s).replace(/[\\\/\?\*\[\]:]/g, ' ').trim().slice(0, 31) || 'Sheet';
   /* the footer block as rows — appended to EVERY sheet */
   function footerRows(E, doc){
-    const t = (k, v) => E.t.call({ lang:doc.lang }, k, v);
+    const t = R().tr(E, doc.lang), M = R().MISSING;
     const site = doc.lang === 'ar' ? doc.site.nameAr : doc.site.nameEn;
     const prov = t('rpB.prov');
     return [[], [t('rpFt.label')],
       [t('rpFt.id'), doc.id], [t('rpFt.title'), R().title(E, doc)], [t('rpFt.site'), site], [t('rpFt.window'), t(doc.period.labelKey, doc.period.params)],
       [t('rpFt.generated'), doc.generatedAtLabel], [t('rpFt.by'), doc.generatedBy],
-      [t('rpFt.tariff'), doc.basisVersions.tariff + (doc.basisVersions.tariffProvisional ? ' ' + prov : '')],
-      [t('rpFt.emission'), doc.basisVersions.emission + (doc.basisVersions.emissionProvisional ? ' ' + prov : '')],
+      [t('rpFt.tariff'), (doc.basisVersions.tariff || M) + (doc.basisVersions.tariffProvisional ? ' ' + prov : '')],
+      [t('rpFt.emission'), (doc.basisVersions.emission || M) + (doc.basisVersions.emissionProvisional ? ' ' + prov : '')],
       [t('rpFt.eko'), doc.ekoVersion],
       doc.provisional.length ? [t('rpProv.note', { list: doc.provisional.map(p => t('rpProv.' + p)).join(', ') })] : []];
   }
   function workbookSheets(E, doc){
-    const t = (k, v) => E.t.call({ lang:doc.lang }, k, v);
+    const t = R().tr(E, doc.lang);
     const sheets = [];
     const foot = footerRows(E, doc);
     /* Figures */
     const figRows = [[t('rpCol.figure'), t('rpXl.value'), t('rpXl.unit'), t('rpXl.window'), t('rpCol.source'), t('rpXl.tariff'), t('rpXl.emission'), t('rpXl.formula'), t('rpXl.flag'), t('rpBasisLbl')]];
     Object.values(doc.figures).forEach(f => { const b = f.basis;
-      figRows.push([t(f.labelKey), f.value, f.unit, t(b.windowKey, b.windowParams || {}), (b.sources || []).map(s => R().sourceLabel(E, s, doc.lang)).join(' + '),
+      figRows.push([t(f.labelKey), R().num(f.value) ?? R().MISSING, f.unit, t(b.windowKey, b.windowParams || {}), (b.sources || []).map(s => R().sourceLabel(E, s, doc.lang)).join(' + '),
         b.tariff ? b.tariff.id + ' ' + (b.tariff.version || '') + ' · ' + b.tariff.rate + ' ' + b.tariff.unit + (b.tariff.provisional ? ' ' + t('rpB.prov') : '') : '',
         b.emission ? b.emission.id + ' · ' + b.emission.factor + ' ' + b.emission.unit + (b.emission.provisional ? ' ' + t('rpB.prov') : '') : '',
         b.formulaKey ? t(b.formulaKey) : '', f.flagged ? t('rpB.flagged') : '', R().basisText(E, b, f.flagged, doc.lang)]); });

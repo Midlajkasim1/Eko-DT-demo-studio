@@ -14,7 +14,9 @@ window.EKO_RV = (function(){
   const C = () => window.EKO_C;
   const R = () => window.EKO_R;
   const esc = s => C().esc(s);
-  const ctx = (E, d) => ({ lang:d.lang, t:(k, v) => E.t.call({ lang:d.lang }, k, v), ar: d.lang === 'ar' });
+  const ctx = (E, d) => ({ lang:d.lang, t:R().tr(E, d.lang), ar: d.lang === 'ar' });
+  const or = v => v == null || v === '' ? R().MISSING : v;
+  const num2 = v => { const x = R().num(v); return x == null ? null : +x.toFixed(2); };
   const HUB = () => window.EKO_LAYOUTS.reports || { families:{} };
   /* a family's colour is the identity hue of the Overview summary row it
      names (hueKey) — the same colour that domain has everywhere — or none */
@@ -27,21 +29,24 @@ window.EKO_RV = (function(){
 
   const prov = (c, on) => on ? `<span class="rpprov">${esc(c.t('rpB.prov'))}</span>` : '';
   const basisHtml = (E, c, b, flagged) => `<span class="rpbasis">${esc(c.t('rpBasisLbl'))}: ${esc(R().basisText(E, b, flagged, c.lang))}</span>`;
-  const figCard = (E, c, f) => `<div class="rpfig" data-flag="${f.flagged ? 1 : 0}" data-prov="${(f.basis.tariff && f.basis.tariff.provisional) || (f.basis.emission && f.basis.emission.provisional) ? 1 : 0}">
+  /* formatted from the stored value, so documents saved before the MISSING rule (fmt:"null") render the same way */
+  const figCard = (E, c, f) => { const v = R().fmt(f.value, f.d), miss = v === R().MISSING;
+    return `<div class="rpfig" data-flag="${f.flagged ? 1 : 0}" data-missing="${miss ? 1 : 0}" data-prov="${(f.basis.tariff && f.basis.tariff.provisional) || (f.basis.emission && f.basis.emission.provisional) ? 1 : 0}">
       <span class="rpflbl">${esc(c.t(f.labelKey))}</span>
-      <span class="rpfval"><b class="tMono">${esc(f.fmt)}</b><span class="rpfunit">${esc(f.unit)}</span></span>
-      ${basisHtml(E, c, f.basis, f.flagged)}</div>`;
+      <span class="rpfval"><b class="tMono">${esc(v)}</b>${miss || !f.unit ? '' : `<span class="rpfunit">${esc(f.unit)}</span>`}</span>
+      ${basisHtml(E, c, f.basis, f.flagged)}</div>`; };
 
   function chartLine(E, c, w){
-    if(!w.values) return `<p class="rpmiss">${esc(c.t('rpMiss.noData', { what: w.series }))}</p>`;
+    const vs = (w.values || []).filter(Number.isFinite);
+    if(!vs.length) return `<p class="rpmiss">${esc(c.t('rpMiss.noData', { what: w.series }))}</p>`;
     const tr = ekoTrend(w.values, 480, 60);
-    const mx = Math.max(...w.values), mn = Math.min(...w.values);
+    const mx = Math.max(...vs), mn = Math.min(...vs);
     return `<figure class="rpchart"><figcaption class="rpflbl">${esc(c.t(w.labelKey))}</figcaption>
       <svg viewBox="0 0 480 60" preserveAspectRatio="none" aria-label="${esc(c.t(w.labelKey))}"><path d="${tr.line}" fill="none" stroke="var(--acc)" stroke-width="1.6"/></svg>
       <span class="rpaxis tMonoS">${esc(R().fmt(mn, 1))} – ${esc(R().fmt(mx, 1))} ${esc(w.unit)}</span>
       ${basisHtml(E, c, w.basis)}</figure>`;
   }
-  const tableHtml = (c, head, rows, label) => `${label ? `<div class="rpflbl">${esc(label)}</div>` : ''}<div class="rptw"><table class="rptable"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(x => `<td${x.cls ? ` class="${x.cls}"` : ''}>${x.html != null ? x.html : esc(x)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  const tableHtml = (c, head, rows, label) => `${label ? `<div class="rpflbl">${esc(label)}</div>` : ''}<div class="rptw"><table class="rptable"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(x => x == null || x === '' ? `<td>${esc(R().MISSING)}</td>` : `<td${x.cls ? ` class="${x.cls}"` : ''}>${x.html != null ? x.html : esc(x)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   const mono = s => ({ html: esc(s), cls:'tMonoS' });
 
   /* tabular views also feed the XLSX writer: head + rows + basis text */
@@ -51,9 +56,9 @@ window.EKO_RV = (function(){
       rows: w.rows.map(a => [c.t('rpSev.' + a.sev), a.asset, c.ar ? (a.techAr || a.techEn) : a.techEn, E.fmtAge.call({ t:c.t }, a.ageH), a.ack ? c.t('ackShort', { time:a.ack.time, who:a.ack.who }) : C().sevAction({ t:c.t }, a.sev)]),
       basis: c.t('rpWin.lastH', { h:w.hours, to:E.data.basis.asOf }) + ' · ' + c.t('rpSrc.alarms') };
     if(w.type === 'table.boards') return { head:[c.t('rpCol.board'), 'kW'], rows:w.rows.map(r => [r[0], r[1]]), basis:R().basisText(E, w.basis, false, c.lang) };
-    if(w.type === 'table.waste') return { head:[c.t('rpCol.driver'), 'kWh', 'AED', c.t('rpCol.state')], rows:w.rows.map(k => [c.ar ? k.labelAr : k.labelEn, +k.wasteKwh.toFixed(2), +(k.wasteKwh * w.tariff.rate).toFixed(2), c.ar ? k.stateAr : k.stateEn]), basis:R().basisText(E, w.basis, false, c.lang) };
-    if(w.type === 'table.anom') return { head:[c.t('colAssetId'), c.t('rpCol.what'), 'kWh MTD', 'AED'], rows:w.rows.map(a => [a.id, (c.ar ? a.titleAr : a.titleEn) + ' · ' + (c.ar ? a.zoneAr : a.zone), a.kwhMtd, +(a.kwhMtd * w.tariff.rate).toFixed(2)]), basis:R().basisText(E, w.basis, false, c.lang) };
-    if(w.type === 'table.bench') return { head:[c.t('rpCol.system'), 'Wh/m²', c.t('rpCol.band'), c.t('rpCol.note')], rows:w.rows.map(r => [c.ar ? r.sysAr : r.sysEn, r.whm2, r.bandLo + '–' + r.bandHi, c.ar ? r.noteAr : r.noteEn]), basis:R().basisText(E, w.basis, false, c.lang) };
+    if(w.type === 'table.waste') return { head:[c.t('rpCol.driver'), 'kWh', 'AED', c.t('rpCol.state')], rows:w.rows.map(k => [c.ar ? k.labelAr : k.labelEn, num2(k.wasteKwh), num2(R().mul(k.wasteKwh, w.tariff.rate)), c.ar ? k.stateAr : k.stateEn]), basis:R().basisText(E, w.basis, false, c.lang) };
+    if(w.type === 'table.anom') return { head:[c.t('colAssetId'), c.t('rpCol.what'), 'kWh MTD', 'AED'], rows:w.rows.map(a => [a.id, (c.ar ? a.titleAr : a.titleEn) + ' · ' + (c.ar ? a.zoneAr : a.zone), R().num(a.kwhMtd), num2(R().mul(a.kwhMtd, w.tariff.rate))]), basis:R().basisText(E, w.basis, false, c.lang) };
+    if(w.type === 'table.bench') return { head:[c.t('rpCol.system'), 'Wh/m²', c.t('rpCol.band'), c.t('rpCol.note')], rows:w.rows.map(r => [c.ar ? r.sysAr : r.sysEn, R().num(r.whm2), r.bandLo == null || r.bandHi == null ? null : r.bandLo + '–' + r.bandHi, c.ar ? r.noteAr : r.noteEn]), basis:R().basisText(E, w.basis, false, c.lang) };
     if(w.type === 'table') return { head:w.head, rows:w.rows, basis:w.basis ? R().basisText(E, w.basis, false, c.lang) : '' };
     if(w.type === 'kv') return { head:[c.t('rpCol.field'), c.t('rpXl.value')], rows:w.rows, basis:w.basis ? R().basisText(E, w.basis, false, c.lang) : '' };
     return null;
@@ -73,7 +78,7 @@ window.EKO_RV = (function(){
         return tableHtml(c, tab.head.map(esc), tab.rows.map(r => r.map(x => typeof x === 'number' ? mono(R().fmt(x, Number.isInteger(x) ? 0 : 1)) : (/^[A-Z]{2,5}-[A-Z0-9-]+$/.test(String(x)) ? mono(x) : x))), c.t(w.labelKey))
           + (tab.basis ? `<span class="rpbasis">${esc(c.t('rpBasisLbl'))}: ${esc(tab.basis)}</span>` : ''); }
       case 'kv': {
-        return `<div class="rpflbl">${esc(c.t(w.labelKey))}</div><dl class="rpkv">${w.rows.map(r => `<dt>${esc(r[0])}</dt><dd>${esc(r[1])}</dd>`).join('')}</dl>${w.basis ? basisHtml(E, c, w.basis) : ''}`; }
+        return `<div class="rpflbl">${esc(c.t(w.labelKey))}</div><dl class="rpkv">${w.rows.map(r => `<dt>${esc(r[0])}</dt><dd>${esc(or(r[1]))}</dd>`).join('')}</dl>${w.basis ? basisHtml(E, c, w.basis) : ''}`; }
       case 'status.leak':  return `<p class="rpmiss ${w.ready ? 'rpok' : ''}">${esc(c.t(w.ready ? 'rpLeak.ready' : 'rpLeak.pending', w.params))}</p>`;
       case 'period.energy':return w.available ? `<div class="rpfigs">${w.figures.map(f => figCard(E, c, f)).join('')}</div>` : '';
       case 'text':         return `<div class="rpflbl">${esc(c.t(w.labelKey))}</div><p class="rpmiss">${esc(c.t(w.textKey))}</p>`;
@@ -110,7 +115,7 @@ window.EKO_RV = (function(){
       ['rpFt.window', c.t(doc.period.labelKey, doc.period.params)], ['rpFt.generated', doc.generatedAtLabel],
       ['rpFt.by', doc.generatedBy], ['rpFt.tariff', doc.basisVersions.tariff, doc.basisVersions.tariffProvisional], ['rpFt.emission', doc.basisVersions.emission, doc.basisVersions.emissionProvisional], ['rpFt.eko', doc.ekoVersion]
     ];
-    return `<footer class="rpfoot" aria-label="${esc(c.t('rpFt.label'))}">${cells.map(([k, v, p]) => `<span><i>${esc(c.t(k))}</i> ${esc(v)}${p ? ' ' : ''}${prov(c, p)}</span>`).join('')}</footer>`;
+    return `<footer class="rpfoot" aria-label="${esc(c.t('rpFt.label'))}">${cells.map(([k, v, p]) => `<span><i>${esc(c.t(k))}</i> ${esc(or(v))}${p ? ' ' : ''}${prov(c, p)}</span>`).join('')}</footer>`;
   }
   function narrHead(c, doc){
     const n = doc.narration;
