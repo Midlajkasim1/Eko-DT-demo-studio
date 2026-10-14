@@ -48,6 +48,7 @@
     getEquipment() { return this._json('/api/fin/equip-live'); }
     getAlarms() { return this._json('/api/fin/alarms'); }
     getDocuments() { return this._json('/api/fin/documents'); }
+    getWorkOrders() { return this._json('/api/fin/workorders'); }
     getMeters() { return this._json('/api/fin/pmu-live'); }
     getHisPoints() { return this._json('/api/fin/his-points'); }
     getPointHistory(id, days) {
@@ -72,6 +73,7 @@
     async getEquipment() { return null; }
     async getAlarms() { return null; }
     async getDocuments() { return null; }
+    async getWorkOrders() { return null; }
     async getMeters() { return null; }
     async getHisPoints() { return null; }
     async getPointHistory() { return null; }
@@ -89,6 +91,7 @@
     alarms: null,
     meters: null,
     documents: null,
+    workorders: null,
     timers: [],
     generation: 0,
   };
@@ -123,12 +126,13 @@
   }
 
   async function pollRealtime() {
-    const [equipment, alarms, meters, history, documents] = await Promise.all([
+    const [equipment, alarms, meters, history, documents, workorders] = await Promise.all([
       state.provider.getEquipment(),
       state.provider.getAlarms(),
       state.provider.getMeters(),
       state.provider.getPowerHistory(),
       state.provider.getDocuments(),
+      state.provider.getWorkOrders(),
     ]);
     if (usable(history)) {
       state.powerHistory = history;
@@ -141,6 +145,7 @@
     if (usable(alarms)) { state.alarms = alarms; emit('alarms', alarms); }
     if (usable(meters)) { state.meters = meters; emit('meters', meters); }
     if (usable(documents)) { state.documents = documents; emit('documents', documents); }
+    if (usable(workorders)) { state.workorders = workorders; emit('workorders', workorders); }
   }
 
   async function start() {
@@ -175,6 +180,7 @@
     get alarms() { return state.alarms; },
     get meters() { return state.meters; },
     get documents() { return state.documents; },
+    get workorders() { return state.workorders; },
   };
 
   start();

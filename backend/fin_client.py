@@ -140,6 +140,20 @@ def parse_zinc_csv(text: str) -> list[dict]:
     return rows
 
 
+def _cmms_id(value):
+    """FIN equipId is the CMMS equipment number. Zinc stores it as a number."""
+    if value is None or value == "":
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    if isinstance(value, int):
+        return str(value)
+    text = str(value).strip().strip('"')
+    if text.endswith(".0") and text[:-2].isdigit():
+        return text[:-2]
+    return text
+
+
 def clip_decimals(text: str) -> str:
     """Cut a displayed number after two decimal places. 23.3128 stays 23.31."""
     return re.sub(r"(-?)(\d+)\.(\d{3,})", lambda m: f"{m.group(1)}{m.group(2)}.{m.group(3)[:2]}", text)
@@ -816,6 +830,7 @@ class FinScramClient:
             equip_data = {
                 "name": nav_name,
                 "bimId": equip.get("bimId") or equip_id or nav_name,
+                "equipId": _cmms_id(equip.get("equipId")),
                 "alarms": equip_alarms,
                 "points": formatted_points,
                 "tags": tags,

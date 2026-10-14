@@ -1353,6 +1353,8 @@
         typeAr: (eq.type || "معدات").toUpperCase(),
         level: eq.floor || "Level",
         levelAr: eq.floor || "الطابق",
+        equipId: normEquipId(eq.equipId),
+        workOrders: [],
         wos: 0,
         wost: null,
         make: "--",
@@ -1538,6 +1540,61 @@
     countUtilityAndEmsMeters(site, newAssets);
 
     applyHeat(list);
+    stampWorkOrders();
+    paint();
+  }
+
+  var woState = { byId: {}, byName: {} };
+
+  function normEquipId(value) {
+    if (value == null || value === '') return '';
+    if (typeof value === 'number' && isFinite(value)) return String(Math.trunc(value));
+    var text = String(value).trim();
+    if (/^\d+\.0$/.test(text)) return text.slice(0, -2);
+    return text;
+  }
+
+  function woDueStatus(order) {
+    if (!order || !order.dueIso) return 'sched';
+    var due = new Date(order.dueIso + 'T00:00:00');
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return due < today ? 'over' : 'sched';
+  }
+
+  function stampWorkOrders() {
+    var site = window.EKO_DATA && window.EKO_DATA.marsa;
+    if (!site || !Array.isArray(site.assets)) return;
+    site.assets.forEach(function (asset) {
+      var equipId = normEquipId(asset.equipId) || woState.byName[asset.id] || '';
+      asset.equipId = equipId;
+      var list = (equipId && woState.byId[equipId] ? woState.byId[equipId] : []).map(function (order) {
+        return Object.assign({}, order, { status: woDueStatus(order) });
+      });
+      list.sort(function (a, b) {
+        if (a.status !== b.status) return a.status === 'over' ? -1 : 1;
+        return String(a.dueIso || '').localeCompare(String(b.dueIso || ''));
+      });
+      asset.workOrders = list;
+      asset.wos = list.length;
+      asset.wost = list.length ? (list.some(function (order) { return order.status === 'over'; }) ? 'over' : 'sched') : null;
+    });
+  }
+
+  function applyWorkOrders(payload) {
+    woState = { byId: {}, byName: {} };
+    ((payload && payload.orders) || []).forEach(function (order) {
+      var equipId = normEquipId(order.equipment);
+      if (!equipId) return;
+      if (!woState.byId[equipId]) woState.byId[equipId] = [];
+      woState.byId[equipId].push(order);
+    });
+    var names = (payload && payload.equipIds) || {};
+    Object.keys(names).forEach(function (name) {
+      var equipId = normEquipId(names[name]);
+      if (equipId) woState.byName[name] = equipId;
+    });
+    stampWorkOrders();
     paint();
   }
 
@@ -1891,6 +1948,7 @@ window.addEventListener('dashboard-data', function (e) {
     if (d.type === 'meters') applyMeters(d.data);
     if (d.type === 'equipment') applyEquipment(d.data);
     if (d.type === 'documents') applyDocuments(d.data);
+    if (d.type === 'workorders') applyWorkOrders(d.data);
   });
 
   if (window.DashboardData && window.DashboardData.alarms) applyAlarms(window.DashboardData.alarms);
@@ -1898,4 +1956,5 @@ window.addEventListener('dashboard-data', function (e) {
   if (window.DashboardData && window.DashboardData.meters) applyMeters(window.DashboardData.meters);
   if (window.DashboardData && window.DashboardData.equipment) applyEquipment(window.DashboardData.equipment);
   if (window.DashboardData && window.DashboardData.documents) applyDocuments(window.DashboardData.documents);
+  if (window.DashboardData && window.DashboardData.workorders) applyWorkOrders(window.DashboardData.workorders);
 })();

@@ -31,6 +31,7 @@ from fin_client import (
     parse_zinc_csv,
     safe_get,
 )
+from workorders import SQL_EXPR, file_payload, payload_from_text
 
 # ─── Load Config ─────────────────────────────────────────────────────────────
 
@@ -131,6 +132,7 @@ cached_fdd_summary: list = []
 cached_meter_data: dict = {}
 cached_alarm_data: dict = {}
 cached_facility: dict = {}
+cached_workorders: dict = {}
 
 
 # ─── Background Polling ─────────────────────────────────────────────────────
@@ -164,6 +166,7 @@ async def realtime_loop():
                 cached_power_history["Total_Power_Consumption_his"] = cached_power_history[
                     "Hourly_Energy_Consumption_his"
                 ]
+            await refresh_workorders()
             cached_building_data = {
                 "status": "success",
                 "Building_Info": {
@@ -358,6 +361,7 @@ def _flatten_equip(realtime: dict) -> list[dict]:
                     "inAlarm": len(alarms) > 0,
                     "alarms": alarms,
                     "bimId": eq.get("bimId", ""),
+                    "equipId": eq.get("equipId") or "",
                     "points": eq.get("points", []),
                 })
     return equip_list
@@ -605,6 +609,32 @@ async def get_status():
         server_url=FIN_SERVER_URL,
         display_name=CONFIG.get("display_name", PROJECT_NAME),
     )
+
+
+async def refresh_workorders():
+    """Prefer the live SQL table. The docs dump fills in when that call fails."""
+    global cached_workorders
+    text = None
+    if client and client.is_authenticated:
+        endpoint = f"/api/{client.project_name}/eval?expr={quote(SQL_EXPR, safe='')}"
+        try:
+            text = await client.fetch_api(endpoint, is_text=True)
+        except Exception as exc:
+            print(f"[FIN] work order fetch error: {exc}")
+            text = None
+    live = payload_from_text(text, "fin") if text else None
+    if live and live["orders"]:
+        cached_workorders = live
+        return
+    cached_workorders = file_payload()
+
+
+@app.get("/api/fin/workorders")
+async def get_workorders():
+    """PPM rows joined to model equipment by equipId."""
+    if not cached_workorders:
+        return file_payload()
+    return cached_workorders
 
 
 @app.get("/api/fin/equip-live")
