@@ -98,7 +98,7 @@
     "equipment": "/api/{project}/read?filter=equip",
     "alarms": "/api/{project}/eval?expr=readAll(equip+or+point).alarms(today)"
   },
-  "workorder_endpoint": "/api/{project}/eval?expr=sqlQuery(read(sqlConn),%22SELECT%20*%20FROM%20workOrderMarsa%22)",
+  "workorder_expr": "sqlQuery(read(sqlConn), \"SELECT * FROM workOrderMarsa\")",
   "power_endpoints": {
     "Hourly_Energy_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181ee6e-67dac181,2026-05-21..today()%2C%7B-limit%7D)",
     "Peak_Demand_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f788-2d229f48,2026-05-21..today()%2C%7B-limit%7D)",

@@ -31,7 +31,7 @@ from fin_client import (
     parse_zinc_csv,
     safe_get,
 )
-from workorders import live_payload, norm_id, orders_by_equipment
+from workorders import error_payload, live_payload, norm_id, orders_by_equipment
 
 # ─── Load Config ─────────────────────────────────────────────────────────────
 
@@ -613,6 +613,8 @@ async def get_status():
 
 def _attach_workorders():
     """Copy the live jobs onto each equipment row. The only key is equipId."""
+    if isinstance(cached_equip_data, dict):
+        cached_equip_data["workOrderError"] = (cached_workorders or {}).get("error") or ""
     equipment = (cached_equip_data or {}).get("equipment")
     if not isinstance(equipment, list):
         return
@@ -623,22 +625,26 @@ def _attach_workorders():
 
 
 async def refresh_workorders():
-    """Read workorder_endpoint from config, the same way equipment and alarms are read."""
+    """Eval workorder_expr from config, the same session as equipment and alarms."""
     global cached_workorders
-    template = CONFIG.get("workorder_endpoint") or ""
-    if not client or not client.is_authenticated or not template:
+    expr = (CONFIG.get("workorder_expr") or "").strip()
+    if not client or not client.is_authenticated or not expr:
         return
-    endpoint = client._resolve_endpoint(template)
     try:
-        text = await client.fetch_api(endpoint, is_text=True)
+        text = await client.fetch_api(
+            f"/api/{client.project_name}/eval?expr={quote(expr, safe='')}",
+            is_text=True,
+        )
     except Exception as exc:
         print(f"[FIN] work order fetch error: {exc}")
+        cached_workorders = error_payload(str(exc))
+        _attach_workorders()
         return
-    if not text or "errType" in text or "Unknown symbol" in text:
-        print("[FIN] work order read returned an error")
-        return
-    cached_workorders = live_payload(text)
+    cached_workorders = live_payload(text or "")
     _attach_workorders()
+    err = cached_workorders.get("error") or ""
+    count = len(cached_workorders.get("orders") or [])
+    print(f"[FIN] work orders: {err or str(count) + ' rows'}")
 
 
 @app.get("/api/fin/workorders")
@@ -646,7 +652,7 @@ async def get_workorders():
     """Live PPM rows. Empty until the FIN read succeeds."""
     if not client or not client.is_authenticated:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    return cached_workorders or {"timestamp": None, "source": "fin", "orders": []}
+    return cached_workorders or {"timestamp": None, "source": "fin", "orders": [], "error": ""}
 
 
 @app.get("/api/fin/equip-live")

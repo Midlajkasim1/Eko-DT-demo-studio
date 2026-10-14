@@ -1080,9 +1080,11 @@ window.EKO_C = (function(){
       return `<div class="aprow"><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`;
     };
     if (!orders.length) {
+      const err = (E.data && E.data.workOrderError) || '';
+      const note = err ? `${t('apWoReadFail')} ${err}` : t(r.equipId ? 'apWoNoRows' : 'apWoUnlinked');
       return `<p class="alempty">${esc(t('apWoEmpty'))}</p>`
         + (r.equipId ? row(t('apWoEquip'), r.equipId) : '')
-        + `<p class="apnote">${esc(t(r.equipId ? 'apWoNoRows' : 'apWoUnlinked'))}</p>`;
+        + `<p class="apnote">${esc(note)}</p>`;
     }
     const cards = orders.map(order => {
       const st = order.status === 'over' ? 'over' : 'sched';

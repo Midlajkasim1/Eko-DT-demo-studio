@@ -1301,7 +1301,10 @@
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     var list = payload && payload.equipment;
     if (!site || !Array.isArray(list)) return;
-    
+    if (Object.prototype.hasOwnProperty.call(payload, 'workOrderError')) {
+      site.workOrderError = payload.workOrderError || '';
+    }
+ 
     // Build fresh asset list from FIN live data
     var newAssets = list.map(function (eq) {
       var crit = "C";
@@ -1549,8 +1552,8 @@
   function normEquipId(value) {
     if (value == null || value === '') return '';
     if (typeof value === 'number' && isFinite(value)) return String(Math.trunc(value));
-    var text = String(value).trim();
-    if (/^\d+\.0$/.test(text)) return text.slice(0, -2);
+    var text = String(value).trim().replace(/^"|"$/g, '');
+    if (/^\d+\.0+$/.test(text)) return text.replace(/\.0+$/, '');
     return text;
   }
 
@@ -1586,6 +1589,8 @@
 
   function applyWorkOrders(payload) {
     woState = { byId: {} };
+    var site = window.EKO_DATA && window.EKO_DATA.marsa;
+    if (site) site.workOrderError = (payload && payload.error) || '';
     ((payload && payload.orders) || []).forEach(function (order) {
       var equipId = normEquipId(order.equipment);
       if (!equipId) return;

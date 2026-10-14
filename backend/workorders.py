@@ -4,32 +4,47 @@ from datetime import date, datetime
 
 
 def norm_id(value):
+    """Equipment and work-order numbers, as plain digits."""
     if value is None or value == "":
+        return ""
+    if isinstance(value, dict):
+        value = value.get("dis") or value.get("val") or ""
+    if isinstance(value, bool):
         return ""
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     if isinstance(value, int):
         return str(value)
     text = str(value).strip().strip('"')
-    if text.endswith(".0") and text[:-2].isdigit():
-        return text[:-2]
+    if text in ("", "N", "NA", "null"):
+        return ""
+    if re.fullmatch(r"\d+\.0+", text):
+        return text.split(".", 1)[0]
     return text
 
 
 def parse_mdy(value):
-    match = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{2,4})$", str(value or "").strip())
-    if not match:
+    text = str(value or "").strip().split(" ")[0]
+    if not text:
         return None
-    year = int(match.group(3))
-    if year < 100:
-        year += 2000
+    match = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{2,4})$", text)
+    if match:
+        year = int(match.group(3))
+        if year < 100:
+            year += 2000
+        try:
+            return date(year, int(match.group(1)), int(match.group(2)))
+        except ValueError:
+            return None
+    iso = re.match(r"^(\d{4})-(\d{2})-(\d{2})", text)
+    if not iso:
+        return None
     try:
-        return date(year, int(match.group(1)), int(match.group(2)))
+        return date(int(iso.group(1)), int(iso.group(2)), int(iso.group(3)))
     except ValueError:
         return None
 
 
-# FIN spells the same columns in more than one way.
 _CANON = {
     "work_orders": "id",
     "workorders": "id",
@@ -50,51 +65,56 @@ _CANON = {
 }
 
 
-def _canon(name):
-    token = name.strip().split()[0].lower() if name and name.strip() else ""
-    return _CANON.get(token, token)
+def _name(cell):
+    token = str(cell or "").strip().split()[0].strip('"')
+    return _CANON.get(token.lower(), token)
 
 
-def _header_names(line):
-    return [_canon(col) for col in next(csv.reader([line]))]
-
-
-def _grid_rows(text):
-    lines = [line for line in text.splitlines() if line.strip()]
+def _rows(text):
+    lines = [line for line in (text or "").splitlines() if line.strip()]
     header_at = None
     headers = []
     for index, line in enumerate(lines):
         if line.lower().startswith("ver"):
             continue
-        names = _header_names(line)
+        names = [_name(col) for col in next(csv.reader([line]))]
         if "equipment" in names and "id" in names:
             header_at = index
             headers = names
             break
     if header_at is None:
-        return [], []
+        return None
     rows = []
     for raw in csv.reader(lines[header_at + 1 :]):
-        if not raw:
+        if not raw or len(raw) < 2:
             continue
         item = {}
         for index, name in enumerate(headers):
             if name and index < len(raw):
                 item[name] = raw[index].strip().strip('"')
         rows.append(item)
-    return headers, rows
+    return rows
+
+
+def _fin_error(text):
+    if not text:
+        return "FIN returned an empty work-order read"
+    if "errType" not in text and "Unknown symbol" not in text:
+        return ""
+    match = re.search(r'dis:"([^"]+)"', text)
+    if match:
+        return match.group(1)[:240]
+    return "FIN work-order read failed"
 
 
 def parse_workorder_text(text):
-    if not text or "errType" in text or "Unknown symbol" in text:
-        return []
-    headers, rows = _grid_rows(text)
-    if "equipment" not in headers or "id" not in headers:
+    rows = _rows(text)
+    if not rows:
         return []
     orders = []
     for item in rows:
         equip = norm_id(item.get("equipment"))
-        wo_id = norm_id(item.get("id")) or str(item.get("id") or "").strip()
+        wo_id = norm_id(item.get("id"))
         if not equip or not wo_id:
             continue
         due = item.get("dueDate") or ""
@@ -118,11 +138,23 @@ def parse_workorder_text(text):
     return orders
 
 
-def live_payload(text):
+def error_payload(message):
     return {
         "timestamp": datetime.now().isoformat(),
         "source": "fin",
-        "orders": parse_workorder_text(text),
+        "orders": [],
+        "error": (message or "FIN work-order read failed")[:240],
+    }
+
+
+def live_payload(text):
+    orders = parse_workorder_text(text)
+    error = "" if orders else _fin_error(text)
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "source": "fin",
+        "orders": orders,
+        "error": error,
     }
 
 
