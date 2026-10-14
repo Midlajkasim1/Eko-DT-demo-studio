@@ -229,6 +229,28 @@ export interface FinSeverityBands {
 /** Per-project FIN settings live here. A field a project does not set falls back to the
  *  backend config.json default, so projects saved before a field existed keep working. */
 export interface ProjectApiSettings {
+  /** FIN_SETTINGS_VERSION at the last Save Settings; absent on projects saved before it existed */
+  schemaVersion?: number
+  /** IANA timezone of the site ("Asia/Dubai"): the day boundary for today's readings */
+  siteTimezone?: string
+  /** Show the prototype's demo figures (Marsa Al Arab fixture) in the dashboard. Off: only FIN
+   *  readings and this project's own settings are shown. */
+  dashboardDemo?: boolean
+  /** Reporting basis. A cost or CO₂ figure whose rate is not set is reported as unavailable. */
+  energyTariff?: number
+  gasTariff?: number
+  /** ISO 4217 code shown with every cost, e.g. "AED" */
+  currency?: string
+  /** Names the tariff in the report basis, e.g. "DEWA-C 2026-Q3" */
+  tariffName?: string
+  /** kg CO₂ per kWh */
+  co2Factor?: number
+  /** Names the emission factor in the report basis, e.g. "DEWA grid 2025" */
+  co2FactorName?: string
+  /** The Power page's distribution boards. Absent: the built-in board keys, shown where the
+   *  project maps them (Marsa Al Arab's six through config.json). Each board names Data Mapping
+   *  keys, never a FIN point ID. */
+  finPowerBoards?: PowerBoard[]
   finBaseUrl?: string
   finProjectName?: string
   finDisplayName?: string
@@ -251,6 +273,17 @@ export interface ProjectApiSettings {
   subPanels?: Record<string, { label: string, type: string }>
   modelsConfig?: Array<{ id: string, label: string, name: string, active: boolean }>
   floorsConfig?: Array<{ id: string, label: string, name: string }>
+}
+
+/** One distribution board on the Power page */
+export interface PowerBoard {
+  name: string
+  /** A key of FIN Live Points Mapping (e.g. "mcc1"): the board's reading */
+  liveKey: string
+  /** A key of FIN Historical Endpoints (e.g. "Hourly_EC_MCC1_his"): its hourly energy */
+  historyKey?: string
+  /** The meter that feeds it, as the meter profile names it (e.g. "PMU09") */
+  meter?: string
 }
 
 export interface ProjectModel extends ProjectModelEntry {

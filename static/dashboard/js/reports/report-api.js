@@ -66,6 +66,9 @@ window.EKO_R = (function(){
   const tr = (E, lang) => (k, v) => E.t.call({ lang: lang || E.lang }, k, clean(v));
   const LS_STORE = 'eko-reports-v1', LS_AUDIT = 'eko-audit-v1', LS_REMOVED = 'eko-reports-removed-v1', STORE_CAP = 12, AUDIT_CAP = 300;
 
+  /* The site's clock for printed times (the open project's timezone, named); the browser's in the prototype */
+  const siteTimeOpts = () => { const tz = ((window.INJECTED_PROJECT_CONFIG || {}).site || {}).timezone; return tz ? { timeZone: tz, timeZoneName: 'short' } : {}; };
+
   /* ---- sources: every id a figure can cite ------------------------------ */
   const SOURCES = {
     'meters.main': { labelKey:'rpSrc.mainMeters' },
@@ -101,8 +104,10 @@ window.EKO_R = (function(){
   const periodId = p => !p ? 'today' : p.kind === 'last' ? (p.h === 12 ? 'last12' : 'last6') : p.kind === 'days' ? 'days3' : p.kind;
 
   const basisFor = (E, o) => Object.assign({ from:'00:00', to:E.data.basis.asOf, windowKey:'rpWin.today', windowParams:{ to:E.data.basis.asOf } }, o || {});
-  const tariff = E => ({ id:E.data.basis.tariffId, version:E.data.basis.tariffVersion, rate:E.data.basis.aedPerKwh, unit:'AED/kWh', provisional:E.data.basis.tariffStatus === 'provisional' });
-  const gasTariff = E => ({ id:E.data.basis.tariffId, version:E.data.basis.tariffVersion, rate:E.data.gas.tariffAedM3, unit:'AED/m³', provisional:E.data.basis.gasTariffStatus === 'provisional' });
+  /* the project's currency (Dashboard Settings → FIN Config); the prototype's AED otherwise */
+  const cur = E => (E.data.basis && E.data.basis.currency) || 'AED';
+  const tariff = E => ({ id:E.data.basis.tariffId, version:E.data.basis.tariffVersion, rate:E.data.basis.aedPerKwh, unit:cur(E) + '/kWh', provisional:E.data.basis.tariffStatus === 'provisional' });
+  const gasTariff = E => ({ id:E.data.basis.tariffId, version:E.data.basis.tariffVersion, rate:E.data.gas.tariffAedM3, unit:cur(E) + '/m³', provisional:E.data.basis.gasTariffStatus === 'provisional' });
   const emission = E => ({ id:E.data.basis.co2FactorId, factor:E.data.basis.co2KgPerKwh, unit:'kg CO₂/kWh', provisional:E.data.basis.co2FactorStatus === 'provisional' });
   const mtd = E => ({ from:E.data.basis.monthStart || '1', to:E.data.basis.asOf, windowKey:'rpWin.mtd', windowParams:{ to:E.data.basis.asOf } });
   const at = E => ({ from:E.data.basis.asOf, to:E.data.basis.asOf, windowKey:'rpWin.at', windowParams:{ t:E.data.basis.asOf } });
@@ -131,15 +136,15 @@ window.EKO_R = (function(){
     'power.contractedKw':     E => ({ win:'fixed', value:E.data.metrics.contractedKw, unit:'kW', d:0, labelKey:'rpF.contracted', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], windowKey:'rpWin.contract', windowParams:{} }) }),
     /* derived: tariff */
     'derived.energyCostTodayAed': E => { const v = mul(E.data.metrics.energyTodayMwh, 1000, E.data.basis.aedPerKwh);
-      return { win:'today', value:v, unit:'AED', d:1, labelKey:'rpF.energyCostToday', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }) }; },
+      return { win:'today', value:v, unit:cur(E), d:1, labelKey:'rpF.energyCostToday', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }) }; },
     'derived.energyCostMtdAed':   E => { const v = mul(E.data.energyLanding.mtdKwh, E.data.basis.aedPerKwh);
-      return { win:'fixed', value:v, unit:'AED', d:1, labelKey:'rpF.energyCostMtd', sources:['meters.main'], basis:basisFor(E, Object.assign({ sources:['meters.main'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
+      return { win:'fixed', value:v, unit:cur(E), d:1, labelKey:'rpF.energyCostMtd', sources:['meters.main'], basis:basisFor(E, Object.assign({ sources:['meters.main'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
     'derived.energyCostPrevMonthAed': E => { const v = mul(E.data.power.prevMonthKwh, E.data.basis.aedPerKwh);
-      return { win:'fixed', value:v, unit:'AED', d:1, labelKey:'rpF.energyCostPrev', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff', from:null, to:null, windowKey:'rpWin.prevMonth', windowParams:{} }) }; },
+      return { win:'fixed', value:v, unit:cur(E), d:1, labelKey:'rpF.energyCostPrev', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff', from:null, to:null, windowKey:'rpWin.prevMonth', windowParams:{} }) }; },
     'derived.avoidableAedMo':     E => { const v = mul(E.data.metrics.avoidableKwhMo, E.data.basis.aedPerKwh);
-      return { win:'fixed', value:v, unit:'AED', d:1, labelKey:'rpF.avoidableMo', sources:['model.opt'], basis:basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
+      return { win:'fixed', value:v, unit:cur(E), d:1, labelKey:'rpF.avoidableMo', sources:['model.opt'], basis:basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
     'derived.wasteAedMtd':        E => { const v = mul(E.data.energyLanding.wasteTotalKwh, E.data.basis.aedPerKwh);
-      return { win:'fixed', value:v, unit:'AED', d:1, labelKey:'rpF.wasteMtd', sources:['model.opt'], basis:basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
+      return { win:'fixed', value:v, unit:cur(E), d:1, labelKey:'rpF.wasteMtd', sources:['model.opt'], basis:basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
     /* derived: emission */
     'derived.co2TodayT':          E => { const v = mul(E.data.metrics.energyTodayMwh, E.data.basis.co2KgPerKwh);
       return { win:'today', value:v, unit:'t CO₂', d:1, labelKey:'rpF.co2Today', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.mwhTimesFactor' }) }; },
@@ -157,7 +162,7 @@ window.EKO_R = (function(){
     'gas.mtdM3':          E => ({ win:'fixed', value:E.data.gas.mtdM3, unit:'m³', d:1, labelKey:'rpF.gasMtd', sources:['meter.G-01'], basis:basisFor(E, Object.assign({ sources:['meter.G-01'] }, mtd(E))) }),
     'gas.avg7M3':         E => ({ win:'fixed', value:E.data.gas.avg7M3, unit:'m³/d', d:1, labelKey:'rpF.gasAvg7', sources:['meter.G-01'], basis:basisFor(E, { sources:['meter.G-01'], from:null, windowKey:'rpWin.lastD', windowParams:{ n:7 } }) }),
     'derived.gasCostMtdAed': E => { const v = mul(E.data.gas.mtdM3, E.data.gas.tariffAedM3);
-      return { win:'fixed', value:v, unit:'AED', d:1, labelKey:'rpF.gasCostMtd', sources:['meter.G-01'], basis:basisFor(E, Object.assign({ sources:['meter.G-01'], tariff:gasTariff(E), formulaKey:'rpFx.m3TimesTariff' }, mtd(E))) }; },
+      return { win:'fixed', value:v, unit:cur(E), d:1, labelKey:'rpF.gasCostMtd', sources:['meter.G-01'], basis:basisFor(E, Object.assign({ sources:['meter.G-01'], tariff:gasTariff(E), formulaKey:'rpFx.m3TimesTariff' }, mtd(E))) }; },
     /* alarms (counts derive from the one list) */
     'alarms.open':     E => ({ win:'fixed', value:E.data.alarms.length, unit:'', d:0, labelKey:'rpF.alarmsOpen', sources:['alarms'], basis:basisFor(E, Object.assign({ sources:['alarms'] }, at(E))) }),
     'alarms.critical': E => ({ win:'fixed', value:E.data.alarms.filter(a => a.sev === 'critical').length, unit:'', d:0, labelKey:'rpSev.critical', sources:['alarms'], basis:basisFor(E, Object.assign({ sources:['alarms'] }, at(E))) }),
@@ -178,7 +183,7 @@ window.EKO_R = (function(){
     'spaces.occupiedPct': E => ({ win:'fixed', value:E.data.spaces.occupiedPct, unit:'%', d:0, labelKey:'rpF.occupiedPct', sources:['bms'], basis:basisFor(E, Object.assign({ sources:['bms'] }, at(E))) }),
     /* incident (needs params.alarmId) */
     'incident.impactAedMo': (E, per, params) => { const a = E.data.alarms.find(x => x.id === params.alarmId); if(!a || a.impactAedMo == null) return null;
-      return { win:'fixed', value:a.impactAedMo, unit:'AED', d:0, labelKey:'rpF.impactMo', sources:['model.opt'], basis:basisFor(E, { sources:['model.opt'], from:null, to:null, windowKey:'rpWin.monthlyEst', windowParams:{} }) }; },
+      return { win:'fixed', value:a.impactAedMo, unit:cur(E), d:0, labelKey:'rpF.impactMo', sources:['model.opt'], basis:basisFor(E, { sources:['model.opt'], from:null, to:null, windowKey:'rpWin.monthlyEst', windowParams:{} }) }; },
     'incident.ageH': (E, per, params) => { const a = E.data.alarms.find(x => x.id === params.alarmId); if(!a) return null;
       return { win:'fixed', value:a.ageH, unit:'h', d:a.ageH < 1 ? 1 : 0, labelKey:'rpF.alarmAge', sources:['alarms'], basis:basisFor(E, Object.assign({ sources:['alarms'] }, at(E))) }; },
     /* forecast (sub-module locked on this site: the section says so) */
@@ -187,8 +192,13 @@ window.EKO_R = (function(){
   const hoursOf = per => per.kind === 'last' ? per.h : per.kind === 'days' ? per.n * 24 : per.kind === 'month' || per.kind === 'prevMonth' ? 24 * 31 : 24;
 
   /* ---- source labels: registry ids, and any meter by id (D96) ------------ */
+  /* The prototype cites its sample meters by id. A site that has no such meter (every Studio project
+     in real mode) reads water and gas from its FIN mapping (total_water / total_gas), so it is cited
+     as that, never as another site's meter. */
+  const FIN_TOTALS = { 'meter.W-01':'rpSrc.waterFin', 'meter.MW-03':'rpSrc.waterFin', 'meter.G-01':'rpSrc.gasFin', 'meter.KG-02':'rpSrc.gasFin' };
   function sourceLabel(E, id, lang){
     const t = (k, v) => E.t.call({ lang: lang || E.lang }, k, v);
+    if(FIN_TOTALS[id] && !(E.data.meters || []).some(x => 'meter.' + x.id === id)) return t(FIN_TOTALS[id]);
     if(/^meter\./.test(id)){ const mid = id.slice(6); const m = (E.data.meters || []).find(x => x.id === mid);
       return t('rpSrc.meter', { id: mid }) + (m ? ' · ' + ((lang || E.lang) === 'ar' ? (m.nameAr || m.nameEn) : m.nameEn) : ''); }
     return t((SOURCES[id] || {}).labelKey || id);
@@ -344,7 +354,7 @@ window.EKO_R = (function(){
     return {
       id: newId(), version: 1, lang: E.lang, spec: JSON.parse(JSON.stringify(spec)), templateId: tpl.id, titleKey: tpl.titleKey, titleParams,
       site: { key: E.data.key, nameEn: E.data.nameEn, nameAr: E.data.nameAr },
-      period: per, generatedAt: now.toISOString(), generatedAtLabel: now.toLocaleString(E.lang === 'ar' ? 'ar-AE' : 'en-GB'),
+      period: per, generatedAt: now.toISOString(), generatedAtLabel: now.toLocaleString(E.lang === 'ar' ? 'ar-AE' : 'en-GB', siteTimeOpts()),
       generatedBy: (E.data.user && (E.lang === 'ar' ? E.data.user.nameAr : E.data.user.name)) || '',
       basisVersions: { tariff: [b.tariffId, b.tariffVersion].filter(x => x != null && x !== '').join(' ') || null, emission: b.co2FactorId != null && b.co2FactorId !== '' ? b.co2FactorId : null, tariffProvisional: b.tariffStatus === 'provisional', emissionProvisional: b.co2FactorStatus === 'provisional' },
       provisional, ekoVersion: window.EKO_VERSION || '', sources: tpl.sources, sections, dataQuality: dq, figures, narration: null
@@ -359,7 +369,7 @@ window.EKO_R = (function(){
   function basisText(E, b, flagged, lang){
     const t = tr(E, lang), parts = [];
     if(b.windowKey) parts.push(t(b.windowKey, b.windowParams || {}));
-    if(b.sources && b.sources.length) parts.push(b.sources.map(s => sourceLabel(E, s, lang)).join(' + '));
+    if(b.sources && b.sources.length) parts.push([...new Set(b.sources.map(s => sourceLabel(E, s, lang)))].join(' + '));
     if(b.averagingKey) parts.push(t(b.averagingKey));
     if(b.tariff) parts.push(tariffText(t, b.tariff));
     if(b.emission) parts.push(emissionText(t, b.emission));
@@ -415,5 +425,5 @@ window.EKO_R = (function(){
     return doc;
   }
 
-  return { build, generate, period, periodOf, periodId, PERIODS, dataQuality, basisText, sourceLabel, fmt, num, mul, div, tr, MISSING, tariffText, emissionText, SOURCES, FIG, templates: T, store, audit, auditFor, title, lockedIds, hoursOf };
+  return { siteTimeOpts, build, generate, period, periodOf, periodId, PERIODS, dataQuality, basisText, sourceLabel, fmt, num, mul, div, tr, MISSING, tariffText, emissionText, SOURCES, FIG, templates: T, store, audit, auditFor, title, lockedIds, hoursOf };
 })();

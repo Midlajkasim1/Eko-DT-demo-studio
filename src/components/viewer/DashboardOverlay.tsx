@@ -18,6 +18,7 @@ import { createEcoSchematic } from '@/lib/ecoSchematic'
 import type { HvacSchematic } from '@/lib/hvacGeometry'
 import { useFinStore } from '@/store/useFinStore'
 import type { ProjectApiSettings } from '@/types'
+import { dashboardProjectInfo } from '@/lib/finSettings'
 
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 
@@ -1090,21 +1091,23 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         containerRef.current.innerHTML = tempDiv.innerHTML
 
         const apiSettings: ProjectApiSettings = currentProject?.apiSettings || {}
-        const configScript = `
-          window.INJECTED_PROJECT_CONFIG = {
-            initialTemplate: "${currentProject?.renderSettings?.templateId || 'default'}",
-            initialXrayColor: "${currentProject?.renderSettings?.xrayColor || 'blue'}",
-            fin: {
-              baseUrl: "${apiSettings.finBaseUrl || 'https://localhost'}",
-              project: "${apiSettings.finProjectName || ''}",
-              interval: ${apiSettings.finInterval || 5000},
-              directMode: ${apiSettings.finDirectMode || false},
-              livePoints: ${apiSettings.finLivePoints ? JSON.stringify(apiSettings.finLivePoints) : 'undefined'},
-              endpoints: ${apiSettings.finEndpoints ? JSON.stringify(apiSettings.finEndpoints) : 'undefined'}
-            }
-          };
-        `
-        try { window.eval(configScript) } catch (err) { console.error(err) }
+        // The saved settings of the project open now; a field it does not set stays absent
+        ;(window as any).INJECTED_PROJECT_CONFIG = {
+          initialTemplate: currentProject?.renderSettings?.templateId || 'default',
+          initialXrayColor: currentProject?.renderSettings?.xrayColor || 'blue',
+          ...(currentProject ? dashboardProjectInfo(currentProject) : {}),
+          fin: {
+            baseUrl: apiSettings.finBaseUrl || 'https://localhost',
+            project: apiSettings.finProjectName || '',
+            interval: apiSettings.finInterval || 5000,
+            directMode: apiSettings.finDirectMode || false,
+            livePoints: apiSettings.finLivePoints,
+            endpoints: apiSettings.finEndpoints,
+          },
+        }
+        // The backend serves this project before the dashboard's first poll is trusted (the
+        // dashboard drops answers stamped for another project until it does)
+        void useFinStore.getState().syncProjectSettings()
 
         return loadScripts(Array.from(doc.querySelectorAll('script')), signal)
       })
@@ -1120,7 +1123,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (containerRef.current) containerRef.current.innerHTML = ''
       delete (window as any).INJECTED_PROJECT_CONFIG
     }
-  }, [visible, currentProject?.apiSettings])
+  }, [visible, currentProject?.projectId, currentProject?.apiSettings])
 
   if (!visible) return null
 

@@ -43,7 +43,9 @@ window.EKO_CMMS = (function(){
   function init(app){
     E = app;
     const kind = (E.data.features || {}).cmms || 'mock';
-    adapter = kind === 'hexagon' ? window.EKO_CMMS_HEXAGON : window.EKO_CMMS_MOCK;
+    /* "none": no CMMS is connected (a Studio project in real mode) — nothing is raised or simulated */
+    adapter = kind === 'none' ? null : kind === 'hexagon' ? window.EKO_CMMS_HEXAGON : window.EKO_CMMS_MOCK;
+    if(!adapter){ if(timer){ clearTimeout(timer); timer = null; } return; }
     if(adapter.init) adapter.init();
     adapter.subscribe(onStatusEvent);
     processQueue();                       /* resume anything queued pre-reload */
@@ -54,6 +56,11 @@ window.EKO_CMMS = (function(){
   function saveQ(q){ try{ localStorage.setItem(LSQ, JSON.stringify(q)); }catch(e){} }
 
   function createWorkOrder(payload){
+    if(!adapter){                                   /* no CMMS: say so; never queue a work order nobody will receive */
+      if(E){ delete (E.state.woPhase || {})[payload.assetId]; E.set({}); }
+      if(window.EKO_FB && E) window.EKO_FB.toast({ tone:'warn', text: E.t('woNoCmms') });
+      return null;
+    }
     const q = loadQ();
     const idem = payload.idem || ('idem-' + payload.assetId + '-' + Date.now());
     if(!q.some(x => x.idem === idem)){

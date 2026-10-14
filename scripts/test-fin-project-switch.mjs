@@ -126,7 +126,9 @@ try {
     await page.click('.ds-tab:has-text("Data Mapping")')
   }
   const status = () => page.locator('[data-testid="fin-resources-status"]').first().innerText().catch(() => '')
-  const offered = () => page.locator('datalist option').evaluateAll(o => o.map(x => x.textContent))
+  // the FIN points offered for a Live Points value (the Power Boards editor offers mapping keys, not points)
+  const offered = () => page.locator('.ds-field', { has: page.locator('h3:text-is("FIN Live Points Mapping")') }).locator('datalist option')
+    .evaluateAll(o => o.map(x => x.textContent))
   const showsPoints = async (project, label) => {
     try {
       await until(async () => (await status()).includes(`3 points available from FIN project ${project}.`), `status for ${project}`)
@@ -217,7 +219,10 @@ try {
     await severity.locator('input').nth(0).inputValue() === '' && await severity.locator('input').nth(1).inputValue() === '',
     'new project: severity direction / critical / warning are blank')
   check(await page.locator('.dashboard-settings-modal button', { hasText: /^Load / }).count() === 0, 'new project: no "Load <site>" preset buttons')
-  check(await page.locator('[data-testid="block-unset"]').count() === BLOCKS.length, 'new project: each block says it is not set for this project yet')
+  const blockTitles = [...Object.values(KV_TITLES), 'Severity Configuration']
+  const unset = await Promise.all(blockTitles.map(t => section(t).locator('[data-testid="block-unset"]').count()))
+  check(blockTitles.length === BLOCKS.length && unset.every(n => n === 1), 'new project: each block says it is not set for this project yet')
+  check(await section('Power Boards').locator('[data-testid="block-unset"]').count() === 1, 'new project: Power Boards are not set either (the built-in boards apply)')
   await save()                                       // nothing entered, so nothing is written
   const freshSaved = await disk('switch-new')
   check(BLOCKS.every(b => !(b in freshSaved)), 'new project: Save with nothing entered writes no mapping block')

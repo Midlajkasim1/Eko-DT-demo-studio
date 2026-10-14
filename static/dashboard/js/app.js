@@ -110,6 +110,8 @@
     /* D105: the role model. Role = defaults; permissions stay in user.canControl / features. */
     role(){ const roles = this.data.roles || {}; const r = this.state.rolePreview || (this.data.user || {}).role; return roles[r] ? r : (roles.technician ? 'technician' : Object.keys(roles)[0] || 'technician'); },
     roleCfg(){ return (this.data.roles || {})[this.role()] || {}; },
+    /* the signed-in user's initials, from data.user.name ("Arman Y." → "AY"); '' when no user is known */
+    initials(){ return String((this.data.user || {}).name || '').trim().split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase(); },
     wording(){ return this.roleCfg().wording || 'plain'; },
     disclose(k){ const o = this.state.disclose || {}; return (k in o) ? !!o[k] : !!((this.roleCfg().disclose || {})[k]); },
     landing(){ const c = this.roleCfg(); const l = c.landing === 'auto' ? ((this.data.sites || []).length > 1 ? 'portfolio' : 'site') : (c.landing || 'site');
@@ -300,7 +302,7 @@
       <button class="iconbtn tipU tbdisp" data-act="dlg" data-v="display" data-tip="${esc(E.t('tbDisplay'))}" aria-label="${esc(E.t('tbDisplay'))}" aria-haspopup="menu" aria-expanded="${E.state.dlg==='display'}">${icon('monitor',18)}</button>
       <button class="iconbtn deskonly tipU" data-act="dlg" data-v="report" data-tip="${esc(E.t('reportsTip'))}" aria-label="${esc(E.t('reportsTip'))}" aria-haspopup="dialog">${icon('doc',18)}</button>
       ${window.EKO_NF ? window.EKO_NF.bell(E) : ''}
-      <button class="avatar tipU" data-act="dlg" data-v="menu" data-tip="${esc(E.t('accountTip'))}" aria-haspopup="menu" aria-label="${esc(E.t('accountTip'))}">AY</button>
+      <button class="avatar tipU" data-act="dlg" data-v="menu" data-tip="${esc(E.t('accountTip'))}" aria-haspopup="menu" aria-label="${esc(E.t('accountTip'))}">${esc(E.initials() || '·')}</button>
     </div>`;
   }
 
@@ -443,7 +445,7 @@
       out += `<div class="scrim scrimclear" data-born="${E.state.born==='dlg'?1:0}" data-act="closeDlg"></div>
       <div class="dlg dlgdrop dropEnd accmenu" data-born="${E.state.born==='dlg'?1:0}" role="menu" aria-label="${esc(E.t('accountTip'))}">
         <div class="draghandle"></div>
-        <div class="accid"><span class="avatar accavatar" aria-hidden="true">AY</span><div class="col accwho"><b>${esc(E.lang==='ar' ? (u.nameAr||u.name||'') : (u.name||''))}</b><span class="accrole">${esc(E.t(roleKey))}${previewing ? ` <span class="accprev">${esc(E.t('rolePreviewTag'))}</span>` : ''}</span></div></div>
+        <div class="accid"><span class="avatar accavatar" aria-hidden="true">${esc(E.initials() || '·')}</span><div class="col accwho"><b>${esc(E.lang==='ar' ? (u.nameAr||u.name||'') : (u.name||''))}</b><span class="accrole">${esc(E.t(roleKey))}${previewing ? ` <span class="accprev">${esc(E.t('rolePreviewTag'))}</span>` : ''}</span></div></div>
         ${demo ? `<div class="accdemobox" data-tip="${esc(E.t('demoRoleNote'))}"><span class="accdemolbl"><span class="accdemotag">${esc(E.t('menuDemo'))}</span>${esc(E.t('demoRole'))}</span>
           <div class="segbox row accsegs">${['technician','engineer','executive'].map(r => seg('rolePreview', r, E.t({ technician:'roleTechnician', engineer:'roleEngineer', executive:'roleExecutive' }[r]), E.role() === r)).join('')}</div></div>` : ''}
         <div class="accfoot"><button class="btnG accsignout" role="menuitem" data-act="signOut" data-tip="${esc(E.t('signOutD'))}">${esc(E.t('signOut'))}</button></div>
@@ -1179,7 +1181,7 @@
     ackAlarm(el, ev){ ev.stopPropagation(); if(window.EKO_PWA) window.EKO_PWA.haptic('ack');
       const a = E.alarm(el.dataset.alarm);
       const d = new Date();
-      a.ack = { time: String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'), who: 'AY' };
+      a.ack = { time: String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'), who: E.initials() || '—' };
       render(); },
     /* By-system row: ONE click from the Overview filters the register to
        that system's alarmed assets (spec: filter by system, ≤2 clicks). */

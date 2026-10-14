@@ -3,6 +3,7 @@ import type JSZip from 'jszip'
 import { ASSETS_VERSION, buildTextureAsset, collectGarbage, TEXTURES_DIR } from '@/lib/textureAssets'
 import { assetFileName, collectMapGarbage, MAP_ASSETS_DIR } from '@/lib/mapAssets'
 import { hasMap, pruneMapConfig } from '@/lib/mapConfig'
+import { apiConfigFor, exportedSiteConfig } from '@/lib/finSettings'
 import type { MapAsset, ProjectMeta, ProjectModel, RecentProjectCard, TextureAsset } from '@/types'
 
 // Only used to CACHE folder handles for "recent projects" — no actual data stored here
@@ -526,11 +527,7 @@ export async function exportProjectAsZip(handle: FileSystemDirectoryHandle, meta
   try {
     const r = await fetch('/backend/config.json?t=' + Date.now(), { cache: 'no-store' })
     if (r.ok) {
-      const cfg = await r.json()
-      const s = meta.apiSettings || {}
-      if (s.finProjectName) cfg.project_name = s.finProjectName
-      if (s.finBaseUrl) cfg.fin_server_url = s.finBaseUrl
-      if (s.finInterval) cfg.polling = { ...(cfg.polling || {}), live_ms: s.finInterval }
+      const cfg = exportedSiteConfig(await r.json(), meta.apiSettings)
       zip.file('backend/config.json', JSON.stringify(cfg, null, 2))
     }
   } catch { /* skip if not available */ }
@@ -581,29 +578,7 @@ export async function exportFinProjectAsZip(handle: FileSystemDirectoryHandle, m
   zip.file('project.json', JSON.stringify(finMeta, null, 2))
 
   // Also include api-config.json for standalone FIN dashboard (direct API mode)
-  const apiSettings = meta.apiSettings || {}
-  const apiConfig = {
-    project_name: apiSettings.finProjectName || meta.name,
-    fin_server_url: apiSettings.finBaseUrl || 'https://localhost',
-    display_name: apiSettings.finDisplayName,
-    direct_mode: true, // Always true for FIN standalone viewer
-    polling_interval: apiSettings.finInterval || 5000,
-    live_point_ids: apiSettings.finLivePoints || {},
-    power_endpoints: apiSettings.finEndpoints || {},
-    equipment_classes: apiSettings.finEquipmentClasses,
-    meter_profile: apiSettings.finMeterProfile,
-    severity_bands: apiSettings.finSeverityBands,
-    weather: {
-      lat: apiSettings.weatherLat ?? 24.469,
-      lon: apiSettings.weatherLon ?? 54.358,
-      apiKey: apiSettings.weatherApiKey || '88214bff7aa566e9f6ff1ba5db38f65f',
-    },
-    navButtons: apiSettings.navButtons,
-    leftCards: apiSettings.leftCards,
-    rightCards: apiSettings.rightCards,
-    sideButtons: apiSettings.sideButtons,
-  }
-  zip.file('api-config.json', JSON.stringify(apiConfig, null, 2))
+  zip.file('api-config.json', JSON.stringify(apiConfigFor(meta.apiSettings, meta.name), null, 2))
 
   const zipModelsFolder = zip.folder('models')!
   for (const model of models) {

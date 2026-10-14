@@ -268,7 +268,8 @@ window.EKO_A = (function(){
 
   function anomNow(){
     try{
-      const parts = new Intl.DateTimeFormat('en-GB',{ timeZone:'Asia/Dubai', year:'numeric', month:'numeric', day:'numeric', hour:'numeric', hourCycle:'h23' }).formatToParts(new Date());
+      const tz = (window.INJECTED_PROJECT_CONFIG && window.INJECTED_PROJECT_CONFIG.site && window.INJECTED_PROJECT_CONFIG.site.timezone) || 'Asia/Dubai';   /* the open project's site */
+      const parts = new Intl.DateTimeFormat('en-GB',{ timeZone:tz, year:'numeric', month:'numeric', day:'numeric', hour:'numeric', hourCycle:'h23' }).formatToParts(new Date());
       const g = t => parseInt((parts.find(p => p.type===t)||{}).value, 10);
       let h = g('hour'); if(h===24) h = 0;
       return { y:g('year'), m:g('month')-1, d:g('day'), h };

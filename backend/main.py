@@ -122,27 +122,23 @@ ACTIVE_ISOLATED = False
 # True restores per-project mappings for it too. Other FIN projects are always per-project.
 PROJECT_MAPPINGS_DYNAMIC = False
 
-
-def _norm_url(url: Optional[str]) -> str:
-    return str(url or "").strip().rstrip("/").lower()
-
-
-def site_defaults_apply(project_name: Optional[str], server_url: Optional[str]) -> bool:
-    """config.json's mappings are the point IDs of ONE FIN project on ONE server: true only for that
-    very project on that very server, never another project or the same name on another server."""
-    site_url = BASE_CONFIG.get("fin_server_url", "https://localhost")
-    return (bool(project_name) and project_name == BASE_CONFIG.get("project_name")
-            and _norm_url(server_url or site_url) == _norm_url(site_url))
+# The Studio project this session verified as config.json's own site (_serves_standard_site: its
+# FIN project holds config.json's records on the server signed in to), or None. Only then does the
+# backend serve it config.json's mappings, so only then are config.json's keys that project's keys.
+STANDARD_VERIFIED: Optional[dict] = None
 
 
-def apply_studio_settings(settings: dict, project_id: Optional[str], target: tuple) -> None:
-    """A Studio project's settings. On config.json's own site, with PROJECT_MAPPINGS_DYNAMIC off, its
-    FIN name/server/interval apply but the mappings are config.json's: a saved, partial or empty
-    block cannot replace them. Anywhere else the project's own mappings are the only ones."""
-    if not PROJECT_MAPPINGS_DYNAMIC and site_defaults_apply(*target):
+def apply_studio_settings(settings: dict, project_id: Optional[str], standard: bool) -> None:
+    """A Studio project's settings. `standard` (see _serves_standard_site): its FIN name and interval
+    apply but the mappings are config.json's, so a saved, partial or empty block cannot replace them.
+    Otherwise the project's own mappings are the only ones."""
+    global STANDARD_VERIFIED
+    if standard:
         apply_project_settings({k: v for k, v in settings.items() if k not in PROJECT_DICT_SETTINGS}, project_id)
+        STANDARD_VERIFIED = {"project_id": project_id, "project_name": BASE_CONFIG.get("project_name")}
     else:
         apply_project_settings(settings, project_id, isolated=True)
+        STANDARD_VERIFIED = None
 
 
 def apply_project_settings(settings: Optional[dict], project_id: Optional[str] = None,
@@ -190,6 +186,12 @@ def _fin_rec_file_url(base: str, project: str, ref: str) -> str:
     return base.rstrip("/") + "/api/" + quote(project, safe="") + "/rec/" + quote(rec, safe=":") + "/file"
 
 
+def _ref_project(ref: str) -> Optional[str]:
+    """The FIN project a record ref belongs to: "@p:marsaAlArab:r:..." -> "marsaAlArab"."""
+    m = re.match(r"@p:([^:]+):r:", ref or "")
+    return m.group(1) if m else None
+
+
 def _catalog_doc(ref: str) -> Optional[dict]:
     try:
         with open(_documents_path(), "r", encoding="utf-8") as handle:
@@ -214,7 +216,10 @@ def _pdf_filename(name: str) -> str:
 
 
 def load_documents() -> dict:
-    """Re-read the catalog each call so an edit shows up on the next poll."""
+    """Re-read the catalog each call so an edit shows up on the next poll.
+
+    A manual is a record of ONE FIN project, so only the active project's are listed: another
+    project's equipment is never matched to this site's manuals."""
     try:
         with open(_documents_path(), "r", encoding="utf-8") as handle:
             raw = json.load(handle)
@@ -231,17 +236,23 @@ def load_documents() -> dict:
             "types": list(fam.get("types") or []),
             "names": list(fam.get("names") or []),
         }
+        had_doc = False
         for kind in ("om", "warranty"):
             doc = fam.get(kind)
             if not isinstance(doc, dict) or not doc.get("ref"):
                 continue
             ref = str(doc["ref"])
+            had_doc = True
+            if _ref_project(ref) != PROJECT_NAME:
+                continue
             item[kind] = {
                 "name": str(doc.get("name") or ""),
                 "nameAr": str(doc.get("nameAr") or ""),
                 "ref": ref,
                 "url": _viewer_file_url(ref),
             }
+        if had_doc and "om" not in item and "warranty" not in item:
+            continue   # every manual of this family belongs to another FIN project
         families.append(item)
     return {"families": families}
 
@@ -699,6 +710,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Eko-Project"],
 )
 
 # Only the JSON API and the viewer's own text assets. Never /project.json or
@@ -773,6 +785,24 @@ async def _validate_project(c) -> bool:
     return status == 200 and text is not None and not _is_error_grid(text)
 
 
+async def _serves_standard_site(c) -> bool:
+    """Whether this signed-in session reads config.json's own site, so its standard mappings apply.
+    Not by server address (the FIN server's IP/URL changes): the session's FIN project must be
+    config.json's project_name AND a record config.json maps must exist in it on this server.
+    FIN record IDs are per database, so another server's project of the same name has none."""
+    if PROJECT_MAPPINGS_DYNAMIC or not c.project_name or c.project_name != BASE_CONFIG.get("project_name"):
+        return False
+    ref = next((v for k, v in (BASE_CONFIG.get("live_point_ids") or {}).items()
+                if not str(k).startswith("_") and isinstance(v, str) and ":r:" in v), None)
+    if not ref:
+        return False
+    pid = ref.replace("{project}", c.project_name)
+    found = (await _point_results(c, [pid]))[pid]["status"] == "valid"
+    if not found:
+        print(f"[FIN] {c.project_name} on this server does not hold config.json's points: project mappings used")
+    return found
+
+
 # (project_id, name) typed at sign-in. Kept for that one project only: it is never saved, so a
 # later settings sync of the same project must not drop it, and another project must not get it.
 TYPED_NAME: Optional[tuple] = None
@@ -801,7 +831,8 @@ def _display_name() -> str:
 @app.post("/api/fin/login")
 async def login(req: LoginRequest):
     """Authenticate with FIN server using SCRAM-SHA-256."""
-    global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK, TYPED_NAME
+    global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK, TYPED_NAME, STANDARD_VERIFIED
+    STANDARD_VERIFIED = None   # a new session proves the standard site again (below), or not at all
 
     # Settings sent with the login belong to the Studio project being opened, and only they
     # configure it. Without them the configuration already active (bundled project or
@@ -809,10 +840,8 @@ async def login(req: LoginRequest):
     managed = req.settings is not None
     typed = (req.project_name or "").strip()
     if managed:
-        # what this sign-in will read: the name typed here or the project's own, on the server asked for
-        target = (typed or str(req.settings.get("finProjectName") or "").strip(),
-                  req.server_url or str(req.settings.get("finBaseUrl") or "").strip() or None)
-        apply_studio_settings(req.settings, req.project_id, target)
+        # its own mappings until the signed-in session proves it reads config.json's site (below)
+        apply_studio_settings(req.settings, req.project_id, standard=False)
 
     server_url = req.server_url or FIN_SERVER_URL
     if managed and not typed and "project_name" not in ACTIVE_OVERRIDES:
@@ -843,6 +872,9 @@ async def login(req: LoginRequest):
     # With no project name there is nothing to check or poll.
     if project:
         PROJECT_CHECK = {"validated": await _validate_project(client), "source": name_source}
+        if managed and await _serves_standard_site(client):
+            apply_studio_settings(req.settings, req.project_id, standard=True)
+            FIN_SERVER_URL, PROJECT_NAME = server_url, project   # the session's, not config.json's
         _start_polling()
     else:
         PROJECT_CHECK = {"validated": None, "source": name_source}
@@ -871,9 +903,7 @@ async def set_project_settings(req: ProjectSettingsRequest):
     if TYPED_NAME and TYPED_NAME[0] != (req.project_id or None):
         TYPED_NAME = None
     kept = TYPED_NAME[1] if TYPED_NAME else ""
-    # the session stays on the server it signed in to, so that is the server this project reads
-    target = (str(req.settings.get("finProjectName") or "").strip() or kept, client.base_url)
-    apply_studio_settings(req.settings, req.project_id, target)
+    apply_studio_settings(req.settings, req.project_id, standard=False)
     if "project_name" not in ACTIVE_OVERRIDES:
         PROJECT_NAME = kept
     wanted_url = str(req.settings.get("finBaseUrl") or "").strip().rstrip("/")
@@ -889,6 +919,9 @@ async def set_project_settings(req: ProjectSettingsRequest):
         "validated": await _validate_project(client) if PROJECT_NAME else None,
         "source": name_source,
     }
+    if PROJECT_NAME and await _serves_standard_site(client):
+        apply_studio_settings(req.settings, req.project_id, standard=True)
+        FIN_SERVER_URL, PROJECT_NAME = client.base_url, client.project_name
 
     _cancel_polling()
     _reset_caches()
@@ -1160,12 +1193,22 @@ async def get_mapping_schema():
     def keys(obj) -> list:
         return [k for k in (obj if isinstance(obj, dict) else {}) if not k.startswith("_")]
 
-    return {
+    schema = {
         "finLivePoints": keys(BASE_CONFIG.get("live_point_ids")),
         "finEndpoints": keys(BASE_CONFIG.get("power_endpoints")),
         "finEquipmentClasses": keys(BASE_CONFIG.get("equipment_classes")),
         "finMeterProfile": keys((BASE_CONFIG.get("meter_profile") or {}).get("point_map")),
     }
+    # config.json's site, by name only: never proof that a project IS that site
+    if not PROJECT_MAPPINGS_DYNAMIC and BASE_CONFIG.get("project_name"):
+        schema["standardProfile"] = BASE_CONFIG["project_name"]
+    # Authoritative: the project this signed-in session verified on this server and serves
+    # config.json's mappings (whose keys are then its keys). Absent when nothing was verified, e.g.
+    # the same project name on another tenant, no session, or per-project mappings.
+    if STANDARD_VERIFIED and client and client.is_authenticated and not PROJECT_MAPPINGS_DYNAMIC:
+        schema["standardProject"] = STANDARD_VERIFIED["project_name"]
+        schema["standardProjectId"] = STANDARD_VERIFIED["project_id"]
+    return schema
 
 
 @app.get("/api/fin/status", response_model=StatusResponse)
@@ -1182,43 +1225,58 @@ async def get_status():
     )
 
 
+# The Eko-DT project a data answer was polled for. The Studio swaps the dashboard as soon as a
+# project opens, before the backend has switched to it: the stamp lets the dashboard drop an
+# answer that still belongs to the previous project.
+PROJECT_HEADER = "X-Eko-Project"
+
+
+def _stamp(response: Response) -> None:
+    response.headers[PROJECT_HEADER] = quote(ACTIVE_PROJECT_ID or "", safe="")
+
+
 @app.get("/api/fin/equip-live")
-async def get_equip_live():
+async def get_equip_live(response: Response):
     """Get live equipment data (floor-wise with points and alarms)."""
     if not client or not client.is_authenticated:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    _stamp(response)
     return cached_equip_data or {"timestamp": None, "equipment": []}
 
 
 @app.get("/api/fin/power-live")
-async def get_power_live():
+async def get_power_live(response: Response):
     """Get live power/energy/sensor data."""
     if not client or not client.is_authenticated:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    _stamp(response)
     return cached_power_data or {}
 
 
 @app.get("/api/fin/power-history")
-async def get_power_history():
+async def get_power_history(response: Response):
     """Get the historian series. Refreshed once per realtime cycle, not per live poll."""
     if not client or not client.is_authenticated:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    _stamp(response)
     return cached_power_history or {}
 
 
 @app.get("/api/fin/pmu-live")
-async def get_meter_live():
+async def get_meter_live(response: Response):
     """Get power-meter equipment metrics keyed by meter name."""
     if not client or not client.is_authenticated:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    _stamp(response)
     return cached_meter_data
 
 
 @app.get("/api/fin/alarms")
-async def get_alarms():
+async def get_alarms(response: Response):
     """Get the flat active-alarm list with counts by severity."""
     if not client or not client.is_authenticated:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    _stamp(response)
     return cached_alarm_data or {
         "timestamp": None,
         "alarms": [],
@@ -1353,7 +1411,8 @@ async def get_building_info():
 @app.post("/api/fin/logout")
 async def logout():
     """Disconnect from FIN server."""
-    global client, PROJECT_CHECK
+    global client, PROJECT_CHECK, STANDARD_VERIFIED
+    STANDARD_VERIFIED = None
     _cancel_polling()
     if client:
         await client.close()
@@ -1363,8 +1422,9 @@ async def logout():
 
 
 @app.get("/api/fin/documents")
-async def get_documents():
+async def get_documents(response: Response):
     """O&M and warranty manuals. Each link stays on this server."""
+    _stamp(response)
     return load_documents()
 
 
@@ -1375,7 +1435,7 @@ async def get_fin_file(ref: str, download: int = 0):
         raise HTTPException(status_code=401, detail="Not authenticated")
     if not re.fullmatch(r"@p:[A-Za-z0-9_]+:r:[0-9a-fA-F-]+", ref or ""):
         raise HTTPException(status_code=404, detail="Unknown document")
-    doc = _catalog_doc(ref)
+    doc = _catalog_doc(ref) if _ref_project(ref) == client.project_name else None
     if not doc:
         raise HTTPException(status_code=404, detail="Unknown document")
     url = _fin_rec_file_url(client.base_url, client.project_name, ref)

@@ -114,7 +114,7 @@
     bulk:[
       { id:'wo', labelKey:'dgBulkWo', icon:'wrench', doneKey:'dgBulkWoDone', run:(E2, rows) => { E2.state.woPhase = E2.state.woPhase || {}; let n = 0; rows.forEach(r => { if(E2.state.woRaised[r.id] || E2.state.woPhase[r.id]) return; E2.state.woPhase[r.id] = 'raising'; n++; if(window.EKO_CMMS) window.EKO_CMMS.createWorkOrder({ assetId:r.id }); }); return n; } },
       { id:'ack', labelKey:'dgBulkAck', icon:'check', doneKey:'dgBulkAckDone', run:(E2, rows) => { let n = 0; const d = new Date(); const time = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-        rows.forEach(r => (r.alarms || []).forEach(id => { const a = E2.alarm(id); if(a && !a.ack){ a.ack = { time, who:'AY' }; n++; } })); return n; } },
+        rows.forEach(r => (r.alarms || []).forEach(id => { const a = E2.alarm(id); if(a && !a.ack){ a.ack = { time, who: E2.initials() || '—' }; n++; } })); return n; } },
       { id:'export', labelKey:'dgBulkExport', icon:'download' },
       { id:'tag', labelKey:'dgBulkTag', icon:'plus', run:(E2, rows, tag) => { E2.state.tags = E2.state.tags || {}; rows.forEach(r => { const set = new Set(E2.state.tags[r.id] || []); set.add(tag); E2.state.tags[r.id] = [...set]; }); try{ localStorage.setItem('eko-tags-' + ((E2.data.user && E2.data.user.name) || 'user'), JSON.stringify(E2.state.tags)); }catch(e){} return rows.length; } }
     ]

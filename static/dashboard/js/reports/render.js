@@ -55,9 +55,9 @@ window.EKO_RV = (function(){
     if(w.type === 'table.alarms') return { head:[c.t('rpCol.sev'), c.t('colAssetId'), c.t('rpCol.what'), c.t('rpCol.age'), c.t('rpCol.state')],
       rows: w.rows.map(a => [c.t('rpSev.' + a.sev), a.asset, c.ar ? (a.techAr || a.techEn) : a.techEn, E.fmtAge.call({ t:c.t }, a.ageH), a.ack ? c.t('ackShort', { time:a.ack.time, who:a.ack.who }) : C().sevAction({ t:c.t }, a.sev)]),
       basis: c.t('rpWin.lastH', { h:w.hours, to:E.data.basis.asOf }) + ' · ' + c.t('rpSrc.alarms') };
-    if(w.type === 'table.boards') return { head:[c.t('rpCol.board'), 'kW'], rows:w.rows.map(r => [r[0], r[1]]), basis:R().basisText(E, w.basis, false, c.lang) };
-    if(w.type === 'table.waste') return { head:[c.t('rpCol.driver'), 'kWh', 'AED', c.t('rpCol.state')], rows:w.rows.map(k => [c.ar ? k.labelAr : k.labelEn, num2(k.wasteKwh), num2(R().mul(k.wasteKwh, w.tariff.rate)), c.ar ? k.stateAr : k.stateEn]), basis:R().basisText(E, w.basis, false, c.lang) };
-    if(w.type === 'table.anom') return { head:[c.t('colAssetId'), c.t('rpCol.what'), 'kWh MTD', 'AED'], rows:w.rows.map(a => [a.id, (c.ar ? a.titleAr : a.titleEn) + ' · ' + (c.ar ? a.zoneAr : a.zone), R().num(a.kwhMtd), num2(R().mul(a.kwhMtd, w.tariff.rate))]), basis:R().basisText(E, w.basis, false, c.lang) };
+    if(w.type === 'table.boards') return { head:[c.t('rpCol.board'), 'kW'], rows:w.rows.map(r => [r[0], R().fmt(r[1], 1)]), basis:R().basisText(E, w.basis, false, c.lang) };
+    if(w.type === 'table.waste') return { head:[c.t('rpCol.driver'), 'kWh', E.data.basis.currency || 'AED', c.t('rpCol.state')], rows:w.rows.map(k => [c.ar ? k.labelAr : k.labelEn, num2(k.wasteKwh), num2(R().mul(k.wasteKwh, w.tariff.rate)), c.ar ? k.stateAr : k.stateEn]), basis:R().basisText(E, w.basis, false, c.lang) };
+    if(w.type === 'table.anom') return { head:[c.t('colAssetId'), c.t('rpCol.what'), 'kWh MTD', E.data.basis.currency || 'AED'], rows:w.rows.map(a => [a.id, (c.ar ? a.titleAr : a.titleEn) + ' · ' + (c.ar ? a.zoneAr : a.zone), R().num(a.kwhMtd), num2(R().mul(a.kwhMtd, w.tariff.rate))]), basis:R().basisText(E, w.basis, false, c.lang) };
     if(w.type === 'table.bench') return { head:[c.t('rpCol.system'), 'Wh/m²', c.t('rpCol.band'), c.t('rpCol.note')], rows:w.rows.map(r => [c.ar ? r.sysAr : r.sysEn, R().num(r.whm2), r.bandLo == null || r.bandHi == null ? null : r.bandLo + '–' + r.bandHi, c.ar ? r.noteAr : r.noteEn]), basis:R().basisText(E, w.basis, false, c.lang) };
     if(w.type === 'table') return { head:w.head, rows:w.rows, basis:w.basis ? R().basisText(E, w.basis, false, c.lang) : '' };
     if(w.type === 'kv') return { head:[c.t('rpCol.field'), c.t('rpXl.value')], rows:w.rows, basis:w.basis ? R().basisText(E, w.basis, false, c.lang) : '' };
@@ -86,7 +86,7 @@ window.EKO_RV = (function(){
     }
   }
   const sourcesText = (E, doc, s) => { const c = ctx(E, doc);
-    return [s.points.map(p => R().sourceLabel(E, p, c.lang)).join(' + '), c.t(s.windowKey, s.windowParams || {})].concat(s.bases).filter(Boolean).join(' · '); };
+    return [[...new Set(s.points.map(p => R().sourceLabel(E, p, c.lang)))].join(' + '), c.t(s.windowKey, s.windowParams || {})].concat(s.bases).filter(Boolean).join(' · '); };
   function narrBlock(E, c, doc, b, cls){
     if(!b) return '';
     if(b.rejected) return `<p class="rpmiss rpnarrrej">${esc(c.t('rpNarr.rejected'))}</p>`;

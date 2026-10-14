@@ -204,7 +204,7 @@ window.EKO_AI = (function(){
   function footerRows(){
     const b = E.data.basis || {}, prov = t('rpB.prov');
     const site = E.lang === 'ar' ? E.data.nameAr : E.data.nameEn;
-    return [[t('rpFt.site'), site], [t('rpFt.generated'), new Date().toLocaleString(E.lang === 'ar' ? 'ar-AE' : 'en-GB')], [t('rpFt.by'), (E.data.user && (E.lang === 'ar' ? E.data.user.nameAr : E.data.user.name)) || ''],
+    return [[t('rpFt.site'), site], [t('rpFt.generated'), new Date().toLocaleString(E.lang === 'ar' ? 'ar-AE' : 'en-GB', window.EKO_R && window.EKO_R.siteTimeOpts ? window.EKO_R.siteTimeOpts() : {})], [t('rpFt.by'), (E.data.user && (E.lang === 'ar' ? E.data.user.nameAr : E.data.user.name)) || ''],
       [t('rpFt.tariff'), (b.tariffId || '') + ' ' + (b.tariffVersion || '') + (b.tariffStatus === 'provisional' ? ' ' + prov : '')], [t('rpFt.emission'), (b.co2FactorId || '') + (b.co2FactorStatus === 'provisional' ? ' ' + prov : '')], [t('rpFt.eko'), window.EKO_VERSION || '']];
   }
   function exportMd(c){

@@ -501,9 +501,10 @@ window.EKO_C = (function(){
        by its tone, with Energy Waste / Cost Impact as paired sub-cells —
        followed by the Energy Waste & Risk section (totals + share bars).
        Top opportunities and Modules do NOT live on this panel. */
+    const cur = b.currency || 'AED';   /* the project's currency; no unit after a missing cost */
     const cards = d.kpis.map(k => {
       const st = ar ? k.stateAr : k.stateEn;
-      const cost = k.costAed != null ? k.costAed : (k.wasteKwh != null ? k.wasteKwh * b.aedPerKwh : null);
+      const cost = k.costAed != null ? k.costAed : (k.wasteKwh != null && b.aedPerKwh != null ? k.wasteKwh * b.aedPerKwh : null);   /* no tariff: unknown, not 0 */
       return `<article class="optcard2" data-tone="${k.tone}">
         <div class="optheadrow"><span class="optname">${esc(ar?k.labelAr:k.labelEn)}</span>
           <span class="optval tMonoS msA">${fmt(k.gaugeVal,1)}${k.key==='overnight'||k.key==='imbalance'?'%':''}</span></div>
@@ -511,17 +512,17 @@ window.EKO_C = (function(){
         <p class="opttip">${esc(ar?k.tipAr:k.tipEn)}</p>
         <div class="optcells">
           <span class="optcell"><i class="optlbl">${esc(E.t('wasteLbl'))}</i><b class="tMonoS">${fmt(k.wasteKwh,1)} kWh</b></span>
-          <span class="optcell"><i class="optlbl">${esc(E.t('costLbl'))}</i><b class="tMonoS">${fmt(cost,1)} AED</b></span>
+          <span class="optcell"><i class="optlbl">${esc(E.t('costLbl'))}</i><b class="tMonoS">${fmt(cost,1)}${cost == null ? '' : ' ' + esc(cur)}</b></span>
         </div></article>`;
     }).join('');
     const RAMP2 = ['#C2504B','#D07A3C','#D8A83C','#D8C63C'];
     const ranked = [...d.kpis].filter(k => k.wasteKwh != null && isFinite(k.wasteKwh)).sort((x,y)=>y.wasteKwh-x.wasteKwh);
     const rank = ranked.length ? ranked : d.kpis;
     const rampOf = k => RAMP2[Math.min(Math.max(rank.indexOf(k), 0), RAMP2.length-1)];
-    const totAed = d.wasteTotalAed != null ? d.wasteTotalAed : (d.wasteTotalKwh != null ? d.wasteTotalKwh * b.aedPerKwh : null);
+    const totAed = d.wasteTotalAed != null ? d.wasteTotalAed : (d.wasteTotalKwh != null && b.aedPerKwh != null ? d.wasteTotalKwh * b.aedPerKwh : null);
     const wr = `<div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('ewrT'))}</span></div>
       <div class="row gap8"><span class="ewrtot tMonoS">${fmt(d.wasteTotalKwh,1)} kWh</span>
-        <span class="ewrtot tMonoS">${fmt(totAed,1)} AED</span></div>
+        <span class="ewrtot tMonoS">${fmt(totAed,1)}${totAed == null ? '' : ' ' + esc(cur)}</span></div>
       ${d.kpis.map(k => {
         const risk = k.sharePct != null && isFinite(k.sharePct) ? Math.min(100, Math.max(0, k.sharePct)) : 0;
         return `<div class="ewrrow">
@@ -547,6 +548,7 @@ window.EKO_C = (function(){
        gradient value bar with an amber over-baseline overflow segment and a
        marker dot; the baseline/contracted tick carries its label above. */
     const bullet = (hc, key) => {
+      if (!hc) return '';   /* no chart record (real mode: no fixture bands) */
       const split = !hc.crit && hc.value > hc.bands[0];
       const tick = hc.crit ? 100 : hc.bands[0];
       const dotC = split ? '#FFC53D' : '#4EA3E8';
@@ -618,15 +620,16 @@ window.EKO_C = (function(){
       ${hero(E.t('pwPeak'), peakPct != null ? E.t('pwPctLimit',{p:peakPct}) : '', peakPct != null ? 'crit' : '', nd(peakKw,1), peakKw != null ? 'kW' : '', E.t('pwContractedLine',{v:fmt(contractedKw,0)}), peakKw != null ? bullet(p.heroCharts.peak,'P') : '')}
     </div>`;
     const zhAll = { hourly: p.zoneLast24, today: p.zoneHourly, weekly: p.zoneWeekly, monthly: p.zoneMonthly };
-    const lastVal = z => (z && z.length) ? Number(z[z.length-1])||0 : 0;
-    const sumVal = z => (z||[]).reduce((a,v)=>a+(Number(v)||0),0);
+    /* a board with no reading is missing (--), never 0 kWh */
+    const lastVal = z => (z && z.length && z[z.length-1] != null) ? Number(z[z.length-1]) : null;
+    const sumVal = z => (z||[]).some(v => v != null) ? (z||[]).reduce((a,v)=>a+(Number(v)||0),0) : null;
     const boardNames = (p.zones && p.zones.length) ? p.zones : p.boards.map(x=>x[0]);
     const boardLoads = tr === 'monthly' && p.zoneMTD ? p.zoneMTD
       : tr === 'weekly' && p.zoneWTD ? p.zoneWTD
       : tr === 'today' && zhAll.today && zhAll.today[0] && zhAll.today[0].length ? zhAll.today.map(sumVal)
       : tr === 'hourly' && zhAll.hourly && zhAll.hourly[0] && zhAll.hourly[0].length ? zhAll.hourly.map(lastVal)
       : (p.zoneLast24 && p.zoneLast24[0] && p.zoneLast24[0].length ? p.zoneLast24.map(lastVal)
-        : p.boards.map(x => Number(x[1])||0));
+        : p.boards.map(x => x[1] == null ? null : Number(x[1])));
     const boards = boardNames.map((name,i2) => [name, boardLoads[i2] == null ? null : boardLoads[i2]]);
     const totKwh = boards.reduce((a,x)=>a+Math.max(0, Number(x[1])||0),0);
     const dbEmpty = boards.every(x => x[1] == null || Number(x[1]) === 0);
@@ -661,6 +664,8 @@ window.EKO_C = (function(){
         `<button class="dbrow" data-act="pwBoard" data-i="${i2}" data-on="${String(E.state.pwBoard)===String(i2)}"><span class="dbid">${esc(x[0])}</span>
           <span class="dbbar"><span style="width:${totalMax?((Math.max(0, Number(x[1])||0)/totalMax*100).toFixed(1)):0}%;background:${hues[i2]}"></span></span>
           <span class="dbkw">${x[1]==null||(dbEmpty&&Number(x[1])===0)?'--':(fmt(Number(x[1]),1)+' kWh')}</span>${icon('chevR',12)}</button>`).join('')}</div></article>`;
+    /* no board mapped for this project: say so, never an empty donut or 0 kWh rows */
+    const noBoards = titleKey => `<article class="pwwidget"><div class="pwwh"><span class="alcardt">${esc(E.t(titleKey))}</span></div><p class="alempty" data-testid="pw-boards-unset">${esc(E.t('pwDbNotConfigured'))}</p></article>`;
     let zh = (zhAll[tr] && zhAll[tr][0]) ? zhAll[tr] : [[]];
     let zhHues = hues;
     let zhNames = boardNames;
@@ -785,7 +790,7 @@ window.EKO_C = (function(){
           <button class="btnG btnSm" data-act="goPage" data-page="power-model" data-sub="power">${esc(E.t('modelView'))}</button></span>
       </div>
       ${heroRow}
-      <div class="pwgrid pg39">${share}${entrend}${db}${peak}</div>
+      <div class="pwgrid pg39">${boards.length ? share : noBoards('pwDbShare')}${entrend}${boards.length ? db : noBoards('pwDb')}${peak}</div>
       ${mvRow(E)}
     </div>`;
   }
@@ -793,7 +798,7 @@ window.EKO_C = (function(){
   function mvRow(E){
     const doc = window.EKO_LAYOUTS[E.state.pageId] || {};
     const w = (doc.widgets || []).find(x => x.type === 'powerMv'); if(!w) return '';
-    const cards = ((w.binding || {}).cards || []).map(k => k === 'baselineVsActual' ? window.EKO_BVA.card(E) : k === 'meterStatus' ? window.EKO_MT.panel(E) : '').join('');
+    const cards = ((w.binding || {}).cards || []).map(k => k === 'baselineVsActual' ? (E.data.power.bva ? window.EKO_BVA.card(E) : `<article class="alcard"><p class="alempty" data-testid="bva-unset">${esc(E.t('bvaNotConfigured'))}</p></article>`) : k === 'meterStatus' ? window.EKO_MT.panel(E) : '').join('');
     return `<div class="mvgrid" data-layout="${esc((w.binding || {}).layout || 'side')}">${cards}</div>`;
   }
 
@@ -801,6 +806,7 @@ window.EKO_C = (function(){
      metric rows with h22 bullets, the zones-today list and the waste chip. */
   function consModelPanel(E){
     const p = E.data.power, sv = p.subview, ar = E.lang === 'ar';
+    if (!sv) return `<div class="cmpanel"><p class="alempty" data-testid="pw-model-unset">${esc(E.t('pwModelNotConfigured'))}</p></div>`;   /* real mode: no model for this project */
     const mrow = (lbl, val, note, svg2) =>
       `<div class="cmrow"><div class="cmhead"><span class="cmlbl">${esc(lbl)}</span>
         <span class="cmval">${val}</span><span class="cmnote">${esc(note)}</span></div>${svg2||''}</div>`;
@@ -1241,7 +1247,8 @@ window.EKO_C = (function(){
     };
     const dubaiYmd = () => {
       try {
-        const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Dubai', year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(new Date());
+        const tz = (window.INJECTED_PROJECT_CONFIG && window.INJECTED_PROJECT_CONFIG.site && window.INJECTED_PROJECT_CONFIG.site.timezone) || 'Asia/Dubai';   /* the open project's site */
+        const parts = new Intl.DateTimeFormat('en-GB', { timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(new Date());
         const g = k => parseInt((parts.find(p => p.type === k) || {}).value, 10);
         return { y: g('year'), m: g('month'), d: g('day') };
       } catch (e) {

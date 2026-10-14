@@ -37,6 +37,21 @@ const FIN_API_BASE = '/api/fin'
 /** Which project's configuration the backend session is running, so it is only re-sent on change */
 let appliedConfigKey: string | null = null
 
+/** Bumped whenever the session changes project (sign-in, switch, sign-out): an answer to a
+ *  request sent before that is dropped, so a slow reply never lands on the next project. */
+let dataEpoch = 0
+
+/** Switches run one at a time, each for the project open when it runs, so the last one wins */
+let syncChain: Promise<void> = Promise.resolve()
+
+/** The backend stamps data with the Eko-DT project it was polled for (X-Eko-Project). An answer
+ *  for another project is dropped; a backend that does not stamp is trusted as before. */
+function forOpenProject(res: Response): boolean {
+  const stamp = res.headers.get('X-Eko-Project')
+  if (stamp === null) return true
+  return decodeURIComponent(stamp) === (useProjectStore.getState().currentProject?.projectId ?? '')
+}
+
 /** The open project's identity and backend-relevant settings. Every project has them (a project
  *  with none sends {} and the backend falls back to its config.json defaults), so a connected
  *  session never keeps serving the previous project's mappings. null only when no project is open. */
@@ -61,6 +76,7 @@ export const useFinStore = create<FinState>((set, get) => ({
     try {
       // The backend signs in with this project's FIN configuration, not just its config.json defaults
       const config = currentProjectConfig()
+      dataEpoch++
       const res = await fetch(`${FIN_API_BASE}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -99,6 +115,7 @@ export const useFinStore = create<FinState>((set, get) => ({
       // ignore
     }
     appliedConfigKey = null
+    dataEpoch++
     set({
       isConnected: false,
       equipment: [],
@@ -122,10 +139,14 @@ export const useFinStore = create<FinState>((set, get) => ({
   },
 
   fetchEquipment: async () => {
+    const epoch = dataEpoch
     try {
       const res = await fetch(`${FIN_API_BASE}/equip-live`)
+      if (epoch !== dataEpoch) return
       if (res.ok) {
+        if (!forOpenProject(res)) return
         const data = await res.json()
+        if (epoch !== dataEpoch) return
         set({
           equipment: data.equipment || [],
           lastUpdated: data.timestamp || new Date().toISOString(),
@@ -139,10 +160,14 @@ export const useFinStore = create<FinState>((set, get) => ({
   },
 
   fetchPower: async () => {
+    const epoch = dataEpoch
     try {
       const res = await fetch(`${FIN_API_BASE}/power-live`)
+      if (epoch !== dataEpoch) return
       if (res.ok) {
+        if (!forOpenProject(res)) return
         const data: FinPowerLiveResponse = await res.json()
+        if (epoch !== dataEpoch) return
         set({ powerData: data })
       } else if (res.status === 401) {
         set({ isConnected: false })
@@ -152,37 +177,47 @@ export const useFinStore = create<FinState>((set, get) => ({
     }
   },
 
-  syncProjectSettings: async () => {
-    const config = currentProjectConfig()
-    if (!get().isConnected || !config || config.key === appliedConfigKey) return
-    try {
-      const res = await fetch(`${FIN_API_BASE}/project-settings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settings: config.settings, project_id: config.projectId }),
-      })
-      if (res.status === 401) {
-        set({ isConnected: false })
-        return
-      }
-      if (!res.ok) return
-      appliedConfigKey = config.key
-      // The switch re-validates the project name, so the badge must follow it
-      void get().fetchStatus()
-      // Whatever was polled under the previous project must not linger on screen
-      set({ equipment: [], powerData: null, lastUpdated: null })
-      const data = await res.json().catch(() => ({}))
-      if (data.reconnect_required) {
-        set({ connectionError: 'This project uses a different FIN server. Disconnect and sign in again.' })
-      }
-      setTimeout(() => {
-        get().fetchEquipment()
-        get().fetchPower()
-      }, 2000)
-    } catch {
-      // Backend not reachable; the next change retries
-    }
+  syncProjectSettings: () => {
+    syncChain = syncChain.then(() => syncOnce(get, set)).catch(() => { /* the next change retries */ })
+    return syncChain
   },
 
   setConnectionError: (error) => set({ connectionError: error }),
 }))
+
+type Get = () => FinState
+type Set = (partial: Partial<FinState>) => void
+
+/** One switch of the backend session to the project open now (read when it runs, not when asked) */
+async function syncOnce(get: Get, set: Set): Promise<void> {
+  const config = currentProjectConfig()
+  if (!get().isConnected || !config || config.key === appliedConfigKey) return
+  dataEpoch++
+  try {
+    const res = await fetch(`${FIN_API_BASE}/project-settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings: config.settings, project_id: config.projectId }),
+    })
+    if (res.status === 401) {
+      set({ isConnected: false })
+      return
+    }
+    if (!res.ok) return
+    appliedConfigKey = config.key
+    // The switch re-validates the project name, so the badge must follow it
+    void get().fetchStatus()
+    // Whatever was polled under the previous project must not linger on screen
+    set({ equipment: [], powerData: null, lastUpdated: null })
+    const data = await res.json().catch(() => ({}))
+    if (data.reconnect_required) {
+      set({ connectionError: 'This project uses a different FIN server. Disconnect and sign in again.' })
+    }
+    setTimeout(() => {
+      get().fetchEquipment()
+      get().fetchPower()
+    }, 2000)
+  } catch {
+    // Backend not reachable; the next change retries
+  }
+}

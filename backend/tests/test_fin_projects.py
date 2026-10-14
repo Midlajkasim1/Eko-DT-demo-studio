@@ -5,6 +5,7 @@ FinScramClient is replaced by tests/fake_fin.py, so no FIN server is needed.
 """
 import copy
 import os
+import re
 import sys
 import unittest
 from urllib.parse import unquote
@@ -179,6 +180,16 @@ class FinProjectDiscoveryTests(unittest.TestCase):
         for value in ("p:{project}", "hisRead", "/api/", "ahu", "kwh", '"PMU"', "250", "desc", "_comment"):
             self.assertNotIn(value, text)
 
+    def test_mapping_schema_names_config_json_site_but_verifies_nothing_without_a_session(self):
+        schema = self.http.get("/api/fin/mapping-schema").json()
+        self.assertEqual(schema["standardProfile"], main.BASE_CONFIG["project_name"])   # a name, not a verification
+        self.assertNotIn("standardProject", schema)                                      # no session: nothing verified
+        main.PROJECT_MAPPINGS_DYNAMIC = True
+        try:
+            self.assertNotIn("standardProfile", self.http.get("/api/fin/mapping-schema").json())
+        finally:
+            main.PROJECT_MAPPINGS_DYNAMIC = False
+
     def test_mapping_schema_is_the_same_whichever_project_is_open(self):
         before = self.http.get("/api/fin/mapping-schema").json()
         self.login(B, "B")
@@ -216,7 +227,9 @@ class FinProjectDiscoveryTests(unittest.TestCase):
         validate(B, "B")
         self.http.post("/api/fin/project-settings", json={"settings": A, "project_id": "A"})
         validate(A, "A")
-        reads = [(p, unquote(ep)) for p, ep in FakeFinClient.probe_log if "readById" in unquote(ep)]
+        # the validated points only (sign-in also reads one of config.json's records: main._serves_standard_site)
+        reads = [(p, unquote(ep)) for p, ep in FakeFinClient.probe_log
+                 if "readById" in unquote(ep) and re.search(r":r:(111|222)\)", unquote(ep))]
         self.assertEqual([p for p, _ in reads], ["marsaAlArab", "ellisdonDemo", "marsaAlArab"])
         self.assertIn("/api/marsaAlArab/eval?expr=readById(@p:marsaAlArab:r:111)", reads[0][1])
         self.assertIn("/api/ellisdonDemo/eval?expr=readById(@p:ellisdonDemo:r:222)", reads[1][1])

@@ -75,6 +75,7 @@ class ProjectConfigTests(unittest.TestCase):
         self._real_project_json = main.PROJECT_JSON
         main.FinScramClient = FakeFinClient
         FakeFinClient.slow_realtime = False
+        FakeFinClient.missing_points = set()
         self.http = TestClient(main.app)
         self.http.__enter__()
 
@@ -214,9 +215,21 @@ class ProjectConfigTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         self.assert_standard(self.get("/api/fin/project-settings"))
 
-    def test_same_name_on_another_server_gets_no_site_mappings(self):
-        # another server may be another tenant: its "marsaAlArab" is not config.json's
-        self.login({"finProjectName": main.BASE_CONFIG["project_name"], "finBaseUrl": "https://fin.other.example"}, "proj-elsewhere")
+    def test_a_new_server_address_keeps_the_standard_mappings(self):
+        # the FIN server's IP/URL changes: the site is recognised by its project and records, not its address
+        for url in ("https://10.10.90.21", "https://fin.client.example:8443"):
+            r = self.http.post("/api/fin/login", json={"username": "u", "password": "p", "server_url": url, "project_id": "proj-ip",
+                                                       "settings": {"finProjectName": main.BASE_CONFIG["project_name"]}})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assert_standard(self.get("/api/fin/project-settings"))
+            self.assertEqual(self.get("/api/fin/status")["server_url"], url)   # the session's server, not config.json's
+
+    def test_same_name_without_the_sites_records_gets_no_site_mappings(self):
+        # another tenant's "marsaAlArab": config.json's point records do not exist there
+        name = main.BASE_CONFIG["project_name"]
+        FakeFinClient.missing_points = {v.replace("{project}", name) for v in main.BASE_CONFIG["live_point_ids"].values()
+                                        if isinstance(v, str)}
+        self.login({"finProjectName": name, "finBaseUrl": "https://fin.other.example"}, "proj-elsewhere")
         served = self.runtime()
         self.assert_not_configured(served["config"], BLOCKS)
         self.assertEqual(live_points(served["power_live"]), {})
@@ -232,6 +245,43 @@ class ProjectConfigTests(unittest.TestCase):
                 self.assertEqual(cfg["config"]["live_point_ids"], PROJECT_B["finLivePoints"])   # B's own, no Marsa IDs
             else:
                 self.assert_standard(cfg)
+
+    # --- mapping-schema: the standard profile is reported only once this server verified it ------
+
+    def schema(self):
+        return self.get("/api/fin/mapping-schema")
+
+    def test_schema_reports_the_standard_profile_verified_on_this_server(self):
+        self.login({"finProjectName": main.BASE_CONFIG["project_name"]}, "proj-site")
+        s = self.schema()
+        self.assertEqual((s.get("standardProject"), s.get("standardProjectId")), (main.BASE_CONFIG["project_name"], "proj-site"))
+        self.assert_standard(self.get("/api/fin/project-settings"))                    # and it is what is served
+
+    def test_schema_does_not_verify_the_same_name_on_another_tenant(self):
+        # config.json's records are not on this server: same name, another site
+        name = main.BASE_CONFIG["project_name"]
+        FakeFinClient.missing_points = {v.replace("{project}", name) for v in main.BASE_CONFIG["live_point_ids"].values()
+                                        if isinstance(v, str)}
+        self.login({"finProjectName": name, "finBaseUrl": "https://fin.other.example"}, "proj-elsewhere")
+        s = self.schema()
+        self.assertNotIn("standardProject", s)
+        self.assertNotIn("standardProjectId", s)
+        self.assertEqual(s["standardProfile"], name)                                     # still named, for messages
+        self.assert_not_configured(self.get("/api/fin/project-settings"), BLOCKS)        # and not served config.json's
+
+    def test_schema_verification_follows_the_session(self):
+        site = {"finProjectName": main.BASE_CONFIG["project_name"]}
+        self.login(site, "proj-site")
+        self.assertEqual(self.schema().get("standardProjectId"), "proj-site")
+        self.switch(PROJECT_B, "proj-B")                                                 # another project: not verified
+        self.assertNotIn("standardProject", self.schema())
+        self.switch(site, "proj-site")                                                   # back, verified again
+        self.assertEqual(self.schema().get("standardProjectId"), "proj-site")
+        self.http.post("/api/fin/login", json={"username": "u", "password": "p"})        # a sign-in without the project
+        self.assertNotIn("standardProject", self.schema())
+        self.login(site, "proj-site")
+        self.http.post("/api/fin/logout")
+        self.assertNotIn("standardProject", self.schema())
 
     def test_dynamic_on_restores_per_project_mappings(self):
         main.PROJECT_MAPPINGS_DYNAMIC = True
@@ -308,6 +358,30 @@ class ProjectConfigTests(unittest.TestCase):
         self.assertEqual(main.client.last_point_rows, [])
         self.assertEqual(main.client.last_alarm_rows, [])
         self.assertEqual(self.get("/api/fin/equip-live").get("equipment", []), [])
+
+    def test_data_answers_are_stamped_with_the_project_they_were_polled_for(self):
+        # the dashboard drops an answer stamped for another project (it can outlive a switch)
+        paths = ("/api/fin/power-live", "/api/fin/equip-live", "/api/fin/power-history",
+                 "/api/fin/pmu-live", "/api/fin/alarms", "/api/fin/documents")
+        self.login(PROJECT_A, "proj-A")
+        for p in paths:
+            self.assertEqual(self.http.get(p).headers.get(main.PROJECT_HEADER), "proj-A", p)
+        self.switch(PROJECT_B, "proj-B")
+        for p in paths:
+            self.assertEqual(self.http.get(p).headers.get(main.PROJECT_HEADER), "proj-B", p)
+        self.assert_serves_b()   # the stamp does not change the payload
+
+    def test_manuals_are_only_listed_for_their_own_fin_project(self):
+        def refs():
+            fams = self.get("/api/fin/documents")["families"]
+            return [f[k]["ref"] for f in fams for k in ("om", "warranty") if k in f]
+        self.login({"finProjectName": main.BASE_CONFIG["project_name"]}, "proj-site")
+        site_refs = refs()
+        self.assertTrue(site_refs and all(r.startswith("@p:" + main.BASE_CONFIG["project_name"] + ":r:") for r in site_refs))
+        self.switch({"finProjectName": "khaznaDataCenter"}, "proj-K")
+        self.assertEqual(refs(), [], "another FIN project is not offered config.json's site manuals")
+        r = self.http.get("/api/fin/file", params={"ref": site_refs[0]})
+        self.assertEqual(r.status_code, 404, "nor can it open one through its own session")
 
     def test_server_url_change_asks_for_a_new_sign_in(self):
         self.login(PROJECT_A, "proj-A")

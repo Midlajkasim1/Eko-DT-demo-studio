@@ -60,7 +60,14 @@ export async function fetchFinResources(projectId: string): Promise<{ resources:
 
 /** The keys each Data Mapping block can have (Eko-DT's own, from the backend's config.json),
  *  as names only. Blocks the backend does not describe are left out. */
-export type MappingSchema = Partial<Record<'finLivePoints' | 'finEndpoints' | 'finEquipmentClasses' | 'finMeterProfile', string[]>>
+export type MappingSchema = Partial<Record<'finLivePoints' | 'finEndpoints' | 'finEquipmentClasses' | 'finMeterProfile', string[]>> & {
+  /** config.json's own site, by name: never proof that a project is that site */
+  standardProfile?: string
+  /** Set only when the signed-in session verified config.json's records on this server for the
+   *  Eko-DT project `standardProjectId`, and serves it config.json's mappings (authoritative) */
+  standardProject?: string
+  standardProjectId?: string
+}
 
 export async function fetchMappingSchema(): Promise<MappingSchema> {
   const body = await getJson<Record<string, unknown>>('/api/fin/mapping-schema', 'the mapping keys')
@@ -68,6 +75,9 @@ export async function fetchMappingSchema(): Promise<MappingSchema> {
   for (const field of ['finLivePoints', 'finEndpoints', 'finEquipmentClasses', 'finMeterProfile'] as const) {
     const keys = body[field]
     if (Array.isArray(keys)) out[field] = keys.filter((k): k is string => typeof k === 'string')
+  }
+  for (const key of ['standardProfile', 'standardProject', 'standardProjectId'] as const) {
+    if (typeof body[key] === 'string' && body[key]) out[key] = body[key] as string
   }
   return out
 }

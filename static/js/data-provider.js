@@ -17,6 +17,8 @@
       realtimeMs: Number(raw.polling && raw.polling.realtime_ms) || 30000,
       project: fin.project || fin.project_name || '',
       displayName: raw.display_name || fin.displayName || '',
+      // The Eko-DT project this dashboard shows. Only the Studio and the exported viewer know it.
+      projectId: raw.projectId || '',
     };
   }
 
@@ -32,11 +34,18 @@
   }
 
   class BackendProvider {
+    constructor(projectId) { this.projectId = projectId || ''; }
     async _json(url) {
       try {
         const res = await fetch(url);
         if (res.status === 401) return { unauthorized: true };
         if (!res.ok) return null;
+        // The backend stamps data with the project it polled it for. Right after a project
+        // switch it can still be serving the previous one: that answer is not this project's.
+        const stamp = res.headers.get('X-Eko-Project');
+        if (this.projectId && stamp !== null && decodeURIComponent(stamp) !== this.projectId) {
+          return { otherProject: true };
+        }
         return await res.json();
       } catch (_) {
         return null;
@@ -104,7 +113,18 @@
   }
 
   function usable(data) {
-    return !!data && !data.unauthorized;
+    return !!data && !data.unauthorized && !data.otherProject;
+  }
+
+  // While the backend is still on another project, ask again soon rather than at the next
+  // 30 s realtime tick, so the project's own equipment and alarms follow the switch quickly
+  let catchUp = null;
+  function retrySoon(generation) {
+    if (catchUp) return;
+    catchUp = setTimeout(function () {
+      catchUp = null;
+      if (generation === state.generation) pollRealtime();
+    }, 2000);
   }
 
   // Consumers read power_history off the live payload, so it is spliced back in
@@ -113,8 +133,13 @@
     return state.powerHistory ? { ...live, power_history: state.powerHistory } : live;
   }
 
+  // Every poll checks, after its await, that this poller was not stopped meanwhile: a stopped
+  // poller (the previous project's dashboard) must not hand its late answers to the next one.
   async function pollLive() {
+    const generation = state.generation;
     const data = await state.provider.getLiveValues();
+    if (generation !== state.generation) return;
+    if (data && data.otherProject) { retrySoon(generation); return; }
     if (usable(data)) {
       state.power = withHistory(data);
       emit('power', state.power);
@@ -123,6 +148,7 @@
   }
 
   async function pollRealtime() {
+    const generation = state.generation;
     const [equipment, alarms, meters, history, documents] = await Promise.all([
       state.provider.getEquipment(),
       state.provider.getAlarms(),
@@ -130,6 +156,8 @@
       state.provider.getPowerHistory(),
       state.provider.getDocuments(),
     ]);
+    if (generation !== state.generation) return;
+    if ([equipment, alarms, meters, history, documents].some(function (d) { return d && d.otherProject; })) retrySoon(generation);
     if (usable(history)) {
       state.powerHistory = history;
       if (state.power) {
@@ -147,7 +175,8 @@
     stop();
     const generation = state.generation;
     state.config = await resolveConfig();
-    state.provider = state.config && state.config.directMode ? new DirectProvider() : new BackendProvider();
+    if (generation !== state.generation) return;
+    state.provider = state.config && state.config.directMode ? new DirectProvider() : new BackendProvider(state.config && state.config.projectId);
     await Promise.all([pollRealtime(), pollLive()]);
     // stop() during either await would otherwise be undone by the timers below
     if (generation !== state.generation) return;
@@ -159,6 +188,7 @@
     state.generation++;
     state.timers.forEach(clearInterval);
     state.timers = [];
+    if (catchUp) { clearTimeout(catchUp); catchUp = null; }
   }
 
   window.DashboardData = {

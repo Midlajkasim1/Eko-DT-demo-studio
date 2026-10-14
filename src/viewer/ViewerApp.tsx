@@ -8,6 +8,7 @@ import { useProjectStore } from '@/store/useProjectStore'
 import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import { useMapStore } from '@/store/useMapStore'
 import { hasMap } from '@/lib/mapConfig'
+import { dashboardProjectInfo } from '@/lib/finSettings'
 import { MapLayer } from '@/components/map/MapLayer'
 import { SignInOverlay, checkSession } from '@/viewer/SignInOverlay'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
@@ -169,6 +170,7 @@ export default function ViewerApp() {
         if (meta.isFinProject && meta.apiSettings) {
           const s = meta.apiSettings
           ;(window as any).INJECTED_PROJECT_CONFIG = {
+            ...dashboardProjectInfo(meta),
             fin: {
               baseUrl: s.finBaseUrl || 'https://localhost',
               project: s.finProjectName || '',
@@ -180,7 +182,7 @@ export default function ViewerApp() {
             weather: {
               lat: s.weatherLat ?? 24.469,
               lon: s.weatherLon ?? 54.358,
-              apiKey: s.weatherApiKey || '88214bff7aa566e9f6ff1ba5db38f65f',
+              apiKey: s.weatherApiKey || undefined,   // only the project's own key
             },
             navButtons: s.navButtons || undefined,
             leftCards: s.leftCards || undefined,

@@ -34,6 +34,8 @@ window.EKO_ADDONS = (function(){
                           figure: E => { const n = (E.data.alarms || []).filter(a => a.sys === 'Security').length; return { key: 'ad.systems.security.fig', vars: { n } }; } },
     'energy.bench':     { module: 'energy', sub: 'bench', nameKey: 'subBench', icon: 'columns',
                           figure: E => { const n = ((window.EKO_DATA || {}).portfolio || []).length; return n > 1 ? { key: 'ad.energy.bench.fig', vars: { n } } : null; } },
+    'energy.anom':      { module: 'energy', sub: 'anom', nameKey: 'subAnom', icon: 'spark',
+                          figure: () => null },
     'energy.fcst':      { module: 'energy', sub: 'fcst', nameKey: 'subFcst', icon: 'spark',
                           figure: E => { const m = ((E.data.metrics || {}).energyTodayKwh); return m == null ? null : { key: 'ad.energy.fcst.fig', vars: { v: m } }; } }
   };

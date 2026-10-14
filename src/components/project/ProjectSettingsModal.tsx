@@ -2,20 +2,27 @@ import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useProjectStore } from '@/store/useProjectStore'
 import { useFinStore } from '@/store/useFinStore'
-import { writeJson } from '@/lib/projectDb'
 import { FinProjectPicker } from '@/components/project/FinProjectPicker'
 import { fetchFinResources, fetchMappingSchema, type FinResource, type MappingSchema } from '@/lib/finProjects'
 import {
   KeyValueEditor,
   MappingSection,
   MeterProfileEditor,
+  PowerBoardsEditor,
   SeverityEditor,
   type EditorState,
 } from '@/components/project/FinMappingEditors'
 import {
+  DEFAULT_SITE_TIMEZONE,
+  FIN_SETTINGS_VERSION,
   MAPPING_FIELDS,
   MAPPING_TITLES,
   applyMappingValues,
+  basisProblem,
+  boardKeyOptions,
+  powerBoardsProblem,
+  DEFAULT_CURRENCY,
+  isTimeZone,
   mappingProblem,
   type MappingField,
 } from '@/lib/finSettings'
@@ -39,6 +46,9 @@ const CONNECTION_DEFAULTS = {
 }
 
 type MappingStates = Record<MappingField, EditorState>
+
+/** An empty field is "not set", never 0 */
+const numberOrUndefined = (text: string): number | undefined => (text.trim() === '' ? undefined : Number(text))
 
 const mappingStatesFrom = (s: ProjectApiSettings): MappingStates =>
   Object.fromEntries(MAPPING_FIELDS.map(f => [f, { value: s[f] as JsonObject | undefined }])) as MappingStates
@@ -121,6 +131,8 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   // What each Data Mapping editor last reported (undefined value = not set). `revs` remounts an
   // editor when its content is replaced from outside: opening a project, a preset or Clear.
   const [mappings, setMappings] = useState<MappingStates>(() => mappingStatesFrom({}))
+  // remounts the Power boards editor when its content is replaced (opening a project, Clear)
+  const [boardsRev, setBoardsRev] = useState(0)
   const [revs, setRevs] = useState<Record<MappingField, number>>(
     () => Object.fromEntries(MAPPING_FIELDS.map(f => [f, 0])) as Record<MappingField, number>
   )
@@ -157,19 +169,26 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
 
   // The keys each block can have, offered as blank rows in a block this project has not set.
   // Names only: no value from config.json or from any other project reaches the editor.
+  // Also says whether the session verified this project as config.json's site, so it is re-read
+  // whenever the open project or the FIN session changes. schemaLoaded: the backend answered.
   const [schema, setSchema] = useState<MappingSchema>({})
+  const [schemaLoaded, setSchemaLoaded] = useState(false)
   useEffect(() => {
     if (!visible) return
     let cancelled = false
-    fetchMappingSchema().then(s => { if (!cancelled) setSchema(s) }, () => { /* rows can still be added by hand */ })
+    fetchMappingSchema().then(
+      s => { if (!cancelled) { setSchema(s); setSchemaLoaded(true) } },
+      () => { if (!cancelled) { setSchema({}); setSchemaLoaded(false) } },   // rows can still be added by hand
+    )
     return () => { cancelled = true }
-  }, [visible])
+  }, [visible, currentProject?.projectId, finConnected, finStatus?.project_id, finStatus?.project_name])
 
   useEffect(() => {
     if (visible && currentProject) {
       const savedSettings = currentProject.apiSettings || {}
       setMappings(mappingStatesFrom(savedSettings))
       setRevs(prev => Object.fromEntries(MAPPING_FIELDS.map(f => [f, prev[f] + 1])) as typeof prev)
+      setBoardsRev(r => r + 1)
       setSaveError(null)
       setValidation(null)
       setValidateError(null)
@@ -212,6 +231,22 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
 
   if (!visible || !currentProject) return null
 
+  // Power boards name Data Mapping keys the backend serves this project (as edited now)
+  /* The boards' problem against a mapping-schema answer (loaded: the backend answered), said so the
+     user can act on it: config.json's keys count only when the backend verified this project */
+  const boardsCheck = (sch: MappingSchema, loaded: boolean): string | null => {
+    const keys = boardKeyOptions(currentProject.projectId, settings.finProjectName,
+      { live: mappings.finLivePoints.value, history: mappings.finEndpoints.value }, sch)
+    const prefix = !keys.standard && typeof mappings.finMeterProfile.value?.prefix === 'string' ? mappings.finMeterProfile.value.prefix : undefined
+    const problem = powerBoardsProblem(settings.finPowerBoards, keys, prefix)
+    if (!problem) return null
+    if (!loaded) return `${problem} The Eko-DT backend could not be reached to check which mapping keys it serves this project, so only this project's own Data Mapping keys are accepted.`
+    if (keys.unverifiedStandard) return `${problem} config.json's standard keys are accepted only once the backend has verified ${sch.standardProfile}'s records on the FIN server it is signed in to: connect to FIN with this project open, then save again.`
+    return problem
+  }
+  const boardKeys = boardKeyOptions(currentProject.projectId, settings.finProjectName,
+    { live: mappings.finLivePoints.value, history: mappings.finEndpoints.value }, schema)
+  const boardsError = boardsCheck(schema, schemaLoaded)
   // isFin only decides FIN-specific side effects below; every settings tab is for every project
   const isFin = !!currentProject.isFinProject
   // Validation reads the FIN project the backend session serves. A project picked here but not
@@ -256,7 +291,10 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   }
 
   const handleSave = async () => {
-    if (!folderHandle) return
+    if (!folderHandle) {
+      setSaveError('Not saved: this project has no folder open.')
+      return
+    }
     // Nothing malformed is written; say which sections need fixing
     const invalid = MAPPING_FIELDS.filter(f => mappings[f].error)
     if (invalid.length) {
@@ -264,8 +302,32 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
       setSaveError(`Not saved. Fix ${invalid.map(f => MAPPING_TITLES[f]).join(', ')}.`)
       return
     }
+    if (settings.siteTimezone && !isTimeZone(settings.siteTimezone)) {
+      setActiveTab('fin')
+      setSaveError(`Not saved. "${settings.siteTimezone}" is not a timezone name (e.g. Asia/Dubai).`)
+      return
+    }
+    if (settings.finPowerBoards?.length) {
+      // Checked against the backend's answer now, once it serves this project (not a stale one)
+      if (useFinStore.getState().isConnected) await useFinStore.getState().syncProjectSettings()
+      let fresh: MappingSchema = {}, loaded = true
+      try { fresh = await fetchMappingSchema() } catch { loaded = false }
+      setSchema(fresh); setSchemaLoaded(loaded)
+      const problem = boardsCheck(fresh, loaded)
+      if (problem) {
+        setActiveTab('data')
+        setSaveError(`Not saved. ${problem}`)
+        return
+      }
+    }
+    const basisError = basisProblem(settings)
+    if (basisError) {
+      setActiveTab('fin')
+      setSaveError(`Not saved. ${basisError}`)
+      return
+    }
     const validSettings = applyMappingValues(
-      settings,
+      { ...settings, schemaVersion: FIN_SETTINGS_VERSION },
       Object.fromEntries(MAPPING_FIELDS.map(f => [f, mappings[f].value]))
     )
     if (!isFin) {
@@ -278,45 +340,27 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
     }
     setSaveError(null)
     setSaving(true)
+    const projectId = currentProject.projectId
     try {
-      const updatedMeta = {
-        ...currentProject,
-        apiSettings: validSettings,
-        updatedAt: Date.now(),
+      await useProjectStore.getState().saveApiSettings(validSettings)
+    } catch (e) {
+      // Shown only while this project is open; the modal stays open so nothing typed is lost.
+      // project.json may already hold the save (only the api-config.json copy failed): then the
+      // open project uses it, and the backend must follow it too.
+      const message = e instanceof Error ? e.message : String(e)
+      const inProjectJson = useProjectStore.getState().currentProject?.apiSettings === validSettings
+      if (openProjectId.current === projectId) {
+        setSaveError(inProjectJson ? message : `Not saved. ${message}`)
+        if (inProjectJson) await useFinStore.getState().syncProjectSettings()
       }
-      await writeJson(folderHandle, 'project.json', updatedMeta)
-      useProjectStore.setState({ currentProject: updatedMeta })
-
-      // Always write api-config.json for FIN projects so the standalone viewer has it
-      if (isFin) {
-        const apiConfig = {
-          project_name: validSettings.finProjectName || currentProject.name,
-          fin_server_url: validSettings.finBaseUrl || 'https://localhost',
-          display_name: validSettings.finDisplayName,
-          direct_mode: true, // Always true for FIN standalone viewer
-          polling_interval: validSettings.finInterval || 5000,
-          live_point_ids: validSettings.finLivePoints || {},
-          power_endpoints: validSettings.finEndpoints || {},
-          equipment_classes: validSettings.finEquipmentClasses,
-          meter_profile: validSettings.finMeterProfile,
-          severity_bands: validSettings.finSeverityBands,
-          weather: {
-            lat: validSettings.weatherLat ?? 24.469,
-            lon: validSettings.weatherLon ?? 54.358,
-            apiKey: validSettings.weatherApiKey || '88214bff7aa566e9f6ff1ba5db38f65f',
-          },
-          navButtons: validSettings.navButtons,
-          leftCards: validSettings.leftCards,
-          rightCards: validSettings.rightCards,
-          sideButtons: validSettings.sideButtons,
-        }
-        await writeJson(folderHandle, 'api-config.json', apiConfig)
-      }
-
-      onClose()
-    } finally {
       setSaving(false)
+      return
     }
+    // Saved. The backend session now serves what was saved (not the form), before the dashboard
+    // asks it for data. Not mounting FinLoginPanel must not leave the previous mapping running.
+    if (openProjectId.current === projectId) await useFinStore.getState().syncProjectSettings()
+    setSaving(false)
+    onClose()
   }
 
   const update = (field: keyof ProjectApiSettings, value: any) => {
@@ -387,11 +431,58 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
               </div>
               <div className="ds-field">
                 <label>Display Name</label>
-                <input type="text" value={settings.finDisplayName || ''} onChange={e => update('finDisplayName', e.target.value)} placeholder="Shown on the sign-in screen" />
+                <input type="text" value={settings.finDisplayName || ''} onChange={e => update('finDisplayName', e.target.value)} placeholder={`Shown on the sign-in screen and in reports (default: ${currentProject.name})`} />
               </div>
               <div className="ds-field">
                 <label>Polling Interval (ms)</label>
                 <input type="number" value={settings.finInterval || 5000} onChange={e => update('finInterval', parseInt(e.target.value) || 5000)} />
+              </div>
+              <div className="ds-field">
+                <label>Site Timezone</label>
+                <input type="text" value={settings.siteTimezone || ''} onChange={e => update('siteTimezone', e.target.value.trim() || undefined)} placeholder={DEFAULT_SITE_TIMEZONE} />
+                <p className="ds-hint">IANA name, e.g. Asia/Dubai. Sets where "today" starts in the dashboard and reports.</p>
+              </div>
+
+              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Reporting Basis</h3>
+              <p className="ds-hint">Costs and CO₂ are calculated only from the rates entered here, and every report states them. A rate left empty makes the figures that need it unavailable.</p>
+              <div className="ds-field-row">
+                <div className="ds-field">
+                  <label>Electricity Tariff (per kWh)</label>
+                  <input type="number" step="any" min="0" value={settings.energyTariff ?? ''} onChange={e => update('energyTariff', numberOrUndefined(e.target.value))} />
+                </div>
+                <div className="ds-field">
+                  <label>Currency</label>
+                  <input type="text" value={settings.currency || ''} placeholder={DEFAULT_CURRENCY} maxLength={3}
+                    onChange={e => update('currency', e.target.value.trim().toUpperCase() || undefined)} />
+                </div>
+              </div>
+              <div className="ds-field">
+                <label>Tariff Name</label>
+                <input type="text" value={settings.tariffName || ''} placeholder="e.g. DEWA-C 2026-Q3" onChange={e => update('tariffName', e.target.value.trim() || undefined)} />
+              </div>
+              <div className="ds-field-row">
+                <div className="ds-field">
+                  <label>CO₂ Factor (kg per kWh)</label>
+                  <input type="number" step="any" min="0" value={settings.co2Factor ?? ''} onChange={e => update('co2Factor', numberOrUndefined(e.target.value))} />
+                </div>
+                <div className="ds-field">
+                  <label>CO₂ Factor Source</label>
+                  <input type="text" value={settings.co2FactorName || ''} placeholder="e.g. DEWA grid 2025" onChange={e => update('co2FactorName', e.target.value.trim() || undefined)} />
+                </div>
+              </div>
+              <div className="ds-field">
+                <label>Gas Tariff (per m³)</label>
+                <input type="number" step="any" min="0" value={settings.gasTariff ?? ''} onChange={e => update('gasTariff', numberOrUndefined(e.target.value))} />
+              </div>
+
+              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Demo Figures</h3>
+              <div className="ds-field">
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={settings.dashboardDemo === true} style={{ width: 'auto' }}
+                    onChange={e => update('dashboardDemo', e.target.checked || undefined)} />
+                  Show the prototype's demo figures (Marsa Al Arab sample data)
+                </label>
+                <p className="ds-hint">Off: the dashboard shows only this project's FIN readings and settings, and modules with no FIN source (anomalies, forecast, benchmark) are hidden.</p>
               </div>
 
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Weather API</h3>
@@ -509,6 +600,25 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                   </MappingSection>
                 )
               })}
+
+              <MappingSection
+                title="Power Boards"
+                hint={"The distribution boards on the Power page. Each board names keys of this project's FIN Live Points Mapping"
+                  + ' (and, optionally, FIN Historical Endpoints and a meter); FIN point IDs stay in those mappings.'
+                  + ' Not set: the built-in boards (MCC 1, MCC 2, …) where this project maps their keys.'}
+                hasValue={!!settings.finPowerBoards?.length}
+                unsetText="No boards set for this project: the built-in boards are shown where this project maps their keys."
+                error={boardsError ?? undefined}
+                onLoad={() => { update('finPowerBoards', undefined); setBoardsRev(r => r + 1) }}
+              >
+                <PowerBoardsEditor
+                  key={`${currentProject.projectId}-boards-${boardsRev}`}
+                  value={settings.finPowerBoards}
+                  liveKeys={boardKeys.live}
+                  historyKeys={boardKeys.history}
+                  onChange={boards => update('finPowerBoards', boards)}
+                />
+              </MappingSection>
             </div>
           )}
 

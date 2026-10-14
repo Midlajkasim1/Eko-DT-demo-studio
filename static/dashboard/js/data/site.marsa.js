@@ -7,6 +7,8 @@
 window.EKO_DATA = window.EKO_DATA || {};
 window.EKO_DATA.marsa = {
   "key": "marsa",
+  /* The FIN project these figures describe: another FIN project does not take this site's name or contract figures (data-map.js) */
+  "finProject": "marsaAlArab",
   "nameEn": "Marsa Al Arab", "nameAr": "مرسى العرب",
   "cityEn": "Dubai", "cityAr": "دبي",
 

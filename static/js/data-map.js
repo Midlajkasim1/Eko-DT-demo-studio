@@ -2,6 +2,137 @@
   'use strict';
   if (!window.DASHBOARD_OVERLAY) return;
 
+  /* Every dashboard load (a project switch, a settings save) runs this file again. Only the newest
+     copy maps data: an older one, holding the previous project's history cache and requests still
+     in flight, must not write into the next project's site data. */
+  var instance = window.__ekoDataMapInstance = (window.__ekoDataMapInstance || 0) + 1;
+  function current() { return instance === window.__ekoDataMapInstance; }
+
+  /* The open project's site (DashboardOverlay.tsx injects it from the saved settings) */
+  function siteInfo() {
+    return (window.INJECTED_PROJECT_CONFIG && window.INJECTED_PROJECT_CONFIG.site) || null;
+  }
+  function siteTimezone() {
+    var info = siteInfo();
+    return (info && info.timezone) || 'Asia/Dubai';
+  }
+
+  /* The site data is the prototype's Marsa Al Arab fixture: the structure every page renders, and
+     sample figures. In the Studio (a project injected) the dashboard is in REAL mode unless the
+     project turns Demo figures on: it shows only FIN readings and the project's own settings.
+     Without an injected project (the standalone prototype) everything stays as it was. */
+  var injected = window.INJECTED_PROJECT_CONFIG || null;
+  var realMode = !!(injected && injected.site) && injected.demo !== true;
+  var fixtureSite = (function () {
+    var site = window.EKO_DATA && window.EKO_DATA.marsa, info = siteInfo();
+    return !info || (!!info.finProject && !!site && info.finProject === site.finProject);
+  })();
+
+  (function applySiteIdentity() {
+    var site = window.EKO_DATA && window.EKO_DATA.marsa;
+    var info = siteInfo();
+    if (!site || !info) return;
+    var name = info.displayName || (fixtureSite ? '' : info.name);
+    if (name) {
+      site.nameEn = name; site.nameAr = name;
+      // the top bar names the site from its portfolio row
+      var row = (window.EKO_DATA.portfolio || []).find(function (p) { return p.key === site.key; });
+      if (row) { row.nameEn = name; row.nameAr = name; }
+    }
+    if (realMode) clearFixtureFigures(site);
+    if (realMode) applyReportingBasis(site, injected.basis || {});
+    if (realMode) clearFixtureServices(site);
+  })();
+
+  /* REAL mode: the prototype's people, systems and estate are not this project's.
+     - user: the Studio has no dashboard sign-in, so no name (reports say "—"); not "Arman Y."
+     - integrations: the actual FIN connection (state, points, last data), not a sample BMS row
+     - CMMS and AI narration: none connected, so nothing is raised or written by a simulator
+     - sites: only this project; the sample estate (other sites' figures) is empty */
+  function clearFixtureServices(site) {
+    site.user = Object.assign({}, site.user, { name: '', nameAr: '' });
+    site.integrations = [{ name: 'FIN Framework' + (siteInfo().finProject ? ' · ' + siteInfo().finProject : ''), proto: '', st: 'Connecting', hb: '', pts: '' }];
+    site.features = Object.assign({}, site.features, { cmms: 'none', llm: 'none', control: 'off' });
+    var D = window.EKO_DATA || {};
+    if (Array.isArray(D.portfolio)) D.portfolio = D.portfolio.filter(function (p) { return p.key === site.key; });
+    if (D.estate && Array.isArray(D.estate.sites)) D.estate.sites = [];
+    // adapters are chosen when the app starts, which may already have happened
+    if (window.EKO && window.EKO_CMMS) window.EKO_CMMS.init(window.EKO);
+    if (window.EKO_LLM && window.EKO_LLM.use) window.EKO_LLM.use('none');
+  }
+
+  /* The FIN integration row: what the backend actually reports */
+  function finIntegration(patch) {
+    var site = window.EKO_DATA && window.EKO_DATA.marsa;
+    if (!realMode || !site || !site.integrations || !site.integrations[0]) return;
+    Object.assign(site.integrations[0], patch);
+    paint();
+  }
+  function hhmm() { var n = siteNow(); return String(n.h).padStart(2, '0') + ':' + String(n.min).padStart(2, '0'); }
+
+  /* REAL mode: every sample figure FIN does not replace is cleared, for every project (Marsa's too,
+     whose fixture figures are not FIN readings either). Lists start empty and fill from FIN;
+     modules with no FIN source at all (anomalies, forecast, benchmark) are hidden. */
+  function clearFixtureFigures(site) {
+    if (site.metrics) { site.metrics.contractedKw = null; site.metrics.baselineKw = null; }
+    site.load24hMw = null;
+    site.alarms = [];
+    site.assets = [];
+    site.meters = [];   // the prototype's meter register and its data-quality states (no FIN source)
+    if (site.power) {
+      var pw = site.power;
+      pw.prevMonthKwh = null; pw.contractedMw = null; pw.peakAvgKw = null;
+      pw.subview = null; pw.bva = null; pw.pmuChips = [];
+      pw.heroCharts = { current: null, peak: null, month: null };
+      pw.boards = []; pw.zones = []; pw.zonesAr = []; pw.zoneHues = [];
+      pw.zoneHourly = []; pw.pmus = []; pw.peakSeries = [];
+    }
+    if (site.anom) { site.anom.items = []; site.anom.flaggedKwhToday = null; }
+    if (site.fcst) { site.fcst.monthEndMwh = null; site.fcst.peakMwh = null; site.fcst.peakPct = null; }
+    if (site.bench) { site.bench.rows = []; site.bench.siteWhm2 = null; }
+    site.entitlements = site.entitlements || {};
+    site.entitlements.modules = Object.assign({}, site.entitlements.modules,
+      { 'energy.anom': 'hidden', 'energy.fcst': 'hidden', 'energy.bench': 'hidden' });
+  }
+
+  /* REAL mode: costs and CO2 use only the rates saved for this project (Dashboard Settings → FIN
+     Config); a rate it did not set is null, so every figure that needs it reads "—". The report
+     window is the site clock now, not the prototype's fixed "14:00" and "1 Sep". */
+  function applyReportingBasis(site, b) {
+    var basis = site.basis = site.basis || {};
+    var rate = b.energyTariff == null ? null : b.energyTariff;
+    var factor = b.co2Factor == null ? null : b.co2Factor;
+    basis.currency = b.currency || 'AED';
+    basis.aedPerKwh = rate;
+    basis.tariffId = rate == null ? null : (b.tariffName || 'Project tariff');
+    basis.tariffVersion = '';
+    basis.tariffStatus = rate == null ? 'missing' : 'configured';
+    basis.co2KgPerKwh = factor;
+    basis.co2FactorId = factor == null ? null : (b.co2FactorName || 'Project factor');
+    basis.co2FactorStatus = factor == null ? 'missing' : 'configured';
+    basis.gasTariffStatus = b.gasTariff == null ? 'missing' : 'configured';
+    if (site.gas) site.gas.tariffAedM3 = b.gasTariff == null ? null : b.gasTariff;
+    var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    Object.defineProperty(basis, 'asOf', { enumerable: true, configurable: true, get: function () {
+      var n = siteNow(); return String(n.h).padStart(2, '0') + ':' + String(n.min).padStart(2, '0'); } });
+    Object.defineProperty(basis, 'monthStart', { enumerable: true, configurable: true, get: function () {
+      return '1 ' + MON[siteNow().m]; } });
+  }
+
+  /* The site clock: year, month (0-11), day, hour, minute in the site timezone */
+  function siteNow() {
+    try {
+      var parts = new Intl.DateTimeFormat('en-GB', { timeZone: siteTimezone(), year: 'numeric', month: 'numeric',
+        day: 'numeric', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).formatToParts(new Date());
+      var g = function (t) { var x = parts.find(function (p) { return p.type === t; }); return x ? parseInt(x.value, 10) : NaN; };
+      var h = g('hour');
+      return { y: g('year'), m: g('month') - 1, d: g('day'), h: h === 24 ? 0 : h, min: g('minute') };
+    } catch (e) {
+      var d = new Date();
+      return { y: d.getFullYear(), m: d.getMonth(), d: d.getDate(), h: d.getHours(), min: d.getMinutes() };
+    }
+  }
+
   function sev(s) {
     s = String(s || '').toLowerCase();
     if (s === 'critical') return 'critical';
@@ -255,18 +386,51 @@
     return v > 50 ? v / 1000 : v;
   }
 
-  var ZONE_NAMES = ["MCC 1","MCC 2","Kitchen SMDB","LVFP","ATS","Sump pump"];
-  var ZONE_HUES = ["#4EA3E8","#F0A93B","#45C79A","#E48FC4","#A78BFA","#E06C75"];
-  var BOARD_KEYS = ["mcc1","mcc2","smdb_kit","lvfp","ats","sump_pump"];
-  var PMU_IDS = ["PMU09","PMU04","PMU05","PMU06","PMU07","PMU08"];
-  var PMU_HIS = {
-    PMU09: "Hourly_EC_MCC1_his",
-    PMU04: "Hourly_EC_MCC2_his",
-    PMU05: "Hourly_EC_SMDB_KIT_his",
-    PMU06: "Hourly_EC_LVFP_his",
-    PMU07: "Hourly_EC_ATS_his",
-    PMU08: "Hourly_EC_SP_his"
-  };
+  /* Distribution boards: Eko-DT's board keys, as listed in Data Mapping (a live key and an hourly
+     history endpoint each). A board is shown only when the project maps one of its keys, so a
+     project that maps none has no boards, never Marsa's. `pmu` is the meter that feeds the board
+     on Marsa Al Arab only (fixtureSite): another site's PMU numbers mean nothing here. */
+  var BOARDS = [
+    { name: "MCC 1",        live: "mcc1",      his: "Hourly_EC_MCC1_his",     pmu: "PMU09", hue: "#4EA3E8" },
+    { name: "MCC 2",        live: "mcc2",      his: "Hourly_EC_MCC2_his",     pmu: "PMU04", hue: "#F0A93B" },
+    { name: "Kitchen SMDB", live: "smdb_kit",  his: "Hourly_EC_SMDB_KIT_his", pmu: "PMU05", hue: "#45C79A" },
+    { name: "LVFP",         live: "lvfp",      his: "Hourly_EC_LVFP_his",     pmu: "PMU06", hue: "#E48FC4" },
+    { name: "ATS",          live: "ats",       his: "Hourly_EC_ATS_his",      pmu: "PMU07", hue: "#A78BFA" },
+    { name: "Sump pump",    live: "sump_pump", his: "Hourly_EC_SP_his",       pmu: "PMU08", hue: "#E06C75" }
+  ];
+  /* The project's own boards (Dashboard Settings → Data Mapping → Power Boards), each naming Data
+     Mapping keys. Always listed, so a board with no reading shows "--" rather than disappearing. */
+  var HUES = ["#4EA3E8", "#F0A93B", "#45C79A", "#E48FC4", "#A78BFA", "#E06C75", "#5FC4C9", "#C9A65F", "#8FA3E4", "#E4A38F"];
+  var CONFIGURED_BOARDS = (function () {
+    var list = injected && Array.isArray(injected.powerBoards) ? injected.powerBoards : null;
+    if (!list || !list.length) return null;
+    return list.filter(function (b) { return b && b.name && b.liveKey; }).map(function (b, i) {
+      return { name: String(b.name), live: String(b.liveKey), his: b.historyKey ? String(b.historyKey) : null,
+        pmu: b.meter ? String(b.meter) : null, hue: HUES[i % HUES.length] };
+    });
+  })();
+  /* Whose board ↔ meter links to trust: the project's configured ones, else Marsa Al Arab's own */
+  var boardMeterLinks = !!CONFIGURED_BOARDS || fixtureSite;
+  /* Configured boards are listed from the start, readings unknown ("--") until FIN answers for this
+     project: never "not configured", and never the sample boards and their series */
+  (function seedConfiguredBoards() {
+    var pw = window.EKO_DATA && window.EKO_DATA.marsa && window.EKO_DATA.marsa.power;
+    if (!CONFIGURED_BOARDS || !pw) return;
+    pw.boards = CONFIGURED_BOARDS.map(function (b) { return [b.name, null]; });
+    pw.zones = CONFIGURED_BOARDS.map(function (b) { return b.name; });
+    pw.zonesAr = pw.zones.slice();
+    pw.zoneHues = CONFIGURED_BOARDS.map(function (b) { return b.hue; });
+    ["zoneHourly", "zoneLast24", "zoneWeekly", "zoneMonthly", "zoneWTD", "zoneMTD", "zoneYesterday", "zonePrevWeek", "zonePrevMonth"]
+      .forEach(function (k) { pw[k] = []; });
+    pw.pmuFlats = {};
+  })();
+  /* The boards to show: the configured ones; else the built-in ones this project maps (its live
+     key is served, or its history endpoint is) */
+  function mappedBoards(p) {
+    if (CONFIGURED_BOARDS) return CONFIGURED_BOARDS;
+    var hist = (p && p.power_history) || {};
+    return BOARDS.filter(function (b) { return (p && b.live in p) || b.his in hist; });
+  }
   var lastBoardKwh = {};
 
   function applyPower(p) {
@@ -596,7 +760,7 @@
       function nowParts() {
         try {
           var parts = new Intl.DateTimeFormat("en-GB", {
-            timeZone: "Asia/Dubai",
+            timeZone: siteTimezone(),
             year: "numeric",
             month: "numeric",
             day: "numeric",
@@ -832,26 +996,49 @@
         return a.slice(0, len);
       }
 
-      if (site.power) {
-        var ids = ["Hourly_EC_MCC1_his","Hourly_EC_MCC2_his","Hourly_EC_SMDB_KIT_his","Hourly_EC_LVFP_his","Hourly_EC_ATS_his","Hourly_EC_SP_his"];
-        var flats = ids.map(function (id) { return flattenHist(p.power_history[id]); });
-        site.power.pmuFlats = {};
-        PMU_IDS.forEach(function (id) {
-          site.power.pmuFlats[id] = flattenHist(p.power_history[PMU_HIS[id]]);
+      /* per board: an hour no meter reported is null (a gap), never 0 kWh */
+      function todayHourlyGaps(flat) {
+        var now = nowParts();
+        var n = Math.min(24, Math.max(1, now.h + 1));
+        var hours = [], i;
+        for (i = 0; i < n; i++) hours[i] = null;
+        (flat || []).forEach(function (pt) {
+          if (pt.y === now.y && pt.m === now.m && pt.d === now.d && pt.h >= 0 && pt.h < n) hours[pt.h] = Math.trunc(pt.val * 100) / 100;
         });
+        return hours;
+      }
+      function byHourGaps(flat, keys) {
+        var map = {};
+        (flat || []).forEach(function (pt) { map[pt.y + "-" + (pt.m + 1) + "-" + pt.d + "-" + pt.h] = pt.val; });
+        return keys.map(function (hk) { var v = map[hk.k]; return v == null ? null : Math.trunc(v * 100) / 100; });
+      }
+
+      var boardList = mappedBoards(p);
+      /* Demo figures (or the standalone prototype) with no board mapped: the sample boards stay */
+      var ZONE_FIELDS = ["zones", "zonesAr", "zoneHues", "zoneHourly", "zoneLast24", "zoneWeekly", "zoneMonthly",
+        "zoneWTD", "zoneMTD", "zoneYesterday", "zonePrevWeek", "zonePrevMonth", "pmuFlats"];
+      var sampleBoards = null;
+      if (site.power && !realMode && !boardList.length) {
+        sampleBoards = {};
+        ZONE_FIELDS.forEach(function (k) { if (k in site.power) sampleBoards[k] = site.power[k]; });
+      }
+      if (site.power) {
+        var flats = boardList.map(function (b) { return flattenHist(p.power_history[b.his]); });
+        site.power.pmuFlats = {};
+        if (boardMeterLinks) {
+          boardList.forEach(function (b, i) { if (b.pmu) site.power.pmuFlats[meterKey(b.pmu)] = flats[i]; });
+        }
         var peakFlat = flattenHist(p.power_history.Peak_Demand_his);
         var allFlats = flats.concat([peakFlat]);
-        if (flats.some(function (f) { return f.length; })) {
-          site.power.zones = ZONE_NAMES;
-          site.power.zonesAr = ZONE_NAMES;
-          site.power.zoneHues = ZONE_HUES;
-        }
-        var todayZ = flats.map(todayHourly);
-        var todayLen = todayZ[0] ? todayZ[0].length : 0;
+        site.power.zones = boardList.map(function (b) { return b.name; });
+        site.power.zonesAr = site.power.zones.slice();
+        site.power.zoneHues = boardList.map(function (b) { return b.hue; });
+        var todayZ = flats.map(todayHourlyGaps);
+        var todayLen = todayZ[0] ? todayZ[0].length : todayHourlyGaps([]).length;
         site.power.zoneHourly = todayZ;
         changed = true;
         var hourKeys = lastNHours(allFlats, 1);
-        site.power.zoneLast24 = flats.map(function (f) { return byHour(f, hourKeys); });
+        site.power.zoneLast24 = flats.map(function (f) { return byHourGaps(f, hourKeys); });
         site.power.peakLast24 = byHour(peakFlat, hourKeys);
         /* The viewer timeline: the site's load per clock hour over the last
            25 hours, oldest first, as the hourly average in kW. The zone meters
@@ -954,6 +1141,7 @@
           weekly: weekBarLabels(weekKeys),
           monthly: monthLabels(monthKeys)
         };
+        if (sampleBoards) Object.assign(site.power, sampleBoards);
         if (site.water) {
           site.water.todayM3 = null;
           site.water.avgDrawM3Day = null;
@@ -1090,30 +1278,42 @@
       }
     }
     if (site.power) {
-      var boards = ZONE_NAMES.map(function (name, i) {
-        var kw = asNum(p[BOARD_KEYS[i]]);
-        if (kw == null) {
-          var series = (site.power.zoneLast24 && site.power.zoneLast24[i]) || (site.power.zoneHourly && site.power.zoneHourly[i]) || [];
-          if (series.length) kw = series[series.length - 1];
+      var list = mappedBoards(p);
+      if (list.length || realMode) {
+        /* the board's live key; else its latest reported hour; else null (shown --), never 0 */
+        var latest = function (series, name) {
+          var i = (site.power.zones || []).indexOf(name);
+          var s = i >= 0 && series ? series[i] : null;
+          var v = s && s.length ? s[s.length - 1] : null;
+          return v == null ? null : v;
+        };
+        var boards = list.map(function (b) {
+          var kw = asNum(p[b.live]);
+          if (kw == null) kw = latest(site.power.zoneLast24, b.name);
+          if (kw == null) kw = latest(site.power.zoneHourly, b.name);
+          return [b.name, kw];
+        });
+        var prev = site.power.boards;
+        var same = prev && prev.length === boards.length && boards.every(function (b, i) {
+          return prev[i] && prev[i][0] === b[0] && prev[i][1] === b[1];
+        });
+        if (!same) {
+          site.power.boards = boards;
+          site.power.zones = list.map(function (b) { return b.name; });
+          site.power.zonesAr = site.power.zones.slice();
+          site.power.zoneHues = list.map(function (b) { return b.hue; });
+          changed = true;
         }
-        return [name, kw == null ? 0 : kw];
-      });
-      var prev = site.power.boards;
-      var same = prev && prev.length === boards.length && boards.every(function (b, i) {
-        return prev[i] && prev[i][0] === b[0] && prev[i][1] === b[1];
-      });
-      if (!same) {
-        site.power.boards = boards;
-        site.power.zones = ZONE_NAMES;
-        site.power.zonesAr = ZONE_NAMES;
-        site.power.zoneHues = ZONE_HUES;
-        changed = true;
       }
-      PMU_IDS.forEach(function (id, i) {
-        var kwh = asNum(p[BOARD_KEYS[i]]);
-        if (kwh == null && site.power.boards && site.power.boards[i]) kwh = asNum(site.power.boards[i][1]);
-        if (kwh != null) lastBoardKwh[id] = kwh;
-      });
+      // a board's meter: the project's configured link, else Marsa Al Arab's own (PMU09 = MCC 1, ...)
+      if (boardMeterLinks) {
+        list.forEach(function (b, i) {
+          if (!b.pmu) return;
+          var kwh = asNum(p[b.live]);
+          if (kwh == null && site.power.boards && site.power.boards[i]) kwh = asNum(site.power.boards[i][1]);
+          if (kwh != null) lastBoardKwh[meterKey(b.pmu)] = kwh;
+        });
+      }
       if (Array.isArray(site.power.pmus)) {
         site.power.pmus.forEach(function (row) {
           if (row && lastBoardKwh[row.id] != null) {
@@ -1155,19 +1355,28 @@
     var m = String(s || "").toUpperCase().match(/PMU\d+/);
     return m ? m[0] : "";
   }
+  /* How a meter is keyed: Marsa Al Arab's by PMU number (its names carry more), any other site's by name */
+  function meterKey(name) {
+    return (fixtureSite && pmuKey(name)) || String(name || "");
+  }
 
   function applyMeters(meters) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !meters || !site.power) return;
+    /* /pmu-live lists the meters the project's own meter profile matched (its prefix and point
+       aliases), so every one is shown. Marsa Al Arab's are keyed by PMU number, which its board
+       names and history follow; another site's meter keeps its own name. */
     var byKey = {};
     Object.keys(meters).forEach(function (name) {
-      var k = pmuKey(name);
-      if (k) byKey[k] = { name: name, row: meters[name] || {} };
+      var k = meterKey(name);
+      byKey[k] = { name: name, row: meters[name] || {} };
     });
-    (site.assets || []).forEach(function (a) {
-      var k = pmuKey(a.id);
-      if (k && !byKey[k]) byKey[k] = { name: a.id, row: {} };
-    });
+    if (fixtureSite) {
+      (site.assets || []).forEach(function (a) {
+        var k = pmuKey(a.id);
+        if (k && !byKey[k]) byKey[k] = { name: a.id, row: {} };
+      });
+    }
     function rowOf(meta, live) {
       var r = live && live.row;
       var db = meta.db;
@@ -1183,13 +1392,16 @@
         pf: null
       };
     }
+    /* each meter's board name: the project's configured boards, else Marsa Al Arab's own */
     var canonDb = {};
-    PMU_CANON.forEach(function (m) { canonDb[m.id] = m.db; });
+    if (CONFIGURED_BOARDS) CONFIGURED_BOARDS.forEach(function (b) { if (b.pmu) canonDb[meterKey(b.pmu)] = b.name; });
+    else if (fixtureSite) PMU_CANON.forEach(function (m) { canonDb[m.id] = m.db; });
     var ids = Object.keys(byKey);
     ids.sort(function (a, b) {
-      return (parseInt(a.replace(/\D/g, ""), 10) || 0) - (parseInt(b.replace(/\D/g, ""), 10) || 0);
+      return (parseInt(a.replace(/\D/g, ""), 10) || 0) - (parseInt(b.replace(/\D/g, ""), 10) || 0) || (a < b ? -1 : a > b ? 1 : 0);
     });
-    if (!ids.length) ids = PMU_CANON.map(function (m) { return m.id; });
+    // no meter reported: the known meters are listed (readings "--"); a site that knows none lists none
+    if (!ids.length) ids = Object.keys(canonDb);
     site.power.pmus = ids.map(function (id) {
       return rowOf({ id: id, db: canonDb[id] }, byKey[id]);
     });
@@ -1392,6 +1604,7 @@
           ? window.DashboardData.getPointHistory(primary.spId, 7)
           : Promise.resolve(null);
         Promise.all([actP, spP]).then(function (both) {
+          if (!current()) return;
           var actDays = histDaily(both[0] && both[0].history);
           var spDays = histDaily(both[1] && both[1].history);
           var spByT = {};
@@ -1795,6 +2008,7 @@
       return;
     }
     api.getPointHistory(id, 31).then(function (res) {
+      if (!current()) return;
       heatHist[id] = { pending: false, days: dailyMap(res) };
       applyShown();
       paint();
@@ -1884,13 +2098,20 @@
     paint();
   }
 
-window.addEventListener('dashboard-data', function (e) {
+window.addEventListener('dashboard-data', function onData(e) {
+    if (!current()) { window.removeEventListener('dashboard-data', onData); return; }
     var d = e.detail || {};
     if (d.type === 'alarms') applyAlarms(d.data);
     if (d.type === 'power') applyPower(d.data);
     if (d.type === 'meters') applyMeters(d.data);
     if (d.type === 'equipment') applyEquipment(d.data);
     if (d.type === 'documents') applyDocuments(d.data);
+    if (d.type === 'status') finIntegration({ st: d.data && d.data.connected ? 'Live' : 'Not connected' });
+    if (d.type === 'power' && d.data) finIntegration({ st: 'Live', hb: hhmm() });
+    if (d.type === 'equipment' && d.data && Array.isArray(d.data.equipment)) {
+      var pts = d.data.equipment.reduce(function (n, eq) { return n + ((eq && eq.points) || []).length; }, 0);
+      finIntegration({ pts: pts + (pts === 1 ? ' point' : ' points'), hb: hhmm() });
+    }
   });
 
   if (window.DashboardData && window.DashboardData.alarms) applyAlarms(window.DashboardData.alarms);

@@ -11,6 +11,8 @@ import {
   type ValueKind,
 } from '@/lib/mappingRows'
 import { STATUS_LABEL, type BlockResult, type ItemResult, type MappingStatus } from '@/lib/mappingValidation'
+import { powerBoardRows, powerBoardsFromRows, type PowerBoardRow } from '@/lib/finSettings'
+import type { PowerBoard } from '@/types'
 
 /** What an editor reports upward: the object to save (undefined = not set) or a problem */
 export interface EditorState {
@@ -319,6 +321,63 @@ export function SeverityEditor({ value, onChange }: MeterProfileEditorProps) {
   )
 }
 
+interface PowerBoardsEditorProps {
+  value: PowerBoard[] | undefined
+  /** The Data Mapping keys a board may name (see boardKeyOptions), offered as choices */
+  liveKeys: string[]
+  historyKeys: string[]
+  onChange: (boards: PowerBoard[] | undefined) => void
+}
+
+/** One distribution board per row: a name and the Data Mapping keys that feed it. A key is chosen
+ *  from the project's mapping, never a FIN point ID. Remount (change `key`) to load a new value. */
+export function PowerBoardsEditor({ value, liveKeys, historyKeys, onChange }: PowerBoardsEditorProps) {
+  const liveId = useId()
+  const hisId = useId()
+  const [rows, setRows] = useState<(PowerBoardRow & { id: number })[]>(() => powerBoardRows(value).map(r => ({ ...r, id: newRowId() })))
+  const commit = (next: (PowerBoardRow & { id: number })[]) => {
+    setRows(next)
+    onChange(powerBoardsFromRows(next))
+  }
+  const edit = (id: number, patch: Partial<PowerBoardRow>) => commit(rows.map(r => (r.id === id ? { ...r, ...patch } : r)))
+  const field = (row: PowerBoardRow & { id: number }, k: keyof PowerBoardRow, label: string, placeholder: string, list?: string, flex = '1') => (
+    <input type="text" aria-label={label} placeholder={placeholder} value={row[k]} list={list}
+      onChange={e => edit(row.id, { [k]: e.target.value })} style={{ ...inputStyle, flex }} />
+  )
+  return (
+    <div data-testid="power-boards-editor">
+      <datalist id={liveId}>{liveKeys.map(k => <option key={k} value={k} />)}</datalist>
+      <datalist id={hisId}>{historyKeys.map(k => <option key={k} value={k} />)}</datalist>
+      {rows.length === 0 && <p className="ds-hint" style={{ margin: '0 0 8px' }}>No boards yet. Add one below.</p>}
+      {rows.length > 0 && (
+        <div className="ds-hint" style={{ display: 'flex', gap: '8px', margin: '0 0 4px' }}>
+          <span style={{ flex: 1 }}>Board name</span><span style={{ flex: 1 }}>Live key</span>
+          <span style={{ flex: 1 }}>History key (optional)</span><span style={{ flex: '0 0 18%' }}>Meter (optional)</span>
+          <span style={{ width: '38px' }} />
+        </div>
+      )}
+      {rows.map((row, i) => (
+        <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
+          {field(row, 'name', 'Board name', 'e.g. MCC 1')}
+          {field(row, 'liveKey', 'Live key', 'a live points key', liveId)}
+          {field(row, 'historyKey', 'History key', 'a historical endpoint key', hisId)}
+          {field(row, 'meter', 'Meter', 'e.g. PMU09', undefined, '0 0 18%')}
+          <button type="button" className="ds-btn ds-btn-secondary" style={smallBtn} title="Delete this board"
+            aria-label={`Delete board ${i + 1}`} onClick={() => commit(rows.filter(r => r.id !== row.id))}>
+            ✕
+          </button>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: '8px', margin: '10px 0' }}>
+        <button type="button" className="ds-btn ds-btn-secondary" style={smallBtn}
+          onClick={() => commit([...rows, { id: newRowId(), name: '', liveKey: '', historyKey: '', meter: '' }])}>
+          + Add board
+        </button>
+      </div>
+    </div>
+  )
+}
+
 interface MappingSectionProps {
   title: string
   hint: string
@@ -327,12 +386,14 @@ interface MappingSectionProps {
   onLoad: (value: JsonObject | undefined) => void
   /** The latest Validate Mapping result for this block, if any */
   result?: BlockResult
+  /** What "not set" means for this block, when it is not "the backend default applies" */
+  unsetText?: string
   children: ReactNode
 }
 
 /** Title, description and Clear around one mapping editor. Clear calls onLoad; the parent
  *  remounts the editor so it shows the block as unset. */
-export function MappingSection({ title, hint, hasValue, error, onLoad, result, children }: MappingSectionProps) {
+export function MappingSection({ title, hint, hasValue, error, onLoad, result, unsetText, children }: MappingSectionProps) {
   return (
     <div className="ds-field" style={{ marginTop: '28px' }}>
       <h3 className="ds-section-title">{title}</h3>
@@ -341,7 +402,7 @@ export function MappingSection({ title, hint, hasValue, error, onLoad, result, c
       {!hasValue && (
         <p className="ds-hint" style={{ margin: '0 0 8px' }} data-testid="block-unset">
           <StatusBadge status="not_configured" />
-          {' Not set for this project yet. Fill in the fields below and Save Settings; blank fields are not saved.'}
+          {unsetText ? ` ${unsetText}` : ' Not set for this project yet. Fill in the fields below and Save Settings; blank fields are not saved.'}
           {result?.backend_default && " Until then the backend reads this block from its own config.json, which is not this project's mapping."}
         </p>
       )}

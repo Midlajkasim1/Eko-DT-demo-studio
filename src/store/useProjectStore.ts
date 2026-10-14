@@ -15,7 +15,9 @@ import {
   removeCachedHandle,
   cacheHandle,
   cardFromMeta,
+  writeJson,
 } from '@/lib/projectDb'
+import { apiConfigFor } from '@/lib/finSettings'
 import { ASSETS_VERSION } from '@/lib/textureAssets'
 import { collectMapGarbage, deleteMapAsset, storeMapImage } from '@/lib/mapAssets'
 import { pickRenderSettings } from '@/constants/renderSettings'
@@ -78,6 +80,10 @@ interface ProjectState {
   saveMapConfig: (mapConfig: import('@/types').MapConfig) => Promise<void>
   addMapImage: (file: Blob) => Promise<import('@/types').MapAsset | null>
   addTextureAsset: (asset: import('@/types').TextureAsset) => Promise<void>
+  /** Dashboard Settings → Save Settings. Writes project.json (and api-config.json for a FIN
+   *  project) into this project's folder, then makes it the open project's configuration.
+   *  Throws when anything is not written, so the caller never reports a save that did not happen. */
+  saveApiSettings: (apiSettings: import('@/types').ProjectApiSettings) => Promise<ProjectMeta>
   setMaterialOverride: (modelId: string, override: import('@/types').MaterialOverride) => Promise<void>
   removeMaterialOverride: (modelId: string, overrideId: string) => Promise<void>
   setDirty: (dirty: boolean) => void
@@ -467,6 +473,32 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await saveProjectMeta(folderHandle, updated)
     await cacheHandle(updated.projectId, folderHandle, updated, updated.thumbnail)
     set({ currentProject: updated, recentProjects: refreshCard(get().recentProjects, updated) })
+  },
+
+  saveApiSettings: async (apiSettings) => {
+    const { currentProject, folderHandle } = get()
+    if (!currentProject || !folderHandle) throw new Error('No project is open.')
+    const projectId = currentProject.projectId
+    const updated: ProjectMeta = { ...currentProject, apiSettings, updatedAt: Date.now() }
+
+    // project.json is the source of truth: nothing changes in the app unless it was written
+    await writeJson(folderHandle, 'project.json', updated)
+    // Written to the folder that was open when Save was pressed. If another project was opened
+    // meanwhile, that one stays on screen: this project's settings must not replace it.
+    const stillOpen = () => get().currentProject?.projectId === projectId && get().folderHandle === folderHandle
+    if (stillOpen()) {
+      set({ currentProject: { ...get().currentProject!, apiSettings, updatedAt: updated.updatedAt } })
+    }
+    try { await cacheHandle(projectId, folderHandle, updated, updated.thumbnail) } catch { /* recent-list card only */ }
+    set({ recentProjects: refreshCard(get().recentProjects, updated) })
+
+    // The standalone FIN viewer reads this copy; a failure is reported, project.json already holds the save
+    if (updated.isFinProject) {
+      const failed = await writeJson(folderHandle, 'api-config.json', apiConfigFor(apiSettings, updated.name))
+        .then(() => null, (err: unknown) => (err instanceof Error ? err.message : String(err)))
+      if (failed) throw new Error(`Settings were saved to project.json, but api-config.json could not be written: ${failed}`)
+    }
+    return updated
   },
 
   setMaterialOverride: async (modelId: string, override: import('@/types').MaterialOverride) => {

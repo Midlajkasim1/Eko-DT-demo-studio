@@ -127,6 +127,9 @@ try {
     check(power === want && JSON.stringify(hist) === JSON.stringify(Object.keys(s.finEndpoints)) &&
       alarms[0].severity === (s.finSeverityBands.order === 'desc' ? 'warning' : 'critical'),
       `${label}: API output follows ${meta.name} (total_power=${power}, history=${hist}, severity=${alarms[0].severity})`)
+    // the dashboard drops data stamped for another project, so the stamp must name this one
+    const stamp = (await fetch(API + '/api/fin/power-live')).headers.get('x-eko-project')
+    check(stamp === meta.projectId, `${label}: live data is stamped for ${meta.projectId} (got ${stamp})`)
   }
 
   // ── A, B written to disk; open A ──
@@ -152,8 +155,76 @@ try {
   const diskA = await disk('iso-A'); const diskB = await disk('iso-B')
   check(diskB.apiSettings.finLivePoints.total_power === 'p:{project}:r:333', 'B edit saved into B project.json')
   check(JSON.stringify(diskA.apiSettings) === JSON.stringify(A.apiSettings), 'A project.json untouched by the edit')
+  check(diskB.apiSettings.schemaVersion === 1, 'Save Settings stamps the settings schema version')
   const B2 = { ...B, apiSettings: diskB.apiSettings }
   await backendServes(B2, 'B edited')
+
+  // ── FIN Config fields persist: save, reopen from disk, shown again ──
+  const finField = label => page.locator('.ds-field', { has: page.locator(`label:text-is("${label}")`) }).locator('input').first()
+  await page.click('text=Dashboard Settings'); await page.waitForSelector('.dashboard-settings-modal'); await page.click('.ds-tab:has-text("FIN Config")')
+  await finField('Display Name').fill('Bee Site')
+  await finField('Site Timezone').fill('Asia/Riyadh')
+  await page.click('text=Save Settings'); await page.waitForSelector('.dashboard-settings-modal', { state: 'detached' })
+  const diskB3 = await disk('iso-B')
+  check(diskB3.apiSettings.finDisplayName === 'Bee Site' && diskB3.apiSettings.siteTimezone === 'Asia/Riyadh' &&
+    JSON.stringify(diskB3.apiSettings.finLivePoints) === JSON.stringify(diskB.apiSettings.finLivePoints),
+    'B: display name and timezone saved into project.json, mappings unchanged')
+  await open(A, false); await open(B, false)                                           // close and reopen B from disk
+  await page.click('text=Dashboard Settings'); await page.waitForSelector('.dashboard-settings-modal'); await page.click('.ds-tab:has-text("FIN Config")')
+  check(await finField('Display Name').inputValue() === 'Bee Site' && await finField('Site Timezone').inputValue() === 'Asia/Riyadh',
+    'B reopened: display name and timezone restored in FIN Config')
+  // reporting basis: a rate of 0 is refused, nothing is written
+  await finField('Electricity Tariff (per kWh)').fill('0')
+  await page.click('text=Save Settings')
+  await page.waitForSelector('text=Not saved.', { timeout: 5000 }).catch(() => {})
+  check((await page.locator('.dashboard-settings-modal').innerText()).includes('Electricity tariff must be a number above zero') &&
+    (await disk('iso-B')).apiSettings.energyTariff === undefined, 'reporting basis: a tariff of 0 is not saved')
+  await finField('Electricity Tariff (per kWh)').fill('0.42')
+  await finField('Currency').fill('sar')
+  await finField('CO₂ Factor (kg per kWh)').fill('0.5')
+  await finField('Tariff Name').fill('Bee Tariff')
+  await page.click('text=Save Settings'); await page.waitForSelector('.dashboard-settings-modal', { state: 'detached' })
+  const basisDisk = (await disk('iso-B')).apiSettings
+  check(basisDisk.energyTariff === 0.42 && basisDisk.currency === 'SAR' && basisDisk.co2Factor === 0.5 && basisDisk.tariffName === 'Bee Tariff' &&
+    basisDisk.gasTariff === undefined && basisDisk.dashboardDemo === undefined, 'reporting basis saved into B\'s project.json; unset rates stay unset')
+  check((await disk('iso-A')).apiSettings.energyTariff === undefined, 'A got none of B\'s rates')
+  await open(A, false); await open(B, false)
+  await page.click('text=Dashboard Settings'); await page.waitForSelector('.dashboard-settings-modal'); await page.click('.ds-tab:has-text("FIN Config")')
+  check(await finField('Electricity Tariff (per kWh)').inputValue() === '0.42' && await finField('Currency').inputValue() === 'SAR' &&
+    await page.locator('label:has-text("Show the prototype\'s demo figures") input').isChecked() === false,
+    'B reopened: reporting basis restored, demo figures off')
+  await close()
+  await open(A, false)
+  await page.click('text=Dashboard Settings'); await page.waitForSelector('.dashboard-settings-modal'); await page.click('.ds-tab:has-text("FIN Config")')
+  check(await finField('Electricity Tariff (per kWh)').inputValue() === '' && await finField('Currency').inputValue() === '', 'A shows no rate of its own (none from B)')
+  await close()
+  await open(B, false)
+  B2.apiSettings = (await disk('iso-B')).apiSettings
+  await page.click('text=Dashboard Settings'); await page.waitForSelector('.dashboard-settings-modal')   // the checks below close it
+  check(await page.evaluate(() => window.INJECTED_PROJECT_CONFIG === undefined || window.INJECTED_PROJECT_CONFIG.projectId === 'iso-B'),
+    'B reopened: any injected dashboard config names B')
+  await close()
+  B2.apiSettings = diskB3.apiSettings
+
+  // ── a save that cannot be written is reported, and changes nothing ──
+  await openData()
+  await page.evaluate(() => {
+    const s = window.__twin.stores.project
+    window.__realHandle = s.getState().folderHandle
+    const fail = async () => { throw new Error('disk is read-only') }
+    s.setState({ folderHandle: { kind: 'directory', name: 'broken', getFileHandle: fail, getDirectoryHandle: fail } })
+  })
+  await section('FIN Live Points Mapping').locator('input[aria-label="Value"]').first().fill('p:{project}:r:444')
+  await page.click('text=Save Settings')
+  await page.waitForSelector('text=Not saved.', { timeout: 5000 }).catch(() => {})
+  const failText = await page.locator('.dashboard-settings-modal').innerText().catch(() => '')
+  const inStore = await page.evaluate(() => window.__twin.stores.project.getState().currentProject.apiSettings.finLivePoints.total_power)
+  check(failText.includes('Not saved.') && failText.includes('disk is read-only'), 'failed write: "Not saved" and the reason are shown')
+  check(await page.locator('.dashboard-settings-modal').count() === 1, 'failed write: the modal stays open with the edit')
+  check(inStore === 'p:{project}:r:333' && (await disk('iso-B')).apiSettings.finLivePoints.total_power === 'p:{project}:r:333',
+    'failed write: neither the open project nor project.json took the unsaved value')
+  await page.evaluate(() => window.__twin.stores.project.setState({ folderHandle: window.__realHandle }))
+  await close()
 
   // ── B -> A -> B ──
   await open(A, false)
@@ -185,6 +256,53 @@ try {
   await open(A, false)
   await backendServes(A, 'list->A')
 
+  // ── Power Boards: add / validate / delete / save / restore / edit, per project ──
+  const boardsSec = () => section('Power Boards')
+  const boardRows = () => boardsSec().locator('input[aria-label="Board name"]').evaluateAll(ns => ns.map(n => {
+    const row = n.parentElement, v = l => row.querySelector(`input[aria-label="${l}"]`).value
+    return [v('Board name'), v('Live key'), v('History key'), v('Meter')] }))
+  const fillBoard = async (i, [name, live, his, meter]) => {
+    const f = l => boardsSec().locator(`input[aria-label="${l}"]`).nth(i)
+    await f('Board name').fill(name); await f('Live key').fill(live); await f('History key').fill(his); await f('Meter').fill(meter)
+  }
+  // the Save button itself (an unset block's note also says "Save Settings"); the save must be refused, not just flagged
+  const saveBtn = '.dashboard-settings-modal button:has-text("Save Settings")'
+  const saveExpectingError = async text => {
+    await page.click(saveBtn)
+    await page.waitForSelector('text=Not saved.', { timeout: 5000 }).catch(() => {})
+    const t = await page.locator('.dashboard-settings-modal').innerText()
+    return t.includes('Not saved. Power board') && t.includes(text)
+  }
+  await open(B, false)
+  const boardsBefore = (await disk('iso-B')).apiSettings.finPowerBoards
+  await openData()
+  check(await boardsSec().locator('[data-testid="block-unset"]').count() === 1 && (await boardRows()).length === 0, 'Power Boards: not set for B yet')
+  await boardsSec().locator('button:has-text("+ Add board")').click()
+  await fillBoard(0, ['Main Board', 'total_power', 'B_his', 'MTR-1'])
+  await boardsSec().locator('button:has-text("+ Add board")').click()
+  await fillBoard(1, ['main board', 'only_B', '', ''])
+  check(await saveExpectingError('another board already has this name') && (await disk('iso-B')).apiSettings.finPowerBoards === boardsBefore,
+    'Power Boards: a duplicate name is refused and nothing is written')
+  await fillBoard(1, ['Aux Board', 'mcc1', '', ''])
+  check(await saveExpectingError('"mcc1" is not a key of this project\'s FIN Live Points Mapping'), 'Power Boards: another site\'s key (mcc1) is refused for B')
+  await fillBoard(1, ['Aux Board', 'only_B', '', ''])
+  await boardsSec().locator('button:has-text("+ Add board")').click()
+  await fillBoard(2, ['Temporary', 'total_power', '', ''])
+  await boardsSec().locator('button[aria-label="Delete board 3"]').click()
+  await page.click(saveBtn); await page.waitForSelector('.dashboard-settings-modal', { state: 'detached' })
+  const wantBoards = [{ name: 'Main Board', liveKey: 'total_power', historyKey: 'B_his', meter: 'MTR-1' }, { name: 'Aux Board', liveKey: 'only_B' }]
+  check(JSON.stringify((await disk('iso-B')).apiSettings.finPowerBoards) === JSON.stringify(wantBoards), 'Power Boards: B\'s two boards saved to its project.json (the deleted one is not)')
+  check((await disk('iso-A')).apiSettings.finPowerBoards === undefined, 'Power Boards: A got none of B\'s boards')
+  await open(A, false); await openData()
+  check((await boardRows()).length === 0, 'Power Boards: A shows no boards of B\'s'); await close()
+  await open(B, false); await openData()
+  check(JSON.stringify(await boardRows()) === JSON.stringify([['Main Board', 'total_power', 'B_his', 'MTR-1'], ['Aux Board', 'only_B', '', '']]),
+    'Power Boards: B reopened from disk shows its boards')
+  await fillBoard(1, ['Aux Board 2', 'only_B', '', ''])
+  await page.click(saveBtn); await page.waitForSelector('.dashboard-settings-modal', { state: 'detached' })
+  check((await disk('iso-B')).apiSettings.finPowerBoards[1].name === 'Aux Board 2', 'Power Boards: an edit is saved')
+  B2.apiSettings = (await disk('iso-B')).apiSettings
+
   // ── export carries the project's own settings, not another project's ──
   // the zips are built in the page (the real export code) and unpacked here
   const zips = await page.evaluate(async () => {
@@ -205,6 +323,25 @@ try {
     fin: await unzip(zips.fin, 'project.json'),
     finApi: await unzip(zips.fin, 'api-config.json'),
   }
+  const siteCfg = await unzip(zips.backend, 'backend/config.json')
+  check(JSON.stringify(siteCfg.live_point_ids) === '{}' && JSON.stringify(siteCfg.power_endpoints) === '{}' && !JSON.stringify(siteCfg).includes('3181ee6e'),
+    'backend export for B (ellisdonDemo): config.json carries none of config.json\'s Marsa point maps')
+  check(siteCfg.project_name === 'ellisdonDemo', 'backend export config.json names B\'s FIN project')
+  const exportedText = JSON.stringify([exported, siteCfg])
+  check(!/\bsecret\b/.test(exportedText) && !/\btester\b/.test(exportedText), 'exports contain neither the FIN password nor the username typed at sign-in')
+  check(exported.backend.apiSettings.siteTimezone === 'Asia/Riyadh' && exported.fin.apiSettings.finDisplayName === 'Bee Site',
+    'exports carry B\'s site settings (timezone, display name)')
+  check(exported.fin.apiSettings.energyTariff === 0.42 && exported.backend.apiSettings.currency === 'SAR', 'exports carry B\'s reporting basis')
+  check(JSON.stringify(exported.backend.apiSettings.finPowerBoards) === JSON.stringify(B2.apiSettings.finPowerBoards) &&
+    JSON.stringify(exported.fin.apiSettings.finPowerBoards) === JSON.stringify(B2.apiSettings.finPowerBoards), 'exports carry B\'s power boards')
+  check(!('apiKey' in exported.finApi.weather), 'FIN viewer api-config.json has no weather key (B set none)')
+  // no shared weather key in any exported file: a hardcoded fallback has the shape `|| '<32 hex>'` (the key is never printed)
+  const hardcodedKey = /\|\|\s*["'][0-9a-f]{32}["']/
+  const zipTexts = async b64 => { const z = await JSZip.loadAsync(Buffer.from(b64, 'base64')); const out = []
+    for (const f of Object.values(z.files)) if (!f.dir && /\.(js|json|html|py)$/.test(f.name)) out.push([f.name, await f.async('string')])
+    return out }
+  const withKey = [...await zipTexts(zips.backend), ...await zipTexts(zips.fin)].filter(([, t]) => hardcodedKey.test(t)).map(([n]) => n)
+  check(withKey.length === 0, 'no exported file carries a hardcoded fallback key' + (withKey.length ? ': ' + withKey.join(', ') : ''))
   for (const k of ['finLivePoints', 'finEndpoints', 'finEquipmentClasses', 'finMeterProfile', 'finSeverityBands']) {
     assert.deepStrictEqual(exported.backend.apiSettings[k], B2.apiSettings[k], 'backend export ' + k)
     assert.deepStrictEqual(exported.fin.apiSettings[k], B2.apiSettings[k], 'fin export ' + k)
@@ -303,6 +440,62 @@ try {
   await open(D, false)
   await openFin()
   check(await nameField().inputValue() === '', 'B->D: the connection name was not saved into D by switching')
+  await close()
+
+  // ── switching project while a save is still being written: the save lands in A's folder only ──
+  await open(A, true)                                                               // A as on disk at the start
+  const diskB0 = JSON.stringify((await disk('iso-B')).apiSettings)
+  await openData()
+  await page.evaluate(() => {                                                       // A's folder answers slowly
+    const s = window.__twin.stores.project, real = s.getState().folderHandle
+    s.setState({ folderHandle: { kind: 'directory', name: real.name,
+      getFileHandle: async (n, o) => { await new Promise(r => setTimeout(r, 1500)); return real.getFileHandle(n, o) },
+      getDirectoryHandle: (n, o) => real.getDirectoryHandle(n, o) } })
+  })
+  await section('FIN Live Points Mapping').locator('input[aria-label="Value"]').first().fill('p:{project}:r:555')
+  await page.click('text=Save Settings')
+  await open(B, false)                                                              // switch before the write finishes
+  await sleep(2500)
+  const openNow = await page.evaluate(() => { const c = window.__twin.stores.project.getState().currentProject; return { id: c.projectId, live: c.apiSettings.finLivePoints } })
+  check(openNow.id === 'iso-B' && JSON.stringify(openNow.live) === JSON.stringify(B2.apiSettings.finLivePoints),
+    'save during a switch: the open project is still B, with B\'s own mappings ' + JSON.stringify(openNow))
+  check((await disk('iso-A')).apiSettings.finLivePoints.total_power === 'p:{project}:r:555', 'save during a switch: written into A\'s project.json')
+  check(JSON.stringify((await disk('iso-B')).apiSettings) === diskB0, 'save during a switch: B\'s project.json untouched')
+  await backendServes(B2, 'save during a switch: backend')
+
+  // ── Power Boards on config.json's own site: its boards name config.json's keys ──
+  const M = { ...base, projectId: 'iso-M', name: 'Project M (Marsa)', isFinProject: true, apiSettings: { finProjectName: 'marsaAlArab' } }
+  await open(M, true)
+  await openData()
+  await boardsSec().locator('button:has-text("+ Add board")').click()
+  await fillBoard(0, ['MCC 1', 'total_power', '', ''])
+  check(await saveExpectingError('"total_power" is not a key of this project\'s FIN Live Points Mapping'), 'Marsa: a key config.json does not serve is refused')
+  await fillBoard(0, ['MCC 1', 'mcc1', 'Hourly_EC_MCC1_his', 'PMU09'])
+  await page.click(saveBtn); await page.waitForSelector('.dashboard-settings-modal', { state: 'detached' })
+  check(JSON.stringify((await disk('iso-M')).apiSettings.finPowerBoards) === JSON.stringify([{ name: 'MCC 1', liveKey: 'mcc1', historyKey: 'Hourly_EC_MCC1_his', meter: 'PMU09' }]),
+    'Marsa: a board on config.json\'s keys is saved')
+  check((await (await fetch(API + '/api/fin/mapping-schema')).json()).standardProjectId === 'iso-M', 'Marsa: the backend reports it verified this project on this server')
+
+  // mapping-schema unreachable: standard-only keys are not accepted, said plainly; own keys still save
+  await page.route('**/api/fin/mapping-schema', r => r.abort())
+  await openData()
+  await fillBoard(0, ['MCC 1 renamed', 'mcc1', 'Hourly_EC_MCC1_his', 'PMU09'])
+  check(await saveExpectingError('could not be reached') && (await disk('iso-M')).apiSettings.finPowerBoards[0].name === 'MCC 1',
+    'Marsa, backend unreachable: config.json\'s keys are refused with a clear message, nothing written')
+  await close()
+  await open(B, false); await openData()
+  await fillBoard(1, ['Aux Board 3', 'only_B', '', ''])
+  await page.click(saveBtn); await page.waitForSelector('.dashboard-settings-modal', { state: 'detached' })
+  check((await disk('iso-B')).apiSettings.finPowerBoards[1].name === 'Aux Board 3', 'B, backend unreachable: boards on B\'s own keys still save')
+  await page.unroute('**/api/fin/mapping-schema')
+
+  // no FIN session (nothing verified on any server): a name match alone does not admit config.json's keys
+  await open(M, false)
+  await fetch(API + '/api/fin/logout', { method: 'POST' })
+  await openData()
+  await fillBoard(0, ['MCC 1 renamed', 'mcc1', '', ''])
+  check(await saveExpectingError('accepted only once the backend has verified marsaAlArab') && (await disk('iso-M')).apiSettings.finPowerBoards[0].name === 'MCC 1',
+    'Marsa, not verified: config.json\'s keys are refused until the backend verifies the server')
   await close()
 } catch (e) {
   console.log('ERROR', e.stack || e.message)
