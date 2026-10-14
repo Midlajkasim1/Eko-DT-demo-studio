@@ -102,8 +102,8 @@ window.EKO_NF = (function(){
       E.set({ assetSel: asset, apTab: tab2 });
     };
     switch(kind){
-      case 'workOrder':   if(p.asset){ openAsset(p.asset, 'activity'); return; } break;
-      case 'asset':       if(p.asset || (n.source&&n.source.id)){ openAsset(p.asset || n.source.id, 'activity'); return; } break;
+      case 'workOrder':   if(p.asset){ openAsset(p.asset, 'alarms'); return; } break;
+      case 'asset':       if(p.asset || (n.source&&n.source.id)){ openAsset(p.asset || n.source.id, 'analytics'); return; } break;
       case 'alarm':       if(p.asset){ openAsset(p.asset, 'alarms'); return; }
                           E.go('marsa-overview', 'overview', null); return;
       case 'controlTab':  if(p.asset){ openAsset(p.asset, 'control'); return; } break;

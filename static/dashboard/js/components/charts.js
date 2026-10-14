@@ -47,3 +47,37 @@ function ekoTrend(vals,w,h){
   return{line:line,area:line+' L'+w.toFixed(1)+','+h+' L0,'+h+' Z',
     avgY:y(avg).toFixed(1),avg:avg.toFixed(1),min:mn,max:mx,w:w,h:h};
 }
+
+// Grouped actual-vs-setpoint bars for the asset Analytics tab.
+function ekoCompareBars(groups,w,h){
+  const padT=8,padB=18,padX=6;
+  const innerW=w-padX*2,innerH=h-padT-padB;
+  const nums=[];
+  (groups||[]).forEach(g=>{
+    if(g.a!=null&&isFinite(g.a)) nums.push(+g.a);
+    if(g.b!=null&&isFinite(g.b)) nums.push(+g.b);
+  });
+  if(!nums.length) return {svg:'',min:0,max:0};
+  let lo=Math.min.apply(null,nums),hi=Math.max.apply(null,nums);
+  const span=(hi-lo)||1;
+  lo=lo-span*0.28; hi=hi+span*0.18;
+  const y=v=>padT+innerH-((v-lo)/((hi-lo)||1))*innerH;
+  const n=groups.length,slot=innerW/n,bw=Math.max(3.5,slot*0.3);
+  const base=y(lo);
+  let bars='';
+  groups.forEach((g,i)=>{
+    const cx=padX+i*slot+slot/2;
+    const rect=(val,shift,fill)=>{
+      if(val==null||!isFinite(val)) return '';
+      const yv=y(val), top=Math.min(yv,base), ht=Math.max(Math.abs(yv-base),1);
+      return `<rect x="${(cx+shift).toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${ht.toFixed(1)}" rx="1.4" fill="${fill}"/>`;
+    };
+    bars+=rect(g.a,-bw-0.8,'var(--acc)')+rect(g.b,0.8,'var(--info)');
+  });
+  const labels=groups.map((g,i)=>{
+    const x=padX+i*slot+slot/2;
+    const t=String(g.label==null?'':g.label);
+    return `<text x="${x.toFixed(1)}" y="${h-4}" text-anchor="middle" fill="var(--t3)" font-size="8">${t}</text>`;
+  }).join('');
+  return {svg:bars+labels,min:lo,max:hi,w:w,h:h};
+}

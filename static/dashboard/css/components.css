@@ -6395,6 +6395,23 @@
   font-weight:var(--txValueW)
 }
 
+.dashboard-native-container #assetpanel .apwtyrow dd {
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:2px;
+  text-align:right
+}
+
+.dashboard-native-container #assetpanel .apwtypair {
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:2px;
+  font-family:'JetBrains Mono',monospace;
+  font-size:var(--txCapSz)
+}
+
 .dashboard-native-container .apsrc {
   font-size:var(--txSubSz);
   color:var(--txSubC)
@@ -13444,6 +13461,30 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .apfull .systrend {
   padding-block:4px
 }
+
+.dashboard-native-container .apcmpchart {
+  min-height:88px
+}
+
+.dashboard-native-container .apcmpleg {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:var(--txCapSz);
+  color:var(--t3);
+  padding-block:2px 0
+}
+
+.dashboard-native-container .apcmpdot {
+  width:8px;
+  height:8px;
+  border-radius:2px;
+  display:inline-block;
+  flex:none
+}
+
+.dashboard-native-container .apcmpdot[data-k="act"] { background:var(--acc) }
+.dashboard-native-container .apcmpdot[data-k="sp"] { background:var(--info) }
 
 .dashboard-native-container .accnote {
   padding:2px 12px 6px;

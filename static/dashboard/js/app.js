@@ -145,6 +145,18 @@
       return this.data.alarms.filter(a =>
         !hid.has(a.sev) && (this.state.showAcked || !a.ack));
     },
+    /* Water or gas utility alarm. Same split as the meter counter: a Utilities
+       asset is gas only when its name says gas, otherwise water. Chilled-water
+       plant stays out of this. */
+    utilDomain(a){
+      const blob = ((a && a.asset) || '') + ' ' + ((a && a.locEn) || '') + ' ' + ((a && a.plainEn) || '') + ' ' + ((a && a.sys) || '');
+      const s = blob.toLowerCase();
+      const gas = /gas[_-]?meter|(?:^|[^a-z])gm[-_]|gas-meter/.test(s)
+        || (a && a.sys === 'Utilities' && /gas/.test(s) && !/water/.test(s));
+      if (gas) return 'gas';
+      if (a && (a.sys === 'Utilities' || /water[_-]?meter|(?:^|[^a-z])wm[-_]/.test(s))) return 'water';
+      return '';
+    },
     /* Timeline events derive from the alarm list: everything younger than 24 h
        that carries the time it was raised (an equipment fault with no alarm
        record has none, so it has no place on a timeline). */
@@ -1010,7 +1022,7 @@
       E.state.woPhase[id] = 'raising'; render();
       if(window.EKO_CMMS) window.EKO_CMMS.createWorkOrder({ assetId: id });
       else { delete E.state.woPhase[id]; render(); } },
-    woOpen(el){ E.set({ assetSel: el.dataset.asset, apTab: 'activity' }); },
+    woOpen(el){ E.set({ assetSel: el.dataset.asset, apTab: 'alarms' }); },
     locate(el){ const id = el.dataset.asset;
       const a = E.data.alarms.find(x => x.asset === id);
       if(!document.getElementById('vpmain'))

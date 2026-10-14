@@ -150,6 +150,38 @@ def trunc2(val: float) -> str:
     return clip_decimals(f"{val:.12f}").rstrip("0").rstrip(".")
 
 
+def display_cur_val(val: Any, nav_lower: str, unit: str) -> tuple[str, str]:
+    """Turn a FIN curVal into a panel string. Bools use the quoted display, else On/Off."""
+    if isinstance(val, dict):
+        val = val.get("dis") or val.get("val")
+    if val is None or val == "" or val == "N/A":
+        return "—", "Null"
+    if isinstance(val, bool):
+        return ("On" if val else "Off"), "Bool"
+    if isinstance(val, str):
+        s = val.strip()
+        m = re.match(r'^(T|F|true|false)\s*(?:"([^"]*)")?$', s, re.I)
+        if m:
+            shown = decode_zinc_unicode((m.group(2) or "").strip())
+            if shown:
+                return shown, "Bool"
+            return ("On" if m.group(1)[0].upper() == "T" else "Off"), "Bool"
+        cleaned = s.rstrip("°CcFf%")
+        try:
+            val = float(cleaned)
+        except (ValueError, TypeError):
+            return clip_decimals(s), "Str"
+    if isinstance(val, (int, float)):
+        is_fdd = nav_lower.startswith("fd") or "fdd" in nav_lower or nav_lower.startswith("rule")
+        if not is_fdd and (unit == "%" or any(x in nav_lower for x in ["valve", "coil", "demand"])):
+            return f"{int(val)}%", "Number"
+        shown = trunc2(float(val))
+        if unit:
+            shown = f"{shown}{unit}"
+        return shown, "Number"
+    return clip_decimals(str(val)), "Str"
+
+
 def alarm_is_open(row: dict) -> bool:
     """A FIN alarm stays on the list only while its active marker is set.
 
@@ -816,23 +848,14 @@ class FinScramClient:
                     val = p.get("val")
                 if val is None:
                     val = p.get("v0")
-                if isinstance(val, dict):
-                    val = val.get("dis") or val.get("val")
-                if isinstance(val, str):
-                    cleaned = val.strip().rstrip("°CcFf%")
-                    try:
-                        val = float(cleaned)
-                    except (ValueError, TypeError):
-                        pass
-                if val == "T" or val is True:
-                    val = True
-                elif val == "F" or val is False:
-                    val = False
 
                 # A point with no current value is not reporting, but if it is
                 # historized we still keep it so its trend stays chartable.
                 is_his = p.get("his") is True
-                reporting = not (val is None or val == "" or val == "N/A")
+                empty = val is None or val == "" or val == "N/A"
+                if isinstance(val, dict):
+                    empty = not (val.get("dis") or val.get("val"))
+                reporting = not empty
                 if not reporting:
                     if not is_his:
                         continue
@@ -841,19 +864,9 @@ class FinScramClient:
                 unit = p.get("unit", "") or ""
                 if val is None:
                     display_val = "—"
-                elif isinstance(val, bool):
-                    display_val = "T" if val else "F"
-                elif isinstance(val, (int, float)):
-                    if unit == "%" or any(x in nav_lower for x in ["valve", "coil", "demand"]):
-                        val = int(val)
-                        unit = "%"
-                        display_val = f"{val}{unit}"
-                    else:
-                        display_val = trunc2(float(val))
-                        if unit:
-                            display_val = f"{display_val}{unit}"
+                    kind = "Null"
                 else:
-                    display_val = clip_decimals(str(val))
+                    display_val, kind = display_cur_val(val, nav_lower, unit)
 
                 nav_key = nav_lower.replace(" ", "_")
                 if nav_key in seen_navs:
@@ -869,6 +882,7 @@ class FinScramClient:
                     "his": is_his,
                     "reporting": reporting,
                     "unit": unit,
+                    "kind": kind,
                 })
 
             floor = safe_get(equip.get("floorRef"), "dis", "Unknown Floor")

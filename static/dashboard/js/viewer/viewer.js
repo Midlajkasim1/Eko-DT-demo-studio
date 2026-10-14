@@ -72,6 +72,14 @@ window.EKO_V = (function(){
       const grp = ((E.data.systems && E.data.systems.groups) || []).find(g => g.id === E.state.sub);
       if (grp && grp.sysKey) list = list.filter(a => grp.sysKey.includes(a.sys));
     }
+    if (E.state.module === 'utilities') {
+      const sub = E.state.sub;
+      list = list.filter(a => {
+        const d = E.utilDomain(a);
+        if (!d) return false;
+        return sub === 'water' || sub === 'gas' ? d === sub : true;
+      });
+    }
     /* One marker per equipment. The colour is the worst severity. The number
        is every open alarm on that equipment, not only the winning severity. */
     const where = a => guidOf(a.asset) || a.bimId || a.asset || (Math.round(a.x) + ',' + Math.round(a.y));
@@ -389,7 +397,14 @@ window.EKO_V = (function(){
     const axis = `<span class="tlaxis" aria-hidden="true">${ticks.join('')}</span>`;
 
     /* a marker is when an alarm was RAISED, not a point on the curve */
-    const evs = E.events().filter(a => a.ageH <= range).map(a => {
+    const evSrc = E.state.module === 'utilities'
+      ? E.events().filter(a => {
+          const d = E.utilDomain(a);
+          if (!d) return false;
+          return E.state.sub === 'water' || E.state.sub === 'gas' ? d === E.state.sub : true;
+        })
+      : E.events();
+    const evs = evSrc.filter(a => a.ageH <= range).map(a => {
       const when = a.raisedAt ? clockLabel(E, a.raisedAt) : E.ph(a.raised);
       return `<button class="scrubev tipU" style="left:${(1-a.ageH/range)*100}%"
         data-act="tlEvent" data-age="${a.ageH}"

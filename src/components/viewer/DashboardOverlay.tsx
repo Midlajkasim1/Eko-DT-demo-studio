@@ -12,6 +12,7 @@ import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
 import { createFcuSchematic } from '@/lib/fcuSchematic'
 import { createAhuSchematic } from '@/lib/ahuSchematic'
+import { createFahuSchematic } from '@/lib/fahuSchematic'
 import { createMauSchematic } from '@/lib/mauSchematic'
 import { createEcoSchematic } from '@/lib/ecoSchematic'
 import type { HvacSchematic } from '@/lib/hvacGeometry'
@@ -33,7 +34,12 @@ const SCHEMATICS: Record<string, (localBox: THREE.Box3, modelMatrix: THREE.Matri
   AHU:  createAhuSchematic,
   MAHU: createMauSchematic,
   ECO:  createEcoSchematic,
+  FAHU: createFahuSchematic,
 }
+
+/* Types whose internals are driven by live FIN points (filter, UV and fan state).
+   FCU, AHU and FAHU stay at their default look: their readings live in the asset panel. */
+const LIVE_SCHEMATICS = new Set(['MAHU', 'ECO'])
 
 function loadScripts(scripts: HTMLScriptElement[], signal: { mounted: boolean }) {
   return scripts.reduce<Promise<void>>((prev, s) => prev.then(() => new Promise((resolve) => {
@@ -320,7 +326,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const dt = Math.min(0.05, (now - shown.last) / 1000)
         shown.last = now
         shown.schematic.tick(dt)
-        if (now - shown.synced > 400) {
+        if (LIVE_SCHEMATICS.has(shown.type) && now - shown.synced > 400) {
           shown.synced = now
           shown.schematic.apply(pointsFor(shown.assetId, shown.bimId))
         }
@@ -372,7 +378,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       })
       ghostFill.uniforms.uOpacity.value = 0.22
       active = { ...internals, schematic, bimId, last: performance.now(), synced: 0 }
-      schematic.apply(pointsFor(internals.assetId, bimId))
+      if (LIVE_SCHEMATICS.has(internals.type)) schematic.apply(pointsFor(internals.assetId, bimId))
     }
     const buildGhost = async (entry: Located, bimId: string, seq: number, internals: Internals | null) => {
       let meshes: any[][] = []
@@ -518,7 +524,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const internals = bimId ? internalsFor(assetIdOrBimId, bimId) : null
       if (colored && colored.bimId === bimId && ghost) {
         syncColour()
-        if (active && internals) active.schematic.apply(pointsFor(internals.assetId, bimId))
+        if (active && internals && LIVE_SCHEMATICS.has(internals.type)) active.schematic.apply(pointsFor(internals.assetId, bimId))
         return true
       }
       colored = null

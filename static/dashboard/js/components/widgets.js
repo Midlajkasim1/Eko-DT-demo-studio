@@ -362,19 +362,25 @@ window.EKO_C = (function(){
       + '</div>');
   }
 
-  /* Utilities module panel (D40, Final mock): ACTIVE ALARMS grouped WATER /
-     GAS from the water+gas monitoring lists (never the canonical ribbon
-     twelve), then the two footer rows into the sub-pages. */
+  /* Utilities module panel: ACTIVE ALARMS grouped WATER / GAS from live
+     utility alarms only, then the two footer rows into the sub-pages. */
   function utilitiesPanel(E){
     const ar = E.lang==='ar';
-    const wa = E.data.water.alarms, ga = E.data.gas.alarms;
+    const sub = E.state.sub;
+    const live = E.visAlarms().filter(a => {
+      const d = E.utilDomain(a);
+      if (!d) return false;
+      return sub === 'water' || sub === 'gas' ? d === sub : true;
+    });
+    const wa = live.filter(a => E.utilDomain(a) === 'water');
+    const ga = live.filter(a => E.utilDomain(a) === 'gas');
     const n = wa.length + ga.length;                     /* count derives */
-    const row = (i, sub, page) => `<button class="uprow" data-act="goSub" data-mod="utilities" data-sub="${sub}" data-page="${page}">
-      <span class="uadot" data-sev="${i.sev}"></span>
+    const row = (a, subName, page) => `<button class="uprow" data-act="goSub" data-mod="utilities" data-sub="${subName}" data-page="${page}">
+      <span class="uadot" data-sev="${esc(a.sev)}"></span>
       <span class="col grow minw0 taS gap1">
-        <span class="uploc">${esc(ar?i.locAr:i.locEn)}</span>
-        <span class="uptit">${esc(ar?i.tAr:i.tEn)}</span></span>
-      <span class="uaage">${esc(E.ph(i.age))}</span></button>`;
+        <span class="uploc">${esc(ar ? (a.locAr || a.locEn) : a.locEn)}</span>
+        <span class="uptit">${esc(ar ? (a.plainAr || a.plainEn || a.tAr) : (a.plainEn || a.tEn || ''))}</span></span>
+      <span class="uaage">${esc(a.ageH != null ? E.fmtAge(a.ageH) : E.ph(a.age))}</span></button>`;
     const foot = (lblKey, key, sub, page) => `<button class="upfoot" data-act="goSub" data-mod="utilities" data-sub="${sub}" data-page="${page}">
       <span class="upfl">${esc(E.t(lblKey))}</span>
       <span class="tMonoS cT2">${esc(ar?E.data.landing[key].headAr:E.data.landing[key].headEn)}</span>${icon('chevR',12)}</button>`;
@@ -931,9 +937,10 @@ window.EKO_C = (function(){
      Reference anatomy (D43 rulings): header = asset CODE + chip + expand +
      close; context = location · zone · plain-language type; action pills
      Locate in 3D (primary) / Work order / CAFM (Analytics is a tab, dropped
-     from pills); tabs Alarms / Activity / O&M / Warranty (+ Control only when
-     the data contract, site flag and role permit). LIVE PARAMETERS persists
-     above every tab. Desktop has no footer; the PHONE SHEET keeps a sticky
+     from pills); tabs Alarms / Analytics / O&M / Warranty (+ Control only when
+     the data contract, site flag and role permit). Alarms holds FDD and open
+     alarms; Analytics holds analog live values and the trend graph.
+     Desktop has no footer; the PHONE SHEET keeps a sticky
      footer (intentional responsive divergence, logged). */
   /* The minimum the panel needs, built from the alarms that name the asset */
   function alarmAsAsset(E, id){
@@ -996,43 +1003,39 @@ window.EKO_C = (function(){
     const upper = raw.trim().toUpperCase();
     if (upper === 'T' || upper === 'TRUE' || upper === 'ON' || upper === 'RUN' || upper === 'RUNNING') return 'On';
     if (upper === 'F' || upper === 'FALSE' || upper === 'OFF' || upper === 'STOP' || upper === 'STOPPED') return 'Off';
+    if (/[a-zA-Z°%]/.test(raw)) return raw;
     const n = fcuNumber(raw);
-    if (n != null && unit && raw.indexOf(unit) === -1 && !/[a-zA-Z°]/.test(raw)) {
+    if (n != null && unit && raw.indexOf(unit.trim()) === -1) {
       const text = fmt(n, 1);
       return text + unit;
     }
     return raw;
   }
-  function fcuFind(points, test) {
-    for (let i = 0; i < points.length; i++) {
-      if (test(fcuFold(points[i] && points[i].navName))) return points[i];
-    }
-    return null;
+  function isFddNav(name) {
+    const k = fcuFold(name);
+    return k.indexOf('fdd') === 0 || k.indexOf('rule') === 0;
   }
-  function fcuPointRows(asset) {
-    const id = String(asset && asset.id || '').toUpperCase();
-    const type = String(asset && asset.typeEn || '').toUpperCase();
-    if (id.indexOf('FCU') !== 0 && type.indexOf('FCU') === -1) return '';
-    const points = (asset && asset.points) || [];
-    if (!points.length) return '';
-    const zone = fcuFind(points, k => k.indexOf('zonetemp') !== -1 && k.indexOf('set') === -1 && !/sp$/.test(k));
-    const pos = fcuFind(points, k => k.indexOf('coolingvalvepos') !== -1 || (k.indexOf('valve') !== -1 && k.indexOf('pos') !== -1 && k.indexOf('cmd') === -1));
-    const cmd = fcuFind(points, k => k.indexOf('coolingvalvecmd') !== -1 || (k.indexOf('valve') !== -1 && (k.indexOf('cmd') !== -1 || k.indexOf('command') !== -1)));
-    const speed = fcuFind(points, k => k.indexOf('fanspeed') !== -1);
-    const run = fcuFind(points, k => k.indexOf('fanrun') !== -1 || k === 'fanstatus');
-    const rows = [
-      ['ZONE_TEMP', fcuShown(fcuClean(zone && zone.currentValue), ' °C')],
-      ['COOLING_VALVE_POS', fcuShown(fcuClean(pos && pos.currentValue), ' %')],
-      ['COOLING_VALVE_CMD', fcuShown(fcuClean(cmd && cmd.currentValue), ' %')],
-      ['FAN_SPEED_MODE', fcuShown(fcuClean(speed && speed.currentValue), ' %')],
-      ['FAN_RUN_STS', fcuShown(fcuClean(run && run.currentValue), '')],
-    ].filter(row => row[1]);
-    if (!rows.length) return '';
-    return rows.map(row => `<div class="aprow"><dt>${esc(row[0])}</dt><dd>${esc(row[1])}</dd></div>`).join('');
+  function isAlarmNav(name) {
+    const k = fcuFold(name);
+    return k.indexOf('alarm') !== -1 || /(?:^|_)alm(?:$|_)/.test(String(name || '').toLowerCase());
+  }
+  function analogUnit(name, unit) {
+    if (unit) {
+      const u = String(unit).trim();
+      return u ? (u.charAt(0) === '°' || u.charAt(0) === '%' ? ' ' + u : ' ' + u) : '';
+    }
+    const k = fcuFold(name);
+    if (k.indexOf('alarm') !== -1 || k.indexOf('filter') !== -1 || k.indexOf('occup') !== -1 || k.indexOf('enable') !== -1) return '';
+    if (k.indexOf('temp') !== -1) return ' °C';
+    if (k.indexOf('hum') !== -1) return ' %';
+    if (k.indexOf('co2') !== -1) return ' ppm';
+    if (k.indexOf('press') !== -1 || /dp$/.test(k)) return ' Pa';
+    if (k.indexOf('valve') !== -1 || k.indexOf('damper') !== -1 || k.indexOf('speed') !== -1 || k.indexOf('pos') !== -1 || k.indexOf('cmd') !== -1) return ' %';
+    return '';
   }
   /* The air-handler family as a whole word of the id or type: "MAHU-ANC09-BF-01" is MAHU,
-     never AHU, FAHU is its own kind (no rows of its own yet), and "ILIANA ECO-ANC09-BF-01"
-     is the kitchen-exhaust ecology unit whatever type FIN gives it. */
+     never AHU, and "ILIANA ECO-ANC09-BF-01" is the kitchen-exhaust ecology unit whatever
+     type FIN gives it. FCU, AHU and FAHU use the generic analog rows. */
   function airKind(asset) {
     const s = (String(asset && asset.id || '') + ' ' + String(asset && asset.typeEn || '')).toUpperCase();
     const m = s.match(/(?:^|[^A-Z])(AHU|MAHU|FAHU|ECO)(?=[^A-Z]|$)/);
@@ -1111,27 +1114,37 @@ window.EKO_C = (function(){
     ];
     return rows.map(row => `<div class="aprow"><dt>${esc(row[0])}</dt><dd>${esc(row[1])}</dd></div>`).join('');
   }
-  function ahuPointRows(asset) {
-    const id = String(asset && asset.id || '').toUpperCase();
-    const type = String(asset && asset.typeEn || '').toUpperCase();
-    if (id.indexOf('AHU') !== 0 && type.indexOf('AHU') === -1) return '';
-    if (['MAHU', 'FAHU', 'ECO'].includes(airKind(asset))) return '';
-    const points = (asset && asset.points) || [];
-    if (!points.length) return '';
-    const raTemp = fcuFind(points, k => k.indexOf('ratemp') !== -1 && k.indexOf('set') === -1 && !/sp$/.test(k));
-    const raHum = fcuFind(points, k => k.indexOf('rahum') !== -1 && k.indexOf('set') === -1 && !/sp$/.test(k));
-    const raCo2 = fcuFind(points, k => k.indexOf('raco2') !== -1 && k.indexOf('set') === -1 && !/sp$/.test(k));
-    const saTemp = fcuFind(points, k => k.indexOf('satemp') !== -1 && k.indexOf('set') === -1 && !/sp$/.test(k));
-    const saHum = fcuFind(points, k => k.indexOf('sahum') !== -1 && k.indexOf('set') === -1 && !/sp$/.test(k));
-    const saPressure = fcuFind(points, k => k.indexOf('sapressure') !== -1 && k.indexOf('set') === -1 && !/sp$/.test(k));
-    const rows = [
-      ['RA_TEMP', fcuShown(fcuClean(raTemp && raTemp.currentValue), ' °C')],
-      ['RA_HUM', fcuShown(fcuClean(raHum && raHum.currentValue), ' %')],
-      ['RA_CO2', fcuShown(fcuClean(raCo2 && raCo2.currentValue), ' ppm')],
-      ['SA_TEMP', fcuShown(fcuClean(saTemp && saTemp.currentValue), ' °C')],
-      ['SA_HUM', fcuShown(fcuClean(saHum && saHum.currentValue), ' %')],
-      ['SA_PRESSURE', fcuShown(fcuClean(saPressure && saPressure.currentValue), ' Pa')],
-    ].filter(row => row[1]);
+  function analogPointRows(asset) {
+    const listed = Array.isArray(asset && asset.analog) ? asset.analog : null;
+    const rows = [];
+    const push = (name, raw, unit) => {
+      const shown = fcuShown(fcuClean(raw), analogUnit(name, unit));
+      if (shown) rows.push([name, shown]);
+    };
+    if (listed && listed.length) {
+      listed.forEach(p => {
+        if (!p || !p[0] || isFddNav(p[0]) || isAlarmNav(p[0])) return;
+        push(p[0], p[2], p[3]);
+      });
+    } else {
+      const fromPts = (asset && asset.points) || [];
+      if (fromPts.length) {
+        fromPts.forEach(p => {
+          if (!p || !p.reporting) return;
+          if (isFddNav(p.navName) || isAlarmNav(p.navName)) return;
+          const folded = fcuFold(p.navName);
+          if (folded.indexOf('warrant') !== -1) return;
+          push(p.navName, p.currentValue, p.unit);
+        });
+      } else {
+        ((asset && asset.params) || []).forEach(p => {
+          if (!p || !p[0] || isFddNav(p[0]) || isAlarmNav(p[0])) return;
+          const folded = fcuFold(p[0]);
+          if (folded.indexOf('warrant') !== -1) return;
+          push(p[0], p[2], p[3]);
+        });
+      }
+    }
     if (!rows.length) return '';
     return rows.map(row => `<div class="aprow"><dt>${esc(row[0])}</dt><dd>${esc(row[1])}</dd></div>`).join('');
   }
@@ -1149,27 +1162,47 @@ window.EKO_C = (function(){
     const sevChips = ['critical','high','medium'].filter(s => sevN[s]).map(s => `<span class="statchip" data-sev="${s}">${sevN[s]} ${esc(t('rib'+s[0].toUpperCase()+s.slice(1)))}</span>`).join('');
     const ctl = window.EKO_CTL && window.EKO_CTL.showsControl(E, r);
     let tab = E.state.apTab;
-    if(!['alarms','activity','om','warranty','control'].includes(tab)) tab = 'alarms';
+    if (tab === 'activity') tab = 'analytics';
+    if(!['alarms','analytics','om','warranty','control'].includes(tab)) tab = 'alarms';
     if(tab === 'control' && !ctl) tab = 'alarms';
     const trP = x => E.ph(x);
-    const live = `<h4 class="tLbl">${esc(t('apLiveParams'))}</h4>
-      ${(r.params||[]).map(p =>
-        `<div class="aprow"><dt>${esc(trP(p[0]))}${p[1] ? `<span class="apsrc">${esc(trP(p[1]))}</span>` : ''}</dt><dd>${esc(E.clip2 ? E.clip2(p[2]) : p[2])}</dd></div>`).join('')
-        || `<p class="alempty">${esc(t('emptyDash'))}</p>`}`;
-    /* D105: progressive disclosure replaces the old Pro depth — a labelled expansion in place, per user */
-    const fullOn = E.disclose('full');
-    const tr7 = r.trend7 && Array.isArray(r.trend7.vals) && r.trend7.vals.length >= 2 ? r.trend7 : null;
+    const foldNav = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const isBoolLive = v => { const s = String(v == null ? '' : v).trim().toUpperCase(); return s === 'T' || s === 'F' || s === 'TRUE' || s === 'FALSE' || s === 'ON' || s === 'OFF'; };
+    const wtySlot = n => { const f = foldNav(n); if (f.indexOf('warrant') === -1) return null; if (f.indexOf('start') !== -1) return 'start'; if (f.indexOf('end') !== -1) return 'end'; return null; };
+    const alsText = als.map(a => String((a && (a.plainEn || a.techEn)) || '').toLowerCase());
+    const fddRows = (r.params || []).filter(p => {
+      if (!isFddNav(p[0]) || wtySlot(p[0]) || isBoolLive(p[2])) return false;
+      const msg = String(p[2] || '').toLowerCase();
+      if (!msg) return false;
+      return !alsText.some(t => t && (t.indexOf(msg.slice(0, 48)) !== -1 || msg.indexOf(t.slice(0, 48)) !== -1));
+    });
+    const alarmPtSrc = Array.isArray(r.alarmPts) && r.alarmPts.length
+      ? r.alarmPts
+      : ((r.points || []).filter(p => p && p.reporting && isAlarmNav(p.navName)).map(p => [p.navName, '', p.currentValue]));
+    const alarmPtRows = alarmPtSrc.filter(p => fcuClean(p[2])).map(p => {
+      const shown = fcuShown(fcuClean(p[2]), '');
+      return shown ? [p[0], shown] : null;
+    }).filter(Boolean);
+    const analogRows = analogPointRows(r);
+    /* MAHU and ECO list every FIN point they draw, a missing one as "—"; the rest use the generic analog rows */
+    const typeRows = mauPointRows(r) || ecoPointRows(r);
+    const cmp = r.compare || null;
     const reason = r.st === 'stale' ? 'dgNoTrend.stale' : (r.trendKind === 'state' ? 'dgNoTrend.state' : 'dgNoTrend.none');
-    const fcuRows = fcuPointRows(r);
-    const ahuRows = ahuPointRows(r) || mauPointRows(r) || ecoPointRows(r);
-    const full = `<div class="apfull"><div class="row gap8"><h4 class="tLbl grow">${esc(t('apFullT'))}</h4><button class="statlink" data-act="disclose" data-k="full" aria-expanded="${fullOn}">${esc(t(fullOn ? 'hideFull' : 'discloseFull'))}</button></div>
-      ${fcuRows}
-      ${ahuRows}
-      ${fullOn ? (tr7 ? (() => { const p = window.ekoTrend(tr7.vals, 240, 56); const lo = Math.min(...tr7.vals), hi = Math.max(...tr7.vals);
-        return `<p class="tCap">${esc(trP(tr7.point))} · ${esc(t('apTrendPts', { n: tr7.vals.length }))} · ${lo}–${hi} ${esc(tr7.unit || '')}</p>
-        <div class="systrend"><svg viewBox="0 0 240 56" preserveAspectRatio="none"><path d="${p.area}" fill="var(--accT)"/><path d="${p.line}" fill="none" stroke="var(--acc)" stroke-width="1.5"/></svg></div>
-        <table class="rawtbl"><thead><tr><th>${esc(t('rawPoint'))}</th><th>${esc(t('rawValue'))}</th></tr></thead><tbody>${tr7.vals.map((v, i) => `<tr><td>${t('rawDay', { n: i + 1 - tr7.vals.length })}</td><td class="tMonoS">${v} ${esc(tr7.unit || '')}</td></tr>`).join('')}</tbody></table>`; })()
-        : `<p class="tCap">${esc(t('emptyDash'))} · ${esc(t(reason))}</p>`) : ''}</div>`;
+    const graphBlock = (() => {
+      const dayGroups = cmp && Array.isArray(cmp.days) ? cmp.days.filter(d => d && (d.actual != null || d.sp != null)).map(d => ({ label: d.label, a: d.actual, b: d.sp })) : [];
+      const pairGroups = cmp && Array.isArray(cmp.pairs) ? cmp.pairs.filter(p => p.actual != null || p.sp != null).map(p => ({ label: t(p.key), a: p.actual, b: p.sp, unit: p.unit })) : [];
+      const groups = dayGroups.length >= 2 ? dayGroups : pairGroups;
+      if (!groups.length || typeof window.ekoCompareBars !== 'function') {
+        return `<p class="tCap">${esc(t('emptyDash'))} · ${esc(t(reason))}</p>`;
+      }
+      const cap = dayGroups.length >= 2
+        ? `${esc(trP(cmp.actName || t('apCmpActual')))} · ${esc(t('apCmpDays'))}`
+        : esc(t('apCmpCap'));
+      const bars = window.ekoCompareBars(groups, 240, 88);
+      return `<p class="tCap">${cap}</p>
+        <div class="apcmpleg"><span class="apcmpdot" data-k="act"></span>${esc(t('apCmpActual'))}<span class="apcmpdot" data-k="sp"></span>${esc(t('apCmpSp'))}</div>
+        <div class="systrend apcmpchart"><svg viewBox="0 0 240 88" preserveAspectRatio="xMidYMid meet">${bars.svg}</svg></div>`;
+    })();
     const pack = docsFor(E, r);
     const omDocs = pack ? (pack.om ? [pack.om] : []) : (r.omDocs || []);
     const warranty = pack ? (pack.warranty || null) : (r.warranty || null);
@@ -1180,24 +1213,77 @@ window.EKO_C = (function(){
         : title;
       return `<div class="aprow"><dt>${name}</dt><dd class="cT3">${esc(d2.meta || '')}</dd></div>`;
     };
+    const wtyPick = which => {
+      if (which === 'start' && r.wtyStart) return r.wtyStart;
+      if (which === 'end' && r.wtyEnd) return r.wtyEnd;
+      const fromPts = (r.points || []).find(p => wtySlot(p.navName) === which);
+      if (fromPts && fromPts.currentValue) return fromPts.currentValue;
+      const fromParams = (r.params || []).find(p => wtySlot(p[0]) === which);
+      return fromParams ? fromParams[2] : null;
+    };
+    const wtyFmt = v => {
+      if (v == null || v === '' || v === '—' || v === '--') return null;
+      const s = String(v).trim();
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) return d.toLocaleDateString(arL ? 'ar-AE' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+      }
+      return s;
+    };
+    const wtyYmd = v => {
+      if (v == null || v === '' || v === '—' || v === '--') return null;
+      const s = String(v).trim();
+      const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+      if (iso) return { y: +iso[1], m: +iso[2], d: +iso[3] };
+      const dt = new Date(s);
+      if (isNaN(dt.getTime())) return null;
+      return { y: dt.getFullYear(), m: dt.getMonth() + 1, d: dt.getDate() };
+    };
+    const dubaiYmd = () => {
+      try {
+        const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Dubai', year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(new Date());
+        const g = k => parseInt((parts.find(p => p.type === k) || {}).value, 10);
+        return { y: g('year'), m: g('month'), d: g('day') };
+      } catch (e) {
+        const n = new Date();
+        return { y: n.getFullYear(), m: n.getMonth() + 1, d: n.getDate() };
+      }
+    };
+    const wtyStartVal = wtyFmt(wtyPick('start'));
+    const wtyEndVal = wtyFmt(wtyPick('end'));
+    const endYmd = wtyYmd(wtyPick('end'));
+    let wtyLeftTxt = null;
+    if (endYmd) {
+      const today = dubaiYmd();
+      const left = Math.round((Date.UTC(endYmd.y, endYmd.m - 1, endYmd.d) - Date.UTC(today.y, today.m - 1, today.d)) / 86400000);
+      if (left > 0) wtyLeftTxt = t('apWtyLeft', { n: left });
+      else if (left === 0) wtyLeftTxt = t('apWtyToday');
+      else wtyLeftTxt = t('apWtyExpired');
+    }
+    const wtyDates = (wtyStartVal ? `<div class="aprow"><dt>${esc(t('apWtyStart'))}</dt><dd>${esc(wtyStartVal)}</dd></div>` : '')
+      + (wtyEndVal ? `<div class="aprow"><dt>${esc(t('apWtyEnd'))}</dt><dd>${esc(wtyEndVal)}</dd></div>` : '')
+      + (wtyLeftTxt ? `<div class="aprow"><dt>${esc(t('apWtyRemain'))}</dt><dd>${esc(wtyLeftTxt)}</dd></div>` : '');
     let body = '';
     if(tab === 'alarms'){
-      body = (als.length ? als.map(a => `<div class="alref">
+      const fddHtml = fddRows.length
+        ? fddRows.map(p => `<div class="aprow"><dt>${esc(trP(p[0]))}</dt><dd>${esc(E.clip2 ? E.clip2(p[2]) : p[2])}</dd></div>`).join('')
+        : '';
+      const alarmPtHtml = alarmPtRows.length
+        ? alarmPtRows.map(p => `<div class="aprow"><dt>${esc(trP(p[0]))}</dt><dd>${esc(p[1])}</dd></div>`).join('')
+        : '';
+      body = (fddHtml ? `<h4 class="tLbl">${esc(t('apFdd'))}</h4>${fddHtml}` : '')
+        + alarmPtHtml
+        + (als.length ? als.map(a => `<div class="alref">
         <div class="alrefh"><span class="statchip" data-sev="${a.sev}">${esc(t('rib'+a.sev[0].toUpperCase()+a.sev.slice(1)).toLowerCase())}</span>
           <span class="alrefage tMonoS msA">${esc(a.age)}</span></div>
         <div class="alreft">${esc(E.alarmLines(a).main)}</div>${E.alarmLines(a).sub ? `<div class="alreftech">${esc(E.alarmLines(a).sub)}</div>` : ''}
         <div class="alrefack">${a.ack ? esc(t('ackShort',{time:a.ack.time,who:a.ack.who})) : esc(t('apUnack'))}</div>
       </div>`).join('') : `<p class="alempty">${esc(t('apNoAlarms'))}</p>`)
       + `<p class="apnote">${esc(t('finNote'))}</p>`;
-    } else if(tab === 'activity'){
-      const act = r.activity || [];
-      body = `<h4 class="tLbl seclbl">${esc(t('apActivity'))}</h4>`
-        + (act.length ? act.map(a2 => `<div class="actref">
-          <div class="actrefh"><span class="tMonoS fw6">${esc(a2[0])}</span>
-            <span class="row gap6 msA"><span class="wodot" data-st="${a2[3]||'prog'}"></span>${esc(t('wo'+(a2[3]||'prog')[0].toUpperCase()+(a2[3]||'prog').slice(1)))}</span></div>
-          <div class="actreft">${esc(trP(a2[1]))}</div>
-          <div class="actrefd">${esc(trP(a2[2]||''))}</div></div>`).join('')
-        : `<p class="alempty">${esc(t('emptyDash'))}</p>`);
+    } else if(tab === 'analytics'){
+      body = `<h4 class="tLbl">${esc(t('apLiveParams'))}</h4>`
+        + (typeRows || analogRows || `<p class="alempty">${esc(t('emptyDash'))}</p>`)
+        + `<h4 class="tLbl seclbl">${esc(t('apFullT'))}</h4>${graphBlock}`;
     } else if(tab === 'om'){
       body = `<h4 class="tLbl seclbl">${esc(t('omLib'))}</h4>`
         + (omDocs.length ? omDocs.map(docRow).join('')
@@ -1211,7 +1297,19 @@ window.EKO_C = (function(){
           ${r.cafm?`<button class="aplink" data-act="none">${esc(t('openW'))}</button>`:''}</dd></div>
         <p class="apnote">${esc(t('omIndexed'))}</p>`;
     } else if(tab === 'warranty'){
-      body = warranty ? docRow(warranty) : `<p class="alempty">${esc(t('wtyEmpty'))}</p>`;
+      if (warranty) {
+        const title = esc(arL ? (warranty.tAr || warranty.tEn) : warranty.tEn);
+        const name = warranty.url
+          ? `<button type="button" class="aplink" data-act="docOpen" data-url="${esc(warranty.url)}" data-title="${title}">${title}</button>`
+          : title;
+        const bits = [`<span>${esc(warranty.meta || 'PDF')}</span>`];
+        if (wtyStartVal) bits.push(`<span>${esc(t('apWtyStart'))} ${esc(wtyStartVal)}</span>`);
+        if (wtyEndVal) bits.push(`<span>${esc(t('apWtyEnd'))} ${esc(wtyEndVal)}</span>`);
+        if (wtyLeftTxt) bits.push(`<span>${esc(wtyLeftTxt)}</span>`);
+        body = `<div class="aprow apwtyrow"><dt>${name}</dt><dd class="cT3"><span class="apwtypair">${bits.join('')}</span></dd></div>`;
+      } else {
+        body = wtyDates || `<p class="alempty">${esc(t('wtyEmpty'))}</p>`;
+      }
     } else if(tab === 'control'){
       body = window.EKO_CTL.controlTab(E, r);
     }
@@ -1232,8 +1330,8 @@ window.EKO_C = (function(){
         ${woBtn(E, id)}
         <button class="btnG btnSm" data-act="none">⧉ ${esc(t('apCafm'))}</button>
       </div>
-      <div class="aptabs">${tabBtn('alarms', t('apAlarms'), als.length||'')}${tabBtn('activity', t('apActivityTab'))}${tabBtn('om', t('apOmTab'))}${tabBtn('warranty', t('apWtyTab'))}${ctl?tabBtn('control', t('apControlTab')):''}</div>
-      <div class="apbody">${live}${full}${body}</div>
+      <div class="aptabs">${tabBtn('alarms', t('apAlarms'), als.length||'')}${tabBtn('analytics', t('apAnalytics'))}${tabBtn('om', t('apOmTab'))}${tabBtn('warranty', t('apWtyTab'))}${ctl?tabBtn('control', t('apControlTab')):''}</div>
+      <div class="apbody">${body}</div>
       <div class="apfoot apfootmob">
         ${E.state.woRaised[id] || (E.state.woPhase||{})[id]
           ? `${woBtn(E, id)}<button class="btnG" data-act="locate" data-asset="${esc(id)}">${esc(t('locate3d'))}</button>`
