@@ -1354,7 +1354,7 @@
         level: eq.floor || "Level",
         levelAr: eq.floor || "الطابق",
         equipId: normEquipId(eq.equipId),
-        workOrders: [],
+        workOrders: Array.isArray(eq.workOrders) ? eq.workOrders : [],
         wos: 0,
         wost: null,
         make: "--",
@@ -1544,7 +1544,7 @@
     paint();
   }
 
-  var woState = { byId: {}, byName: {} };
+  var woState = { byId: {} };
 
   function normEquipId(value) {
     if (value == null || value === '') return '';
@@ -1566,9 +1566,12 @@
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !Array.isArray(site.assets)) return;
     site.assets.forEach(function (asset) {
-      var equipId = normEquipId(asset.equipId) || woState.byName[asset.id] || '';
+      var equipId = normEquipId(asset.equipId);
       asset.equipId = equipId;
-      var list = (equipId && woState.byId[equipId] ? woState.byId[equipId] : []).map(function (order) {
+      var fromIndex = equipId && woState.byId[equipId] ? woState.byId[equipId] : [];
+      var embedded = asset.workOrders || [];
+      var source = fromIndex.length >= embedded.length ? fromIndex : embedded;
+      var list = source.map(function (order) {
         return Object.assign({}, order, { status: woDueStatus(order) });
       });
       list.sort(function (a, b) {
@@ -1582,17 +1585,12 @@
   }
 
   function applyWorkOrders(payload) {
-    woState = { byId: {}, byName: {} };
+    woState = { byId: {} };
     ((payload && payload.orders) || []).forEach(function (order) {
       var equipId = normEquipId(order.equipment);
       if (!equipId) return;
       if (!woState.byId[equipId]) woState.byId[equipId] = [];
       woState.byId[equipId].push(order);
-    });
-    var names = (payload && payload.equipIds) || {};
-    Object.keys(names).forEach(function (name) {
-      var equipId = normEquipId(names[name]);
-      if (equipId) woState.byName[name] = equipId;
     });
     stampWorkOrders();
     paint();

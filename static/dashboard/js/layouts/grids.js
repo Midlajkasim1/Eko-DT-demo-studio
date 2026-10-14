@@ -64,7 +64,7 @@
     return `<div class="dgxg"><section><h4 class="tLbl">${esc(t('apAnalytics'))}</h4>${analog || `<p class="tCap">${esc(t('emptyDash'))}</p>`}</section><section><h4 class="tLbl">${esc(t('apAlarms'))}</h4>${live}${al}</section></div>`; };
 
   const assets = E => ({
-    id:'assets', titleKey:'regTitle', exportName:'asset-register', rowKey:'id', rowAct:{ act:'openAsset', attr:'asset', tab:'workorder' }, searchKeys:['id', 'zone', 'type'],
+    id:'assets', titleKey:'regTitle', exportName:'asset-register', rowKey:'id', rowAct:{ act:'openAsset', attr:'asset', tab:'alarms' }, searchKeys:['id', 'zone', 'type'],
     isSelectedRow:(E2, r) => E2.state.assetSel === r.id,
     rows: E2 => E2.data.assets,
     groups:[{ id:'identity', labelKey:'dgg.identity' }, { id:'condition', labelKey:'dgg.condition' }, { id:'maintenance', labelKey:'dgg.maintenance' }, { id:'reference', labelKey:'dgg.reference' }],
@@ -91,8 +91,8 @@
         enumOpts:E2 => ['critical', 'high', 'medium'].map(v => ({ v, label:E2.t('rpSev.' + v) })), sortVal:(E2, r) => { const w = worst(E2, r); return w ? ({ critical:0, high:1, medium:2 }[w.sev]) : 9; } },
       { key:'floor', labelKey:'dgc.floor', type:'enum', width:94, def:true, grp:'identity', get:(E2, r) => r.floor, text:(E2, r) => r.floor, enumOpts:E2 => [...new Set(E2.data.assets.map(r => r.floor))].map(v => ({ v, label:v })) },
       { key:'zone', labelKey:'dgc.zone', type:'text', width:132, def:true, grp:'identity', mob:'line2', get:(E2, r) => ar(E2) ? (r.zoneAr || r.zone) : r.zone, text:(E2, r) => ar(E2) ? (r.zoneAr || r.zone) : r.zone },
-      { key:'wos', labelKey:'dgc.wos', type:'num', width:158, def:true, grp:'maintenance', mono:true, get:(E2, r) => r.wos || 0, text:(E2, r) => r.wos ? String(r.wos) : E2.t('emptyDash') },
-      { key:'wost', labelKey:'dgc.wost', type:'enum', width:124, def:true, grp:'maintenance', get:(E2, r) => r.wost || '', text:(E2, r) => r.wost ? E2.t('wo' + r.wost[0].toUpperCase() + r.wost.slice(1)) : E2.t('emptyDash'),
+      { key:'wos', labelKey:'dgc.wos', type:'num', width:158, def:true, grp:'maintenance', mono:true, act:'workorder', get:(E2, r) => r.wos || 0, text:(E2, r) => r.wos ? String(r.wos) : E2.t('emptyDash') },
+      { key:'wost', labelKey:'dgc.wost', type:'enum', width:124, def:true, grp:'maintenance', act:'workorder', get:(E2, r) => r.wost || '', text:(E2, r) => r.wost ? E2.t('wo' + r.wost[0].toUpperCase() + r.wost.slice(1)) : E2.t('emptyDash'),
         cell:(E2, r) => r.wost ? `<span class="row gap6"><span class="wodot" data-st="${r.wost}"></span>${esc(E2.t('wo' + r.wost[0].toUpperCase() + r.wost.slice(1)))}</span>` : `<span class="tCap">${esc(E2.t('emptyDash'))}</span>`,
         enumOpts:E2 => ['over', 'sched', 'pend', 'asgn', 'prog', 'done'].map(v => ({ v, label:E2.t('wo' + v[0].toUpperCase() + v.slice(1)) })) },
       { key:'hasWo', labelKey:'dgc.hasWo', type:'bool', width:196, def:false, grp:'maintenance', get:(E2, r) => !!(r.wos && r.wost && r.wost !== 'done'), text:(E2, r) => E2.t((r.wos && r.wost && r.wost !== 'done') ? 'dgf.yes' : 'dgf.no') },

@@ -1,18 +1,6 @@
-"""Work orders from FIN sqlQuery, with the docs dump as the fallback.
-
-The join key is the work-order `equipment` column and the FIN `equipId` tag.
-"""
-
 import csv
-import os
 import re
 from datetime import date, datetime
-
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-WO_FILE = os.path.join(ROOT, "docs", "workorder.txt")
-EQUIP_FILE = os.path.join(ROOT, "docs", "equip.txt")
-
-SQL_EXPR = 'sqlQuery(read(sqlConn),"SELECT * FROM workOrderMarsa")'
 
 
 def norm_id(value):
@@ -41,55 +29,52 @@ def parse_mdy(value):
         return None
 
 
+# FIN spells the same columns in more than one way.
+_CANON = {
+    "work_orders": "id",
+    "workorders": "id",
+    "work_order": "id",
+    "wonum": "id",
+    "equipment": "equipment",
+    "equipment_description": "description",
+    "equipment_organization": "organization",
+    "position": "position",
+    "asset_tag": "assetTag",
+    "work_order_type": "type",
+    "due_date": "dueDate",
+    "period_uom": "period",
+    "pm_schedule": "pmSchedule",
+    "wo_created_date": "created",
+    "schedule_start_date": "startDate",
+    "schedule_end_date": "endDate",
+}
+
+
+def _canon(name):
+    token = name.strip().split()[0].lower() if name and name.strip() else ""
+    return _CANON.get(token, token)
+
+
 def _header_names(line):
-    names = []
-    for col in next(csv.reader([line])):
-        token = col.strip().split()[0] if col.strip() else ""
-        names.append(token)
-    return names
-
-
-def parse_workorder_text(text):
-    if not text or "errType" in text or "Unknown symbol" in text:
-        return []
-    headers, rows = _grid_rows(text)
-    if "equipment" not in headers:
-        return []
-    orders = []
-    for item in rows:
-        equip = norm_id(item.get("equipment"))
-        wo_id = item.get("work_Orders") or ""
-        if not equip or not wo_id:
-            continue
-        due = item.get("due_Date") or ""
-        due_day = parse_mdy(due)
-        orders.append({
-            "id": wo_id,
-            "equipment": equip,
-            "description": item.get("equipment_Description") or "",
-            "organization": item.get("equipment_Organization") or "",
-            "position": item.get("position") or "",
-            "assetTag": item.get("asset_Tag") or "",
-            "type": item.get("work_Order_Type") or "",
-            "dueDate": due,
-            "dueIso": due_day.isoformat() if due_day else "",
-            "period": item.get("period_UOM") or "",
-            "pmSchedule": item.get("pm_Schedule") or "",
-            "created": item.get("wo_Created_Date") or "",
-            "startDate": item.get("schedule_Start_Date") or "",
-            "endDate": item.get("schedule_End_Date") or "",
-        })
-    return orders
+    return [_canon(col) for col in next(csv.reader([line]))]
 
 
 def _grid_rows(text):
     lines = [line for line in text.splitlines() if line.strip()]
-    start = 1 if lines and lines[0].lower().startswith("ver") else 0
-    if start >= len(lines):
+    header_at = None
+    headers = []
+    for index, line in enumerate(lines):
+        if line.lower().startswith("ver"):
+            continue
+        names = _header_names(line)
+        if "equipment" in names and "id" in names:
+            header_at = index
+            headers = names
+            break
+    if header_at is None:
         return [], []
-    headers = _header_names(lines[start])
     rows = []
-    for raw in csv.reader(lines[start + 1 :]):
+    for raw in csv.reader(lines[header_at + 1 :]):
         if not raw:
             continue
         item = {}
@@ -100,33 +85,51 @@ def _grid_rows(text):
     return headers, rows
 
 
-def equip_ids_from_file():
-    """navName -> equipId from the exported equip grid. Live FIN ids win on the client."""
-    try:
-        text = open(EQUIP_FILE, encoding="utf-8", errors="replace").read()
-    except OSError:
-        return {}
-    mapping = {}
-    for row in _grid_rows(text)[1]:
-        name = str(row.get("navName") or "").strip()
-        equip_id = norm_id(row.get("equipId"))
-        if name and equip_id:
-            mapping[name] = equip_id
-    return mapping
+def parse_workorder_text(text):
+    if not text or "errType" in text or "Unknown symbol" in text:
+        return []
+    headers, rows = _grid_rows(text)
+    if "equipment" not in headers or "id" not in headers:
+        return []
+    orders = []
+    for item in rows:
+        equip = norm_id(item.get("equipment"))
+        wo_id = norm_id(item.get("id")) or str(item.get("id") or "").strip()
+        if not equip or not wo_id:
+            continue
+        due = item.get("dueDate") or ""
+        due_day = parse_mdy(due)
+        orders.append({
+            "id": wo_id,
+            "equipment": equip,
+            "description": item.get("description") or "",
+            "organization": item.get("organization") or "",
+            "position": item.get("position") or "",
+            "assetTag": item.get("assetTag") or "",
+            "type": item.get("type") or "",
+            "dueDate": due,
+            "dueIso": due_day.isoformat() if due_day else "",
+            "period": item.get("period") or "",
+            "pmSchedule": item.get("pmSchedule") or "",
+            "created": item.get("created") or "",
+            "startDate": item.get("startDate") or "",
+            "endDate": item.get("endDate") or "",
+        })
+    return orders
 
 
-def payload_from_text(text, source):
+def live_payload(text):
     return {
         "timestamp": datetime.now().isoformat(),
-        "source": source,
-        "orders": parse_workorder_text(text) if text else [],
-        "equipIds": equip_ids_from_file(),
+        "source": "fin",
+        "orders": parse_workorder_text(text),
     }
 
 
-def file_payload():
-    try:
-        text = open(WO_FILE, encoding="utf-8", errors="replace").read()
-    except OSError:
-        text = ""
-    return payload_from_text(text, "file")
+def orders_by_equipment(payload):
+    grouped = {}
+    for order in (payload or {}).get("orders") or []:
+        equip_id = norm_id(order.get("equipment"))
+        if equip_id:
+            grouped.setdefault(equip_id, []).append(order)
+    return grouped

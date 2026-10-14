@@ -880,10 +880,10 @@ window.EKO_C = (function(){
       </div>
       <div class="regscroll"><table class="reg">
         <thead><tr>${th('id','colAssetId')}${th('st','colStatus',true)}${th('floor','colFloor',true)}${th('zone','colZone')}${th('wos','colWos')}<th>${esc(t('colWoStatus'))}</th><th></th></tr></thead>
-        <tbody>${rows.map(r => `<tr data-act="openAsset" data-asset="${esc(r.id)}" data-tab="workorder" data-on="${s.assetSel===r.id}" tabindex="0">
+        <tbody>${rows.map(r => `<tr data-act="openAsset" data-asset="${esc(r.id)}" data-tab="alarms" data-on="${s.assetSel===r.id}" tabindex="0">
           <td class="mono">${esc(r.id)}</td><td>${chipFor(r)}</td>
           <td>${esc(r.floor)}</td><td data-tip="${esc(E.lang==='ar'?(r.zoneAr||r.zone):r.zone)}" data-tipif="trunc">${esc(E.lang==='ar'?(r.zoneAr||r.zone):r.zone)}</td>
-          <td class="mono">${r.wos||t('emptyDash')}</td><td>${woCell(r)}</td>
+          <td class="mono" data-act="openAsset" data-asset="${esc(r.id)}" data-tab="workorder">${r.wos||t('emptyDash')}</td><td data-act="openAsset" data-asset="${esc(r.id)}" data-tab="workorder">${woCell(r)}</td>
           <td><span class="cT3">${icon('dots',13)}</span></td></tr>`).join('')}
         </tbody></table></div></section>`;
   }
@@ -1082,7 +1082,7 @@ window.EKO_C = (function(){
     if (!orders.length) {
       return `<p class="alempty">${esc(t('apWoEmpty'))}</p>`
         + (r.equipId ? row(t('apWoEquip'), r.equipId) : '')
-        + `<p class="apnote">${esc(t('apWoUnlinked'))}</p>`;
+        + `<p class="apnote">${esc(t(r.equipId ? 'apWoNoRows' : 'apWoUnlinked'))}</p>`;
     }
     const cards = orders.map(order => {
       const st = order.status === 'over' ? 'over' : 'sched';

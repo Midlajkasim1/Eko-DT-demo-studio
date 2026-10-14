@@ -31,7 +31,7 @@ from fin_client import (
     parse_zinc_csv,
     safe_get,
 )
-from workorders import SQL_EXPR, file_payload, payload_from_text
+from workorders import live_payload, norm_id, orders_by_equipment
 
 # ─── Load Config ─────────────────────────────────────────────────────────────
 
@@ -611,30 +611,42 @@ async def get_status():
     )
 
 
-async def refresh_workorders():
-    """Prefer the live SQL table. The docs dump fills in when that call fails."""
-    global cached_workorders
-    text = None
-    if client and client.is_authenticated:
-        endpoint = f"/api/{client.project_name}/eval?expr={quote(SQL_EXPR, safe='')}"
-        try:
-            text = await client.fetch_api(endpoint, is_text=True)
-        except Exception as exc:
-            print(f"[FIN] work order fetch error: {exc}")
-            text = None
-    live = payload_from_text(text, "fin") if text else None
-    if live and live["orders"]:
-        cached_workorders = live
+def _attach_workorders():
+    """Copy the live jobs onto each equipment row. The only key is equipId."""
+    equipment = (cached_equip_data or {}).get("equipment")
+    if not isinstance(equipment, list):
         return
-    cached_workorders = file_payload()
+    grouped = orders_by_equipment(cached_workorders)
+    for eq in equipment:
+        equip_id = norm_id(eq.get("equipId"))
+        eq["workOrders"] = list(grouped.get(equip_id, []))
+
+
+async def refresh_workorders():
+    """Read workorder_endpoint from config, the same way equipment and alarms are read."""
+    global cached_workorders
+    template = CONFIG.get("workorder_endpoint") or ""
+    if not client or not client.is_authenticated or not template:
+        return
+    endpoint = client._resolve_endpoint(template)
+    try:
+        text = await client.fetch_api(endpoint, is_text=True)
+    except Exception as exc:
+        print(f"[FIN] work order fetch error: {exc}")
+        return
+    if not text or "errType" in text or "Unknown symbol" in text:
+        print("[FIN] work order read returned an error")
+        return
+    cached_workorders = live_payload(text)
+    _attach_workorders()
 
 
 @app.get("/api/fin/workorders")
 async def get_workorders():
-    """PPM rows joined to model equipment by equipId."""
-    if not cached_workorders:
-        return file_payload()
-    return cached_workorders
+    """Live PPM rows. Empty until the FIN read succeeds."""
+    if not client or not client.is_authenticated:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return cached_workorders or {"timestamp": None, "source": "fin", "orders": []}
 
 
 @app.get("/api/fin/equip-live")
@@ -642,6 +654,8 @@ async def get_equip_live():
     """Get live equipment data (floor-wise with points and alarms)."""
     if not client or not client.is_authenticated:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    if cached_equip_data:
+        _attach_workorders()
     return cached_equip_data or {"timestamp": None, "equipment": []}
 
 

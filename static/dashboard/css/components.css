@@ -1422,6 +1422,10 @@
   clip-path:polygon(14% 44%,0 63%,45% 100%,100% 18%,82% 4%,42% 68%)
 }
 
+.dashboard-native-container td[data-tab="workorder"] {
+  cursor:pointer
+}
+
 .dashboard-native-container .wodot[data-st="over"] {
   background:var(--critTx)
 }
