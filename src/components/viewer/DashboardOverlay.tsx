@@ -7,6 +7,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
 import { ASSET_BIM_MAPPING } from '@/constants/assetBimMapping'
 import { resetCameraToHome } from '@/lib/cameraUtils'
+import { createMiniMap } from '@/lib/miniMap'
 import { disciplineOf, layersFor, layerShows } from '@/lib/modelDiscipline'
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
@@ -930,6 +931,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       repositionMarkers()
     }
 
+    const miniMap = createMiniMap(engine)
+    const afterFrame = () => {
+      drawGhost()
+      miniMap.capture()
+    }
+
     ;(window as any).EKO_HOST_ENGINE = {
       projectPoint,
       resolveAllAssetPositions,
@@ -991,6 +998,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       startSlice: () => sliceTool()?.start(),
       stopSlice: () => sliceTool()?.stop(),
       clearSection: () => sliceTool()?.clear(),
+      attachMiniMap: (el: HTMLElement | null) => miniMap.attach(el),
+      setMiniMap: (on: boolean) => miniMap.setEnabled(on),
     }
     // The dashboard may have rendered before the bridge existed: redraw so the
     // equipment markers (which need bimIdFor) appear.
@@ -1006,7 +1015,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const controls = engine.world?.camera?.controls
     controls?.addEventListener('update', onCameraUpdate)
     engine.world?.renderer?.onBeforeUpdate?.add(syncGhost)
-    engine.world?.renderer?.onAfterUpdate?.add(drawGhost)
+    engine.world?.renderer?.onAfterUpdate?.add(afterFrame)
 
     // Models can finish loading well after the dashboard: retry until located.
     // Any change to the loaded models forgets the "not found" answers and
@@ -1054,7 +1063,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       } catch { /* viewer keeps its canvas */ }
       controls?.removeEventListener('update', onCameraUpdate)
       engine.world?.renderer?.onBeforeUpdate?.remove(syncGhost)
-      engine.world?.renderer?.onAfterUpdate?.remove(drawGhost)
+      engine.world?.renderer?.onAfterUpdate?.remove(afterFrame)
+      miniMap.dispose()
       clearInterval(resolveTimer)
       void clearHighlight()
       void clearSpaceHeat()

@@ -1105,10 +1105,33 @@
   position:absolute;
   inset-inline-end:16px;
   bottom:16px;
-  width:148px;
-  height:96px;
+  width:200px;
+  height:200px;
   padding:6px;
-  z-index:21
+  z-index:21;
+  overflow:hidden;
+  cursor:pointer;
+  user-select:none;
+  touch-action:none
+}
+
+.dashboard-native-container .minimap .mmap-view,
+.dashboard-native-container .minimap .mmap-ov {
+  position:absolute;
+  inset:6px;
+  width:calc(100% - 12px);
+  height:calc(100% - 12px);
+  border-radius:8px
+}
+
+.dashboard-native-container .minimap .mmap-view {
+  display:block;
+  background:var(--s2, #d7e0ea)
+}
+
+.dashboard-native-container .minimap .mmap-ov {
+  pointer-events:none;
+  overflow:hidden
 }
 
 .dashboard-native-container .minimap svg {
@@ -8336,7 +8359,9 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .minimap {
   top:56px;
   bottom:auto;
-  inset-inline-end:66px
+  inset-inline-end:200px;
+  width:200px;
+  height:200px
 }
 
 .dashboard-native-container #vbar {
