@@ -92,6 +92,7 @@
     meters: null,
     documents: null,
     workorders: null,
+    alarmHistory: null,
     timers: [],
     generation: 0,
   };
@@ -126,13 +127,14 @@
   }
 
   async function pollRealtime() {
-    const [equipment, alarms, meters, history, documents, workorders] = await Promise.all([
+    const [equipment, alarms, meters, history, documents, workorders, alarmHistory] = await Promise.all([
       state.provider.getEquipment(),
       state.provider.getAlarms(),
       state.provider.getMeters(),
       state.provider.getPowerHistory(),
       state.provider.getDocuments(),
       state.provider.getWorkOrders(),
+      state.provider.getAlarmHistory(2),
     ]);
     if (usable(history)) {
       state.powerHistory = history;
@@ -146,6 +148,7 @@
     if (usable(meters)) { state.meters = meters; emit('meters', meters); }
     if (usable(documents)) { state.documents = documents; emit('documents', documents); }
     if (usable(workorders)) { state.workorders = workorders; emit('workorders', workorders); }
+    if (usable(alarmHistory)) { state.alarmHistory = alarmHistory; emit('alarmHistory', alarmHistory); }
   }
 
   async function start() {
@@ -181,6 +184,7 @@
     get meters() { return state.meters; },
     get documents() { return state.documents; },
     get workorders() { return state.workorders; },
+    get alarmHistory() { return state.alarmHistory; },
   };
 
   start();

@@ -655,6 +655,7 @@
         set(m, "energyTodayKwh", trunc1(todayKwh));
         set(m, "energyTodayMwh", todayKwh / 1000);
       }
+      if (site.basis) site.basis.asOf = String(nowP.h).padStart(2, "0") + ":00";
       if (site.summary && site.summary[0]) {
         var energyRow = site.summary[0];
         energyRow.spark = todayHours;
@@ -1996,6 +1997,13 @@
     }
   };
 
+  function applyAlarmHistory(payload) {
+    var site = window.EKO_DATA && window.EKO_DATA.marsa;
+    if (!site || !payload) return;
+    site.alarmHistory = payload;
+    paint();
+  }
+
   function applyDocuments(payload) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     var families = payload && payload.families;
@@ -2012,6 +2020,7 @@ window.addEventListener('dashboard-data', function (e) {
     if (d.type === 'equipment') applyEquipment(d.data);
     if (d.type === 'documents') applyDocuments(d.data);
     if (d.type === 'workorders') applyWorkOrders(d.data);
+    if (d.type === 'alarmHistory') applyAlarmHistory(d.data);
   });
 
   if (window.DashboardData && window.DashboardData.alarms) applyAlarms(window.DashboardData.alarms);
@@ -2020,4 +2029,5 @@ window.addEventListener('dashboard-data', function (e) {
   if (window.DashboardData && window.DashboardData.equipment) applyEquipment(window.DashboardData.equipment);
   if (window.DashboardData && window.DashboardData.documents) applyDocuments(window.DashboardData.documents);
   if (window.DashboardData && window.DashboardData.workorders) applyWorkOrders(window.DashboardData.workorders);
+  if (window.DashboardData && window.DashboardData.alarmHistory) applyAlarmHistory(window.DashboardData.alarmHistory);
 })();

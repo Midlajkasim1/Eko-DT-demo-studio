@@ -227,7 +227,9 @@ window.EKO_WALL = (function(){
       m.rate = { n: inWindow, per10: inWindow / (T.rateWindowMin / 10), windowMin: T.rateWindowMin, target: T.rateTargetPer10Min, source: T.rateSource, incomplete: null };
       const in10 = al.filter(a => (a.ageH || 0) * 60 <= 10).length;
       m.flood = { on: in10 > T.floodPer10Min, n: in10, limit: T.floodPer10Min, source: T.floodSource };
-      const bins = Array(24).fill(0); al.forEach(a => { const h = a.ageH || 0; if(h < 24) bins[23 - Math.floor(h)]++; });
+      const hist24 = E.data.alarmHistory && Array.isArray(E.data.alarmHistory.last24) ? E.data.alarmHistory.last24 : null;
+      const bins = hist24 && hist24.length === 24 ? hist24.slice() : Array(24).fill(0);
+      if (!hist24) al.forEach(a => { const h = a.ageH || 0; if(h < 24) bins[23 - Math.floor(h)]++; });
       m.rate24 = { bins, targetPerHour: T.rateTargetPer10Min * 6, source: T.rateSource, incomplete: null };
       if(f.state !== 'reporting'){ const why = t('wall.incompleteFeed', { state: t('pfRep.' + f.state) }); m.rate.incomplete = why; m.dist.incomplete = why; m.rate24.incomplete = why; }
       let startMin, label, sinceMidnight = false;
@@ -242,8 +244,20 @@ window.EKO_WALL = (function(){
       } else { startMin = 0; label = t('wall.sinceMidnight'); sinceMidnight = true; }
       const hoursSince = m.shiftStartedYesterday ? (nowMin + (1440 - startMin)) / 60 : (nowMin - startMin) / 60;
       const acked = al.filter(a => a.ack && a.ack.time && (m.shiftStartedYesterday || (toMin(a.ack.time) != null && toMin(a.ack.time) >= startMin))).length;
-      const acts = E.data.assets.flatMap(a => a.activity || []).filter(x => x[2] === 'today');
-      m.shift = { label, sinceMidnight, hoursSince, raised: al.filter(a => (a.ageH || 0) <= hoursSince).length, acked, woCreated: acts.length, woClosed: acts.filter(x => x[3] === 'done').length, woBasis: t('wall.shWoBasis') };
+      const todayStamp = s => {
+        if (!s) return false;
+        const nowD = new Date();
+        const md = String(s).match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+        if (md) {
+          let y = +md[3]; if (y < 100) y += 2000;
+          return +md[1] === nowD.getMonth() + 1 && +md[2] === nowD.getDate() && y === nowD.getFullYear();
+        }
+        const iso = String(s).slice(0, 10);
+        const ymd = nowD.getFullYear() + '-' + String(nowD.getMonth() + 1).padStart(2, '0') + '-' + String(nowD.getDate()).padStart(2, '0');
+        return iso === ymd;
+      };
+      const woAll = E.data.assets.flatMap(a => a.workOrders || []);
+      m.shift = { label, sinceMidnight, hoursSince, raised: al.filter(a => (a.ageH || 0) <= hoursSince).length, acked, woCreated: woAll.filter(o => todayStamp(o.created || o.startDate)).length, woClosed: woAll.filter(o => todayStamp(o.endDate)).length, woBasis: t('wall.shWoBasis') };
       const p = (E.data.power || {}).subview;
       if(p && p.peakKw != null && p.limitKw) m.watch.push({ key: 'peak', tone: p.peakKw / p.limitKw >= 0.9 ? 'warn' : 'ok', text: t('wall.w.peak', { kw: fmtW(p.peakKw), pct: fmtW(p.peakKw / p.limitKw * 100), limit: fmtW(p.limitKw) }), basis: t('wall.wb.peak') });
       const trending = E.data.assets.filter(a => a.st === 'alarm' && a.trend7 && a.trend7.vals && a.trend7.vals.length >= 3).filter(a => { const v = a.trend7.vals, d = v[v.length - 1] - v[v.length - 2], w = v[v.length - 1] - v[0]; return d !== 0 && Math.sign(d) === Math.sign(w); });
@@ -436,11 +450,17 @@ window.EKO_WALL = (function(){
       return `<div class="wpane wchartpane" data-pane="work"><div class="whbars">${hbar(t('pfKpi.wos'), h.wos.value || 0, max)}${hbar(t('pfOverdueWord'), h.overdue.value || 0, max, null, h.overdue.value ? 'warn' : '')}</div>
         <div class="wlegend"><span class="wcov wextra">${esc(t('wall.shNotInFeedShort'))}</span></div></div>`;
     }
-    const by = { pend: 0, asgn: 0, prog: 0 }; let open = 0;
-    E.data.assets.forEach(a => { if(a.wost && a.wost !== 'done'){ open += a.wos || 1; if(by[a.wost] != null) by[a.wost] += a.wos || 1; } });
+    let over = 0, sched = 0, open = 0;
+    E.data.assets.forEach(a => {
+      (a.workOrders || []).forEach(o => {
+        open++;
+        if (o.status === 'over') over++;
+        else sched++;
+      });
+    });
     const max = Math.max(open, 1);
-    const shift = s && !s.notInFeed ? `<div class="wshift"><span class="wshl">${esc(s.label)}</span><div class="wstats">${[[s.raised, 'wall.shRaisedS'], [s.acked, 'wall.shAckedS'], [s.woCreated, 'wall.shWoNewS'], [s.woClosed, 'wall.shWoClosedS']].map(x => `<span class="wstat"><b class="wbval">${fmtW(x[0])}</b><span class="wlbl">${esc(t(x[1]))}</span></span>`).join('')}</div></div>` : '';
-    return `<div class="wpane wchartpane" data-pane="work"><div class="whbars">${['pend', 'asgn', 'prog'].map(k => hbar(t('wall.wo.' + k), by[k], max)).join('')}</div>${shift}</div>`;
+    const shift = s && !s.notInFeed ? `<div class="wshift"><span class="wshl">${esc(s.label)}</span><div class="wstats">${[[s.raised, 'wall.shRaisedS'], [s.acked, 'wall.shAckedS'], [s.woCreated, 'wall.shWoNewS'], [s.woClosed, 'wall.shWoClosedS']].map(x => `<span class="wstat"><b class="wbval">${dashW(x[0])}</b><span class="wlbl">${esc(t(x[1]))}</span></span>`).join('')}</div></div>` : '';
+    return `<div class="wpane wchartpane" data-pane="work"><div class="whbars">${hbar(t('wall.wo.over'), over, max, null, over ? 'warn' : '')}${hbar(t('wall.wo.sched'), sched, max)}${hbar(t('wall.wo.open'), open, max)}</div>${shift}</div>`;
   }
   const boardOrder = sites => sites.slice().sort((a, b) => (a.telemetry ? 1 : 0) - (b.telemetry ? 1 : 0) || a.sevRank - b.sevRank || b.alarmCount - a.alarmCount || (a.nameEn || '').localeCompare(b.nameEn || ''));
   const boardPerPage = () => (boardFit && boardFit.perPage) || 12;

@@ -799,21 +799,40 @@ async def get_alarm_history(days: int = 30):
 
     bands = CONFIG.get("severity_bands", {})
     by_day: dict[str, dict] = {}
+    last24 = [0] * 24
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("Asia/Dubai")).replace(tzinfo=None)
+    except Exception:
+        now = datetime.utcnow() + timedelta(hours=4)
 
     for row in parse_zinc_csv(text):
         if row.get("alarm") is not True:
             continue
-        stamp = str(row.get("occurred") or row.get("created") or "")[:10]
-        if not stamp:
-            continue
-        priority = row.get("priority") if isinstance(row.get("priority"), (int, float)) else None
-        day = by_day.setdefault(stamp, {"critical": 0, "warning": 0, "info": 0})
-        day[severity_for(priority, bands)] += 1
+        occurred = row.get("occurred") or row.get("created") or ""
+        stamp = str(occurred)[:10]
+        if stamp:
+            priority = row.get("priority") if isinstance(row.get("priority"), (int, float)) else None
+            day = by_day.setdefault(stamp, {"critical": 0, "warning": 0, "info": 0})
+            day[severity_for(priority, bands)] += 1
+        match = re.search(r"(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})", str(occurred))
+        if match:
+            try:
+                when = datetime.strptime(
+                    f"{match.group(1)} {match.group(2)}:{match.group(3)}:{match.group(4)}",
+                    "%Y-%m-%d %H:%M:%S",
+                )
+                age_h = (now - when).total_seconds() / 3600.0
+                if 0 <= age_h < 24:
+                    last24[23 - int(age_h)] += 1
+            except ValueError:
+                pass
 
     return {
         "days": days,
         "retained": bool(by_day),
         "byDay": [{"date": d, **counts} for d, counts in sorted(by_day.items())],
+        "last24": last24,
     }
 
 
