@@ -585,6 +585,7 @@ export async function exportFinProjectAsZip(handle: FileSystemDirectoryHandle, m
   } catch { /* studio export is the path that can read this file */ }
 
   const apiSettings = meta.apiSettings || {}
+  const projectName = apiSettings.finProjectName || siteCfg.project_name || meta.name
   const livePoints = siteCfg.live_point_ids && Object.keys(siteCfg.live_point_ids).length
     ? siteCfg.live_point_ids
     : (apiSettings.finLivePoints || {})
@@ -597,6 +598,7 @@ export async function exportFinProjectAsZip(handle: FileSystemDirectoryHandle, m
     ...exportedMeta,
     apiSettings: {
       ...(exportedMeta.apiSettings || {}),
+      finProjectName: projectName,
       finDirectMode: true,
       finLivePoints: livePoints,
       finEndpoints: powerEndpoints,
@@ -617,7 +619,7 @@ export async function exportFinProjectAsZip(handle: FileSystemDirectoryHandle, m
 
   // Also include api-config.json for standalone FIN dashboard (direct API mode)
   const apiConfig = {
-    project_name: apiSettings.finProjectName || meta.name,
+    project_name: projectName,
     fin_server_url: apiSettings.finBaseUrl || 'https://localhost',
     direct_mode: true, // Always true for FIN standalone viewer
     polling_interval: apiSettings.finInterval || 5000,

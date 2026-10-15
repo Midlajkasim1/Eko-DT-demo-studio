@@ -50,10 +50,14 @@
   }
 
   function fillProject(template, project) {
+    project = String(project || '').trim();
+    if (!project) return '';
     return String(template || '').split('{project}').join(project);
   }
 
   function evalPath(project, expr) {
+    project = String(project || '').trim();
+    if (!project) return '';
     return '/api/' + encodeURIComponent(project) + '/eval?expr=' + encodeURIComponent(expr);
   }
 
@@ -883,6 +887,7 @@
   }
 
   function finText(path) {
+    if (!path || path.indexOf('/api//') >= 0) return Promise.resolve(null);
     return fetch(path, {
       cache: 'no-store',
       credentials: 'same-origin',
@@ -1001,6 +1006,7 @@
 
   Session.prototype.live = async function () {
     var cfg = this.cfg;
+    if (!String(cfg.project || '').trim()) return null;
     var keys = Object.keys(cfg.livePoints).filter(function (key) {
       var id = cfg.livePoints[key];
       return key.charAt(0) !== '_' && typeof id === 'string' && id.indexOf(':r:') >= 0;
@@ -1023,6 +1029,7 @@
 
   Session.prototype.powerHistory = async function () {
     var cfg = this.cfg;
+    if (!String(cfg.project || '').trim()) return null;
     var keys = Object.keys(cfg.powerEndpoints).filter(function (key) {
       var path = cfg.powerEndpoints[key];
       return key.charAt(0) !== '_' && typeof path === 'string' && path.charAt(0) === '/';
@@ -1129,7 +1136,8 @@
       } catch (e) { /* catalog is optional */ }
     }
     if (!raw) return null;
-    var project = this.cfg.project;
+    var project = String(this.cfg.project || '').trim();
+    if (!project) return null;
     this._docs = {
       families: raw.families.filter(function (fam) { return fam && typeof fam === 'object'; }).map(function (fam) {
         var item = {

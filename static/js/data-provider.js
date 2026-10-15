@@ -63,9 +63,11 @@
     if (cfg && cfg.directMode) {
       // The studio serves the audited backend file. A FIN-hosted zip already
       // carries the same maps on the injected config, and this fetch 404s.
+      // A blank project still has to be filled from api-config.json, or the
+      // reader calls /api//eval and @p::r: instead of /api/marsaAlArab/eval.
       const site = await readConfig('/backend/config.json');
       if (site) cfg = overlaySite(cfg, site);
-      else if (!filled(cfg.livePoints)) {
+      if (!cfg.project || !filled(cfg.livePoints)) {
         const shipped = await readConfig('api-config.json');
         if (shipped) cfg = overlaySite(cfg, shipped);
       }
