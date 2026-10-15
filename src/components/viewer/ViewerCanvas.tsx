@@ -189,12 +189,19 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
   const isFullscreen = useAppStore(s => s.isFullscreen)
   const isToolbarVisible = useAppStore(s => s.isToolbarVisible)
   const renderPanelActive = useAppStore(s => s.renderPanelActive)
+  const [wallOn, setWallOn] = useState(() => typeof document !== 'undefined' && !!document.querySelector('.dashboard-native-container[data-wall="1"]'))
 
   useEffect(() => {
     if (isFinProject || !adminMode) {
       setDashboardVisible(true)
     }
   }, [isFinProject, adminMode])
+
+  useEffect(() => {
+    const onWall = (e: Event) => setWallOn(!!(e as CustomEvent).detail?.on)
+    window.addEventListener('dashboard-wall', onWall)
+    return () => window.removeEventListener('dashboard-wall', onWall)
+  }, [])
 
   useEffect(() => {
     let startX = 0
@@ -826,7 +833,7 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
         <OrientationCube engineRef={engineRef} dashboardVisible={dashboardVisible} />
       )}
 
-      {step === 'viewing' && adminMode && isToolbarVisible && (
+      {step === 'viewing' && isToolbarVisible && (adminMode || wallOn) && (
         <ViewerToolbar
           engineRef={engineRef}
           onToggleStats={() => setStatsVisible(v => !v)}

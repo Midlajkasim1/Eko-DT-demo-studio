@@ -192,6 +192,7 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
 
   return (
     <div
+      className="orientation-cube"
       style={{
         position: 'absolute',
         // Push down further when dashboard is visible

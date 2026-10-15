@@ -950,6 +950,40 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       isolateLayer,
       applySpaceHeat,
       clearSpaceHeat,
+      bindWallOrbit: () => {
+        const cam = engine.world?.camera?.controls as {
+          connect?: (el: HTMLElement) => void
+          disconnect?: () => void
+          _domElement?: HTMLElement
+          currentAction?: number
+          _addAllEventListeners?: (el: HTMLElement) => void
+          _removeAllEventListeners?: (el: HTMLElement) => void
+        }
+        const canvas = engine.world?.renderer?.three?.domElement as HTMLElement | undefined
+        if (!cam || !canvas) return
+        const wallOn = !!document.querySelector('.dashboard-native-container[data-wall="1"]')
+        const hit = document.querySelector('.wmodelhit') as HTMLElement | null
+        const target = wallOn && hit ? hit : canvas
+        const dragging = !!cam.currentAction || !!document.querySelector('.wmodelhit[data-drag="1"]')
+        if (dragging && target !== canvas) return
+        document.querySelectorAll('.wmodelhit').forEach((el) => el.removeAttribute('data-on'))
+        if (cam._domElement === target) {
+          if (target === hit) hit.setAttribute('data-on', '1')
+          return
+        }
+        try {
+          if (typeof cam.disconnect === 'function') cam.disconnect()
+          else if (cam._domElement && typeof cam._removeAllEventListeners === 'function') cam._removeAllEventListeners(cam._domElement)
+        } catch { /* keep going */ }
+        try {
+          if (typeof cam.connect === 'function') cam.connect(target)
+          else if (typeof cam._addAllEventListeners === 'function') {
+            cam._domElement = target
+            cam._addAllEventListeners(target)
+          }
+          if (target === hit) hit.setAttribute('data-on', '1')
+        } catch { /* canvas stays bound */ }
+      },
       startMeasure: () => measureTool()?.start(),
       cancelMeasure: () => measureTool()?.cancel(),
       finishMeasure: () => measureTool()?.finish(),
@@ -1009,6 +1043,15 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     void refreshLevels()
 
     return () => {
+      try {
+        document.querySelectorAll('.wmodelhit').forEach((el) => el.remove())
+        const canvas = engine.world?.renderer?.three?.domElement as HTMLElement | undefined
+        const cam = engine.world?.camera?.controls as { connect?: (el: HTMLElement) => void; disconnect?: () => void }
+        if (cam && canvas) {
+          cam.disconnect?.()
+          cam.connect?.(canvas)
+        }
+      } catch { /* viewer keeps its canvas */ }
       controls?.removeEventListener('update', onCameraUpdate)
       engine.world?.renderer?.onBeforeUpdate?.remove(syncGhost)
       engine.world?.renderer?.onAfterUpdate?.remove(drawGhost)
@@ -1095,6 +1138,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         tempDiv.innerHTML = doc.body.innerHTML
         Array.from(tempDiv.querySelectorAll('script')).forEach(s => s.remove())
         containerRef.current.innerHTML = tempDiv.innerHTML
+        ;(window as any).DASHBOARD_ROOT = containerRef.current
+        ;(window as any).DASHBOARD_OVERLAY = true
 
         const apiSettings: ProjectApiSettings = currentProject?.apiSettings || {}
         const configScript = `
@@ -1106,8 +1151,14 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
               project: "${apiSettings.finProjectName || ''}",
               interval: ${apiSettings.finInterval || 5000},
               directMode: ${apiSettings.finDirectMode || false},
+              realtimeMs: ${apiSettings.finRealtimeMs || 30000},
               livePoints: ${apiSettings.finLivePoints ? JSON.stringify(apiSettings.finLivePoints) : 'undefined'},
-              endpoints: ${apiSettings.finEndpoints ? JSON.stringify(apiSettings.finEndpoints) : 'undefined'}
+              endpoints: ${apiSettings.finEndpoints ? JSON.stringify(apiSettings.finEndpoints) : 'undefined'},
+              workorderExpr: ${JSON.stringify(apiSettings.finWorkorderExpr || '')},
+              meterProfile: ${apiSettings.finMeterProfile ? JSON.stringify(apiSettings.finMeterProfile) : 'undefined'},
+              severityBands: ${apiSettings.finSeverityBands ? JSON.stringify(apiSettings.finSeverityBands) : 'undefined'},
+              equipmentClasses: ${apiSettings.finEquipmentClasses ? JSON.stringify(apiSettings.finEquipmentClasses) : 'undefined'},
+              realtimeEndpoints: ${apiSettings.finRealtimeEndpoints ? JSON.stringify(apiSettings.finRealtimeEndpoints) : 'undefined'}
             }
           };
         `
@@ -1119,6 +1170,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     return () => {
       signal.mounted = false
       window.removeEventListener('dashboard-event', handler)
+      try {
+        document.querySelector('.dashboard-native-container')?.removeAttribute('data-wall')
+        document.querySelectorAll('.wmodelhit').forEach((el) => el.remove())
+        document.body.classList.remove('wall-orbiting')
+        ;(window as any).EKO_HOST_ENGINE?.bindWallOrbit?.()
+      } catch { /* restore canvas orbit */ }
       // The selection dies with the dashboard: don't leave its equipment coloured
       try { (window as any).EKO_HOST_ENGINE?.clearHighlight?.() } catch {}
       try { (window as any).DashboardOverlayTeardown?.() } catch {}

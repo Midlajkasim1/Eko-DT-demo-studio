@@ -132,11 +132,9 @@ window.EKO_WALL = (function(){
     const pageNow = p.pane === 'board' ? boardPage(p) : 0;
     if(p.idx !== E.state.wallIdx || pageNow !== (E.state.wallPage || 0)){ E.state.wallIdx = p.idx; E.state.wallPage = pageNow; try{ sessionStorage.setItem('eko-wall-idx', String(p.idx)); }catch(e){} E.set({ born: 'wall' }); }
     else { const bar = document.querySelector('.wmain .wprog > span'); if(bar) bar.style.width = (p.frac * 100).toFixed(1) + '%'; }
-    const c = cfg(), si = Math.floor((now - epoch) / (c.shiftEverySec * 1000)) % 8;
-    if(si !== shiftIdx){ shiftIdx = si; applyShift(); }
   }
   const SHIFTS = [[0, 0], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1]];
-  function applyShift(){ const w = document.querySelector('.wall'); if(!w) return; const c = cfg(), s = SHIFTS[shiftIdx]; w.style.transform = `translate(${s[0] * c.shiftPx}px, ${s[1] * c.shiftPx}px)`; }
+  function applyShift(){ const w = document.querySelector('.wall'); if(w) w.style.transform = ''; }
   function start(app){
     E = app;
     try{ epoch = +(sessionStorage.getItem('eko-wall-epoch') || 0); }catch(e){ epoch = 0; }
@@ -258,8 +256,9 @@ window.EKO_WALL = (function(){
       };
       const woAll = E.data.assets.flatMap(a => a.workOrders || []);
       m.shift = { label, sinceMidnight, hoursSince, raised: al.filter(a => (a.ageH || 0) <= hoursSince).length, acked, woCreated: woAll.filter(o => todayStamp(o.created || o.startDate)).length, woClosed: woAll.filter(o => todayStamp(o.endDate)).length, woBasis: t('wall.shWoBasis') };
+      const livePeak = E.data.metrics && E.data.metrics.peakTodayKw;
       const p = (E.data.power || {}).subview;
-      if(p && p.peakKw != null && p.limitKw) m.watch.push({ key: 'peak', tone: p.peakKw / p.limitKw >= 0.9 ? 'warn' : 'ok', text: t('wall.w.peak', { kw: fmtW(p.peakKw), pct: fmtW(p.peakKw / p.limitKw * 100), limit: fmtW(p.limitKw) }), basis: t('wall.wb.peak') });
+      if(livePeak && p && p.limitKw) m.watch.push({ key: 'peak', tone: livePeak / p.limitKw >= 0.9 ? 'warn' : 'ok', text: t('wall.w.peak', { kw: fmtW(livePeak, 1), pct: fmtW(livePeak / p.limitKw * 100), limit: fmtW(p.limitKw, 0) }), basis: t('wall.wb.peak') });
       const trending = E.data.assets.filter(a => a.st === 'alarm' && a.trend7 && a.trend7.vals && a.trend7.vals.length >= 3).filter(a => { const v = a.trend7.vals, d = v[v.length - 1] - v[v.length - 2], w = v[v.length - 1] - v[0]; return d !== 0 && Math.sign(d) === Math.sign(w); });
       if(trending.length) m.watch.push({ key: 'trend', tone: 'warn', text: t('wall.w.trend', { n: fmtW(trending.length), list: trending.map(a => a.id).join(', ') }), basis: t('wall.wb.trend', { h: fmtW(c.watch.trendWindowH) }) });
       const w = E.data.water;
@@ -267,7 +266,7 @@ window.EKO_WALL = (function(){
         const pctT = Math.round(w.tankVolumeM3 / w.tankCapacityM3 * 100), days = w.tankVolumeM3 / w.meterAvgM3Day;
         if(pctT <= w.refillThresholdPct || days <= c.watch.autonomyDays) m.watch.push({ key: 'water', tone: pctT <= w.refillThresholdPct ? 'warn' : 'ok', text: t('wall.w.water', { pct: fmtW(pctT), d: fmtW(days, 1), th: fmtW(w.refillThresholdPct) }), basis: t('wall.wb.water') });
       }
-      const down = (E.data.meters || []).filter(x => x.quality === 'offline' || x.quality === 'intermittent');
+      const down = (E.data.meters || []).filter(x => x.live && (x.quality === 'offline' || x.quality === 'intermittent'));
       if(down.length) m.watch.push({ key: 'meters', tone: 'warn', text: t('wall.w.meters', { n: fmtW(down.length), age: E.fmtAge(Math.max.apply(null, down.map(x => (x.receivedMin || 0) / 60))) }), basis: t('wall.wb.meters') });
       const stale = E.data.assets.filter(a => a.st === 'stale');
       if(stale.length) m.watch.push({ key: 'stale', tone: 'warn', text: t('wall.w.stale', { n: fmtW(stale.length), age: E.fmtAge(Math.max.apply(null, stale.map(a => a.staleH || 0))) }), basis: t('wall.wb.stale') });
@@ -346,10 +345,11 @@ window.EKO_WALL = (function(){
         let v = (E.data.metrics || {})[r.metric];
         if (v == null && r.key === 'water' && E.data.water) v = E.data.water.todayM3;
         if (v == null && r.key === 'gas' && E.data.gas) v = E.data.gas.todayM3;
+        if (v === 0 && (r.key === 'energy' || r.key === 'water' || r.key === 'gas')) v = null;
         tiles.push({ key: r.key, label: t(r.label), value: dashW(v, r.d), unit: r.u || '', spark: r.spark, sparkCompare: r.sparkCompare, hue: r.dom, cap: r.capEn ? (E.lang === 'ar' ? r.capAr : r.capEn) : (E.lang === 'ar' ? r.deltaAr : r.deltaEn) });
       });
       const p = (E.data.power || {}).subview;
-      const peakKw = (E.data.metrics && E.data.metrics.peakTodayKw != null) ? E.data.metrics.peakTodayKw : (p && p.peakKw);
+      const peakKw = (E.data.metrics && E.data.metrics.peakTodayKw) || null;
       const limitKw = p && p.limitKw;
       tiles.push({
         key: 'peak',
@@ -515,9 +515,8 @@ window.EKO_WALL = (function(){
       : `<span class="wesc" data-hot="0">${esc(t('wall.exitHint'))}</span><button class="wbtn" data-act="wallGear" data-tip="${esc(t('wall.settings'))}" aria-label="${esc(t('wall.settings'))}" aria-expanded="${!!E.state.wallCfgOpen}">${C().icon('settings', 0)}</button><button class="wbtn" data-act="wallExit" data-tip="${esc(t('wall.exit'))}" aria-label="${esc(t('wall.exit'))}">${C().icon('x', 0)}</button>`;
     const foot = `<footer class="wfoot"><span class="wfname">${esc(f.name)}</span><span class="wconn" data-mode="${pw.mode}"><i class="wdot"></i>${esc(conn)}</span><span>${esc(t('wall.asOf', { t: f.asOf }))}</span>${p.n > 1 ? `<span>${esc(t('wall.mainPos', { i: fmtW(p.idx + 1), n: fmtW(p.n) }))}</span>` : ''}<span class="grow"></span>${ctl}</footer>`;
     const panel = E.state.wallCfgOpen && !locked ? settingsPanel(c, L) : '';
-    const sh = SHIFTS[shiftIdx] || [0, 0];
-    const style = `--wbody:${L.body}px;--wlabel:${L.label}px;--wnum2:${L.num2}px;--wnum1:${L.num1}px;--wline:${L.line}px;--wglyph:${L.glyph}px;--wval:${L.val}px;--wbright:${(c.wallBrightness / 100).toFixed(2)};transform:translate(${sh[0] * c.shiftPx}px, ${sh[1] * c.shiftPx}px)`;
-    return `<div class="wall" data-scope="${c.scope}" data-stale="${stale ? 1 : 0}" data-motion="${c.reduceMotion ? 'reduce' : 'full'}" data-idx="${p.idx}" data-born="${E.state.born === 'wall' ? 1 : 0}" data-body="${L.body}" style="${style}">
+    const style = `--wbody:${L.body}px;--wlabel:${L.label}px;--wnum2:${L.num2}px;--wnum1:${L.num1}px;--wline:${L.line}px;--wglyph:${L.glyph}px;--wval:${L.val}px;--wbright:${(c.wallBrightness / 100).toFixed(2)}`;
+    return `<div class="wall" data-scope="${c.scope}" data-stale="${stale ? 1 : 0}" data-motion="reduce" data-idx="${p.idx}" data-born="${E.state.born === 'wall' ? 1 : 0}" data-body="${L.body}" style="${style}">
       ${banner}<div class="wgrid">${kpiStrip(f, m)}${alarmCard(f, m)}<section class="wcard wcentre wmain" data-zone="main" data-pane="${p.pane}">${p.n > 1 ? `<div class="wprog" aria-hidden="true"><span style="width:${(p.frac * 100).toFixed(1)}%"></span></div>` : ''}${pane ? pane(f, p, m) : ''}</section><div class="wside" data-zone="side">${sideCards(f, m)}</div></div>${foot}</div>${panel}`;
   }
   /* the on-wall settings panel: type size, theme, brightness, dwell, panes, lock, exit — saved per display like the workstation dialog */
