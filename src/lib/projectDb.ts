@@ -4,6 +4,7 @@ import { ASSETS_VERSION, buildTextureAsset, collectGarbage, TEXTURES_DIR } from 
 import { assetFileName, collectMapGarbage, MAP_ASSETS_DIR } from '@/lib/mapAssets'
 import { hasMap, pruneMapConfig } from '@/lib/mapConfig'
 import { apiConfigFor, exportedSiteConfig } from '@/lib/finSettings'
+import { BACKEND_EXPORT_FILES } from '@/lib/backendExport'
 import type { MapAsset, ProjectMeta, ProjectModel, RecentProjectCard, TextureAsset } from '@/types'
 
 // Only used to CACHE folder handles for "recent projects" — no actual data stored here
@@ -504,19 +505,13 @@ export async function exportProjectAsZip(handle: FileSystemDirectoryHandle, meta
   }
 
   // Served by a dev-server middleware only, so a studio running from dist/ cannot reach them
-  const backendFiles = [
-    { name: 'main.py', url: '/backend/main.py' },
-    { name: 'fin_client.py', url: '/backend/fin_client.py' },
-    { name: 'start_viewer.py', url: '/backend/start_viewer.py' },
-    { name: 'requirements.txt', url: '/backend/requirements.txt' },
-    { name: 'login.html', url: '/backend/login.html' },
-  ]
-  for (const bf of backendFiles) {
-    const r = await fetch(bf.url + '?t=' + Date.now(), { cache: 'no-store' })
+  for (const name of BACKEND_EXPORT_FILES) {
+    const url = `/backend/${name}`
+    const r = await fetch(url + '?t=' + Date.now(), { cache: 'no-store' })
     if (!r.ok) {
-      throw new Error(`Could not read ${bf.url} (HTTP ${r.status}). Export the project from \`npm run dev\`.`)
+      throw new Error(`Could not read ${url} (HTTP ${r.status}). Export the project from \`npm run dev\`.`)
     }
-    zip.file(`backend/${bf.name}`, await r.text())
+    zip.file(`backend/${name}`, await r.text())
   }
 
   // config.json — start from the repo file and overlay only the connection fields

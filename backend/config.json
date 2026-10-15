@@ -3,7 +3,6 @@
   "fin_server_url": "https://localhost",
   "display_name": "Marsa Al Arab",
   "documents_file": "om-warranty.json",
-  "_audit": "All point IDs below verified against a live readAll(equip or point) capture (docs/equip+points.txt, 2026-08-04). See docs/FIN_POINT_AUDIT.md. IDs that did not resolve in the project were removed.",
   "polling": {
     "live_ms": 5000,
     "realtime_ms": 30000
@@ -105,6 +104,7 @@
     "endpoint": "/api/sys/eval",
     "expr": "secureEval(projs())"
   },
+  "workorder_expr": "sqlQuery(read(sqlConn), \"SELECT * FROM workOrderMarsa\")",
   "power_endpoints": {
     "Hourly_Energy_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181ee6e-67dac181,2026-05-21..today()%2C%7B-limit%7D)",
     "Peak_Demand_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181f788-2d229f48,2026-05-21..today()%2C%7B-limit%7D)",

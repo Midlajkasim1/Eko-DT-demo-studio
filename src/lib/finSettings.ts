@@ -230,6 +230,7 @@ export function exportedSiteConfig(cfg: JsonObject, settings: ProjectApiSettings
   const s = settings ?? {}
   if (s.finProjectName && s.finProjectName !== cfg.project_name) {
     for (const key of SITE_MAPPING_KEYS) out[key] = {}
+    out.workorder_expr = ''   // the site's work-order query reads its own table (workOrderMarsa)
   }
   if (s.finProjectName) out.project_name = s.finProjectName
   if (s.finBaseUrl) out.fin_server_url = s.finBaseUrl

@@ -362,7 +362,7 @@ class ProjectConfigTests(unittest.TestCase):
     def test_data_answers_are_stamped_with_the_project_they_were_polled_for(self):
         # the dashboard drops an answer stamped for another project (it can outlive a switch)
         paths = ("/api/fin/power-live", "/api/fin/equip-live", "/api/fin/power-history",
-                 "/api/fin/pmu-live", "/api/fin/alarms", "/api/fin/documents")
+                 "/api/fin/pmu-live", "/api/fin/alarms", "/api/fin/documents", "/api/fin/workorders")
         self.login(PROJECT_A, "proj-A")
         for p in paths:
             self.assertEqual(self.http.get(p).headers.get(main.PROJECT_HEADER), "proj-A", p)
@@ -370,6 +370,15 @@ class ProjectConfigTests(unittest.TestCase):
         for p in paths:
             self.assertEqual(self.http.get(p).headers.get(main.PROJECT_HEADER), "proj-B", p)
         self.assert_serves_b()   # the stamp does not change the payload
+
+    def test_work_orders_stay_with_their_own_site(self):
+        # config.json's work-order query reads its own site's table: another project never runs it
+        self.login({"finProjectName": main.BASE_CONFIG["project_name"]}, "proj-site")
+        self.assertEqual(main.CONFIG["workorder_expr"], main.BASE_CONFIG["workorder_expr"])
+        main.cached_workorders = {"orders": [{"id": "1", "equipment": "7"}], "error": ""}
+        self.switch(PROJECT_A, "proj-A")
+        self.assertEqual(main.CONFIG["workorder_expr"], "")
+        self.assertEqual(self.get("/api/fin/workorders")["orders"], [])
 
     def test_manuals_are_only_listed_for_their_own_fin_project(self):
         def refs():

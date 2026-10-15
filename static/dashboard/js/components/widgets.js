@@ -886,10 +886,10 @@ window.EKO_C = (function(){
       </div>
       <div class="regscroll"><table class="reg">
         <thead><tr>${th('id','colAssetId')}${th('st','colStatus',true)}${th('floor','colFloor',true)}${th('zone','colZone')}${th('wos','colWos')}<th>${esc(t('colWoStatus'))}</th><th></th></tr></thead>
-        <tbody>${rows.map(r => `<tr data-act="openAsset" data-asset="${esc(r.id)}" data-on="${s.assetSel===r.id}" tabindex="0">
+        <tbody>${rows.map(r => `<tr data-act="openAsset" data-asset="${esc(r.id)}" data-tab="alarms" data-on="${s.assetSel===r.id}" tabindex="0">
           <td class="mono">${esc(r.id)}</td><td>${chipFor(r)}</td>
           <td>${esc(r.floor)}</td><td data-tip="${esc(E.lang==='ar'?(r.zoneAr||r.zone):r.zone)}" data-tipif="trunc">${esc(E.lang==='ar'?(r.zoneAr||r.zone):r.zone)}</td>
-          <td class="mono">${r.wos||t('emptyDash')}</td><td>${woCell(r)}</td>
+          <td class="mono" data-act="openAsset" data-asset="${esc(r.id)}" data-tab="workorder">${r.wos||t('emptyDash')}</td><td data-act="openAsset" data-asset="${esc(r.id)}" data-tab="workorder">${woCell(r)}</td>
           <td><span class="cT3">${icon('dots',13)}</span></td></tr>`).join('')}
         </tbody></table></div></section>`;
   }
@@ -1154,6 +1154,49 @@ window.EKO_C = (function(){
     if (!rows.length) return '';
     return rows.map(row => `<div class="aprow"><dt>${esc(row[0])}</dt><dd>${esc(row[1])}</dd></div>`).join('');
   }
+  function workOrderBody(E, r) {
+    const t = E.t.bind(E);
+    const orders = r.workOrders || [];
+    const perKey = { D: 'woPerD', W: 'woPerW', M: 'woPerM', Y: 'woPerY', H: 'woPerH' };
+    const period = code => {
+      const key = perKey[String(code || '').toUpperCase()];
+      return key ? t(key) : (code || '');
+    };
+    const row = (label, value) => {
+      if (value == null || value === '' || value === '--') return '';
+      return `<div class="aprow"><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`;
+    };
+    if (!orders.length) {
+      const err = (E.data && E.data.workOrderError) || '';
+      const note = err ? `${t('apWoReadFail')} ${err}` : t(r.equipId ? 'apWoNoRows' : 'apWoUnlinked');
+      return `<p class="alempty">${esc(t('apWoEmpty'))}</p>`
+        + (r.equipId ? row(t('apWoEquip'), r.equipId) : '')
+        + `<p class="apnote">${esc(note)}</p>`;
+    }
+    const cards = orders.map(order => {
+      const st = order.status === 'over' ? 'over' : 'sched';
+      return `<article class="apwocard">
+        <div class="apwohead">
+          <span class="tMono">${esc(order.id)}</span>
+          <span class="row gap6"><span class="wodot" data-st="${st}"></span>${esc(t(st === 'over' ? 'woOver' : 'woSched'))}</span>
+          ${order.type ? `<span class="tCap">${esc(order.type)}</span>` : ''}
+        </div>
+        ${row(t('apWoDesc'), order.description)}
+        ${row(t('apWoEquip'), order.equipment)}
+        ${row(t('apWoTag'), order.assetTag)}
+        ${row(t('apWoPos'), order.position)}
+        ${row(t('apWoOrg'), order.organization)}
+        ${row(t('apWoDue'), order.dueDate)}
+        ${row(t('apWoPeriod'), period(order.period))}
+        ${row(t('apWoPm'), order.pmSchedule)}
+        ${row(t('apWoCreated'), order.created)}
+        ${row(t('apWoStart'), order.startDate)}
+        ${row(t('apWoEnd'), order.endDate)}
+      </article>`;
+    }).join('');
+    return cards + `<p class="apnote">${esc(t('apWoNote'))}</p>`;
+  }
+
   function assetPanel(E){
     const id = E.state.assetSel;
     if(!id) return '';
@@ -1169,7 +1212,7 @@ window.EKO_C = (function(){
     const ctl = window.EKO_CTL && window.EKO_CTL.showsControl(E, r);
     let tab = E.state.apTab;
     if (tab === 'activity') tab = 'analytics';
-    if(!['alarms','analytics','om','warranty','control'].includes(tab)) tab = 'alarms';
+    if(!['alarms','analytics','om','warranty','workorder','control'].includes(tab)) tab = 'alarms';
     if(tab === 'control' && !ctl) tab = 'alarms';
     const trP = x => E.ph(x);
     const foldNav = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -1303,6 +1346,8 @@ window.EKO_C = (function(){
           <span class="tMonoS">${esc(r.cafm||t('emptyDash'))}</span>
           ${r.cafm?`<button class="aplink" data-act="none">${esc(t('openW'))}</button>`:''}</dd></div>
         <p class="apnote">${esc(t('omIndexed'))}</p>`;
+    } else if(tab === 'workorder'){
+      body = workOrderBody(E, r);
     } else if(tab === 'warranty'){
       if (warranty) {
         const title = esc(arL ? (warranty.tAr || warranty.tEn) : warranty.tEn);
@@ -1321,7 +1366,9 @@ window.EKO_C = (function(){
       body = window.EKO_CTL.controlTab(E, r);
     }
     const woDone = E.state.woRaised[id];
-    const tabBtn = (k, lbl, n) => `<button class="aptab" data-on="${tab===k}" data-act="apTab" data-v="${k}">${esc(lbl)}${n?`<span class="cbadge" data-sev="${worst?worst.sev:'medium'}">${n}</span>`:''}</button>`;
+    const orders = r.workOrders || [];
+    const woOver = orders.some(o => o.status === 'over');
+    const tabBtn = (k, lbl, n, sev) => `<button class="aptab" data-on="${tab===k}" data-act="apTab" data-v="${k}">${esc(lbl)}${n?`<span class="cbadge" data-sev="${sev || (worst?worst.sev:'medium')}">${n}</span>`:''}</button>`;
     return `<aside id="assetpanel" data-born="${E.state.born==='asset'?1:0}" data-wide="${E.state.apWide?1:0}" role="dialog" aria-label="${esc(id)}">
       <div class="draghandle"></div>
       <div class="aphead">
@@ -1337,7 +1384,7 @@ window.EKO_C = (function(){
         ${woBtn(E, id)}
         <button class="btnG btnSm" data-act="none">⧉ ${esc(t('apCafm'))}</button>
       </div>
-      <div class="aptabs">${tabBtn('alarms', t('apAlarms'), als.length||'')}${tabBtn('analytics', t('apAnalytics'))}${tabBtn('om', t('apOmTab'))}${tabBtn('warranty', t('apWtyTab'))}${ctl?tabBtn('control', t('apControlTab')):''}</div>
+      <div class="aptabs">${tabBtn('alarms', t('apAlarms'), als.length||'')}${tabBtn('analytics', t('apAnalytics'))}${tabBtn('om', t('apOmTab'))}${tabBtn('warranty', t('apWtyTab'))}${tabBtn('workorder', t('apWoTab'), orders.length||'', woOver?'high':'medium')}${ctl?tabBtn('control', t('apControlTab')):''}</div>
       <div class="apbody">${body}</div>
       <div class="apfoot apfootmob">
         ${E.state.woRaised[id] || (E.state.woPhase||{})[id]

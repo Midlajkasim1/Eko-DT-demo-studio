@@ -1006,7 +1006,8 @@
     /* Asset journey: any entry point opens the ONE docked panel. */
     openAsset(el){
       const assetId = el.dataset.asset;
-      E.set({ born: E.state.assetSel?null:'asset', assetSel: assetId, apTab: E.state.apTab||'alarms', mkPop:null });   /* the camera stays put: Locate in 3D moves it */
+      const tab = el.dataset.tab || E.state.apTab || 'alarms';
+      E.set({ born: E.state.assetSel?null:'asset', assetSel: assetId, apTab: tab, mkPop:null });   /* the camera stays put: Locate in 3D moves it */
     },
     closeAsset(){ E.set({ assetSel: null, paint: null }); goHome(); },   /* closing the panel is back to the home view */
     apTab(el){ E.set({ apTab: el.dataset.v }); },

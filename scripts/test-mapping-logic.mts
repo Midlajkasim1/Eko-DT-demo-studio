@@ -1,5 +1,9 @@
 // Logic tests for Data Mapping (no browser). Run: node scripts/test-mapping-logic.mts
 import assert from 'node:assert'
+import { existsSync, readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { BACKEND_EXPORT_FILES } from '../src/lib/backendExport.ts'
 import { rowsFromObject, objectFromRows, parseImport, mergeEntries } from '../src/lib/mappingRows.ts'
 import { SITE_FIN_EQUIPMENT_CLASSES, SITE_FIN_METER_PROFILE } from '../src/constants/finDefaults.ts'
 import {
@@ -130,7 +134,7 @@ const SITE_CFG = {
   project_name: 'marsaAlArab', fin_server_url: 'https://localhost', polling: { live_ms: 5000, realtime_ms: 30000 },
   live_point_ids: { total_power: 'p:{project}:r:3181ee6e-site' }, power_endpoints: { X_his: 'site' },
   equipment_classes: { system_tags: ['ahu'] }, meter_profile: { prefix: 'PMU' }, severity_bands: { order: 'desc' },
-  realtime_endpoints: { points: 'q' },
+  realtime_endpoints: { points: 'q' }, workorder_expr: 'sqlQuery(read(sqlConn), "SELECT * FROM workOrderMarsa")',
 }
 
 test('export: another FIN project ships none of config.json\'s site point maps; the site keeps them', () => {
@@ -141,8 +145,10 @@ test('export: another FIN project ships none of config.json\'s site point maps; 
   assert.strictEqual(other.fin_server_url, 'https://10.10.90.21')                    // a new server address needs no code change
   same(other.polling, { live_ms: 7000, realtime_ms: 30000 })
   same(other.realtime_endpoints, SITE_CFG.realtime_endpoints)                         // the query template is not a site mapping
+  assert.strictEqual(other.workorder_expr, '')                                        // nor does it run the site's work-order table
   const site = exportedSiteConfig(SITE_CFG, { finProjectName: 'marsaAlArab' })
   same(site.live_point_ids, SITE_CFG.live_point_ids)                                  // existing Marsa export unchanged
+  assert.strictEqual(site.workorder_expr, SITE_CFG.workorder_expr)
   same(exportedSiteConfig(SITE_CFG, undefined), SITE_CFG)                             // nothing set: config.json as is
   same(SITE_CFG.live_point_ids, { total_power: 'p:{project}:r:3181ee6e-site' })      // input never mutated
 })
@@ -265,6 +271,25 @@ test('power boards: names unique and present, keys mapped, history optional, met
   assert(powerBoardsProblem([{ name: 'X', liveKey: 'light_kw', meter: 'PMU09' }], keys, 'MTR')?.includes('does not match this project\'s meter prefix'))
   assert.strictEqual(powerBoardsProblem([{ name: 'X', liveKey: 'light_kw', meter: 'PMU09' }], keys), null, 'no prefix known: any meter label')
   assert(powerBoardsProblem([{ name: 'P2', liveKey: 'light_kw' }, { name: 'X', liveKey: 'nope' }], keys)?.startsWith('Power board 2 (X)'), 'says which board')
+})
+
+test('backend export: every local module main.py imports ships beside it', () => {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'backend')
+  for (const name of BACKEND_EXPORT_FILES) assert(existsSync(path.join(dir, name)), `${name} is listed but missing from backend/`)
+  // walk local imports from the entry points: a module the export leaves out fails at startup
+  const seen = new Set<string>(), todo = ['main', 'start_viewer']
+  while (todo.length) {
+    const mod = todo.pop()!
+    if (seen.has(mod)) continue
+    seen.add(mod)
+    const src = readFileSync(path.join(dir, mod + '.py'), 'utf-8')
+    for (const m of src.matchAll(/^\s*(?:from\s+(\w+)\s+import|import\s+(\w+))/gm)) {
+      const dep = m[1] || m[2]
+      if (existsSync(path.join(dir, dep + '.py'))) todo.push(dep)
+    }
+  }
+  assert(seen.has('workorders'), 'main.py imports workorders')
+  for (const mod of seen) assert(BACKEND_EXPORT_FILES.includes(mod + '.py'), `${mod}.py is imported but not exported`)
 })
 
 console.log(`\n${passed} logic tests passed`)

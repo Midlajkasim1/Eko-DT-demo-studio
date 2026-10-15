@@ -34,6 +34,7 @@ from fin_client import (
     parse_zinc_csv,
     safe_get,
 )
+from workorders import error_payload, live_payload, norm_id, orders_by_equipment
 
 # ─── Load Config ─────────────────────────────────────────────────────────────
 
@@ -102,6 +103,8 @@ def merge_project_settings(base: dict, settings: Optional[dict], isolated: bool 
     if isolated:
         for key in PROJECT_DICT_SETTINGS.values():
             merged[key] = {}
+        # config.json's work-order query reads its own site's table (workOrderMarsa)
+        merged["workorder_expr"] = ""
     for key, value in project_overrides(settings).items():
         if key == "polling.live_ms":
             merged["polling"] = {**(merged.get("polling") or {}), "live_ms": value}
@@ -271,6 +274,7 @@ cached_fdd_summary: list = []
 cached_meter_data: dict = {}
 cached_alarm_data: dict = {}
 cached_facility: dict = {}
+cached_workorders: dict = {}
 
 
 # ─── Background Polling ─────────────────────────────────────────────────────
@@ -304,6 +308,7 @@ async def realtime_loop():
                 cached_power_history["Total_Power_Consumption_his"] = cached_power_history[
                     "Hourly_Energy_Consumption_his"
                 ]
+            await refresh_workorders()
             cached_building_data = {
                 "status": "success",
                 "Building_Info": {
@@ -503,6 +508,7 @@ def _flatten_equip(realtime: dict) -> list[dict]:
                     "inAlarm": len(alarms) > 0,
                     "alarms": alarms,
                     "bimId": eq.get("bimId", ""),
+                    "equipId": eq.get("equipId") or "",
                     "points": eq.get("points", []),
                 })
     return equip_list
@@ -671,7 +677,7 @@ def _reset_caches():
     """Drop data polled under the previous configuration so it is never served for the next."""
     global cached_equip_data, cached_power_data, cached_building_data, cached_sensor_avg
     global cached_power_history, cached_fdd_summary, cached_meter_data, cached_alarm_data
-    global cached_facility
+    global cached_facility, cached_workorders
     cached_equip_data = {}
     cached_power_data = {}
     cached_building_data = {}
@@ -681,6 +687,7 @@ def _reset_caches():
     cached_meter_data = {}
     cached_alarm_data = {}
     cached_facility = {}
+    cached_workorders = {}
 
 
 def _bundled_project() -> tuple[Optional[dict], Optional[str]]:
@@ -1235,12 +1242,59 @@ def _stamp(response: Response) -> None:
     response.headers[PROJECT_HEADER] = quote(ACTIVE_PROJECT_ID or "", safe="")
 
 
+def _attach_workorders():
+    """Copy the live jobs onto each equipment row. The only key is equipId."""
+    if isinstance(cached_equip_data, dict):
+        cached_equip_data["workOrderError"] = (cached_workorders or {}).get("error") or ""
+    equipment = (cached_equip_data or {}).get("equipment")
+    if not isinstance(equipment, list):
+        return
+    grouped = orders_by_equipment(cached_workorders)
+    for eq in equipment:
+        equip_id = norm_id(eq.get("equipId"))
+        eq["workOrders"] = list(grouped.get(equip_id, []))
+
+
+async def refresh_workorders():
+    """Eval workorder_expr from config, the same session as equipment and alarms."""
+    global cached_workorders
+    expr = (CONFIG.get("workorder_expr") or "").strip()
+    if not client or not client.is_authenticated or not expr:
+        return
+    try:
+        text = await client.fetch_api(
+            f"/api/{client.project_name}/eval?expr={quote(expr, safe='')}",
+            is_text=True,
+        )
+    except Exception as exc:
+        print(f"[FIN] work order fetch error: {exc}")
+        cached_workorders = error_payload(str(exc))
+        _attach_workorders()
+        return
+    cached_workorders = live_payload(text or "")
+    _attach_workorders()
+    err = cached_workorders.get("error") or ""
+    count = len(cached_workorders.get("orders") or [])
+    print(f"[FIN] work orders: {err or str(count) + ' rows'}")
+
+
+@app.get("/api/fin/workorders")
+async def get_workorders(response: Response):
+    """Live PPM rows. Empty until the FIN read succeeds."""
+    if not client or not client.is_authenticated:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    _stamp(response)
+    return cached_workorders or {"timestamp": None, "source": "fin", "orders": [], "error": ""}
+
+
 @app.get("/api/fin/equip-live")
 async def get_equip_live(response: Response):
     """Get live equipment data (floor-wise with points and alarms)."""
     if not client or not client.is_authenticated:
         raise HTTPException(status_code=401, detail="Not authenticated")
     _stamp(response)
+    if cached_equip_data:
+        _attach_workorders()
     return cached_equip_data or {"timestamp": None, "equipment": []}
 
 
@@ -1364,13 +1418,14 @@ async def get_point_history(id: str, days: int = 7):
 
 
 @app.get("/api/fin/alarm-history")
-async def get_alarm_history(days: int = 30):
+async def get_alarm_history(response: Response, days: int = 30):
     """Alarm counts by day and severity. Empty when FIN retains no history.
 
     Defaults to 30 days: at Marsa a 7-day window catches 4 of 343 retained
     alarms and hides the 6 July cooling-valve event (196 alarms) entirely.
     """
     _require_client()
+    _stamp(response)
     days = max(1, min(int(days), 90))
     start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     expr = f"readAll(equip or point).alarms({start}..today())"
@@ -1382,21 +1437,40 @@ async def get_alarm_history(days: int = 30):
 
     bands = CONFIG.get("severity_bands", {})
     by_day: dict[str, dict] = {}
+    last24 = [0] * 24
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("Asia/Dubai")).replace(tzinfo=None)
+    except Exception:
+        now = datetime.utcnow() + timedelta(hours=4)
 
     for row in parse_zinc_csv(text):
         if row.get("alarm") is not True:
             continue
-        stamp = str(row.get("occurred") or row.get("created") or "")[:10]
-        if not stamp:
-            continue
-        priority = row.get("priority") if isinstance(row.get("priority"), (int, float)) else None
-        day = by_day.setdefault(stamp, {"critical": 0, "warning": 0, "info": 0})
-        day[severity_for(priority, bands)] += 1
+        occurred = row.get("occurred") or row.get("created") or ""
+        stamp = str(occurred)[:10]
+        if stamp:
+            priority = row.get("priority") if isinstance(row.get("priority"), (int, float)) else None
+            day = by_day.setdefault(stamp, {"critical": 0, "warning": 0, "info": 0})
+            day[severity_for(priority, bands)] += 1
+        match = re.search(r"(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})", str(occurred))
+        if match:
+            try:
+                when = datetime.strptime(
+                    f"{match.group(1)} {match.group(2)}:{match.group(3)}:{match.group(4)}",
+                    "%Y-%m-%d %H:%M:%S",
+                )
+                age_h = (now - when).total_seconds() / 3600.0
+                if 0 <= age_h < 24:
+                    last24[23 - int(age_h)] += 1
+            except ValueError:
+                pass
 
     return {
         "days": days,
         "retained": bool(by_day),
         "byDay": [{"date": d, **counts} for d, counts in sorted(by_day.items())],
+        "last24": last24,
     }
 
 

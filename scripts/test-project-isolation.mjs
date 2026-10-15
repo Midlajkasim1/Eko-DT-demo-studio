@@ -6,7 +6,9 @@
 //
 // Needs Playwright (devDependency) and Microsoft Edge, or set PW_CHANNEL=chrome. PYTHON overrides the interpreter.
 import { chromium } from 'playwright'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import assert from 'node:assert'
@@ -324,6 +326,16 @@ try {
     finApi: await unzip(zips.fin, 'api-config.json'),
   }
   const siteCfg = await unzip(zips.backend, 'backend/config.json')
+  // the exported backend's own files are enough to start it: unpack them and import main
+  const backendZip = await JSZip.loadAsync(Buffer.from(zips.backend, 'base64'))
+  check(!!backendZip.file('backend/main.py') && !!backendZip.file('backend/workorders.py'), 'backend export: workorders.py ships beside main.py')
+  const unpacked = mkdtempSync(path.join(tmpdir(), 'eko-export-'))
+  for (const f of Object.values(backendZip.files)) {
+    if (/^backend\/[^/]+$/.test(f.name)) writeFileSync(path.join(unpacked, f.name.slice('backend/'.length)), await f.async('nodebuffer'))
+  }
+  const imported = spawnSync(python, ['-B', '-E', '-c', 'import main'], { cwd: unpacked, encoding: 'utf-8' })
+  check(imported.status === 0, 'backend export: main.py imports from the unpacked bundle alone' + (imported.status ? ' (' + imported.stderr.trim().split('\n').pop() + ')' : ''))
+  rmSync(unpacked, { recursive: true, force: true })
   check(JSON.stringify(siteCfg.live_point_ids) === '{}' && JSON.stringify(siteCfg.power_endpoints) === '{}' && !JSON.stringify(siteCfg).includes('3181ee6e'),
     'backend export for B (ellisdonDemo): config.json carries none of config.json\'s Marsa point maps')
   check(siteCfg.project_name === 'ellisdonDemo', 'backend export config.json names B\'s FIN project')

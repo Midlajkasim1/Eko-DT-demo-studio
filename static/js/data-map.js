@@ -496,7 +496,7 @@
     } else {
       el.performancePct = null;
     }
-    
+
     // Wire live endpoints to Energy Landing summary cards
     if (el) {
       var rawOvernight = asNum(p.after_hours_deviation != null ? p.after_hours_deviation : p.energy_performance);
@@ -563,7 +563,7 @@
         });
       }
     }
-    
+
     // Wire live endpoints to the Systems HVAC & Mechanical stat cards
     // Sanity-checked: reject any value outside a physically plausible range → stays null → shows '--'
     if (site.systems && site.systems.groups) {
@@ -604,7 +604,7 @@
         });
       }
     }
-    
+
     // Wire live endpoints to the Systems Electrical stat cards
     if (site.systems && site.systems.groups) {
       var elecGrp = site.systems.groups.find(function(g) { return g.id === "electrical"; });
@@ -614,7 +614,7 @@
         // Plausible ranges
         var enDev = (rawEnDev != null && rawEnDev >= -100 && rawEnDev <= 100) ? rawEnDev : null;
         var peakD = (rawPeak  != null && rawPeak >= 0) ? rawPeak : null;
-        
+
         elecGrp.cards.forEach(function(c) {
           if (c.labelEn === "ENERGY DEVIATION" && enDev != null) {
             set(c, "v", trunc1(enDev));
@@ -631,7 +631,7 @@
         });
       }
     }
-    
+
     if (p.power_history) {
       function extractDaily(histId) {
         var hist = p.power_history[histId];
@@ -679,7 +679,7 @@
       if (site.summary) { applySparkAndDelta(site.summary[1], wtSpark); changed = true; }
       var gsSpark = extractDaily("Total_Gas_Consumption_his");
       if (site.summary) { applySparkAndDelta(site.summary[2], gsSpark); changed = true; }
-      
+
       if (el && enSpark.length > 0) {
         set(el, "perfSpark", enSpark);
         if (enSpark.length >= 2) {
@@ -819,6 +819,8 @@
         set(m, "energyTodayKwh", trunc1(todayKwh));
         set(m, "energyTodayMwh", todayKwh / 1000);
       }
+      // real mode's basis.asOf is already the live site clock (a getter, applyReportingBasis)
+      if (site.basis && !realMode) site.basis.asOf = String(nowP.h).padStart(2, "0") + ":00";
       if (site.summary && site.summary[0]) {
         var energyRow = site.summary[0];
         energyRow.spark = todayHours;
@@ -832,6 +834,18 @@
           energyRow.deltaEn = null;
           energyRow.deltaAr = null;
         }
+        changed = true;
+      }
+
+      if (site.power && site.power.bva && site.power.bva.ranges) {
+        var bvaLabs = [], bvaI;
+        for (bvaI = 0; bvaI < todayHours.length; bvaI++) bvaLabs.push(String(bvaI).padStart(2, "0"));
+        site.power.bva.ranges.today = {
+          unit: "kWh",
+          labels: bvaLabs,
+          actual: todayHours.map(function (v) { return v == null ? 0 : v; }),
+          baseline: yestHours.map(function (v) { return v == null ? null : v; })
+        };
         changed = true;
       }
 
@@ -1178,7 +1192,10 @@
             for (wi = 0; wi < wToday.length; wi++) {
               if (wToday[wi]) { wtSum += wToday[wi]; wtN++; }
             }
-            if (wtN) site.water.todayM3 = trunc1(wtSum);
+            if (wtN) {
+              site.water.todayM3 = trunc1(wtSum);
+              set(m, "waterTodayM3", site.water.todayM3);
+            }
             var dayKeys7 = [], di, ddt;
             for (di = 6; di >= 0; di--) {
               ddt = new Date(now.y, now.m, now.d - di);
@@ -1220,7 +1237,7 @@
             var gHourK  = lastNHours([gFlat], 1);
             var gWeekK  = lastNWeeks([gFlat], 6);
             var gMonthK = lastNMonths([gFlat], 6);
-  
+
             site.gas.hourly  = byHour(gFlat, gHourK);
             site.gas.todayH  = gToday;
             site.gas.weekly  = bucket(gFlat, pointWeekKey, gWeekK, "sum");
@@ -1232,14 +1249,17 @@
               monthly: monthLabels(gMonthK)
             };
             site.gas.weekRange = weekSpanLabel(gWeekK);
-  
+
             // Today total (sum of hourly deltas) overrides the scalar if history exists
             var gtSum = 0, gtN = 0;
             for (gi = 0; gi < gToday.length; gi++) {
               if (gToday[gi]) { gtSum += gToday[gi]; gtN++; }
             }
-            if (gtN) site.gas.todayM3 = trunc1(gtSum);
-  
+            if (gtN) {
+              site.gas.todayM3 = trunc1(gtSum);
+              set(m, "gasTodayM3", site.gas.todayM3);
+            }
+
             // 7-day average
             var gDay7 = [], gdi, gddt;
             for (gdi = 6; gdi >= 0; gdi--) {
@@ -1251,14 +1271,14 @@
             var ga7 = 0, gn7 = 0;
             gLast7.forEach(function(v){ if (v) { ga7 += v; gn7++; } });
             if (gn7) site.gas.avg7M3 = trunc1(ga7 / gn7);
-  
+
             // Month-to-date
             var gmtdSum = 0;
             gFlat.forEach(function(pt){
               if (pt.y === gNow.y && pt.m === gNow.m) gmtdSum += pt.val;
             });
             if (gmtdSum > 0) site.gas.mtdM3 = trunc1(gmtdSum);
-  
+
             // daily14 — last 14 days for the bar chart (replaces mock array)
             var g14 = [], g14i, g14dt;
             for (g14i = 13; g14i >= 0; g14i--) {
@@ -1271,7 +1291,7 @@
               site.gas.daily14          = gDaily14.map(function(v){ return v || 0; });
               site.gas.daily14StartDay  = g14[0].d;
             }
-  
+
             changed = true;
           }
         }
@@ -1322,6 +1342,48 @@
           }
         });
       }
+    }
+    if (m.energyTodayKwh == null && site.power && Array.isArray(site.power.zoneHourly) && site.power.zoneHourly.length) {
+      var zhSum = 0, zhN = 0, zhH, zhR;
+      var zhLen = site.power.zoneHourly[0] ? site.power.zoneHourly[0].length : 0;
+      var zhHours = [];
+      for (zhH = 0; zhH < zhLen; zhH++) {
+        var hourSum = 0, hourAny = false;
+        for (zhR = 0; zhR < site.power.zoneHourly.length; zhR++) {
+          var zv = site.power.zoneHourly[zhR] && site.power.zoneHourly[zhR][zhH];
+          if (zv != null && isFinite(zv)) { hourSum += zv; hourAny = true; }
+        }
+        zhHours.push(hourAny ? hourSum : null);
+        if (hourAny) { zhSum += hourSum; zhN++; }
+      }
+      if (zhN) {
+        set(m, "energyTodayKwh", trunc1(zhSum));
+        set(m, "energyTodayMwh", zhSum / 1000);
+        if (site.power.bva && site.power.bva.ranges) {
+          var zhLabs = [], zhi;
+          for (zhi = 0; zhi < zhHours.length; zhi++) zhLabs.push(String(zhi).padStart(2, "0"));
+          var cur = site.power.bva.ranges.today;
+          var hasAct = cur && Array.isArray(cur.actual) && cur.actual.some(function (v) { return v; });
+          if (!hasAct) {
+            site.power.bva.ranges.today = {
+              unit: "kWh",
+              labels: zhLabs,
+              actual: zhHours.map(function (v) { return v == null ? 0 : v; }),
+              baseline: (cur && cur.baseline) || zhHours.map(function () { return null; })
+            };
+          }
+        }
+      }
+    }
+    if (site.power && site.power.subview) {
+      var sv = site.power.subview;
+      if (m.peakTodayKw != null) { sv.peakKw = m.peakTodayKw; changed = true; }
+      var limitKw = m.contractedKw != null ? m.contractedKw : (site.power.contractedMw != null ? site.power.contractedMw * 1000 : null);
+      if (limitKw) {
+        sv.limitKw = limitKw;
+        changed = true;
+      }
+      if (el && el.currentKw != null) sv.loadNowKw = el.currentKw;
     }
     countUtilityAndEmsMeters(site, site.assets);
     if (changed) paint();
@@ -1408,7 +1470,7 @@
     paint();
   }
 
-  
+
   var historyCache = {};
   var HIST_MONTHS = { january:0, february:1, march:2, april:3, may:4, june:5, july:6, august:7, september:8, october:9, november:10, december:11 };
   function foldPtName(n) {
@@ -1513,7 +1575,10 @@
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     var list = payload && payload.equipment;
     if (!site || !Array.isArray(list)) return;
-    
+    if (Object.prototype.hasOwnProperty.call(payload, 'workOrderError')) {
+      site.workOrderError = payload.workOrderError || '';
+    }
+
     // Build fresh asset list from FIN live data
     var newAssets = list.map(function (eq) {
       var crit = "C";
@@ -1565,6 +1630,8 @@
         typeAr: (eq.type || "معدات").toUpperCase(),
         level: eq.floor || "Level",
         levelAr: eq.floor || "الطابق",
+        equipId: normEquipId(eq.equipId),
+        workOrders: Array.isArray(eq.workOrders) ? eq.workOrders : [],
         wos: 0,
         wost: null,
         make: "--",
@@ -1658,7 +1725,7 @@
 
     site.assets = newAssets;
     site.registerTotal = newAssets.length;
-    
+
     if (site.landing && site.landing.reg) {
       site.landing.reg.headEn = newAssets.length + " assets";
       site.landing.reg.headAr = newAssets.length + " أصلًا";
@@ -1751,6 +1818,61 @@
     countUtilityAndEmsMeters(site, newAssets);
 
     applyHeat(list);
+    stampWorkOrders();
+    paint();
+  }
+
+  var woState = { byId: {} };
+
+  function normEquipId(value) {
+    if (value == null || value === '') return '';
+    if (typeof value === 'number' && isFinite(value)) return String(Math.trunc(value));
+    var text = String(value).trim().replace(/^"|"$/g, '');
+    if (/^\d+\.0+$/.test(text)) return text.replace(/\.0+$/, '');
+    return text;
+  }
+
+  function woDueStatus(order) {
+    if (!order || !order.dueIso) return 'sched';
+    var due = new Date(order.dueIso + 'T00:00:00');
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return due < today ? 'over' : 'sched';
+  }
+
+  function stampWorkOrders() {
+    var site = window.EKO_DATA && window.EKO_DATA.marsa;
+    if (!site || !Array.isArray(site.assets)) return;
+    site.assets.forEach(function (asset) {
+      var equipId = normEquipId(asset.equipId);
+      asset.equipId = equipId;
+      var fromIndex = equipId && woState.byId[equipId] ? woState.byId[equipId] : [];
+      var embedded = asset.workOrders || [];
+      var source = fromIndex.length >= embedded.length ? fromIndex : embedded;
+      var list = source.map(function (order) {
+        return Object.assign({}, order, { status: woDueStatus(order) });
+      });
+      list.sort(function (a, b) {
+        if (a.status !== b.status) return a.status === 'over' ? -1 : 1;
+        return String(a.dueIso || '').localeCompare(String(b.dueIso || ''));
+      });
+      asset.workOrders = list;
+      asset.wos = list.length;
+      asset.wost = list.length ? (list.some(function (order) { return order.status === 'over'; }) ? 'over' : 'sched') : null;
+    });
+  }
+
+  function applyWorkOrders(payload) {
+    woState = { byId: {} };
+    var site = window.EKO_DATA && window.EKO_DATA.marsa;
+    if (site) site.workOrderError = (payload && payload.error) || '';
+    ((payload && payload.orders) || []).forEach(function (order) {
+      var equipId = normEquipId(order.equipment);
+      if (!equipId) return;
+      if (!woState.byId[equipId]) woState.byId[equipId] = [];
+      woState.byId[equipId].push(order);
+    });
+    stampWorkOrders();
     paint();
   }
 
@@ -2090,6 +2212,13 @@
     }
   };
 
+  function applyAlarmHistory(payload) {
+    var site = window.EKO_DATA && window.EKO_DATA.marsa;
+    if (!site || !payload) return;
+    site.alarmHistory = payload;
+    paint();
+  }
+
   function applyDocuments(payload) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     var families = payload && payload.families;
@@ -2106,6 +2235,8 @@ window.addEventListener('dashboard-data', function onData(e) {
     if (d.type === 'meters') applyMeters(d.data);
     if (d.type === 'equipment') applyEquipment(d.data);
     if (d.type === 'documents') applyDocuments(d.data);
+    if (d.type === 'workorders') applyWorkOrders(d.data);
+    if (d.type === 'alarmHistory') applyAlarmHistory(d.data);
     if (d.type === 'status') finIntegration({ st: d.data && d.data.connected ? 'Live' : 'Not connected' });
     if (d.type === 'power' && d.data) finIntegration({ st: 'Live', hb: hhmm() });
     if (d.type === 'equipment' && d.data && Array.isArray(d.data.equipment)) {
@@ -2119,4 +2250,6 @@ window.addEventListener('dashboard-data', function onData(e) {
   if (window.DashboardData && window.DashboardData.meters) applyMeters(window.DashboardData.meters);
   if (window.DashboardData && window.DashboardData.equipment) applyEquipment(window.DashboardData.equipment);
   if (window.DashboardData && window.DashboardData.documents) applyDocuments(window.DashboardData.documents);
+  if (window.DashboardData && window.DashboardData.workorders) applyWorkOrders(window.DashboardData.workorders);
+  if (window.DashboardData && window.DashboardData.alarmHistory) applyAlarmHistory(window.DashboardData.alarmHistory);
 })();

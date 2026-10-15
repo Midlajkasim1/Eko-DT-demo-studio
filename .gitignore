@@ -23,6 +23,11 @@ dist-ssr
 *.sln
 *.sw?
 
+env
+venv
+.venv
+.env
+
 
 backend/__pycache__/
 CLAUDE.md
