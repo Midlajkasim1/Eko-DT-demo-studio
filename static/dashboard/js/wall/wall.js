@@ -51,6 +51,7 @@ window.EKO_WALL = (function(){
     const t = truncDec(n || 0, dd);
     return t.toLocaleString('en-GB', { minimumFractionDigits: dd, maximumFractionDigits: dd });
   };
+  const dashW = (n, d) => (n == null || n === '' || !isFinite(+n)) ? '--' : fmtW(n, d);
   const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   const toMin = s => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '').trim()); return m ? (+m[1]) * 60 + (+m[2]) : null; };
   let E = null, timer = null, lastCounts = null, changedAt = 0, changedKeys = [], epoch = 0, shiftIdx = 0, hotTimer = null, listenersOn = false, boardFit = null;
@@ -327,9 +328,24 @@ window.EKO_WALL = (function(){
       const R2 = R(), comp = R2.ratio(f.sites, { num: s => s.pmDone, den: s => s.pmDue, denKey: 'sites', needs: 'records', state: s => s.state });
       if(comp.value != null) tiles.push({ key: 'pm', size: 'sec', label: t('pfc.compliance'), value: fmtW(comp.value * 100), unit: '%', ring: comp.value * 100, cap: cov(comp) });
     } else {
-      (E.data.summary || []).filter(r => ['energy', 'water', 'gas', 'comfort'].includes(r.key)).forEach(r => tiles.push({ key: r.key, label: t(r.label), value: (E.data.metrics || {})[r.metric] == null ? '\u2013' : fmtW(E.data.metrics[r.metric], r.d), unit: r.u || '', spark: r.spark, sparkCompare: r.sparkCompare, hue: r.dom, cap: r.capEn ? (E.lang === 'ar' ? r.capAr : r.capEn) : (E.lang === 'ar' ? r.deltaAr : r.deltaEn) }));
+      (E.data.summary || []).filter(r => ['energy', 'water', 'gas', 'comfort'].includes(r.key)).forEach(r => {
+        let v = (E.data.metrics || {})[r.metric];
+        if (v == null && r.key === 'water' && E.data.water) v = E.data.water.todayM3;
+        if (v == null && r.key === 'gas' && E.data.gas) v = E.data.gas.todayM3;
+        tiles.push({ key: r.key, label: t(r.label), value: dashW(v, r.d), unit: r.u || '', spark: r.spark, sparkCompare: r.sparkCompare, hue: r.dom, cap: r.capEn ? (E.lang === 'ar' ? r.capAr : r.capEn) : (E.lang === 'ar' ? r.deltaAr : r.deltaEn) });
+      });
       const p = (E.data.power || {}).subview;
-      if(p && p.peakKw != null && p.limitKw) tiles.push({ key: 'peak', label: t('wall.kpiPeak'), value: fmtW(p.peakKw / p.limitKw * 100), unit: '%', ring: p.peakKw / p.limitKw * 100, tone: p.peakKw / p.limitKw >= 0.9 ? 'warn' : 'ok', cap: t('wall.ofContract', { kw: fmtW(p.limitKw) }) });
+      const peakKw = (E.data.metrics && E.data.metrics.peakTodayKw != null) ? E.data.metrics.peakTodayKw : (p && p.peakKw);
+      const limitKw = p && p.limitKw;
+      tiles.push({
+        key: 'peak',
+        label: t('wall.kpiPeak'),
+        value: dashW(peakKw, 1),
+        unit: 'kW',
+        ring: (peakKw != null && limitKw) ? peakKw / limitKw * 100 : null,
+        tone: (peakKw != null && limitKw && peakKw / limitKw >= 0.9) ? 'warn' : 'ok',
+        cap: limitKw ? t('wall.ofContract', { kw: fmtW(limitKw, 0) }) : ''
+      });
       const w = E.data.water;
       if(w && w.tankCapacityM3 && w.tankVolumeM3 != null){ const pct = Math.round(w.tankVolumeM3 / w.tankCapacityM3 * 100), days = w.meterAvgM3Day ? w.tankVolumeM3 / w.meterAvgM3Day : null;
         tiles.push({ key: 'tank', label: t('wall.kpiTank'), value: fmtW(pct), unit: '%', ring: pct, tone: pct <= (w.refillThresholdPct || 0) ? 'warn' : 'ok', cap: days != null ? t('wall.autonomy', { d: fmtW(days, 1) }) : '' }); }
@@ -345,7 +361,7 @@ window.EKO_WALL = (function(){
     const sevbar = '';
     const healthy = total === 0 ? `<div class="wok"><span class="wglyph wokg">${C().icon('check', 0)}</span><span class="wlbl">${esc(t('wall.noAlarms'))}</span></div>` : '';
     const hero = `<div class="whero"><div class="wherot"><span class="wnum">${fmtW(m.unacked)}</span><span class="wlbl">${esc(t('wall.unackedLbl'))}</span></div>
-      <div class="wherot"><span class="wnum">${m.oldestH == null ? esc(m.unacked ? t('emptyDash') : t('wall.none')) : esc(E.fmtAge(m.oldestH))}</span><span class="wlbl">${esc(t(f.scope === 'estate' ? 'wall.oldestNotInFeed' : 'wall.oldestLbl'))}</span></div></div>`;
+      <div class="wherot"><span class="wnum">${m.oldestH == null ? '--' : esc(E.fmtAge(m.oldestH))}</span><span class="wlbl">${esc(t(f.scope === 'estate' ? 'wall.oldestNotInFeed' : 'wall.oldestLbl'))}</span></div></div>`;
     const cap = Math.min(cfg().topAlarms, 12);
     let lis;
     if(f.scope === 'estate') lis = f.topSites.slice(0, cap).map(s => `<li class="walr" data-sev="${s.worstSev}" data-act="wallOpenSite" data-site="${esc(s.id)}" data-tip="${esc(t('wall.openSite'))}"><span class="wglyph">${C().sevGlyph(s.worstSev, false, 0)}</span><span class="wsevw">${esc(t('rpSev.' + s.worstSev))}</span><span class="wwhat"><span class="wid">${esc(E.lang === 'ar' ? s.nameAr : s.nameEn)}</span>${s.state !== 'reporting' ? ` <span class="wqual">· ${esc(t('pfRep.' + s.state))}</span>` : ''}</span><span class="wage">${esc(t('wall.nAlarms', { n: fmtW(s.alarmCount) }))}</span></li>`);
@@ -397,7 +413,7 @@ window.EKO_WALL = (function(){
   function paneTrend(f){
     const t = E.t.bind(E), b = (((E.data.power || {}).bva || {}).ranges || {}).today;
     if(!b) return `<div class="wpane wchartpane" data-pane="trend"><div class="wok"><span class="wlbl">${esc(t('wall.notInFeed'))}</span></div></div>`;
-    const n = b.actual.length, max = Math.max.apply(null, b.actual.concat(b.baseline.filter(x => x != null))) * 1.15, W = 1000, H = 400, bw = W / n;
+    const n = b.actual.length, max = Math.max(1, Math.max.apply(null, b.actual.concat(b.baseline.filter(x => x != null)).concat([0]))) * 1.15, W = 1000, H = 400, bw = W / n;
     const pts = b.actual.map((v, i) => `${(i * bw + bw / 2).toFixed(1)},${(H - v / max * H).toFixed(1)}`);
     const line = b.baseline.map((v, i) => v == null ? null : `${(i * bw + bw / 2).toFixed(1)},${(H - v / max * H).toFixed(1)}`).filter(Boolean).join(' ');
     const labels = b.labels.map((l, i) => `<span>${i % 4 === 0 ? esc(l) : ''}</span>`).join('');

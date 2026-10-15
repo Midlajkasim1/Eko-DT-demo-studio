@@ -671,6 +671,18 @@
         changed = true;
       }
 
+      if (site.power && site.power.bva && site.power.bva.ranges) {
+        var bvaLabs = [], bvaI;
+        for (bvaI = 0; bvaI < todayHours.length; bvaI++) bvaLabs.push(String(bvaI).padStart(2, "0"));
+        site.power.bva.ranges.today = {
+          unit: "kWh",
+          labels: bvaLabs,
+          actual: todayHours.map(function (v) { return v == null ? 0 : v; }),
+          baseline: yestHours.map(function (v) { return v == null ? null : v; })
+        };
+        changed = true;
+      }
+
       function todayHourly(flat) {
         var now = nowParts();
         var n = Math.min(24, Math.max(1, now.h + 1));
@@ -990,7 +1002,10 @@
             for (wi = 0; wi < wToday.length; wi++) {
               if (wToday[wi]) { wtSum += wToday[wi]; wtN++; }
             }
-            if (wtN) site.water.todayM3 = trunc1(wtSum);
+            if (wtN) {
+              site.water.todayM3 = trunc1(wtSum);
+              set(m, "waterTodayM3", site.water.todayM3);
+            }
             var dayKeys7 = [], di, ddt;
             for (di = 6; di >= 0; di--) {
               ddt = new Date(now.y, now.m, now.d - di);
@@ -1050,7 +1065,10 @@
             for (gi = 0; gi < gToday.length; gi++) {
               if (gToday[gi]) { gtSum += gToday[gi]; gtN++; }
             }
-            if (gtN) site.gas.todayM3 = trunc1(gtSum);
+            if (gtN) {
+              site.gas.todayM3 = trunc1(gtSum);
+              set(m, "gasTodayM3", site.gas.todayM3);
+            }
   
             // 7-day average
             var gDay7 = [], gdi, gddt;
@@ -1122,6 +1140,48 @@
           }
         });
       }
+    }
+    if (m.energyTodayKwh == null && site.power && Array.isArray(site.power.zoneHourly) && site.power.zoneHourly.length) {
+      var zhSum = 0, zhN = 0, zhH, zhR;
+      var zhLen = site.power.zoneHourly[0] ? site.power.zoneHourly[0].length : 0;
+      var zhHours = [];
+      for (zhH = 0; zhH < zhLen; zhH++) {
+        var hourSum = 0, hourAny = false;
+        for (zhR = 0; zhR < site.power.zoneHourly.length; zhR++) {
+          var zv = site.power.zoneHourly[zhR] && site.power.zoneHourly[zhR][zhH];
+          if (zv != null && isFinite(zv)) { hourSum += zv; hourAny = true; }
+        }
+        zhHours.push(hourAny ? hourSum : null);
+        if (hourAny) { zhSum += hourSum; zhN++; }
+      }
+      if (zhN) {
+        set(m, "energyTodayKwh", trunc1(zhSum));
+        set(m, "energyTodayMwh", zhSum / 1000);
+        if (site.power.bva && site.power.bva.ranges) {
+          var zhLabs = [], zhi;
+          for (zhi = 0; zhi < zhHours.length; zhi++) zhLabs.push(String(zhi).padStart(2, "0"));
+          var cur = site.power.bva.ranges.today;
+          var hasAct = cur && Array.isArray(cur.actual) && cur.actual.some(function (v) { return v; });
+          if (!hasAct) {
+            site.power.bva.ranges.today = {
+              unit: "kWh",
+              labels: zhLabs,
+              actual: zhHours.map(function (v) { return v == null ? 0 : v; }),
+              baseline: (cur && cur.baseline) || zhHours.map(function () { return null; })
+            };
+          }
+        }
+      }
+    }
+    if (site.power && site.power.subview) {
+      var sv = site.power.subview;
+      if (m.peakTodayKw != null) { sv.peakKw = m.peakTodayKw; changed = true; }
+      var limitKw = m.contractedKw != null ? m.contractedKw : (site.power.contractedMw != null ? site.power.contractedMw * 1000 : null);
+      if (limitKw) {
+        sv.limitKw = limitKw;
+        changed = true;
+      }
+      if (el && el.currentKw != null) sv.loadNowKw = el.currentKw;
     }
     countUtilityAndEmsMeters(site, site.assets);
     if (changed) paint();
