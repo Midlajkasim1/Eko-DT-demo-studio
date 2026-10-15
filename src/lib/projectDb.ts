@@ -576,19 +576,59 @@ export async function exportFinProjectAsZip(handle: FileSystemDirectoryHandle, m
   const texturedMeta = await addTexturesToZip(handle, bundledMeta, zip, '')
   const exportedMeta = await addMapAssetsToZip(handle, texturedMeta, zip, '')
 
+  // The audited point maps live in backend/config.json. The settings modal's
+  // copies are older and still contain retired ekoMedical ids.
+  let siteCfg: Record<string, any> = {}
+  try {
+    const r = await fetch('/backend/config.json?t=' + Date.now(), { cache: 'no-store' })
+    if (r.ok) siteCfg = await r.json()
+  } catch { /* studio export is the path that can read this file */ }
+
+  const apiSettings = meta.apiSettings || {}
+  const livePoints = siteCfg.live_point_ids && Object.keys(siteCfg.live_point_ids).length
+    ? siteCfg.live_point_ids
+    : (apiSettings.finLivePoints || {})
+  const powerEndpoints = siteCfg.power_endpoints && Object.keys(siteCfg.power_endpoints).length
+    ? siteCfg.power_endpoints
+    : (apiSettings.finEndpoints || {})
+
   // Force finDirectMode to true for the FIN standalone viewer since there is no backend
-  const finMeta = { ...exportedMeta, apiSettings: { ...(exportedMeta.apiSettings || {}), finDirectMode: true } }
+  const finMeta = {
+    ...exportedMeta,
+    apiSettings: {
+      ...(exportedMeta.apiSettings || {}),
+      finDirectMode: true,
+      finLivePoints: livePoints,
+      finEndpoints: powerEndpoints,
+      finWorkorderExpr: siteCfg.workorder_expr || '',
+      finMeterProfile: siteCfg.meter_profile,
+      finSeverityBands: siteCfg.severity_bands,
+      finEquipmentClasses: siteCfg.equipment_classes,
+      finRealtimeEndpoints: siteCfg.realtime_endpoints,
+      finRealtimeMs: siteCfg.polling?.realtime_ms || 30000,
+    },
+  }
   zip.file('project.json', JSON.stringify(finMeta, null, 2))
 
+  try {
+    const docs = await fetch('/backend/om-warranty.json?t=' + Date.now(), { cache: 'no-store' })
+    if (docs.ok) zip.file('om-warranty.json', await docs.text())
+  } catch { /* manuals stay on the fixture set when the catalog is absent */ }
+
   // Also include api-config.json for standalone FIN dashboard (direct API mode)
-  const apiSettings = meta.apiSettings || {}
   const apiConfig = {
     project_name: apiSettings.finProjectName || meta.name,
     fin_server_url: apiSettings.finBaseUrl || 'https://localhost',
     direct_mode: true, // Always true for FIN standalone viewer
     polling_interval: apiSettings.finInterval || 5000,
-    live_point_ids: apiSettings.finLivePoints || {},
-    power_endpoints: apiSettings.finEndpoints || {},
+    polling: siteCfg.polling || { live_ms: apiSettings.finInterval || 5000, realtime_ms: 30000 },
+    live_point_ids: livePoints,
+    power_endpoints: powerEndpoints,
+    workorder_expr: siteCfg.workorder_expr || '',
+    meter_profile: siteCfg.meter_profile,
+    severity_bands: siteCfg.severity_bands,
+    equipment_classes: siteCfg.equipment_classes,
+    realtime_endpoints: siteCfg.realtime_endpoints,
     weather: {
       lat: apiSettings.weatherLat ?? 24.469,
       lon: apiSettings.weatherLon ?? 54.358,

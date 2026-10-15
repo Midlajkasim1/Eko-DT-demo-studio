@@ -967,13 +967,22 @@ window.EKO_C = (function(){
     if ((fam.names || []).some(p => p && id.indexOf(String(p).toUpperCase()) !== -1)) return true;
     return false;
   }
+  function docFileUrl(d) {
+    if (!d) return '';
+    const ref = d.ref ? String(d.ref) : '';
+    const cfg = window.DashboardData && window.DashboardData.config;
+    /* Standalone is already on the FIN host, so the record file uses that session. */
+    if (cfg && cfg.directMode && ref && cfg.project) {
+      const rec = ref.charAt(0) === '@' ? ref.slice(1) : ref;
+      return '/api/' + encodeURIComponent(cfg.project) + '/rec/' + encodeURIComponent(rec).replace(/%3A/gi, ':') + '/file';
+    }
+    if (ref) return '/api/fin/file?ref=' + encodeURIComponent(ref);
+    const url = String(d.url || '');
+    return url.indexOf('/api/fin/file?') === 0 ? url : '';
+  }
   function docRowData(d) {
     if (!d || !(d.name || d.nameAr)) return null;
-    /* Open through this server. A FIN host link would ask for a second sign-in. */
-    const url = d.ref
-      ? '/api/fin/file?ref=' + encodeURIComponent(d.ref)
-      : (String(d.url || '').indexOf('/api/fin/file?') === 0 ? d.url : '');
-    return { tEn: d.name || d.nameAr, tAr: d.nameAr || d.name, meta: 'PDF', url: url };
+    return { tEn: d.name || d.nameAr, tAr: d.nameAr || d.name, meta: 'PDF', url: docFileUrl(d) };
   }
   function docsFor(E, asset) {
     const families = E.data && E.data.documents;

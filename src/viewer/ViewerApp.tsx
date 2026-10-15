@@ -176,6 +176,12 @@ export default function ViewerApp() {
               directMode: s.finDirectMode || false,
               livePoints: s.finLivePoints || undefined,
               endpoints: s.finEndpoints || undefined,
+              realtimeMs: s.finRealtimeMs || undefined,
+              workorderExpr: s.finWorkorderExpr || '',
+              meterProfile: s.finMeterProfile || undefined,
+              severityBands: s.finSeverityBands || undefined,
+              equipmentClasses: s.finEquipmentClasses || undefined,
+              realtimeEndpoints: s.finRealtimeEndpoints || undefined,
             },
             weather: {
               lat: s.weatherLat ?? 24.469,

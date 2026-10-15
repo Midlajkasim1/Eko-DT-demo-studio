@@ -8,27 +8,69 @@
 
   const EVENT_NAME = 'dashboard-data';
 
+  function filled(value) {
+    if (value == null || value === '') return false;
+    if (typeof value === 'object') return Object.keys(value).length > 0;
+    return true;
+  }
+
   function normalizeConfig(raw) {
     if (!raw) return null;
     const fin = raw.fin || raw;
+    const polling = raw.polling || {};
     return {
       directMode: !!(fin.directMode || fin.direct_mode),
-      liveMs: Number(fin.interval || (raw.polling && raw.polling.live_ms)) || 5000,
-      realtimeMs: Number(raw.polling && raw.polling.realtime_ms) || 30000,
-      project: fin.project || fin.project_name || '',
+      liveMs: Number(fin.interval || fin.liveMs || polling.live_ms || raw.polling_interval) || 5000,
+      realtimeMs: Number(fin.realtimeMs || polling.realtime_ms) || 30000,
+      project: fin.project || fin.project_name || raw.project_name || '',
       displayName: raw.display_name || fin.displayName || '',
+      livePoints: fin.livePoints || raw.live_point_ids || {},
+      powerEndpoints: fin.endpoints || fin.powerEndpoints || raw.power_endpoints || {},
+      workorderExpr: fin.workorderExpr || raw.workorder_expr || '',
+      meterProfile: fin.meterProfile || raw.meter_profile || null,
+      severityBands: fin.severityBands || raw.severity_bands || null,
+      equipmentClasses: fin.equipmentClasses || raw.equipment_classes || null,
+      realtimeEndpoints: fin.realtimeEndpoints || raw.realtime_endpoints || null,
     };
   }
 
-  async function resolveConfig() {
-    if (window.INJECTED_PROJECT_CONFIG) return normalizeConfig(window.INJECTED_PROJECT_CONFIG);
-    for (const url of ['api-config.json', '/api/fin/config']) {
-      try {
-        const res = await fetch(url, { cache: 'no-store' });
-        if (res.ok) return normalizeConfig(await res.json());
-      } catch (_) { /* source not present in this deployment */ }
+  function overlaySite(cfg, site) {
+    if (!cfg || !site) return cfg;
+    const next = { ...cfg, directMode: cfg.directMode };
+    ['livePoints', 'powerEndpoints', 'workorderExpr', 'meterProfile', 'severityBands', 'equipmentClasses', 'realtimeEndpoints'].forEach((key) => {
+      if (filled(site[key])) next[key] = site[key];
+    });
+    if (site.realtimeMs) next.realtimeMs = site.realtimeMs;
+    if (!next.project && site.project) next.project = site.project;
+    return next;
+  }
+
+  async function readConfig(url) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) return null;
+      return normalizeConfig(await res.json());
+    } catch (_) {
+      return null;
     }
-    return null;
+  }
+
+  async function resolveConfig() {
+    let cfg = window.INJECTED_PROJECT_CONFIG ? normalizeConfig(window.INJECTED_PROJECT_CONFIG) : null;
+    if (!cfg) {
+      cfg = await readConfig('api-config.json') || await readConfig('/api/fin/config');
+    }
+    if (cfg && cfg.directMode) {
+      // The studio serves the audited backend file. A FIN-hosted zip already
+      // carries the same maps on the injected config, and this fetch 404s.
+      const site = await readConfig('/backend/config.json');
+      if (site) cfg = overlaySite(cfg, site);
+      else if (!filled(cfg.livePoints)) {
+        const shipped = await readConfig('api-config.json');
+        if (shipped) cfg = overlaySite(cfg, shipped);
+      }
+    }
+    return cfg;
   }
 
   class BackendProvider {
@@ -67,18 +109,22 @@
 
 
   class DirectProvider {
-    async getStatus() { return { connected: false }; }
-    async getLiveValues() { return null; }
-    async getPowerHistory() { return null; }
-    async getEquipment() { return null; }
-    async getAlarms() { return null; }
-    async getDocuments() { return null; }
-    async getWorkOrders() { return null; }
-    async getMeters() { return null; }
-    async getHisPoints() { return null; }
-    async getPointHistory() { return null; }
-    async getAlarmHistory() { return null; }
-    async evalQuery() { return null; }
+    constructor(config) {
+      this.fin = window.FinDirect ? window.FinDirect.session(config) : null;
+    }
+    _miss() { return this.fin ? null : Promise.resolve(null); }
+    getStatus() { return this.fin ? this.fin.status() : Promise.resolve({ connected: false }); }
+    getLiveValues() { return this.fin ? this.fin.live() : this._miss(); }
+    getPowerHistory() { return this.fin ? this.fin.powerHistory() : this._miss(); }
+    getEquipment() { return this.fin ? this.fin.equipment() : this._miss(); }
+    getAlarms() { return this.fin ? this.fin.alarms() : this._miss(); }
+    getDocuments() { return this.fin ? this.fin.documents() : this._miss(); }
+    getWorkOrders() { return this.fin ? this.fin.workorders() : this._miss(); }
+    getMeters() { return this.fin ? this.fin.meters() : this._miss(); }
+    getHisPoints() { return this.fin ? this.fin.hisPoints() : this._miss(); }
+    getPointHistory(id, days) { return this.fin ? this.fin.pointHistory(id, days) : this._miss(); }
+    getAlarmHistory(days) { return this.fin ? this.fin.alarmHistory(days) : this._miss(); }
+    evalQuery(expr) { return this.fin ? this.fin.evalQuery(expr) : this._miss(); }
   }
 
   const state = {
@@ -155,7 +201,7 @@
     stop();
     const generation = state.generation;
     state.config = await resolveConfig();
-    state.provider = state.config && state.config.directMode ? new DirectProvider() : new BackendProvider();
+    state.provider = state.config && state.config.directMode ? new DirectProvider(state.config) : new BackendProvider();
     await Promise.all([pollRealtime(), pollLive()]);
     // stop() during either await would otherwise be undone by the timers below
     if (generation !== state.generation) return;

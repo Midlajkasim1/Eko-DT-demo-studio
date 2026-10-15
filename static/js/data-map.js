@@ -284,9 +284,12 @@
     var loadKw = asNum(p.hourly_energy != null ? p.hourly_energy : p.total_power);
     if (loadKw != null) { set(m, "loadNowMw", trunc1(toMw(loadKw))); set(el, "currentKw", trunc1(loadKw)); }
     var peak = asNum(p.peak_demand);
-    if (peak != null) {
+    if (peak != null && peak > 0) {
       set(m, "peakTodayKw", trunc1(peak));
       set(m, "peakTodayMw", trunc1(peak / 1000));
+    } else {
+      m.peakTodayKw = null;
+      m.peakTodayMw = null;
     }
     var carbonKgH = asNum(p.carbon);
     if (carbonKgH != null) set(el, "carbonKgH", trunc1(carbonKgH));
@@ -651,9 +654,12 @@
       var yestHours = hoursThrough(hourlyFlat, yestP.y, yestP.m, yestP.d, nowP.h);
       var todayKwh = sumKnown(todayHours);
       var yestKwh = sumKnown(yestHours);
-      if (todayKwh != null) {
+      if (todayKwh != null && todayKwh > 0) {
         set(m, "energyTodayKwh", trunc1(todayKwh));
         set(m, "energyTodayMwh", todayKwh / 1000);
+      } else {
+        m.energyTodayKwh = null;
+        m.energyTodayMwh = null;
       }
       if (site.basis) site.basis.asOf = String(nowP.h).padStart(2, "0") + ":00";
       if (site.summary && site.summary[0]) {
@@ -1153,9 +1159,9 @@
           if (zv != null && isFinite(zv)) { hourSum += zv; hourAny = true; }
         }
         zhHours.push(hourAny ? hourSum : null);
-        if (hourAny) { zhSum += hourSum; zhN++; }
+        if (hourAny && hourSum > 0) { zhSum += hourSum; zhN++; }
       }
-      if (zhN) {
+      if (zhN && zhSum > 0) {
         set(m, "energyTodayKwh", trunc1(zhSum));
         set(m, "energyTodayMwh", zhSum / 1000);
         if (site.power.bva && site.power.bva.ranges) {
@@ -1176,7 +1182,8 @@
     }
     if (site.power && site.power.subview) {
       var sv = site.power.subview;
-      if (m.peakTodayKw != null) { sv.peakKw = m.peakTodayKw; changed = true; }
+      sv.peakKw = m.peakTodayKw != null ? m.peakTodayKw : null;
+      changed = true;
       var limitKw = m.contractedKw != null ? m.contractedKw : (site.power.contractedMw != null ? site.power.contractedMw * 1000 : null);
       if (limitKw) {
         sv.limitKw = limitKw;
