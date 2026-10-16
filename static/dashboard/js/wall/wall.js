@@ -450,17 +450,18 @@ window.EKO_WALL = (function(){
       return `<div class="wpane wchartpane" data-pane="work"><div class="whbars">${hbar(t('pfKpi.wos'), h.wos.value || 0, max)}${hbar(t('pfOverdueWord'), h.overdue.value || 0, max, null, h.overdue.value ? 'warn' : '')}</div>
         <div class="wlegend"><span class="wcov wextra">${esc(t('wall.shNotInFeedShort'))}</span></div></div>`;
     }
-    let over = 0, sched = 0, open = 0;
+    let over = 0, due = 0, sched = 0, open = 0;
     E.data.assets.forEach(a => {
       (a.workOrders || []).forEach(o => {
         open++;
         if (o.status === 'over') over++;
+        else if (o.status === 'due') due++;
         else sched++;
       });
     });
     const max = Math.max(open, 1);
     const shift = s && !s.notInFeed ? `<div class="wshift"><span class="wshl">${esc(s.label)}</span><div class="wstats">${[[s.raised, 'wall.shRaisedS'], [s.acked, 'wall.shAckedS'], [s.woCreated, 'wall.shWoNewS'], [s.woClosed, 'wall.shWoClosedS']].map(x => `<span class="wstat"><b class="wbval">${dashW(x[0])}</b><span class="wlbl">${esc(t(x[1]))}</span></span>`).join('')}</div></div>` : '';
-    return `<div class="wpane wchartpane" data-pane="work"><div class="whbars">${hbar(t('wall.wo.over'), over, max, null, over ? 'warn' : '')}${hbar(t('wall.wo.sched'), sched, max)}${hbar(t('wall.wo.open'), open, max)}</div>${shift}</div>`;
+    return `<div class="wpane wchartpane" data-pane="work"><div class="whbars">${hbar(t('wall.wo.over'), over, max, null, over ? 'warn' : '')}${hbar(t('wall.wo.due'), due, max, null, due ? 'warn' : '')}${hbar(t('wall.wo.sched'), sched, max)}${hbar(t('wall.wo.open'), open, max)}</div>${shift}</div>`;
   }
   const boardOrder = sites => sites.slice().sort((a, b) => (a.telemetry ? 1 : 0) - (b.telemetry ? 1 : 0) || a.sevRank - b.sevRank || b.alarmCount - a.alarmCount || (a.nameEn || '').localeCompare(b.nameEn || ''));
   const boardPerPage = () => (boardFit && boardFit.perPage) || 12;

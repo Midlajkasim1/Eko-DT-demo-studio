@@ -1453,6 +1453,10 @@
   background:var(--critTx)
 }
 
+.dashboard-native-container .wodot[data-st="due"] {
+  background:var(--warnHue)
+}
+
 .dashboard-native-container .wodot[data-st="sched"] {
   background:var(--acc)
 }
@@ -8359,7 +8363,7 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .minimap {
   top:56px;
   bottom:auto;
-  inset-inline-end:200px;
+  inset-inline-end:12px;
   width:200px;
   height:200px
 }

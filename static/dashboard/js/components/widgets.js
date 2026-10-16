@@ -1096,11 +1096,12 @@ window.EKO_C = (function(){
         + `<p class="apnote">${esc(note)}</p>`;
     }
     const cards = orders.map(order => {
-      const st = order.status === 'over' ? 'over' : 'sched';
+      const st = order.status === 'over' || order.status === 'due' ? order.status : 'sched';
+      const stKey = st === 'over' ? 'woOver' : st === 'due' ? 'woDue' : 'woSched';
       return `<article class="apwocard">
         <div class="apwohead">
           <span class="tMono">${esc(order.id)}</span>
-          <span class="row gap6"><span class="wodot" data-st="${st}"></span>${esc(t(st === 'over' ? 'woOver' : 'woSched'))}</span>
+          <span class="row gap6"><span class="wodot" data-st="${st}"></span>${esc(t(stKey))}</span>
           ${order.type ? `<span class="tCap">${esc(order.type)}</span>` : ''}
         </div>
         ${row(t('apWoDesc'), order.description)}

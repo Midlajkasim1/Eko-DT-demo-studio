@@ -1628,9 +1628,19 @@
   function woDueStatus(order) {
     if (!order || !order.dueIso) return 'sched';
     var due = new Date(order.dueIso + 'T00:00:00');
+    if (isNaN(due.getTime())) return 'sched';
     var today = new Date();
     today.setHours(0, 0, 0, 0);
-    return due < today ? 'over' : 'sched';
+    if (due < today) return 'over';
+    var limit = new Date(today);
+    limit.setDate(limit.getDate() + 30);
+    return due <= limit ? 'due' : 'sched';
+  }
+
+  function woStatusRank(status) {
+    if (status === 'over') return 0;
+    if (status === 'due') return 1;
+    return 2;
   }
 
   function stampWorkOrders() {
@@ -1646,12 +1656,16 @@
         return Object.assign({}, order, { status: woDueStatus(order) });
       });
       list.sort(function (a, b) {
-        if (a.status !== b.status) return a.status === 'over' ? -1 : 1;
+        var rank = woStatusRank(a.status) - woStatusRank(b.status);
+        if (rank) return rank;
         return String(a.dueIso || '').localeCompare(String(b.dueIso || ''));
       });
       asset.workOrders = list;
       asset.wos = list.length;
-      asset.wost = list.length ? (list.some(function (order) { return order.status === 'over'; }) ? 'over' : 'sched') : null;
+      asset.wost = list.length
+        ? (list.some(function (order) { return order.status === 'over'; }) ? 'over'
+          : list.some(function (order) { return order.status === 'due'; }) ? 'due' : 'sched')
+        : null;
     });
   }
 
