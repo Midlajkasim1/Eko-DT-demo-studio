@@ -3,7 +3,7 @@ import type JSZip from 'jszip'
 import { ASSETS_VERSION, buildTextureAsset, collectGarbage, TEXTURES_DIR } from '@/lib/textureAssets'
 import { assetFileName, collectMapGarbage, MAP_ASSETS_DIR } from '@/lib/mapAssets'
 import { hasMap, pruneMapConfig } from '@/lib/mapConfig'
-import { apiConfigFor, exportedSiteConfig } from '@/lib/finSettings'
+import { exportedSiteConfig, finExportMappings } from '@/lib/finSettings'
 import { BACKEND_EXPORT_FILES } from '@/lib/backendExport'
 import type { MapAsset, ProjectMeta, ProjectModel, RecentProjectCard, TextureAsset } from '@/types'
 
@@ -568,12 +568,65 @@ export async function exportFinProjectAsZip(handle: FileSystemDirectoryHandle, m
   const texturedMeta = await addTexturesToZip(handle, bundledMeta, zip, '')
   const exportedMeta = await addMapAssetsToZip(handle, texturedMeta, zip, '')
 
+  // The audited point maps live in backend/config.json. The settings modal's
+  // copies are older and still contain retired ekoMedical ids.
+  let siteCfg: Record<string, any> = {}
+  try {
+    const r = await fetch('/backend/config.json?t=' + Date.now(), { cache: 'no-store' })
+    if (r.ok) siteCfg = await r.json()
+  } catch { /* studio export is the path that can read this file */ }
+
+  const apiSettings = meta.apiSettings || {}
+  // An unnamed project is not config.json's site: it never takes that site's name or maps
+  const projectName = apiSettings.finProjectName || meta.name
+  const mapped = finExportMappings(siteCfg, apiSettings)
+
   // Force finDirectMode to true for the FIN standalone viewer since there is no backend
-  const finMeta = { ...exportedMeta, apiSettings: { ...(exportedMeta.apiSettings || {}), finDirectMode: true } }
+  const finMeta = {
+    ...exportedMeta,
+    apiSettings: {
+      ...(exportedMeta.apiSettings || {}),
+      finProjectName: projectName,
+      finDirectMode: true,
+      ...mapped,
+      finRealtimeEndpoints: siteCfg.realtime_endpoints,
+      finRealtimeMs: siteCfg.polling?.realtime_ms || 30000,
+    },
+  }
   zip.file('project.json', JSON.stringify(finMeta, null, 2))
 
+  try {
+    const docs = await fetch('/backend/om-warranty.json?t=' + Date.now(), { cache: 'no-store' })
+    if (docs.ok) zip.file('om-warranty.json', await docs.text())
+  } catch { /* manuals stay on the fixture set when the catalog is absent */ }
+
   // Also include api-config.json for standalone FIN dashboard (direct API mode)
-  zip.file('api-config.json', JSON.stringify(apiConfigFor(meta.apiSettings, meta.name), null, 2))
+  const apiConfig = {
+    project_name: projectName,
+    fin_server_url: apiSettings.finBaseUrl || 'https://localhost',
+    display_name: apiSettings.finDisplayName,
+    direct_mode: true, // Always true for FIN standalone viewer
+    polling_interval: apiSettings.finInterval || 5000,
+    polling: siteCfg.polling || { live_ms: apiSettings.finInterval || 5000, realtime_ms: 30000 },
+    live_point_ids: mapped.finLivePoints,
+    power_endpoints: mapped.finEndpoints,
+    workorder_expr: mapped.finWorkorderExpr,
+    meter_profile: mapped.finMeterProfile,
+    severity_bands: mapped.finSeverityBands,
+    equipment_classes: mapped.finEquipmentClasses,
+    realtime_endpoints: siteCfg.realtime_endpoints,
+    // Only a key the user entered for this project; no shared key is ever written into a project
+    weather: {
+      lat: apiSettings.weatherLat ?? 24.469,
+      lon: apiSettings.weatherLon ?? 54.358,
+      ...(apiSettings.weatherApiKey ? { apiKey: apiSettings.weatherApiKey } : {}),
+    },
+    navButtons: apiSettings.navButtons,
+    leftCards: apiSettings.leftCards,
+    rightCards: apiSettings.rightCards,
+    sideButtons: apiSettings.sideButtons,
+  }
+  zip.file('api-config.json', JSON.stringify(apiConfig, null, 2))
 
   const zipModelsFolder = zip.folder('models')!
   for (const model of models) {

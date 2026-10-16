@@ -128,6 +128,9 @@
 }
 .dashboard-native-container #overlays {
   position: absolute;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
 }
 /* A status strip that has not been parked yet must still stay inside the
    dashboard, under its top bar, instead of covering the model sidebar. */
@@ -177,20 +180,73 @@
   position: absolute;
   inset: 0;
 }
+.dashboard-native-container[data-wall="1"] #mount > .wbgfill,
+.dashboard-native-container[data-wall="1"] .wbgfill,
+.dashboard-native-container[data-wall="1"] .wbgfill > i {
+  pointer-events: none !important;
+}
 .dashboard-native-container[data-wall="1"] .wbgfill {
   position: absolute;
   inset: 0;
-  pointer-events: none;
   z-index: 0;
 }
 .dashboard-native-container[data-wall="1"] .wbgfill > i {
   position: absolute;
   background: var(--wbg);
 }
+.dashboard-native-container[data-wall="1"] .wmodel {
+  position: relative;
+}
+.dashboard-native-container[data-wall="1"] .wmodelhit {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+  cursor: grab;
+  background: transparent;
+}
+.dashboard-native-container[data-wall="1"] .wmodelhit[data-on="1"] {
+  pointer-events: auto !important;
+  user-select: none !important;
+}
+.dashboard-native-container[data-wall="1"] .wall,
+.dashboard-native-container[data-wall="1"] .wall * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+body.wall-orbiting,
+body.wall-orbiting * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+body:has([data-wall="1"]) .viewer-toolbar {
+  z-index: 100001 !important;
+  pointer-events: auto !important;
+}
+.dashboard-native-container[data-wall="1"] .wmodelhit:active {
+  cursor: grabbing;
+}
+.dashboard-native-container[data-wall="1"] #mount > .wall,
+.dashboard-native-container[data-wall="1"] .wall .wgrid {
+  pointer-events: none !important;
+}
 .dashboard-native-container[data-wall="1"] .wall {
   background: transparent;
   filter: none;
   z-index: 1;
+  transform: none !important;
+  transition: none !important;
+}
+.dashboard-native-container[data-wall="1"] .wkpis,
+.dashboard-native-container[data-wall="1"] .walarm,
+.dashboard-native-container[data-wall="1"] .wside,
+.dashboard-native-container[data-wall="1"] .wfoot,
+.dashboard-native-container[data-wall="1"] .wpanel,
+.dashboard-native-container[data-wall="1"] .wcentre:not([data-pane="model"]),
+.dashboard-native-container[data-wall="1"] .wover,
+.dashboard-native-container[data-wall="1"] .wchips .wchip,
+.dashboard-native-container[data-wall="1"] .wbtn {
+  pointer-events: auto !important;
 }
 .dashboard-native-container[data-wall="1"] .wcentre[data-pane="model"],
 .dashboard-native-container[data-wall="1"][data-theme="light"] .wcentre[data-pane="model"],
@@ -198,12 +254,15 @@
   background: transparent;
   box-shadow: none;
   overflow: visible;
+  pointer-events: none !important;
 }
 .dashboard-native-container[data-wall="1"] .wcentre[data-pane="model"] .wmodel,
 .dashboard-native-container[data-wall="1"] .wcentre[data-pane="model"] #vpmain,
 .dashboard-native-container[data-wall="1"] .wcentre[data-pane="model"] #enginehost {
   background: transparent;
-  animation: none;
+  animation: none !important;
+  transform: none !important;
+  pointer-events: none !important;
 }
 .dashboard-native-container[data-wall="1"] .wcentre:not([data-pane="model"]) {
   background: var(--wcard);

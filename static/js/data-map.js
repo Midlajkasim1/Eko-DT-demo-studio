@@ -448,9 +448,12 @@
     var loadKw = asNum(p.hourly_energy != null ? p.hourly_energy : p.total_power);
     if (loadKw != null) { set(m, "loadNowMw", trunc1(toMw(loadKw))); set(el, "currentKw", trunc1(loadKw)); }
     var peak = asNum(p.peak_demand);
-    if (peak != null) {
+    if (peak != null && peak > 0) {
       set(m, "peakTodayKw", trunc1(peak));
       set(m, "peakTodayMw", trunc1(peak / 1000));
+    } else {
+      m.peakTodayKw = null;
+      m.peakTodayMw = null;
     }
     var carbonKgH = asNum(p.carbon);
     if (carbonKgH != null) set(el, "carbonKgH", trunc1(carbonKgH));
@@ -815,9 +818,12 @@
       var yestHours = hoursThrough(hourlyFlat, yestP.y, yestP.m, yestP.d, nowP.h);
       var todayKwh = sumKnown(todayHours);
       var yestKwh = sumKnown(yestHours);
-      if (todayKwh != null) {
+      if (todayKwh != null && todayKwh > 0) {
         set(m, "energyTodayKwh", trunc1(todayKwh));
         set(m, "energyTodayMwh", todayKwh / 1000);
+      } else {
+        m.energyTodayKwh = null;
+        m.energyTodayMwh = null;
       }
       // real mode's basis.asOf is already the live site clock (a getter, applyReportingBasis)
       if (site.basis && !realMode) site.basis.asOf = String(nowP.h).padStart(2, "0") + ":00";
@@ -1354,9 +1360,9 @@
           if (zv != null && isFinite(zv)) { hourSum += zv; hourAny = true; }
         }
         zhHours.push(hourAny ? hourSum : null);
-        if (hourAny) { zhSum += hourSum; zhN++; }
+        if (hourAny && hourSum > 0) { zhSum += hourSum; zhN++; }
       }
-      if (zhN) {
+      if (zhN && zhSum > 0) {
         set(m, "energyTodayKwh", trunc1(zhSum));
         set(m, "energyTodayMwh", zhSum / 1000);
         if (site.power.bva && site.power.bva.ranges) {
@@ -1377,7 +1383,8 @@
     }
     if (site.power && site.power.subview) {
       var sv = site.power.subview;
-      if (m.peakTodayKw != null) { sv.peakKw = m.peakTodayKw; changed = true; }
+      sv.peakKw = m.peakTodayKw != null ? m.peakTodayKw : null;
+      changed = true;
       var limitKw = m.contractedKw != null ? m.contractedKw : (site.power.contractedMw != null ? site.power.contractedMw * 1000 : null);
       if (limitKw) {
         sv.limitKw = limitKw;
@@ -1835,9 +1842,19 @@
   function woDueStatus(order) {
     if (!order || !order.dueIso) return 'sched';
     var due = new Date(order.dueIso + 'T00:00:00');
+    if (isNaN(due.getTime())) return 'sched';
     var today = new Date();
     today.setHours(0, 0, 0, 0);
-    return due < today ? 'over' : 'sched';
+    if (due < today) return 'over';
+    var limit = new Date(today);
+    limit.setDate(limit.getDate() + 30);
+    return due <= limit ? 'due' : 'sched';
+  }
+
+  function woStatusRank(status) {
+    if (status === 'over') return 0;
+    if (status === 'due') return 1;
+    return 2;
   }
 
   function stampWorkOrders() {
@@ -1853,12 +1870,16 @@
         return Object.assign({}, order, { status: woDueStatus(order) });
       });
       list.sort(function (a, b) {
-        if (a.status !== b.status) return a.status === 'over' ? -1 : 1;
+        var rank = woStatusRank(a.status) - woStatusRank(b.status);
+        if (rank) return rank;
         return String(a.dueIso || '').localeCompare(String(b.dueIso || ''));
       });
       asset.workOrders = list;
       asset.wos = list.length;
-      asset.wost = list.length ? (list.some(function (order) { return order.status === 'over'; }) ? 'over' : 'sched') : null;
+      asset.wost = list.length
+        ? (list.some(function (order) { return order.status === 'over'; }) ? 'over'
+          : list.some(function (order) { return order.status === 'due'; }) ? 'due' : 'sched')
+        : null;
     });
   }
 

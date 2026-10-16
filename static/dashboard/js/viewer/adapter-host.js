@@ -144,7 +144,17 @@
       },
       screenToWorld: function () { return null; },
       onAssetClick: on('assetClick'),
-      onMarkerClick: on('markerClick')
+      onMarkerClick: on('markerClick'),
+      attachMiniMap: function (el) {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.attachMiniMap) {
+          window.EKO_HOST_ENGINE.attachMiniMap(el);
+        }
+      },
+      setMiniMap: function (on) {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.setMiniMap) {
+          window.EKO_HOST_ENGINE.setMiniMap(on);
+        }
+      }
     };
   });
 })();

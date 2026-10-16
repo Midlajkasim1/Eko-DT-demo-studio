@@ -258,9 +258,12 @@ export interface ProjectApiSettings {
   finDirectMode?: boolean
   finLivePoints?: Record<string, string>
   finEndpoints?: Record<string, string>
-  finEquipmentClasses?: FinEquipmentClasses
+  finWorkorderExpr?: string
   finMeterProfile?: FinMeterProfile
   finSeverityBands?: FinSeverityBands
+  finEquipmentClasses?: FinEquipmentClasses
+  finRealtimeEndpoints?: Record<string, string>
+  finRealtimeMs?: number
   weatherApiKey?: string
   weatherLat?: number
   weatherLon?: number

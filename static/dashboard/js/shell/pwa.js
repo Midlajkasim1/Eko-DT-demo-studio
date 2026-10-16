@@ -95,9 +95,27 @@ window.EKO_PWA = (function(){
     const ctl = ('AbortController' in window) ? new AbortController() : null;
     const timer = ctl ? setTimeout(() => ctl.abort(), HB_TIMEOUT) : null;
     try{
-      const r = await fetch(HB_URL + '?ts=' + Date.now(), { cache:'no-store', signal: ctl ? ctl.signal : undefined });
-      if(!r.ok) throw new Error(r.status);
-      let text = await r.text();
+      let text = '';
+      const directCfg = window.DashboardData && window.DashboardData.config;
+      if (window.DASHBOARD_OVERLAY && directCfg && directCfg.directMode) {
+        if (!directCfg.project) {
+          text = JSON.stringify({ connected: false });
+        } else {
+          const r = await fetch('/api/' + encodeURIComponent(directCfg.project) + '/read?filter=site&ts=' + Date.now(), {
+            cache: 'no-store',
+            credentials: 'same-origin',
+            headers: { Accept: 'text/zinc' },
+            signal: ctl ? ctl.signal : undefined
+          });
+          const body = await r.text();
+          const ok = r.ok && !!body && body.indexOf('errType') < 0 && !/^\s*</.test(body);
+          text = JSON.stringify({ connected: ok });
+        }
+      } else {
+        const r = await fetch(HB_URL + '?ts=' + Date.now(), { cache:'no-store', signal: ctl ? ctl.signal : undefined });
+        if(!r.ok) throw new Error(r.status);
+        text = await r.text();
+      }
       if(window.DASHBOARD_OVERLAY){
         let st = {};
         try { st = JSON.parse(text); } catch(e) { throw new Error('bad status'); }

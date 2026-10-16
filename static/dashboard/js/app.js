@@ -668,7 +668,7 @@
     if(!$('topbar') || !$('ekonav') || !$('mount') || !$('mobtabs') || !$('overlays')) return;
     if(window.EKO_ADDONS) window.EKO_ADDONS.apply(E);   /* D125: entitlements stamp locked/hidden before anything reads the nav */
     if(E.state.wall && window.EKO_WALL){   /* D106: a display context — no rail, no ask bar, no overlays, no pointer */
-      (window.DASHBOARD_ROOT||document.documentElement).setAttribute('data-wall', '1');
+      (document.querySelector('.dashboard-native-container') || window.DASHBOARD_ROOT || document.documentElement).setAttribute('data-wall', '1');
       const liveW = document.getElementById('enginehost'); if(liveW && liveW.dataset.live === '1') keptHost = liveW;
       $('mount').innerHTML = window.EKO_WALL.render(E);
       const freshW = document.getElementById('enginehost'); if(freshW && keptHost) freshW.replaceWith(keptHost);
@@ -684,6 +684,7 @@
     }
     const restoreScroll = keepScroll();
     if(window.EKO_SURF) window.EKO_SURF.reconcile();            /* R2 (D67) */
+    (document.querySelector('.dashboard-native-container') || window.DASHBOARD_ROOT || document.documentElement).removeAttribute('data-wall');
     (window.DASHBOARD_ROOT||document.documentElement).setAttribute('data-nav', E.state.navMin ? 'min' : 'full');
     /* D94: the shell states CSS cannot see — stacked vs split, a short desktop window, the model mode */
     const stacked = E.stacked();
@@ -879,16 +880,25 @@
       ov.querySelector('.wmaxx').focus();
     },
     wmaxClose(){ const ov = document.getElementById('wmaxov'); if(ov) ov.remove(); },
-    /* O&M and warranty. The card stays on this server; the new-tab icon is the only one that leaves it. */
+    /* O&M and warranty. Hosted mode stays on /api/fin/file. Standalone opens the FIN record on this host. */
     docOpen(el){
-      let ref = '';
+      let url = '';
+      let download = '';
       try {
         const u = new URL(el.dataset.url || '', location.origin);
-        if (u.origin !== location.origin || u.pathname !== '/api/fin/file') return;
-        ref = u.searchParams.get('ref') || '';
+        if (u.origin !== location.origin) return;
+        const cfg = window.DashboardData && window.DashboardData.config;
+        const rec = u.pathname.match(/^\/api\/([^/]+)\/rec\/(p:[A-Za-z0-9_]+:r:[0-9a-fA-F-]+)\/file$/);
+        if (cfg && cfg.directMode && rec && rec[1] === cfg.project) {
+          url = u.pathname;
+          download = url;
+        } else if (u.pathname === '/api/fin/file') {
+          const ref = u.searchParams.get('ref') || '';
+          if (!/^@p:[A-Za-z0-9_]+:r:[0-9a-fA-F-]+$/.test(ref)) return;
+          url = '/api/fin/file?ref=' + encodeURIComponent(ref);
+          download = url + '&download=1';
+        } else return;
       } catch (e) { return; }
-      if (!/^@p:[A-Za-z0-9_]+:r:[0-9a-fA-F-]+$/.test(ref)) return;
-      const url = '/api/fin/file?ref=' + encodeURIComponent(ref);
       const title = el.dataset.title || 'PDF';
       const dl = C.esc(E.t('docDownload'));
       const tab = C.esc(E.t('docOpenLarge'));
@@ -899,7 +909,7 @@
         <div class="dochead">
           <h2 class="doctitle">${C.esc(title)}</h2>
           <div class="docacts">
-            <a class="iconbtn tipU" href="${C.esc(url)}&amp;download=1" download data-tip="${dl}" aria-label="${dl}">${C.icon('download', 15)}</a>
+            <a class="iconbtn tipU" href="${C.esc(download)}" download data-tip="${dl}" aria-label="${dl}">${C.icon('download', 15)}</a>
             <a class="iconbtn tipU" href="${C.esc(url)}" target="_blank" rel="noopener noreferrer" data-tip="${tab}" aria-label="${tab}">${C.icon('external', 15)}</a>
           </div>
           <button type="button" class="wmaxx docx" data-act="docClose" aria-label="${C.esc(E.t('close'))}">✕</button>
@@ -1261,6 +1271,7 @@
   };
 
   document.addEventListener('click', ev => {
+    if (window.EKO !== E) return;
     const el = ev.target.closest('[data-act]');
     if(!el) return;
     if(window.EKO_SURF) window.EKO_SURF.noteClick(el);           /* R5: remember the opener */
@@ -1300,6 +1311,7 @@
     render();
   });
   document.addEventListener('click', ev => {
+    if (window.EKO !== E) return;
     const th = ev.target.closest('[data-act="regSort"]');
     if(th){ const k = th.dataset.k;
       if(E.state.regSort === k) E.state.regSortDir = E.state.regSortDir==='asc'?'desc':'asc';
@@ -1309,6 +1321,7 @@
     if(stf){ E.state.regStF = E.state.regStF === stf.dataset.v ? null : stf.dataset.v; render(); }
   });
   document.addEventListener('keydown', ev => {
+    if (window.EKO !== E) return;
     if(E.state.wall){ if(window.EKO_WALL) window.EKO_WALL.onKey(ev); return; }   /* D108: Escape exits; any other key only raises the exit hint */
     if(ev.key === 'Escape' && ev.target.id === 'aiin' && E.state.askHint){ E.set({ askHint:null }); return; }   /* D133: leave report mode, keep the conversation */
     if((ev.ctrlKey || ev.metaKey) && ev.key === '/' && !E.state.signedOut){ ev.preventDefault();   /* D133: the launcher's shortcut */

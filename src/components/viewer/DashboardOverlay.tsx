@@ -7,6 +7,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
 import { ASSET_BIM_MAPPING } from '@/constants/assetBimMapping'
 import { resetCameraToHome } from '@/lib/cameraUtils'
+import { createMiniMap } from '@/lib/miniMap'
 import { disciplineOf, layersFor, layerShows } from '@/lib/modelDiscipline'
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
@@ -924,6 +925,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       repositionMarkers()
     }
 
+    const miniMap = createMiniMap(engine)
+    const afterFrame = () => {
+      drawGhost()
+      miniMap.capture()
+    }
+
     ;(window as any).EKO_HOST_ENGINE = {
       projectPoint,
       resolveAllAssetPositions,
@@ -944,6 +951,40 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       isolateLayer,
       applySpaceHeat,
       clearSpaceHeat,
+      bindWallOrbit: () => {
+        const cam = engine.world?.camera?.controls as {
+          connect?: (el: HTMLElement) => void
+          disconnect?: () => void
+          _domElement?: HTMLElement
+          currentAction?: number
+          _addAllEventListeners?: (el: HTMLElement) => void
+          _removeAllEventListeners?: (el: HTMLElement) => void
+        }
+        const canvas = engine.world?.renderer?.three?.domElement as HTMLElement | undefined
+        if (!cam || !canvas) return
+        const wallOn = !!document.querySelector('.dashboard-native-container[data-wall="1"]')
+        const hit = document.querySelector('.wmodelhit') as HTMLElement | null
+        const target = wallOn && hit ? hit : canvas
+        const dragging = !!cam.currentAction || !!document.querySelector('.wmodelhit[data-drag="1"]')
+        if (dragging && target !== canvas) return
+        document.querySelectorAll('.wmodelhit').forEach((el) => el.removeAttribute('data-on'))
+        if (cam._domElement === target) {
+          if (target === hit) hit.setAttribute('data-on', '1')
+          return
+        }
+        try {
+          if (typeof cam.disconnect === 'function') cam.disconnect()
+          else if (cam._domElement && typeof cam._removeAllEventListeners === 'function') cam._removeAllEventListeners(cam._domElement)
+        } catch { /* keep going */ }
+        try {
+          if (typeof cam.connect === 'function') cam.connect(target)
+          else if (typeof cam._addAllEventListeners === 'function') {
+            cam._domElement = target
+            cam._addAllEventListeners(target)
+          }
+          if (target === hit) hit.setAttribute('data-on', '1')
+        } catch { /* canvas stays bound */ }
+      },
       startMeasure: () => measureTool()?.start(),
       cancelMeasure: () => measureTool()?.cancel(),
       finishMeasure: () => measureTool()?.finish(),
@@ -951,6 +992,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       startSlice: () => sliceTool()?.start(),
       stopSlice: () => sliceTool()?.stop(),
       clearSection: () => sliceTool()?.clear(),
+      attachMiniMap: (el: HTMLElement | null) => miniMap.attach(el),
+      setMiniMap: (on: boolean) => miniMap.setEnabled(on),
     }
     // The dashboard may have rendered before the bridge existed: redraw so the
     // equipment markers (which need bimIdFor) appear.
@@ -966,7 +1009,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const controls = engine.world?.camera?.controls
     controls?.addEventListener('update', onCameraUpdate)
     engine.world?.renderer?.onBeforeUpdate?.add(syncGhost)
-    engine.world?.renderer?.onAfterUpdate?.add(drawGhost)
+    engine.world?.renderer?.onAfterUpdate?.add(afterFrame)
 
     // Models can finish loading well after the dashboard: retry until located.
     // Any change to the loaded models forgets the "not found" answers and
@@ -1003,9 +1046,19 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     void refreshLevels()
 
     return () => {
+      try {
+        document.querySelectorAll('.wmodelhit').forEach((el) => el.remove())
+        const canvas = engine.world?.renderer?.three?.domElement as HTMLElement | undefined
+        const cam = engine.world?.camera?.controls as { connect?: (el: HTMLElement) => void; disconnect?: () => void }
+        if (cam && canvas) {
+          cam.disconnect?.()
+          cam.connect?.(canvas)
+        }
+      } catch { /* viewer keeps its canvas */ }
       controls?.removeEventListener('update', onCameraUpdate)
       engine.world?.renderer?.onBeforeUpdate?.remove(syncGhost)
-      engine.world?.renderer?.onAfterUpdate?.remove(drawGhost)
+      engine.world?.renderer?.onAfterUpdate?.remove(afterFrame)
+      miniMap.dispose()
       clearInterval(resolveTimer)
       void clearHighlight()
       void clearSpaceHeat()
@@ -1089,24 +1142,37 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         tempDiv.innerHTML = doc.body.innerHTML
         Array.from(tempDiv.querySelectorAll('script')).forEach(s => s.remove())
         containerRef.current.innerHTML = tempDiv.innerHTML
+        ;(window as any).DASHBOARD_ROOT = containerRef.current
+        ;(window as any).DASHBOARD_OVERLAY = true
 
         const apiSettings: ProjectApiSettings = currentProject?.apiSettings || {}
-        // The saved settings of the project open now; a field it does not set stays absent
-        ;(window as any).INJECTED_PROJECT_CONFIG = {
-          initialTemplate: currentProject?.renderSettings?.templateId || 'default',
-          initialXrayColor: currentProject?.renderSettings?.xrayColor || 'blue',
-          ...(currentProject ? dashboardProjectInfo(currentProject) : {}),
-          fin: {
-            baseUrl: apiSettings.finBaseUrl || 'https://localhost',
-            project: apiSettings.finProjectName || '',
-            interval: apiSettings.finInterval || 5000,
-            directMode: apiSettings.finDirectMode || false,
-            livePoints: apiSettings.finLivePoints,
-            endpoints: apiSettings.finEndpoints,
-          },
+        // Strings go through JSON.stringify: a quote in a project setting must not end the literal
+        const configScript = `
+          window.INJECTED_PROJECT_CONFIG = {
+            initialTemplate: ${JSON.stringify(currentProject?.renderSettings?.templateId || 'default')},
+            initialXrayColor: ${JSON.stringify(currentProject?.renderSettings?.xrayColor || 'blue')},
+            fin: {
+              baseUrl: ${JSON.stringify(apiSettings.finBaseUrl || 'https://localhost')},
+              project: ${JSON.stringify(apiSettings.finProjectName || '')},
+              interval: ${apiSettings.finInterval || 5000},
+              directMode: ${apiSettings.finDirectMode || false},
+              realtimeMs: ${apiSettings.finRealtimeMs || 30000},
+              livePoints: ${apiSettings.finLivePoints ? JSON.stringify(apiSettings.finLivePoints) : 'undefined'},
+              endpoints: ${apiSettings.finEndpoints ? JSON.stringify(apiSettings.finEndpoints) : 'undefined'},
+              workorderExpr: ${JSON.stringify(apiSettings.finWorkorderExpr || '')},
+              meterProfile: ${apiSettings.finMeterProfile ? JSON.stringify(apiSettings.finMeterProfile) : 'undefined'},
+              severityBands: ${apiSettings.finSeverityBands ? JSON.stringify(apiSettings.finSeverityBands) : 'undefined'},
+              equipmentClasses: ${apiSettings.finEquipmentClasses ? JSON.stringify(apiSettings.finEquipmentClasses) : 'undefined'},
+              realtimeEndpoints: ${apiSettings.finRealtimeEndpoints ? JSON.stringify(apiSettings.finRealtimeEndpoints) : 'undefined'}
+            }
+          };
+        `
+        try { window.eval(configScript) } catch (err) { console.error(err) }
+        // The project open now: its id (answers stamped for another project are dropped), site and basis
+        if (currentProject && (window as any).INJECTED_PROJECT_CONFIG) {
+          Object.assign((window as any).INJECTED_PROJECT_CONFIG, dashboardProjectInfo(currentProject))
         }
-        // The backend serves this project before the dashboard's first poll is trusted (the
-        // dashboard drops answers stamped for another project until it does)
+        // The backend serves this project before the dashboard's first poll is trusted
         void useFinStore.getState().syncProjectSettings()
 
         return loadScripts(Array.from(doc.querySelectorAll('script')), signal)
@@ -1115,6 +1181,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     return () => {
       signal.mounted = false
       window.removeEventListener('dashboard-event', handler)
+      try {
+        document.querySelector('.dashboard-native-container')?.removeAttribute('data-wall')
+        document.querySelectorAll('.wmodelhit').forEach((el) => el.remove())
+        document.body.classList.remove('wall-orbiting')
+        ;(window as any).EKO_HOST_ENGINE?.bindWallOrbit?.()
+      } catch { /* restore canvas orbit */ }
       // The selection dies with the dashboard: don't leave its equipment coloured
       try { (window as any).EKO_HOST_ENGINE?.clearHighlight?.() } catch {}
       try { (window as any).DashboardOverlayTeardown?.() } catch {}

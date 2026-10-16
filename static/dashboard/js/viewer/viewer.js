@@ -319,9 +319,16 @@ window.EKO_V = (function(){
   function dock(E){ return window.EKO_VT.toolbar(E); }
 
   const minimap = E => `<div class="minimap mzglass mzflyin" data-born="${E.state.born==='bloom'?1:0}" aria-label="${C().esc(E.t('dockMinimap'))}">
-    <svg viewBox="0 0 148 96"><rect x="4" y="4" width="140" height="88" rx="4" fill="none" stroke="var(--bd2)"/>
-      <image href="${E.data.viewer.scene.images.photo}" x="8" y="8" width="132" height="80" preserveAspectRatio="xMidYMid slice" opacity=".75"/>
-      <rect x="34" y="20" width="80" height="62" fill="none" stroke="var(--acc)" stroke-width="1.5" rx="2"/></svg></div>`;
+    <canvas class="mmap-view" width="256" height="256"></canvas>
+    <svg class="mmap-ov" viewBox="0 0 256 256" aria-hidden="true">
+      <defs><clipPath id="mmap-clip"><rect width="256" height="256" rx="8"/></clipPath></defs>
+      <g clip-path="url(#mmap-clip)">
+        <polygon class="mmap-frust" fill="rgba(46,91,146,.18)" stroke="var(--acc)" stroke-width="2"/>
+      </g>
+      <g class="mmap-head">
+        <polygon points="0,-11 7,8 -7,8" fill="var(--acc)" stroke="#fff" stroke-width="1.2"/>
+      </g>
+    </svg></div>`;
 
   /* Corner caption (the marker toggle left the canvas in D70: it is the eye
      control in the alarm surfaces). */
@@ -525,6 +532,12 @@ window.EKO_V = (function(){
     if(E.engine.onMeasureResult && !E.engine._ekoMeasHook){
       E.engine._ekoMeasHook = true;
       E.engine.onMeasureResult(r => E.set({ measureResult: r }));
+    }
+    const HE = window.EKO_HOST_ENGINE;
+    if (HE && typeof HE.attachMiniMap === 'function') {
+      const root = document.querySelector('#vpmain .minimap');
+      if (E.state.dock.minimap && root) HE.attachMiniMap(root);
+      else if (typeof HE.setMiniMap === 'function') HE.setMiniMap(false);
     }
   }
 

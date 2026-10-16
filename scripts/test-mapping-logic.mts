@@ -8,7 +8,7 @@ import { rowsFromObject, objectFromRows, parseImport, mergeEntries } from '../sr
 import { SITE_FIN_EQUIPMENT_CLASSES, SITE_FIN_METER_PROFILE } from '../src/constants/finDefaults.ts'
 import {
   mappingProblem, applyMappingValues, toBackendSettings, MAPPING_FIELDS,
-  FIN_SETTINGS_VERSION, DEFAULT_SITE_TIMEZONE, isTimeZone, dashboardProjectInfo, apiConfigFor, exportedSiteConfig,
+  FIN_SETTINGS_VERSION, DEFAULT_SITE_TIMEZONE, isTimeZone, dashboardProjectInfo, apiConfigFor, exportedSiteConfig, finExportMappings,
   rateOrNull, basisProblem, powerBoardsFromRows, powerBoardRows, boardKeyOptions, powerBoardsProblem,
 } from '../src/lib/finSettings.ts'
 import { projectIdFromSelection, projectLabel, savedProjectState } from '../src/lib/finProjects.ts'
@@ -151,6 +151,27 @@ test('export: another FIN project ships none of config.json\'s site point maps; 
   assert.strictEqual(site.workorder_expr, SITE_CFG.workorder_expr)
   same(exportedSiteConfig(SITE_CFG, undefined), SITE_CFG)                             // nothing set: config.json as is
   same(SITE_CFG.live_point_ids, { total_power: 'p:{project}:r:3181ee6e-site' })      // input never mutated
+})
+
+test('FIN viewer export: config.json\'s maps only for its own named site; other and unnamed projects ship their own', () => {
+  const own = { finLivePoints: { total_power: 'p:{project}:r:own' }, finEndpoints: { own_his: 'x' }, finMeterProfile: { prefix: 'MTR' }, finWorkorderExpr: 'mine' }
+  const site = finExportMappings(SITE_CFG, { finProjectName: 'marsaAlArab', ...own })
+  same(site.finLivePoints, SITE_CFG.live_point_ids)                                   // the audited maps win for the site
+  same(site.finMeterProfile, SITE_CFG.meter_profile)
+  assert.strictEqual(site.finWorkorderExpr, SITE_CFG.workorder_expr)
+  for (const settings of [{ finProjectName: 'khaznaDataCenter', ...own }, own]) {     // another FIN project, and a blank name
+    const m = finExportMappings(SITE_CFG, settings)
+    same(m.finLivePoints, own.finLivePoints)
+    same(m.finEndpoints, own.finEndpoints)
+    same(m.finMeterProfile, own.finMeterProfile)
+    assert.strictEqual(m.finSeverityBands, undefined)                                 // a block it did not set stays unset
+    assert.strictEqual(m.finWorkorderExpr, 'mine')
+    assert(!JSON.stringify(m).includes('3181ee6e') && !JSON.stringify(m).includes('workOrderMarsa'), 'no site value')
+  }
+  const bare = finExportMappings(SITE_CFG, {})
+  same(bare.finLivePoints, {})
+  assert.strictEqual(bare.finWorkorderExpr, '')
+  same(finExportMappings({ project_name: 'marsaAlArab' }, { finProjectName: 'marsaAlArab', ...own }).finLivePoints, own.finLivePoints)   // site with no audited map: its own
 })
 
 test('exported project files carry the settings and never a credential', () => {

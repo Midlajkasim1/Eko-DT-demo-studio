@@ -238,6 +238,23 @@ export function exportedSiteConfig(cfg: JsonObject, settings: ProjectApiSettings
   return out
 }
 
+/** The FIN viewer export's site blocks. config.json's audited maps only for config.json's own site
+ *  (named, same FIN project); another or an unnamed project ships its own saved blocks. */
+export function finExportMappings(cfg: JsonObject, settings: ProjectApiSettings | undefined) {
+  const s = settings ?? {}
+  const site = !!s.finProjectName && s.finProjectName === cfg.project_name
+  const pick = <T>(value: unknown, own: T): T =>
+    site && isObject(value) && Object.keys(value).length ? (value as T) : own
+  return {
+    finLivePoints: pick(cfg.live_point_ids, s.finLivePoints || {}),
+    finEndpoints: pick(cfg.power_endpoints, s.finEndpoints || {}),
+    finMeterProfile: pick(cfg.meter_profile, s.finMeterProfile),
+    finSeverityBands: pick(cfg.severity_bands, s.finSeverityBands),
+    finEquipmentClasses: pick(cfg.equipment_classes, s.finEquipmentClasses),
+    finWorkorderExpr: site && typeof cfg.workorder_expr === 'string' ? cfg.workorder_expr : (s.finWorkorderExpr || ''),
+  }
+}
+
 /** The part of apiSettings the backend uses to pick a project's FIN configuration.
  *  An allow-list on purpose: the weather key and dashboard layout stay in the browser. */
 export function toBackendSettings(settings: ProjectApiSettings | undefined): ProjectApiSettings {
