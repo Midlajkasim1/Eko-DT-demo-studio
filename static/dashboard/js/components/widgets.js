@@ -1001,6 +1001,16 @@ window.EKO_C = (function(){
   function fcuFold(name) {
     return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   }
+  /* Same rule as findPoint in hvacGeometry: first point whose folded navName matches. */
+  function fcuFind(points, test) {
+    const list = Array.isArray(points) ? points : [];
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      const name = p && (p.navName != null ? p.navName : p[0]);
+      if (name != null && test(fcuFold(name))) return p;
+    }
+    return null;
+  }
   function fcuClean(value) {
     if (value == null) return null;
     const s = String(value).trim();
@@ -1060,7 +1070,7 @@ window.EKO_C = (function(){
   function pointVal(points, ...names) {
     for (const n of names) {
       const p = fcuFind(points, k => k.endsWith(n));
-      const v = fcuClean(p && p.currentValue);
+      const v = fcuClean(p && (p.currentValue != null ? p.currentValue : p[2]));
       if (v != null) return v;
     }
     return null;
