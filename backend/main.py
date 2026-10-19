@@ -35,6 +35,7 @@ from fin_client import (
     safe_get,
 )
 from workorders import error_payload, live_payload, norm_id, orders_by_equipment
+import notifications
 
 # ─── Load Config ─────────────────────────────────────────────────────────────
 
@@ -649,6 +650,8 @@ async def lifespan(app: FastAPI):
     # An exported project ships its own project.json beside this file; its settings
     # become the active configuration, with config.json as the fallback
     apply_project_settings(*_bundled_project())
+    # a deployment setting, never a project's: projects cannot point the history elsewhere
+    notifications.configure(BASE_CONFIG.get("notification_db_path"))
     yield
     # Cleanup
     global polling_tasks, client
@@ -1255,6 +1258,14 @@ def _attach_workorders():
         eq["workOrders"] = list(grouped.get(equip_id, []))
 
 
+def _note_workorder_sync(error: str) -> None:
+    """Contract trigger "integration sync failed": one row while the FIN work-order read fails,
+    resolved by the next good read. The site is the FIN project this session reads."""
+    notifications.condition(client.project_name, "int.sync_failed", bool(error), severity="warning",
+                            source_kind="integration", source_ref="fin-workorders",
+                            params={"reason": error} if error else None)
+
+
 async def refresh_workorders():
     """Eval workorder_expr from config, the same session as equipment and alarms."""
     global cached_workorders
@@ -1270,10 +1281,12 @@ async def refresh_workorders():
         print(f"[FIN] work order fetch error: {exc}")
         cached_workorders = error_payload(str(exc))
         _attach_workorders()
+        _note_workorder_sync(cached_workorders["error"])
         return
     cached_workorders = live_payload(text or "")
     _attach_workorders()
     err = cached_workorders.get("error") or ""
+    _note_workorder_sync(err)
     count = len(cached_workorders.get("orders") or [])
     print(f"[FIN] work orders: {err or str(count) + ' rows'}")
 

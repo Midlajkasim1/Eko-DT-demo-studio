@@ -10,6 +10,12 @@ Its data is arranged so each Data Mapping block visibly changes the backend's AP
 * severity      - one open alarm of priority 200; its severity depends on the bands
 """
 import asyncio
+import os
+import tempfile
+
+# Every backend run that uses this fake writes notifications to a throwaway database, never the
+# per-user default (tests and the browser tests' fake server alike)
+os.environ.setdefault("EKO_NOTIFICATION_DB", os.path.join(tempfile.mkdtemp(prefix="eko-notif-"), "notifications.sqlite3"))
 
 ALARM_ROW = {
     "alarm": True, "active": True, "message": "High temperature", "priority": 200,

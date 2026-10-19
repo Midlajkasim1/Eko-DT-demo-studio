@@ -44,6 +44,10 @@ The backend reads its configuration from `config.json` located in the `backend` 
 - `fin_server_url`
 - Various endpoints for real-time and power data.
 - Live point IDs to be fetched.
+- `notification_db_path` (optional): where the notification SQLite database is kept. It must be outside
+  this folder, so a new export unzipped over the backend keeps the history. Unset, it is
+  `%LOCALAPPDATA%\EKO-DT\notifications.sqlite3` on Windows (`~/.local/share/eko-dt/` elsewhere).
+  The `EKO_NOTIFICATION_DB` environment variable overrides both.
 
 ## Running the Server
 
