@@ -134,6 +134,12 @@ MIGRATIONS = [
       updated_at TEXT NOT NULL
     );
     """),
+    # Data only, no schema change: events stored before project recipients existed get theirs,
+    # so the history recorded so far is visible. New events get one in Store.condition.
+    (2, """
+    INSERT OR IGNORE INTO notification_recipients (id, event_id, user_id, role, channel, delivery_status)
+    SELECT 'rcp_' || e.id, e.id, '#project:' || e.site_id, NULL, 'inapp', 'delivered' FROM notification_events e;
+    """),
 ]
 
 
@@ -167,6 +173,15 @@ VIEWS = ("all", "unread", "read")            # read = opened (contract: POST /op
 SEVERITIES = ("critical", "warning", "info")
 CHANNEL = "inapp"                            # the only channel the contract defines
 MASTER = "*"                                 # notification_preferences row for the master toggle
+# ponytail: no per-person FIN identity yet, so each site has ONE shared recipient: read, dismissed
+# and preference state is the project's, not a person's. Per-user recipients replace it once
+# sign-in carries identity. The '#project:' prefix is meant never to match a FIN user id
+# (FIN's username rules are not confirmed: check before per-user recipients share this table).
+PROJECT_RECIPIENT_PREFIX = "#project:"
+
+
+def project_recipient(site_id: str) -> str:
+    return PROJECT_RECIPIENT_PREFIX + site_id
 PAGE_DEFAULT, PAGE_MAX = 50, 100
 SEARCHED = ("e.type", "e.asset_id", "e.source_ref", "e.params_json")
 _ITEM_SQL = (
@@ -299,12 +314,17 @@ class Store:
             )
             return row["id"]
         event_id = "ntf_" + uuid.uuid4().hex
-        self.db.execute(
-            "INSERT INTO notification_events (id, site_id, type, severity, source_kind, source_ref, asset_id,"
-            " created_at, last_at, state, status, dedup_key, params_json) VALUES (?,?,?,?,?,?,?,?,?,?,'active',?,?)",
-            (event_id, site_id, type_, severity, source_kind, source_ref, asset_id, stamp, stamp, state, key,
-             _params_json(params)),
-        )
+        with self._write():   # the event and its project recipient together, or neither
+            self.db.execute(
+                "INSERT INTO notification_events (id, site_id, type, severity, source_kind, source_ref, asset_id,"
+                " created_at, last_at, state, status, dedup_key, params_json) VALUES (?,?,?,?,?,?,?,?,?,?,'active',?,?)",
+                (event_id, site_id, type_, severity, source_kind, source_ref, asset_id, stamp, stamp, state, key,
+                 _params_json(params)),
+            )
+            self.db.execute(
+                "INSERT INTO notification_recipients (id, event_id, user_id, role, channel, delivery_status)"
+                " VALUES (?, ?, ?, NULL, ?, 'delivered')", ("rcp_" + event_id, event_id, project_recipient(site_id), CHANNEL),
+            )
         return event_id
 
     def events(self, site_id: str) -> list[dict]:
@@ -383,6 +403,64 @@ class Store:
                 now: Optional[datetime] = None) -> Optional[dict]:
         """Set dismissed_at once (never deletes); repeating it changes nothing."""
         return self._stamp_once("dismissed_at", "dismissed", user_id, site_id, notification_id, now)
+
+    def undismiss(self, user_id: str, site_id: str, notification_id: str,
+                  now: Optional[datetime] = None) -> Optional[dict]:
+        """Undo a dismiss (the bell's Undo). A notification that is not dismissed is left alone."""
+        _check_ids(user_id, site_id)
+        _check_notification_id(notification_id)
+        stamp = utc_iso(now or datetime.now(timezone.utc))
+        with self._write():
+            row = self.db.execute(
+                "SELECT r.id, r.dismissed_at FROM notification_recipients r JOIN notification_events e ON e.id = r.event_id"
+                " WHERE e.id = ? AND r.user_id = ? AND r.channel = ? AND e.site_id = ?",
+                (notification_id, user_id, CHANNEL, site_id),
+            ).fetchone()
+            if row is None:
+                return None
+            if row["dismissed_at"] is not None:
+                self.db.execute("UPDATE notification_recipients SET dismissed_at = NULL WHERE id = ?", (row["id"],))
+                self.db.execute(
+                    "INSERT INTO notification_delivery_history (id, event_id, user_id, channel, status, occurred_at)"
+                    " VALUES (?, ?, ?, ?, 'undismissed', ?)", ("dlv_" + uuid.uuid4().hex, notification_id, user_id, CHANNEL, stamp),
+                )
+        return self.get_notification(user_id, site_id, notification_id)
+
+    def unread_count(self, user_id: str, site_id: str) -> int:
+        """Listed (not dismissed) notifications not yet opened, for this recipient on this site."""
+        _check_ids(user_id, site_id)
+        rows = self._read(
+            "SELECT count(*) AS n FROM notification_recipients r JOIN notification_events e ON e.id = r.event_id"
+            " WHERE r.user_id = ? AND r.channel = ? AND e.site_id = ? AND r.opened_at IS NULL AND r.dismissed_at IS NULL",
+            [user_id, CHANNEL, site_id])
+        return int(rows[0]["n"])
+
+    def mark_all_opened(self, user_id: str, site_id: str, now: Optional[datetime] = None) -> int:
+        """Open every listed, unopened notification (the bell's "mark all read"). Returns how many."""
+        return self._stamp_all("opened_at", "opened", "r.dismissed_at IS NULL", user_id, site_id, now)
+
+    def dismiss_opened(self, user_id: str, site_id: str, now: Optional[datetime] = None) -> int:
+        """Dismiss every opened notification still listed (the bell's "archive read"). Returns how many."""
+        return self._stamp_all("dismissed_at", "dismissed", "r.opened_at IS NOT NULL", user_id, site_id, now)
+
+    def _stamp_all(self, column: str, status: str, also: str, user_id: str, site_id: str,
+                   now: Optional[datetime]) -> int:
+        _check_ids(user_id, site_id)
+        stamp = utc_iso(now or datetime.now(timezone.utc))
+        with self._write():
+            rows = self.db.execute(
+                "SELECT r.id, r.event_id FROM notification_recipients r JOIN notification_events e ON e.id = r.event_id"
+                f" WHERE r.user_id = ? AND r.channel = ? AND e.site_id = ? AND r.{column} IS NULL AND {also}",
+                (user_id, CHANNEL, site_id),
+            ).fetchall()
+            self.db.executemany(f"UPDATE notification_recipients SET {column} = ? WHERE id = ?",
+                                [(stamp, r["id"]) for r in rows])
+            self.db.executemany(
+                "INSERT INTO notification_delivery_history (id, event_id, user_id, channel, status, occurred_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                [("dlv_" + uuid.uuid4().hex, r["event_id"], user_id, CHANNEL, status, stamp) for r in rows],
+            )
+        return len(rows)
 
     def _stamp_once(self, column: str, status: str, user_id: str, site_id: str, notification_id: str,
                     now: Optional[datetime]) -> Optional[dict]:
@@ -505,14 +583,22 @@ def configure(db_path: Optional[str]) -> None:
     _configured = db_path or None
 
 
+def store() -> Store:
+    """The deployment's store, opened on first use; a store that cannot open is a StoreError."""
+    global _store
+    if _store is None:
+        try:
+            _store = Store(resolve_db_path(_configured))
+        except (sqlite3.Error, OSError, ValueError) as exc:
+            raise StoreError(STORE_FAILED) from exc
+    return _store
+
+
 def condition(site_id: Optional[str], type_: str, active: bool, **fields) -> Optional[str]:
     """Store.condition on the site database. A storage failure is logged and never stops
     the polling that reported the condition."""
-    global _store
     try:
-        if _store is None:
-            _store = Store(resolve_db_path(_configured))
-        return _store.condition(site_id, type_, active, **fields)
+        return store().condition(site_id, type_, active, **fields)
     except (sqlite3.Error, StoreError, OSError, ValueError) as exc:
         print(f"[notifications] {type_} not recorded: {exc.__cause__ or exc}")
         return None

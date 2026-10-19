@@ -13,6 +13,7 @@
     "test:unit": "node tests/run.mjs --unit",
     "test:browser": "node tests/run.mjs --browser",
     "test:logic": "node scripts/test-mapping-logic.mts",
+    "test:notif": "node scripts/test-notif-store.mjs",
     "test:mau": "node scripts/test-mau-points.mjs",
     "test:eco": "node scripts/test-eco-points.mjs",
     "test:reports": "node scripts/test-reports.mjs",

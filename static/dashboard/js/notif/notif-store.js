@@ -12,13 +12,82 @@
 window.EKO_NOTIF = (function(){
   'use strict';
   const TT = () => window.EKO_NOTIF_TYPES;
-  const LS = 'eko-notifs-v2';   /* D122: v2 — the v1 seed carried English-only content */
   const SELF_CONFIRM = ['alarm.ack_recorded', 'wo.accepted', 'wo.rejected', 'report.ready'];   /* D90: the report you asked for is ready */
-  const SITE = 'marsa';
   const ME = 'Arman Y.';
+
+  /* Whose notifications these are. The dashboard's own rule (data-map.js realMode): a project the
+     Studio or an exported viewer injects is REAL unless it turns Demo figures on; no injected
+     project is the standalone prototype. The dashboard re-runs this file for every project it
+     opens, so each project reads only its own key. */
+  const INJ = window.INJECTED_PROJECT_CONFIG || null;
+  const REAL = !!(INJ && INJ.site) && INJ.demo !== true;
+  const PROJECT_ID = INJ && typeof INJ.projectId === 'string' && INJ.projectId ? INJ.projectId : null;
+  /* a real project's notifications carry its id; 'marsa' is the demo fixture's own site key */
+  const SITE = REAL ? PROJECT_ID : 'marsa';
+  /* seed only an explicitly demo build outside a real project: an unknown build never seeds */
+  const SEEDS = !REAL && !!(window.EKO_BUILD && window.EKO_BUILD.demo === true);
+  /* v3: one key per mode and project, so demo-seeded rows can never surface in a real project
+     (not even the same project with Demo figures turned off). The shared v2 key is left as it
+     was and never read: its rows were stamped 'marsa' whatever project made them. A real project
+     with no id stores nothing rather than guess. */
+  const LS = SITE ? 'eko-notifs-v3:' + (REAL ? 'real' : 'demo') + ':' + (PROJECT_ID || 'prototype') : null;
 
   let items = [];
   let seq = 0;
+
+  /* ---- the project's server notifications (real mode with a backend) ----
+     A real project reads the backend's project-scoped notifications: their read and dismissed
+     state is the PROJECT's, shared by everyone viewing it, not a person's (no per-user identity
+     yet). The browser's own report.ready rows stay in the local store (no event ingestion yet).
+     Direct mode (FIN-hosted, no Python service) and demo keep the local store only. */
+  const REMOTE = REAL && !!PROJECT_ID && !(INJ.fin && INJ.fin.directMode) && typeof fetch === 'function';
+  const API = '/api/notifications/v1', REMOTE_LIMIT = 100, REFRESH_MS = 30000;
+  let remote = [], remoteUnread = 0, remotePrefs = null, remoteError = null, timer = null, self = null;
+  const live = () => window.EKO_NOTIF === self;   /* a switched-away project's store stops talking */
+  const changed = () => { if(hooks.onAdd) hooks.onAdd(null); };
+  function api(method, path, body){
+    return fetch(API + path, { method, cache: 'no-store', credentials: 'same-origin',
+      headers: Object.assign({ 'X-Eko-Project': encodeURIComponent(PROJECT_ID) }, body ? { 'Content-Type': 'application/json' } : {}),
+      body: body ? JSON.stringify(body) : undefined })
+      .then(res => {
+        const stamp = res.headers.get('X-Eko-Project');   /* never another project's answer */
+        if(stamp !== null && decodeURIComponent(stamp) !== PROJECT_ID) throw new Error('answer for another project');
+        if(!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      });
+  }
+  /* a server row in the bell's own shape; a type the registry does not know is not shown */
+  function fromServer(r){
+    const def = r && TT().byType[r.type];
+    if(!def) return null;
+    return { id: r.id, type: r.type, category: def.category, level: def.level, titleKey: def.titleKey, bodyKey: def.bodyKey,
+             params: r.params || {}, source: r.source || null, externalRef: null, siteId: SITE, actorId: 'system',
+             targetUsers: [], createdAt: r.created_at, readAt: r.opened_at || null, archivedAt: r.dismissed_at || null,
+             dedupKey: null, groupKey: null, actions: [], children: null, remote: true };
+  }
+  function refresh(){
+    if(!REMOTE) return Promise.resolve();
+    if(!live()){ stop(); return Promise.resolve(); }
+    return Promise.all([api('GET', '/notifications?limit=' + REMOTE_LIMIT), api('GET', '/preferences')])
+      .then(([page, p]) => {
+        if(!live()) return;
+        remote = (page.items || []).map(fromServer).filter(Boolean);
+        remoteUnread = typeof page.unread_count === 'number' ? page.unread_count : 0;
+        remotePrefs = p && typeof p === 'object' ? p : null;
+        remoteError = null; changed();
+      })
+      .catch(err => { if(!live()) return; remoteError = String((err && err.message) || err); changed(); });
+  }
+  function stop(){ if(timer){ clearInterval(timer); timer = null; } }
+  /* optimistic: the cache changes now; a refused request puts it back, then the server's truth */
+  function send(method, path, body, undo){
+    return api(method, path, body).catch(() => { if(live()){ undo(); changed(); } }).then(() => refresh());
+  }
+  const remoteFind = id => remote.find(x => x.id === id);
+  const enc = id => encodeURIComponent(id);
+  /* the server's count when the cache holds only a page of them, else the cache's own */
+  const remoteUnreadNow = () => remote.length < REMOTE_LIMIT
+    ? remote.filter(n => !n.readAt && !n.archivedAt).length : remoteUnread;
 
   /* -------- preferences (stage 4): per-type in-app delivery toggles ------- */
   const LSP = 'eko-notif-prefs';
@@ -27,16 +96,28 @@ window.EKO_NOTIF = (function(){
     try{ prefs = JSON.parse(localStorage.getItem(LSP)||'{}'); }catch(e){ prefs = {}; }
   }
   function prefOn(type){
-    if(type in prefs) return !!prefs[type];
+    if(REMOTE && remotePrefs){   /* the project's preferences, master toggle first */
+      if(remotePrefs.master_enabled === false) return false;
+      if(remotePrefs.types && type in remotePrefs.types) return !!remotePrefs.types[type];
+    } else if(type in prefs) return !!prefs[type];
     const def = TT().byType[type];
     return def ? def.defaultOn : true;
   }
-  function setPref(type, on){ prefs[type] = !!on;
+  function setPref(type, on){
+    if(REMOTE){
+      const p = remotePrefs = remotePrefs || { master_enabled: true, types: {} };
+      p.types = p.types || {};
+      const had = type in p.types, was = p.types[type];
+      p.types[type] = !!on; changed();
+      return send('PUT', '/preferences', { types: { [type]: !!on } }, () => { if(had) p.types[type] = was; else delete p.types[type]; });
+    }
+    prefs[type] = !!on;
     try{ localStorage.setItem(LSP, JSON.stringify(prefs)); }catch(e){} }
   loadPrefs();
 
-  function save(){ try{ localStorage.setItem(LS, JSON.stringify(items)); }catch(e){} }
-  function load(){ try{ items = JSON.parse(localStorage.getItem(LS)||'[]'); }catch(e){ items = []; }
+  function save(){ if(!LS) return; try{ localStorage.setItem(LS, JSON.stringify(items)); }catch(e){} }
+  function load(){ if(!LS){ items = []; seq = 0; return 0; }
+    try{ items = JSON.parse(localStorage.getItem(LS)||'[]'); }catch(e){ items = []; }
     const cutoff = Date.now() - TT().PURGE_DAYS*86400000;      /* retention purge */
     items = items.filter(n => new Date(n.createdAt).getTime() > cutoff);
     seq = items.length; return items.length; }
@@ -45,6 +126,7 @@ window.EKO_NOTIF = (function(){
 
   /* ---- the single entry point: every rule that can be enforced on ADD ---- */
   function add(evt){
+    if(!SITE){ console.warn('[notif] no open project: not recorded:', evt && evt.type); return null; }
     const def = TT().byType[evt.type];
     if(!def){ console.error('[notif] unknown type refused:', evt.type); return null; }
     if(evt.actorId === ME && !SELF_CONFIRM.includes(evt.type)){
@@ -128,7 +210,7 @@ window.EKO_NOTIF = (function(){
     return n;
   }
 
-  function list(){ return items.filter(n => !n.archivedAt); }
+  function list(){ return items.filter(n => !n.archivedAt).concat(remote.filter(n => !n.archivedAt)); }
   function unread(siteId){
     return list().filter(n => !n.readAt && (!siteId || n.siteId === siteId));
   }
@@ -136,20 +218,40 @@ window.EKO_NOTIF = (function(){
     return list().filter(n => !n.readAt && n.siteId !== SITE);
   }
   function badge(siteId){
-    const c = unread(siteId || SITE).length;
+    const site = siteId || SITE;
+    const c = items.filter(n => !n.archivedAt && !n.readAt && n.siteId === site).length
+            + (site === SITE ? remoteUnreadNow() : 0);
     return c === 0 ? '' : (c > TT().BADGE_CAP ? TT().BADGE_CAP + '+' : String(c));
   }
   function markRead(id){ const n = items.find(x => x.id === id);
-    if(n && !n.readAt){ n.readAt = new Date().toISOString(); save(); } }
+    if(n && !n.readAt){ n.readAt = new Date().toISOString(); save(); return; }
+    const r = remoteFind(id);
+    if(r && !r.readAt){ r.readAt = new Date().toISOString(); changed();
+      send('POST', '/notifications/' + enc(id) + '/opened', null, () => { r.readAt = null; }); } }
   function markAllRead(siteId){
-    unread(siteId).forEach(n => { n.readAt = new Date().toISOString(); }); save(); }
+    const now = new Date().toISOString();
+    items.filter(n => !n.archivedAt && !n.readAt && (!siteId || n.siteId === siteId)).forEach(n => { n.readAt = now; }); save();
+    const opened = (!siteId || siteId === SITE) ? remote.filter(n => !n.archivedAt && !n.readAt) : [];
+    if(opened.length || (REMOTE && remoteUnread)){ opened.forEach(n => { n.readAt = now; }); changed();
+      send('POST', '/notifications/opened-all', null, () => { opened.forEach(n => { n.readAt = null; }); }); } }
   function archive(id){ const n = items.find(x => x.id === id);
-    if(n){ n.archivedAt = new Date().toISOString(); save(); } return n; }
+    if(n){ n.archivedAt = new Date().toISOString(); save(); return n; }
+    const r = remoteFind(id);
+    if(r && !r.archivedAt){ r.archivedAt = new Date().toISOString(); changed();
+      send('POST', '/notifications/' + enc(id) + '/dismiss', null, () => { r.archivedAt = null; }); }
+    return r; }
   function unarchive(id){ const n = items.find(x => x.id === id);
-    if(n){ n.archivedAt = null; save(); } }
+    if(n){ n.archivedAt = null; save(); return; }
+    if(!REMOTE || typeof id !== 'string') return;
+    const r = remoteFind(id), was = r ? r.archivedAt : null;   /* a refresh may already have dropped it */
+    if(r){ r.archivedAt = null; changed(); }
+    send('DELETE', '/notifications/' + enc(id) + '/dismiss', null, () => { if(r) r.archivedAt = was; }); }
   function archiveRead(siteId){
-    list().filter(n => n.readAt && (!siteId || n.siteId === siteId))
-      .forEach(n => { n.archivedAt = new Date().toISOString(); }); save(); }
+    const now = new Date().toISOString();
+    items.filter(n => !n.archivedAt && n.readAt && (!siteId || n.siteId === siteId)).forEach(n => { n.archivedAt = now; }); save();
+    const gone = (!siteId || siteId === SITE) ? remote.filter(n => !n.archivedAt && n.readAt) : [];
+    if(gone.length){ gone.forEach(n => { n.archivedAt = now; }); changed();
+      send('POST', '/notifications/dismiss-opened', null, () => { gone.forEach(n => { n.archivedAt = null; }); }); } }
 
   const hooks = { onAdd: null };
 
@@ -162,6 +264,7 @@ window.EKO_NOTIF = (function(){
      (WO-2287, CH-2) stay Latin by law. tools/parity.js checks every param. */
   const B = (en, ar) => ({ en, ar });
   function seed(){
+    if(!SEEDS) return 0;   /* demo scaffolding: never written into a real project, whoever calls */
     items = []; seq = 0;
     const S = (mins, evt) => { const n = add(Object.assign({ createdAt: iso(mins) }, evt)); return n; };
     /* yesterday */
@@ -244,9 +347,14 @@ window.EKO_NOTIF = (function(){
   }
   function stopStream(){ if(streamTimer){ clearInterval(streamTimer); streamTimer = null; } }
 
-  if(!load() && (!window.EKO_BUILD || window.EKO_BUILD.demo)) seed();   /* D129: the seeded history is demo scaffolding; a client build starts empty */
+  if(!load() && SEEDS) seed();   /* D129: the seeded history is demo scaffolding; a client build or a real project starts empty */
 
-  return { add, list, unread, badge, otherUnread, markRead, markAllRead, archive, unarchive,
+  self = { add, list, unread, badge, otherUnread, markRead, markAllRead, archive, unarchive,
            archiveRead, seed, startStream, stopStream, hooks, ME, SITE,
-           prefOn, setPref };
+           prefOn, setPref, REMOTE, refresh, remoteError: () => remoteError };
+  if(REMOTE){   /* after this file returns, so live() sees this store as window.EKO_NOTIF */
+    setTimeout(refresh, 0);
+    timer = setInterval(refresh, REFRESH_MS);
+  }
+  return self;
 })();

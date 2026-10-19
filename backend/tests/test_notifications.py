@@ -47,7 +47,28 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(db.execute("PRAGMA synchronous").fetchone()[0], 2)   # FULL
         self.store.close()
         self.store = notifications.Store(self.store.path)                    # reopening applies nothing twice
-        self.assertEqual([r[0] for r in self.store.db.execute("SELECT version FROM schema_migrations")], [1])
+        self.assertEqual([r[0] for r in self.store.db.execute("SELECT version FROM schema_migrations ORDER BY version")],
+                         [v for v, _ in notifications.MIGRATIONS])   # each version exactly once, in order
+
+    def test_migration_2_gives_existing_events_their_project_recipient_once(self):
+        db = self.store.db
+        db.execute("INSERT INTO notification_events (id, site_id, type, severity, created_at, last_at, state, status, dedup_key)"
+                   " VALUES ('ntf_old', 'siteA', 'int.sync_failed', 'warning', 'x', 'x', 'failed', 'resolved', 'k-old')")
+        db.execute("DELETE FROM schema_migrations WHERE version = 2")   # as if this store predates migration 2
+        self.store.close()
+        self.store = notifications.Store(self.store.path)
+        self.store.close()
+        self.store = notifications.Store(self.store.path)               # reopened: not applied twice
+        rows = [tuple(r) for r in self.store.db.execute("SELECT event_id, user_id, channel FROM notification_recipients")]
+        self.assertEqual(rows, [("ntf_old", "#project:siteA", "inapp")])
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM schema_migrations WHERE version = 2").fetchone()[0], 1)
+
+    def test_a_new_condition_comes_with_its_project_recipient(self):
+        eid = self.store.condition("siteA", "int.sync_failed", True, **SYNC)
+        self.store.condition("siteA", "int.sync_failed", True, **SYNC)     # a repeat poll adds no second recipient
+        rows = [tuple(r) for r in self.store.db.execute("SELECT event_id, user_id FROM notification_recipients")]
+        self.assertEqual(rows, [(eid, notifications.project_recipient("siteA"))])
+        self.assertEqual(self.store.list_notifications("#project:siteA", "siteA")["items"][0]["id"], eid)
 
     def test_repeated_polls_keep_one_active_row(self):
         ids = {self.store.condition("siteA", "int.sync_failed", True, now=T0 + timedelta(seconds=30 * i), **SYNC)
@@ -390,9 +411,244 @@ class RecipientStoreTests(unittest.TestCase):
             with self.assertRaises(notifications.StoreError):   # not ValueError: it is not the caller's input
                 call()
 
-    def test_no_http_route_reaches_the_recipient_operations(self):
+    def test_bulk_open_dismiss_opened_undo_and_unread_count_stay_in_scope(self):
+        a = self.deliver(self.event(at=T0))
+        b = self.deliver(self.event(at=T0 + timedelta(minutes=1)))
+        theirs = self.deliver(self.event(), user="u2")
+        other_site = self.deliver(self.event(site="siteB"))
+        self.assertEqual(self.store.unread_count("u1", "siteA"), 2)
+        self.assertEqual(self.store.mark_all_opened("u1", "siteA", now=T0), 2)
+        self.assertEqual(self.store.mark_all_opened("u1", "siteA", now=T0), 0)            # idempotent
+        self.assertEqual(self.store.unread_count("u1", "siteA"), 0)
+        self.assertIsNone(self.store.get_notification("u2", "siteA", theirs)["opened_at"])
+        self.assertIsNone(self.store.get_notification("u1", "siteB", other_site)["opened_at"])
+        self.assertEqual(self.store.dismiss_opened("u1", "siteA", now=T0), 2)
+        self.assertEqual(self.store.list_notifications("u1", "siteA")["items"], [])
+        back = self.store.undismiss("u1", "siteA", a, now=T0)
+        self.assertIsNone(back["dismissed_at"])
+        self.assertEqual(self.ids(self.store.list_notifications("u1", "siteA")), [a])
+        self.assertIsNone(self.store.undismiss("u1", "siteA", theirs))                     # not this recipient's
+        self.assertIsNone(self.store.undismiss("u1", "siteA", other_site))                 # not this site's
+        self.assertEqual(self.store.undismiss("u1", "siteA", a)["dismissed_at"], None)     # nothing to undo: unchanged
+        statuses = sorted(r[0] for r in self.store.db.execute(
+            "SELECT status FROM notification_delivery_history WHERE user_id = 'u1'"))
+        self.assertEqual(statuses, ["dismissed", "dismissed", "opened", "opened", "undismissed"])
+        del b
+
+    def test_notification_routes_live_only_under_v1(self):
         paths = {getattr(r, "path", "") for r in main.app.routes}
-        self.assertFalse([p for p in paths if p.startswith("/api/notifications")], paths)
+        stray = [p for p in paths if p.startswith("/api/notifications") and not p.startswith(main.NOTIF_BASE + "/")]
+        self.assertEqual(stray, [])
+        self.assertIn(main.NOTIF_BASE + "/notifications", paths)
+
+
+GOOD_WO_READ = 'ver:"3.0"\nequipment,work_orders\n7,123\n'
+
+
+class NotificationApiTests(unittest.TestCase):
+    """The project-scoped API through main's real sign-in path, with the fake FIN client."""
+    MARSA = None   # set in setUp: config.json's own FIN project
+    OTHER = "ellisdonDemo"
+
+    def setUp(self):
+        self.MARSA = main.BASE_CONFIG["project_name"]
+        self._real_client, self._real_store = main.FinScramClient, notifications._store
+        main.FinScramClient = FakeFinClient
+        FakeFinClient.slow_realtime = False
+        FakeFinClient.missing_points = set()
+
+        async def good_read(_self, endpoint, is_text=False):   # work orders read fine: no polling noise
+            return GOOD_WO_READ
+        FakeFinClient.fetch_api = good_read
+        self.dir = tempfile.mkdtemp(prefix="eko-notif-api-")
+        notifications._store = notifications.Store(os.path.join(self.dir, "n.sqlite3"))
+        self.http = TestClient(main.app)
+        self.http.__enter__()
+
+    def tearDown(self):
+        self.http.post("/api/fin/logout")
+        self.http.__exit__(None, None, None)
+        main.FinScramClient = self._real_client
+        main.apply_project_settings(None)
+        notifications._store.close()
+        notifications._store = self._real_store
+        if "fetch_api" in FakeFinClient.__dict__:
+            del FakeFinClient.fetch_api
+
+    # ── helpers ──
+    def login(self, fin_project, project_id, password="p"):
+        r = self.http.post("/api/fin/login", json={"username": "u", "password": password,
+                                                   "settings": {"finProjectName": fin_project}, "project_id": project_id})
+        self.assertEqual(r.status_code, 200, r.text)
+
+    def switch(self, fin_project, project_id):
+        r = self.http.post("/api/fin/project-settings", json={"settings": {"finProjectName": fin_project}, "project_id": project_id})
+        self.assertEqual(r.status_code, 200, r.text)
+
+    def call(self, method, path, project="proj-marsa", **kw):
+        headers = kw.pop("headers", {})
+        if project is not None:
+            headers["X-Eko-Project"] = project
+        return self.http.request(method, main.NOTIF_BASE + path, headers=headers, **kw)
+
+    def on_app(self, fn):
+        """Run fn on the app's thread: the store has one SQLite connection, used by one thread."""
+        return self.http.portal.call(fn)
+
+    def event(self, site, type_="int.sync_failed", state="failed", now=None):
+        return self.on_app(lambda: notifications.store().condition(site, type_, True, state=state, now=now, **SYNC))
+
+    def page(self, project="proj-marsa", **params):
+        r = self.call("GET", "/notifications", project=project, params=params)
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()
+
+    def assert_error(self, r, status, code):
+        self.assertEqual(r.status_code, status, r.text)
+        self.assertEqual(r.json()["error"]["code"], code)
+        self.assertEqual(set(r.json()["error"]), {"code", "message", "details"})
+
+    # ── access ──
+    def test_every_route_refuses_when_the_backend_is_not_signed_in(self):
+        for method, path in (("GET", "/notifications"), ("GET", "/notifications/ntf_x"), ("POST", "/notifications/ntf_x/opened"),
+                             ("POST", "/notifications/ntf_x/dismiss"), ("DELETE", "/notifications/ntf_x/dismiss"),
+                             ("POST", "/notifications/opened-all"), ("POST", "/notifications/dismiss-opened"),
+                             ("GET", "/preferences"), ("PUT", "/preferences")):
+            self.assert_error(self.call(method, path), 401, "unauthenticated")
+
+    def test_the_project_header_is_required_and_must_be_the_served_project(self):
+        self.login(self.MARSA, "proj-marsa")
+        self.assert_error(self.call("GET", "/notifications", project=None), 400, "project_required")
+        for forged in ("proj-other", "", " proj-marsa", "PROJ-MARSA", "proj-marsa%00"):
+            r = self.call("GET", "/notifications", project=forged)
+            self.assertIn(r.status_code, (400, 409), forged)
+        self.assertEqual(self.call("GET", "/notifications").status_code, 200)
+
+    def test_a_project_fin_does_not_validate_is_refused(self):
+        self.login("ghost", "proj-ghost")              # the fake FIN cannot read "ghost": signed in, not validated
+        self.assertIs(self.http.get("/api/fin/status").json()["project_validated"], False)
+        self.assert_error(self.call("GET", "/notifications", project="proj-ghost"), 409, "project_not_validated")
+        self.assert_error(self.call("POST", "/notifications/opened-all", project="proj-ghost"), 409, "project_not_validated")
+
+    def test_cross_origin_browsers_are_refused(self):
+        self.login(self.MARSA, "proj-marsa")
+        pre = self.http.options(main.NOTIF_BASE + "/notifications/opened-all", headers={
+            "Origin": "https://evil.example", "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "x-eko-project"})
+        self.assertNotIn("access-control-allow-origin", {k.lower() for k in pre.headers})
+        for path in (main.NOTIF_BASE + "/notifications", "/api/fin/status", "/api/fin/alarms"):
+            r = self.http.get(path, headers={"Origin": "https://evil.example", "X-Eko-Project": "proj-marsa"})
+            self.assertNotIn("access-control-allow-origin", {k.lower() for k in r.headers}, path)
+
+    # ── project scope ──
+    def test_marsa_notifications_are_listed_with_count_scope_and_stamp(self):
+        self.login(self.MARSA, "proj-marsa")
+        empty = self.page()
+        self.assertEqual((empty["items"], empty["next_cursor"], empty["unread_count"], empty["scope"]), ([], None, 0, "project"))
+        eid = self.event(self.MARSA)
+        r = self.call("GET", "/notifications")
+        self.assertEqual(r.headers.get("X-Eko-Project"), "proj-marsa")
+        body = r.json()
+        self.assertEqual([i["id"] for i in body["items"]], [eid])
+        self.assertEqual((body["unread_count"], body["items"][0]["site_id"]), (1, self.MARSA))
+
+    def test_another_project_cannot_be_read_counted_or_changed(self):
+        mine, theirs = self.event(self.MARSA), self.event(self.OTHER)
+        self.login(self.MARSA, "proj-marsa")
+        self.assertEqual([i["id"] for i in self.page()["items"]], [mine])
+        self.assertEqual(self.page()["unread_count"], 1)
+        for method, path in (("GET", f"/notifications/{theirs}"), ("POST", f"/notifications/{theirs}/opened"),
+                             ("POST", f"/notifications/{theirs}/dismiss"), ("DELETE", f"/notifications/{theirs}/dismiss")):
+            self.assert_error(self.call(method, path), 404, "not_found")
+        self.call("POST", "/notifications/opened-all")
+        self.call("POST", "/notifications/dismiss-opened")
+        self.call("PUT", "/preferences", json={"master_enabled": False})
+        other = self.on_app(lambda: notifications.store().get_notification(
+            notifications.project_recipient(self.OTHER), self.OTHER, theirs))
+        self.assertEqual((other["opened_at"], other["dismissed_at"]), (None, None))
+        self.assertTrue(self.on_app(lambda: notifications.store().get_preferences(
+            notifications.project_recipient(self.OTHER)))["master_enabled"])
+
+    def test_switching_project_serves_the_new_project_only(self):
+        mine, theirs = self.event(self.MARSA), self.event(self.OTHER)
+        self.login(self.MARSA, "proj-marsa")
+        self.assertEqual([i["id"] for i in self.page()["items"]], [mine])
+        self.switch(self.OTHER, "proj-other")
+        self.assert_error(self.call("GET", "/notifications"), 409, "project_mismatch")   # the old dashboard is refused
+        self.assertEqual([i["id"] for i in self.page(project="proj-other")["items"]], [theirs])
+        self.switch(self.MARSA, "proj-marsa")
+        self.assertEqual([i["id"] for i in self.page()["items"]], [mine])
+
+    # ── lifecycle ──
+    def test_open_dismiss_undo_bulk_and_unread_count(self):
+        a = self.event(self.MARSA, state="a", now=T0)
+        b = self.event(self.MARSA, state="b", now=T0 + timedelta(minutes=1))
+        self.login(self.MARSA, "proj-marsa")
+        self.assertEqual(self.page()["unread_count"], 2)
+        first = self.call("POST", f"/notifications/{a}/opened").json()["opened_at"]
+        self.assertEqual(self.call("POST", f"/notifications/{a}/opened").json()["opened_at"], first)   # idempotent
+        self.assertEqual(self.page(view="unread")["unread_count"], 1)
+        self.assertEqual([i["id"] for i in self.page(view="unread")["items"]], [b])
+        self.assertIsNotNone(self.call("POST", f"/notifications/{a}/dismiss").json()["dismissed_at"])
+        self.assertEqual([i["id"] for i in self.page()["items"]], [b])
+        self.assertIsNone(self.call("DELETE", f"/notifications/{a}/dismiss").json()["dismissed_at"])  # Undo
+        self.assertEqual(sorted(i["id"] for i in self.page()["items"]), sorted([a, b]))
+        self.assertEqual(self.call("POST", "/notifications/opened-all").json(), {"updated": 1})
+        self.assertEqual(self.page()["unread_count"], 0)
+        self.assertEqual(self.call("POST", "/notifications/dismiss-opened").json(), {"updated": 2})
+        self.assertEqual(self.page()["items"], [])
+        self.assert_error(self.call("POST", "/notifications/ntf_missing/opened"), 404, "not_found")
+
+    def test_preferences_round_trip_for_the_project(self):
+        self.login(self.MARSA, "proj-marsa")
+        self.assertEqual(self.call("GET", "/preferences").json(), {"master_enabled": True, "types": {}})
+        r = self.call("PUT", "/preferences", json={"types": {"report.ready": False}, "master_enabled": False})
+        self.assertEqual(r.json(), {"master_enabled": False, "types": {"report.ready": False}})
+        self.assertEqual(self.call("GET", "/preferences").json()["master_enabled"], False)
+
+    def test_bad_input_is_a_400_in_the_contract_shape(self):
+        self.login(self.MARSA, "proj-marsa")
+        for params in ({"limit": "0"}, {"limit": "abc"}, {"limit": "101"}, {"view": "archived"}, {"cursor": "nope"}):
+            self.assert_error(self.call("GET", "/notifications", params=params), 400, "invalid_input")
+        for body in ({"master_enabled": "yes"}, {"types": {"x": 1}}, {"user_id": "u2"}, ["x"]):
+            self.assert_error(self.call("PUT", "/preferences", json=body), 400, "invalid_input")
+        self.assert_error(self.call("PUT", "/preferences", content=b"{not json", headers={"Content-Type": "application/json"}),
+                          400, "invalid_input")
+
+    def test_a_storage_failure_is_a_500_with_the_fixed_message_only(self):
+        self.login(self.MARSA, "proj-marsa")
+        held, env = notifications._store, os.environ["EKO_NOTIFICATION_DB"]
+        # a store that cannot open (a refused path), never a connection closed under the poller
+        os.environ["EKO_NOTIFICATION_DB"] = os.path.join(notifications.BUNDLE_DIR, "refused.sqlite3")
+        self.on_app(lambda: setattr(notifications, "_store", None))
+        try:
+            r = self.call("GET", "/notifications")
+            self.assert_error(r, 500, "storage_failed")
+            self.assertEqual(r.json()["error"]["message"], notifications.STORE_FAILED)
+            self.assertNotIn("sqlite", r.text.lower())
+            self.assertNotIn("refused.sqlite3", r.text)
+        finally:
+            os.environ["EKO_NOTIFICATION_DB"] = env
+            self.on_app(lambda: setattr(notifications, "_store", held))
+
+    def test_no_fin_credential_reaches_a_response(self):
+        secret = "pw-NEVER-SHOWN-7f3a"
+        self.login(self.MARSA, "proj-marsa", password=secret)
+        eid = self.event(self.MARSA)
+        responses = [self.call("GET", "/notifications"), self.call("GET", f"/notifications/{eid}"),
+                     self.call("POST", f"/notifications/{eid}/opened"), self.call("GET", "/preferences"),
+                     self.http.get("/api/fin/status"), self.http.get("/api/auth/status"), self.http.get("/api/fin/config")]
+        for r in responses:
+            dump = r.text + " ".join(f"{k}:{v}" for k, v in r.headers.items())
+            self.assertNotIn(secret, dump)
+            self.assertNotIn("scram data=", dump.lower())
+
+    def test_the_work_order_sync_trigger_reaches_the_api(self):
+        del FakeFinClient.fetch_api                 # the fake has no read: the work-order sync fails
+        self.login(self.MARSA, "proj-marsa")
+        items = wait_for(lambda: self.page()["items"])
+        self.assertEqual(items[0]["type"], "int.sync_failed")
+        self.assertEqual(items[0]["params"]["system"], "FIN")
 
 
 class DbPathTests(unittest.TestCase):
