@@ -1235,13 +1235,14 @@ window.EKO_C = (function(){
       if (!groups.length || typeof window.ekoCompareBars !== 'function') {
         return `<p class="tCap">${esc(t('emptyDash'))} · ${esc(t(reason))}</p>`;
       }
-      const cap = dayGroups.length >= 2
-        ? `${esc(trP(cmp.actName || t('apCmpActual')))} · ${esc(t('apCmpDays'))}`
+      const days = dayGroups.length >= 2;
+      const cap = days
+        ? `${esc(trP(cmp.actName || t('apCmpActual')))} · ${esc(t('apCmpDays'))}${cmp.unit ? ` · ${esc(cmp.unit)}` : ''}`
         : esc(t('apCmpCap'));
-      const bars = window.ekoCompareBars(groups, 240, 88);
+      const bars = window.ekoCompareBars(groups, { unit: days ? cmp.unit : '', fmt: v => fmt(v, 1), actLbl: t('apCmpActual'), spLbl: t('apCmpSp') });
       return `<p class="tCap">${cap}</p>
         <div class="apcmpleg"><span class="apcmpdot" data-k="act"></span>${esc(t('apCmpActual'))}<span class="apcmpdot" data-k="sp"></span>${esc(t('apCmpSp'))}</div>
-        <div class="systrend apcmpchart"><svg viewBox="0 0 240 88" preserveAspectRatio="xMidYMid meet">${bars.svg}</svg></div>`;
+        <div class="apcmpchart">${bars.html}</div>`;
     })();
     const pack = docsFor(E, r);
     const omDocs = pack ? (pack.om ? [pack.om] : []) : (r.omDocs || []);
