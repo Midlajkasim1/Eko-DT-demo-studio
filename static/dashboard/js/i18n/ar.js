@@ -89,6 +89,7 @@ window.EKO_I18N.ar = {
 
   "cwo": "إنشاء أمر عمل",
   "locate3d": "تحديد في النموذج",
+  "backToAssets": "العودة إلى الأصول",
   "woRaised": "تم إنشاء أمر العمل {id} · مُسند",
   "woNoCmms": "لا يوجد نظام صيانة (CMMS) متصل بهذا المشروع، لذلك لم يُنشأ أمر عمل.",
   "details": "التفاصيل",
@@ -875,6 +876,8 @@ window.EKO_I18N.ar = {
   "nt.alarm.cleared.b": "زال التنبيه \u201c{alarm}\u201d على {asset} بعد {dur}",
   "nt.alarm.reraised.t": "عاد التنبيه",
   "nt.alarm.reraised.b": "زال التنبيه \u201c{alarm}\u201d على {asset} ثم عاد خلال 24 ساعة",
+  "nt.alarm.critical.t": "تنبيه حرج",
+  "nt.alarm.critical.b": "\u201c{message}\u201d على {asset}",
   "nt.assign.to_you.t": "أُسند إليك",
   "nt.assign.to_you.b": "أسند إليك {user} أمر العمل {wo} على {asset}",
   "nt.mention.comment.t": "ذُكرت في تعليق",

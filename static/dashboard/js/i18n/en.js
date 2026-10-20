@@ -91,6 +91,7 @@ window.EKO_I18N.en = {
 
   "cwo": "Create work order",
   "locate3d": "Locate in 3D",
+  "backToAssets": "Back to Assets",
   "woRaised": "Work order {id} raised · Assigned",
   "woNoCmms": "No maintenance system (CMMS) is connected for this project, so no work order was raised.",
   "details": "Details",
@@ -810,6 +811,8 @@ window.EKO_I18N.en = {
   "nt.alarm.cleared.b": "\u201c{alarm}\u201d on {asset} cleared after {dur}",
   "nt.alarm.reraised.t": "Alarm returned",
   "nt.alarm.reraised.b": "\u201c{alarm}\u201d on {asset} cleared and returned within 24h",
+  "nt.alarm.critical.t": "Critical alarm",
+  "nt.alarm.critical.b": "\u201c{message}\u201d on {asset}",
   "nt.assign.to_you.t": "Assigned to you",
   "nt.assign.to_you.b": "{user} assigned you {wo} on {asset}",
   "nt.mention.comment.t": "You were mentioned",

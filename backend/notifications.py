@@ -327,6 +327,14 @@ class Store:
             )
         return event_id
 
+    def active_states(self, site_id: str, type_: str) -> list[tuple]:
+        """(asset_id, state) of this site's still-active conditions of one type: what a poll that no
+        longer sees them must resolve."""
+        _check_ids("system", site_id)
+        rows = self._read("SELECT asset_id, state FROM notification_events WHERE site_id = ? AND type = ? AND status = 'active'",
+                          [site_id, type_])
+        return [(r["asset_id"], r["state"]) for r in rows]
+
     def events(self, site_id: str) -> list[dict]:
         """A site's events, newest first. Never another site's."""
         rows = self.db.execute(

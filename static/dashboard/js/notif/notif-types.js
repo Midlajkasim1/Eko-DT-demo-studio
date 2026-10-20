@@ -2,8 +2,9 @@
    Notification TYPE TABLE (D48 stage 1) — the complete v1 set. Data-driven:
    every type carries its icon, category, default preference, i18n keys and
    deep-link kind. THE LAW: the bell states what happened to WORK, DATA and
-   PEOPLE. No type exists for an alarm RAISE — an alarm raise belongs to the
-   ribbon and produces ZERO notifications. Levels are info | attention
+   PEOPLE. An alarm raise belongs to the ribbon and produces ZERO notifications,
+   with ONE client-approved exception: alarm.critical, off unless the site
+   allows it AND the project's toggle is on. Levels are info | attention
    (attention renders amber accents only; nothing in the bell is ever red).
    ============================================================================ */
 window.EKO_NOTIF_TYPES = (function(){
@@ -52,6 +53,7 @@ window.EKO_NOTIF_TYPES = (function(){
     T('alarm.ack_recorded',     'alarmLifecycle', 'info',      true,  'alarm'),
     T('alarm.cleared',          'alarmLifecycle', 'info',      true,  'alarm'),
     T('alarm.reraised',         'alarmLifecycle', 'attention', true,  'alarm'),
+    T('alarm.critical',         'alarmLifecycle', 'attention', false, 'alarm'),   /* opt-in; also gated by the site setting */
     /* D. ASSIGNMENT AND COLLABORATION */
     T('assign.to_you',          'collaboration',  'info',      true,  'workOrder'),
     T('mention.comment',        'collaboration',  'info',      true,  'asset'),

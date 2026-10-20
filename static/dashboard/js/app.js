@@ -178,6 +178,8 @@
       const gate = window.EKO_ADDONS && window.EKO_ADDONS.lockFor(this, module ?? this.state.module, sub);   /* D125: a gated route opens its add-on, never a half page */
       if(gate){ this.set({ born:'dlg', teaserKey: gate, dlg:'teaser', mobMore:false }); return; }
       if(pageId !== this.state.pageId) this.state._prev = { pageId: this.state.pageId, module: this.state.module, sub: this.state.sub };
+      /* leaving the Locate-in-3D view, by Back to Assets or any other route: panels as they were */
+      if(this.state.locFocus && pageId !== this.state.pageId){ Object.assign(this.state, this.state.locFocus); this.state.locFocus = null; }
       if(window.EKO_SURF) window.EKO_SURF.closeAll();          /* R4 (D67) */
       const targetModule = module ?? this.state.module;
       const targetSub = sub ?? null;
@@ -1038,11 +1040,20 @@
     woOpen(el){ E.set({ assetSel: el.dataset.asset, apTab: 'alarms' }); },
     locate(el){ const id = el.dataset.asset;
       const a = E.data.alarms.find(x => x.asset === id);
-      if(!document.getElementById('vpmain'))
+      /* Locate in 3D gives the model the room: the full viewer (the register's strip is too narrow),
+         the rail and the summary folded for this visit only (never saved), and locBack to return */
+      if(!E.state.locFocus) E.state.locFocus = { navMin: E.state.navMin, ovpMin: E.state.ovpMin };
+      E.state.navMin = true; E.state.ovpMin = true;
+      if(E.stacked()) E.state.modelFs = true;
+      if(!document.getElementById('vpmain') || document.querySelector('.regmodelwrap'))
         E.state.pageId = 'marsa-overview', E.state.module = 'overview', E.state.sub = null;
       E.state.mkPulse = a ? a.id : null; E.state.paint = id; render();   /* located equipment is coloured like a marker tap */
       E.engine.flyTo(id);
       setTimeout(() => { E.state.mkPulse = null; render(); }, 2200); },
+    /* Back to Assets from the Locate-in-3D view: the register again, the camera and the model's
+       highlight stay; go() puts the rail and the summary back as they were and, like any route
+       change (R4), closes the asset panel, so the list has its full width to pick the next asset */
+    locBack(){ E.go('assets-register', 'assets', 'reg'); },
 
     /* One handler for the bar, the sheet, the radial, and the shortcut keys.
        Select and Measure share the click. Slice stays on until it is clicked off or Reset. */

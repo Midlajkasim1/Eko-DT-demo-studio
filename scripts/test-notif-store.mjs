@@ -297,6 +297,21 @@ await atest('switching A -> B in one window: B reads B, the old store goes quiet
   assert.deepStrictEqual(ids(win.load(project('proj-A'))), [])     // back to A: nothing of B's
 })
 
+await atest('a critical FIN alarm from the server shows in the bell; the type is off by default', async () => {
+  const be = fakeBackend('proj-A')
+  be.add('proj-A', 'ntf_c1', { type: 'alarm.critical', severity: 'critical', asset_id: 'AHU-01',
+    source: { kind: 'alarm', id: '@a1' }, params: { asset: 'AHU-01', message: 'Supply temp high' } })
+  const N = dashboardWindow({ backend: be }).load(project('proj-A'))
+  await N.refresh()
+  const row = N.list().find(n => n.id === 'ntf_c1')
+  assert.deepStrictEqual(plain([row.titleKey, row.bodyKey, row.level, row.category, row.params.asset]),
+    ['nt.alarm.critical.t', 'nt.alarm.critical.b', 'attention', 'alarmLifecycle', 'AHU-01'])
+  assert.strictEqual(N.badge(), '1')
+  assert.strictEqual(N.prefOn('alarm.critical'), false, 'opt-in: off until the project turns it on')
+  const local = boot({ injected: project('proj-B'), storage: memoryStorage() })   // no server: the registry default
+  assert.strictEqual(local.prefOn('alarm.critical'), false)
+})
+
 await atest('demo builds and direct mode never call the server', async () => {
   const be = fakeBackend('proj-A'); be.add('proj-A', 'ntf_1')
   const demo = dashboardWindow({ backend: be }).load(null)

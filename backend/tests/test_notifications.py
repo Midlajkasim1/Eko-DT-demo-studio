@@ -524,6 +524,32 @@ class NotificationApiTests(unittest.TestCase):
             self.assertIn(r.status_code, (400, 409), forged)
         self.assertEqual(self.call("GET", "/notifications").status_code, 200)
 
+    # ── identifiers: X-Eko-Project is the Eko-DT project id, never the FIN project name ──
+    def test_the_fin_project_name_is_not_the_project_header(self):
+        self.login(self.MARSA, "proj-marsa")
+        st = self.http.get("/api/fin/status").json()
+        self.assertEqual((st["project_id"], st["project_name"]), ("proj-marsa", self.MARSA))   # two different identifiers
+        self.assert_error(self.call("GET", "/notifications", project=self.MARSA), 409, "project_mismatch")
+        self.assertEqual(self.call("GET", "/notifications", project="proj-marsa").status_code, 200)
+        eid = self.event(self.MARSA)
+        self.assertEqual(self.page()["items"][0]["site_id"], self.MARSA)    # the site id is the FIN project name
+
+    def test_signed_in_without_an_eko_project_every_header_is_refused(self):
+        # the viewer's sign-in and login.html send no project: the backend then serves no Eko-DT project
+        r = self.http.post("/api/fin/login", json={"username": "u", "password": "p"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIsNone(self.http.get("/api/fin/status").json()["project_id"])
+        for header in ("proj-marsa", self.MARSA, "None", "null"):
+            self.assert_error(self.call("GET", "/notifications", project=header), 409, "project_mismatch")
+
+    def test_switching_updates_the_identifier_the_header_must_match(self):
+        self.login(self.MARSA, "proj-marsa")
+        self.switch(self.OTHER, "proj-other")
+        self.assertEqual(self.http.get("/api/fin/status").json()["project_id"], "proj-other")
+        self.assertEqual(self.call("GET", "/notifications", project="proj-other").status_code, 200)
+        for stale in ("proj-marsa", self.OTHER):
+            self.assert_error(self.call("GET", "/notifications", project=stale), 409, "project_mismatch")
+
     def test_a_project_fin_does_not_validate_is_refused(self):
         self.login("ghost", "proj-ghost")              # the fake FIN cannot read "ghost": signed in, not validated
         self.assertIs(self.http.get("/api/fin/status").json()["project_validated"], False)

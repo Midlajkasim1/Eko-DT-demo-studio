@@ -846,6 +846,16 @@
   touch-action:none
 }
 
+/* Back to Assets in the Locate-in-3D view: start side, under the folded summary's header (top 10 +
+   ~40px), so a narrow viewer (the host beside its side panel) never puts it over that header */
+.dashboard-native-container .vpback {
+  position:absolute;
+  top:58px;
+  inset-inline-start:12px;
+  z-index:58;
+  min-height:34px
+}
+
 .dashboard-native-container #enginehost {
   position:absolute;
   inset:0;
@@ -1205,7 +1215,11 @@
   color:var(--warnTx)
 }
 
+/* above the page beside it: in the host the dashboard is narrower than the window, so the register's
+   desktop grid can crush the table, whose spill (position:relative) otherwise took the panel's clicks */
 .dashboard-native-container #assetpanel {
+  position:relative;
+  z-index:1;
   flex:none;
   width:var(--spPan,380px);
   transition:width .2s ease;
@@ -5910,7 +5924,8 @@
   display:none
 }
 
-@media (max-width:760px) {
+/* 1023px = where the pills hide (stacked layout); at 760 tablets had no Locate in 3D at all */
+@media (max-width:1023px) {
   .dashboard-native-container .apfootmob {
     display:flex;
     position:sticky;

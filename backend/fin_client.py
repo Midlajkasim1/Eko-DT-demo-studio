@@ -811,6 +811,10 @@ class FinScramClient:
         _diag_alarm_header(alarms_text, len(alarms))   # TEMP-DIAG: remove with the block above
         attach_alarm_details(alarms_text or "", alarms)
         self.last_alarm_rows = alarms
+        # Did FIN answer with a non-error Zinc grid? A failed read also parses to no rows, and must
+        # never be taken for "all alarms cleared"
+        first = (alarms_text or "").lstrip("\ufeff").lstrip().split("\n", 1)[0]
+        self.last_alarm_read_ok = first.startswith("ver:") and not re.search(r"\berr\b", first)
         self.last_point_rows = points
 
         # Extract FDD points from alarm metadata

@@ -11,6 +11,7 @@ import json
 import mimetypes
 import os
 import re
+import sqlite3
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Optional
@@ -300,6 +301,8 @@ async def realtime_loop():
             cached_fdd_summary = _build_fdd_summary(realtime)
             cached_meter_data = _extract_meters(realtime, CONFIG.get("meter_profile", {}))
             cached_alarm_data = _flatten_alarms(client.last_alarm_rows, CONFIG.get("severity_bands", {}))
+            _note_critical_alarms(client.project_name, cached_alarm_data["alarms"],
+                                  getattr(client, "last_alarm_read_ok", False))
             cached_facility = _compute_facility_services(realtime)
             cached_power_history = await client.fetch_power_histories(pw_endpoints)
             if (
@@ -464,6 +467,8 @@ def _flatten_alarms(rows: list, bands: dict) -> dict:
         if detail.lower() == message.strip().lower():
             detail = ""
         alarms.append({
+            # FIN's own record id, as sent (None when FIN sends none: never made up)
+            "id": safe_get(row.get("id"), "val") or None,
             "source": safe_get(source, "dis") or safe_get(source, "val") or "",
             "message": message,
             "detail": detail,
@@ -1259,6 +1264,36 @@ def _attach_workorders():
     for eq in equipment:
         equip_id = norm_id(eq.get("equipId"))
         eq["workOrders"] = list(grouped.get(equip_id, []))
+
+
+CRITICAL_ALARM = "alarm.critical"
+
+
+def _note_critical_alarms(site: str, alarms: list, read_ok: bool) -> None:
+    """Contract trigger "critical alarm": only when the site allows it (config.json
+    critical_alarm_sites lists its FIN project) AND the project's alarm.critical toggle is on; both
+    are off by default. One row per open critical FIN alarm, keyed by FIN's own id (an alarm with
+    no id is not notified), resolved once FIN stops reporting it. A failed or error read changes
+    nothing: an answer FIN did not give is not "all clear"."""
+    if not read_ok or not site:
+        return
+    try:
+        store = notifications.store()
+        open_now = {a["id"]: a for a in alarms if a.get("severity") == "critical" and a.get("id")}
+        fields = dict(severity="critical", source_kind="alarm")
+        for asset, state in store.active_states(site, CRITICAL_ALARM):   # cleared since the last poll
+            if state not in open_now:
+                store.condition(site, CRITICAL_ALARM, False, asset_id=asset, state=state, source_ref=state, **fields)
+        allowed = site in [s for s in (BASE_CONFIG.get("critical_alarm_sites") or []) if isinstance(s, str)]
+        if not allowed or not store.wants(notifications.project_recipient(site), CRITICAL_ALARM, default=False):
+            return
+        for fin_id, a in open_now.items():
+            store.condition(site, CRITICAL_ALARM, True, asset_id=a.get("source") or None, state=fin_id,
+                            source_ref=fin_id, params={"asset": a.get("source") or "", "message": a.get("message") or "",
+                                                       "occurred": a.get("occurred") or "", "priority": a.get("priority")},
+                            **fields)
+    except (notifications.StoreError, sqlite3.Error, ValueError) as exc:
+        print(f"[notifications] critical alarms not recorded: {exc.__cause__ or exc}")
 
 
 def _note_workorder_sync(error: str) -> None:

@@ -66,6 +66,7 @@
   pointer-events: none;
 }
 .dashboard-native-container .mklayer .mk,
+.dashboard-native-container .vpback,
 .dashboard-native-container .pmuchip,
 .dashboard-native-container .mkpop,
 .dashboard-native-container .vradial,
