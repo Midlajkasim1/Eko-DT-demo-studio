@@ -187,13 +187,36 @@ def display_cur_val(val: Any, nav_lower: str, unit: str) -> tuple[str, str]:
             return clip_decimals(s), "Str"
     if isinstance(val, (int, float)):
         is_fdd = nav_lower.startswith("fd") or "fdd" in nav_lower or nav_lower.startswith("rule")
-        if not is_fdd and (unit == "%" or any(x in nav_lower for x in ["valve", "coil", "demand"])):
+        if not is_fdd and unit == "%":
             return f"{int(val)}%", "Number"
         shown = trunc2(float(val))
         if unit:
             shown = f"{shown}{unit}"
         return shown, "Number"
     return clip_decimals(str(val)), "Str"
+
+
+def bool_state(val: Any) -> bool | None:
+    """True/False for a FIN Bool curVal (T, F, or T "display"), else None."""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        m = re.match(r'^(T|F|true|false)\b', val.strip(), re.I)
+        if m:
+            return m.group(1)[0].upper() == "T"
+    return None
+
+
+def bool_text(point: dict, state: bool | None) -> str | None:
+    """FIN keeps a Bool's false/true text in enum ("NORMAL,FAULT")."""
+    if state is None:
+        return None
+    enum = point.get("enum")
+    if isinstance(enum, str):
+        words = [w.strip() for w in enum.split(",")]
+        if len(words) == 2 and words[int(state)]:
+            return words[int(state)]
+    return "true" if state else "false"
 
 
 def alarm_is_open(row: dict) -> bool:
@@ -323,88 +346,6 @@ def parse_custom_response(text: str) -> dict:
                 continue
 
     return {"rows": rows, "curVal": cur_val, "unit": unit}
-
-
-def parse_alarm_fdd_points(alarms_text: str) -> list[dict]:
-    """Extract FDD Rule_ diagnostic points from << ... >> alarm metadata blocks."""
-    if not alarms_text:
-        return []
-
-    fdd_points = []
-    seen_ids: set[str] = set()
-    segments = alarms_text.split('<<')
-
-    for seg in segments[1:]:
-        if '>>' not in seg:
-            continue
-        block_content, remainder = seg.split('>>', 1)
-        eq_m = re.search(r'(@p:[^\"\s,]+)\s+"([^"]+)"', remainder)
-        if not eq_m:
-            continue
-        eq_val = eq_m.group(1)
-        eq_dis = eq_m.group(2)
-
-        in_table = False
-        for line in block_content.split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith('name,sourceRef,value'):
-                in_table = True
-                continue
-            if not in_table:
-                continue
-
-            # Robust CSV split
-            parts: list[str] = []
-            in_q = False
-            cur: list[str] = []
-            for ch in line:
-                if ch == '"':
-                    in_q = not in_q
-                elif ch == ',' and not in_q:
-                    parts.append(''.join(cur).strip())
-                    cur = []
-                    continue
-                cur.append(ch)
-            parts.append(''.join(cur).strip())
-
-            if len(parts) < 3:
-                continue
-
-            decoded_name = decode_zinc_unicode(parts[0].strip('"'))
-            d_upper = decoded_name.upper()
-            if not (d_upper.startswith("RULE_") or d_upper.startswith("FD&D_")):
-                continue
-
-            synthetic_id = f"fdd_{eq_val}_{decoded_name}"
-            if synthetic_id in seen_ids:
-                continue
-            seen_ids.add(synthetic_id)
-
-            val_raw = parts[2].strip().strip('"')
-            cur_val: Any = decode_zinc_unicode(val_raw)
-            kind = "Bool"
-            if cur_val in ("T", "true"):
-                cur_val = True
-            elif cur_val in ("F", "false"):
-                cur_val = False
-            else:
-                try:
-                    cur_val = float(cur_val)
-                    kind = "Number"
-                except ValueError:
-                    pass
-
-            fdd_points.append({
-                "navName": decoded_name,
-                "id": {"val": synthetic_id, "dis": f"{eq_dis} {decoded_name}"},
-                "equipRef": {"val": eq_val, "dis": eq_dis},
-                "curVal": cur_val,
-                "kind": kind
-            })
-
-    return fdd_points
 
 
 # ─── FIN project list ────────────────────────────────────────────────────────
@@ -765,34 +706,6 @@ class FinScramClient:
         self.last_alarm_rows = alarms
         self.last_point_rows = points
 
-        # Extract FDD points from alarm metadata
-        fdd_points = parse_alarm_fdd_points(alarms_text)
-
-        # Merge extracted FDD points into main points list
-        for fp in fdd_points:
-            fp_nav = fp.get("navName", "").upper()
-            fp_eq_id = safe_get(fp.get("equipRef"), "val")
-            fp_eq_dis = str(safe_get(fp.get("equipRef"), "dis") or "").upper()
-
-            existing = None
-            for p in points:
-                p_nav = str(p.get("navName") or "").upper()
-                if p_nav == fp_nav:
-                    if safe_get(p.get("equipRef"), "val") == fp_eq_id:
-                        existing = p
-                        break
-                    p_id_dis = str(safe_get(p.get("id"), "dis") or "").upper()
-                    if fp_eq_dis and fp_eq_dis in p_id_dis:
-                        existing = p
-                        break
-
-            if existing:
-                existing["curVal"] = fp.get("curVal")
-                if not existing.get("equipRef"):
-                    existing["equipRef"] = fp.get("equipRef")
-            else:
-                points.append(fp)
-
         # Build floor-wise equipment data
         floor_wise: dict[str, dict] = {}
 
@@ -802,21 +715,8 @@ class FinScramClient:
                 continue
 
             equip_id = safe_get(equip.get("id"), "val")
-            equip_nav_upper = nav_name.upper()
-            nav_norm = equip_nav_upper.replace("-", " ").replace("_", " ").strip()
 
-            def is_match(p: dict) -> bool:
-                if safe_get(p.get("equipRef"), "val") == equip_id:
-                    return True
-                dis = str(safe_get(p.get("id"), "dis") or "").upper().replace("-", " ").replace("_", " ")
-                if nav_norm and nav_norm in dis:
-                    return True
-                p_dis = str(p.get("dis") or "").upper().replace("-", " ").replace("_", " ")
-                if nav_norm and nav_norm in p_dis:
-                    return True
-                return False
-
-            equip_points = [p for p in points if is_match(p)]
+            equip_points = [p for p in points if equip_id and safe_get(p.get("equipRef"), "val") == equip_id]
 
             # Filter active alarms
             equip_alarms = []
@@ -858,10 +758,6 @@ class FinScramClient:
                         continue
 
                 val = p.get("curVal")
-                if val is None:
-                    val = p.get("val")
-                if val is None:
-                    val = p.get("v0")
 
                 # A point with no current value is not reporting, but if it is
                 # historized we still keep it so its trend stays chartable.
@@ -881,6 +777,7 @@ class FinScramClient:
                     kind = "Null"
                 else:
                     display_val, kind = display_cur_val(val, nav_lower, unit)
+                state = bool_state(val)
 
                 nav_key = nav_lower.replace(" ", "_")
                 if nav_key in seen_navs:
@@ -890,13 +787,16 @@ class FinScramClient:
                 formatted_points.append({
                     "navName": p_nav,
                     "currentValue": display_val,
-                    # A missing/blank status tag means "no fault reported", not a fault
-                    "status": p.get("status") or p.get("curStatus") or "ok",
+                    "status": p.get("curStatus"),
                     "id": str(safe_get(p.get("id"), "val") or "").lstrip("@"),
                     "his": is_his,
                     "reporting": reporting,
                     "unit": unit,
                     "kind": kind,
+                    # currentValue stays On/Off for the 3D schematics
+                    "bool": state,
+                    "text": bool_text(p, state),
+                    "alarmPoint": p.get("alarmPoint") is True,
                 })
 
             floor = safe_get(equip.get("floorRef"), "dis", "Unknown Floor")
