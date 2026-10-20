@@ -13646,6 +13646,86 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   white-space:nowrap
 }
 
+.dashboard-native-container .cbx[data-dense="1"] {
+  --cbx-min:11px
+}
+
+.dashboard-native-container .cbx[data-dense="1"] .cbxbars {
+  gap:1px
+}
+
+.dashboard-native-container .cbx[data-dense="1"] .cbxbar {
+  width:min(10px, 44%);
+  border-radius:2px 2px 0 0
+}
+
+.dashboard-native-container .cbx[data-dense="1"] .cbxlbl {
+  overflow:visible;
+  text-overflow:clip;
+  padding-inline:0
+}
+
+.dashboard-native-container .aphhead {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:6px;
+  direction:ltr
+}
+
+.dashboard-native-container .aphday {
+  font-size:var(--txValueSz);
+  font-weight:var(--txValueW);
+  color:var(--t1)
+}
+
+.dashboard-native-container .aphnav {
+  flex:none;
+  position:relative;
+  display:flex;
+  align-items:flex-end;
+  gap:1px;
+  height:36px;
+  margin-block-start:8px;
+  padding:3px 0 0;
+  border:1px solid var(--bd1);
+  border-radius:6px;
+  background:var(--s1);
+  cursor:pointer;
+  touch-action:none;
+  user-select:none;
+  direction:ltr
+}
+
+.dashboard-native-container .aphnav i {
+  flex:1 1 0;
+  min-width:0;
+  background:var(--bd2);
+  border-radius:2px 2px 0 0
+}
+
+.dashboard-native-container .aphnav i[data-on="1"] {
+  background:var(--acc)
+}
+
+.dashboard-native-container .aphwin {
+  position:absolute;
+  top:-1px;
+  bottom:-1px;
+  border:2px solid var(--acc);
+  border-radius:6px;
+  background:var(--accT);
+  pointer-events:none
+}
+
+.dashboard-native-container .aphends {
+  display:flex;
+  justify-content:space-between;
+  font-size:var(--txCapSz);
+  color:var(--t3);
+  direction:ltr
+}
+
 .dashboard-native-container .cbxlbl {
   height:var(--cbx-lbl);
   line-height:var(--cbx-lbl);
@@ -15953,7 +16033,7 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 }
 
 @media (min-width:1024px) {
-  .dashboard-native-container #modpanel #modcontent {
+  .dashboard-native-container #modpanel #modcontent,.dashboard-native-container #assetpanel .apbody {
     margin-block-end:var(--aiCornerH)
   }
   .dashboard-native-container .pwarea,.dashboard-native-container .rphub {

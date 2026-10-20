@@ -54,8 +54,8 @@ function ekoCompareBars(groups,o){
   const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const ok=v=>v!=null&&v!==''&&isFinite(v);
   const fmt=o.fmt||(v=>String(Math.round(v*10)/10));
-  const list=(groups||[]).filter(g=>ok(g.a)||ok(g.b));
-  if(!list.length) return {html:'',min:0,max:0};
+  const list=o.keep?(groups||[]):(groups||[]).filter(g=>ok(g.a)||ok(g.b));
+  if(!list.some(g=>ok(g.a)||ok(g.b))) return {html:'',min:0,max:0};
   const unitOf=g=>(g.unit!=null&&g.unit!=='')?g.unit:(o.unit||'');
   const withU=(v,u)=>ok(v)?fmt(+v)+(u?(/^[°%]/.test(u)?u:' '+u):''):'—';
   const shared=new Set(list.map(unitOf)).size<=1;
@@ -86,12 +86,12 @@ function ekoCompareBars(groups,o){
       ? `<span class="cbxbar" data-k="${k}" style="height:${pct(+v,l,h)}%">${shared?'':`<b class="cbxval">${esc(fmt(+v))}</b>`}</span>`
       : `<span class="cbxbar" data-k="${k}" data-none="1"></span>`;
     const u=unitOf(g);
-    const tip=`${g.label==null?'':g.label} · ${o.actLbl||'Actual'} ${withU(g.a,u)} · ${o.spLbl||'Setpoint'} ${withU(g.b,u)}`;
+    const tip=`${g.tip!=null?g.tip:(g.label==null?'':g.label)} · ${o.actLbl||'Actual'} ${withU(g.a,u)} · ${o.spLbl||'Setpoint'} ${withU(g.b,u)}`;
     return `<div class="cbxgrp" data-tip="${esc(tip)}"><div class="cbxbars">${bar(g.a,'act')}${bar(g.b,'sp')}</div><span class="cbxlbl">${esc(g.label)}</span></div>`;
   }).join('');
   const axisW=ticks.reduce((m,x)=>Math.max(m,x.t.length),0);
   const axis=shared?`<div class="cbxaxis" style="width:${axisW+0.5}ch">${ticks.map(x=>`<span style="bottom:${pct(x.v,lo,hi)}%">${esc(x.t)}</span>`).join('')}</div>`:'';
   const grid=shared?`<div class="cbxgrid">${ticks.filter(x=>x.v>lo).map(x=>`<i style="bottom:${pct(x.v,lo,hi)}%"></i>`).join('')}</div>`:'';
-  const html=`<div class="cbx" data-axis="${shared?1:0}" style="--cbx-n:${list.length}">${axis}<div class="cbxscroll"><div class="cbxplot">${grid}${rows}</div></div></div>`;
+  const html=`<div class="cbx" data-axis="${shared?1:0}" data-dense="${o.dense?1:0}" style="--cbx-n:${list.length}">${axis}<div class="cbxscroll"><div class="cbxplot">${grid}${rows}</div></div></div>`;
   return {html:html,min:lo,max:hi};
 }

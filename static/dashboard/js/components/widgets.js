@@ -1194,6 +1194,31 @@ window.EKO_C = (function(){
     return cards + `<p class="apnote">${esc(t('apWoNote'))}</p>`;
   }
 
+  function histChart(E, r, cmp){
+    const t = E.t.bind(E), loc = E.lang === 'ar' ? 'ar-AE' : 'en-GB';
+    const hist = cmp.hist, n = hist.length;
+    const sel = E.state.apHist && E.state.apHist.id === r.id ? E.state.apHist.i : n - 1;
+    const i = Math.max(0, Math.min(n - 1, sel)), day = hist[i];
+    const now = new Date(), today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    const dateOf = (d, o) => new Date(d.t).toLocaleDateString(loc, Object.assign({ timeZone: 'UTC' }, o));
+    const dayName = d => d.t === today ? t('apHistToday') : d.t === today - 864e5 ? t('apHistYesterday') : dateOf(d, { weekday: 'short', day: 'numeric', month: 'short' });
+    const hh = h => String(h).padStart(2, '0');
+    const groups = [];
+    for (let h = 0; h < 24; h++) groups.push({ label: h % 3 ? '' : hh(h), tip: `${dayName(day)} ${hh(h)}:00`, a: day.a ? day.a[h] : null, b: day.b ? day.b[h] : null });
+    const bars = window.ekoCompareBars(groups, { unit: cmp.unit, fmt: v => fmt(v, 1), actLbl: t('apCmpActual'), spLbl: t('apCmpSp'), keep: true, dense: true });
+    const avgs = hist.map(d => d.aAvg).filter(v => v != null && isFinite(v));
+    const lo = Math.min.apply(null, avgs), span = (Math.max.apply(null, avgs) - lo) || 1;
+    const cells = hist.map((d, k) => `<i data-on="${k === i ? 1 : 0}" style="height:${d.aAvg == null ? 0 : (25 + (d.aAvg - lo) / span * 75).toFixed(1)}%"></i>`).join('');
+    const step = (v, dis, lbl, ic) => `<button class="iconbtn icon26" data-act="apHistStep" data-v="${v}" aria-label="${esc(lbl)}"${dis ? ' disabled' : ''}>${icon(ic, 14)}</button>`;
+    const cap = `${esc(E.ph(cmp.actName || t('apCmpActual')))} · ${esc(t('apHistHourly'))}${cmp.unit ? ` · ${esc(cmp.unit)}` : ''}`;
+    return `<p class="tCap">${cap}</p>
+      <div class="aphhead">${step(-1, i === 0, t('apHistPrev'), 'chevL')}<span class="aphday">${esc(dayName(day))}</span>${step(1, i === n - 1, t('apHistNext'), 'chevR')}</div>
+      <div class="apcmpleg"><span class="apcmpdot" data-k="act"></span>${esc(t('apCmpActual'))}<span class="apcmpdot" data-k="sp"></span>${esc(t('apCmpSp'))}</div>
+      <div class="apcmpchart">${bars.html}</div>
+      <div class="aphnav" role="slider" tabindex="0" data-id="${esc(r.id)}" data-n="${n}" aria-label="${esc(t('apHistNav'))}" aria-valuemin="0" aria-valuemax="${n - 1}" aria-valuenow="${i}" aria-valuetext="${esc(dayName(day))}">${cells}<span class="aphwin" style="left:${(i / n * 100).toFixed(3)}%;width:${(100 / n).toFixed(3)}%"></span></div>
+      <div class="aphends"><span>${esc(dateOf(hist[0], { day: 'numeric', month: 'short' }))}</span><span>${esc(dateOf(hist[n - 1], { day: 'numeric', month: 'short' }))}</span></div>`;
+  }
+
   function assetPanel(E){
     const id = E.state.assetSel;
     if(!id) return '';
@@ -1229,6 +1254,7 @@ window.EKO_C = (function(){
     const cmp = r.compare || null;
     const reason = r.st === 'stale' ? 'dgNoTrend.stale' : (r.trendKind === 'state' ? 'dgNoTrend.state' : 'dgNoTrend.none');
     const graphBlock = (() => {
+      if (cmp && Array.isArray(cmp.hist) && cmp.hist.length && typeof window.ekoCompareBars === 'function') return histChart(E, r, cmp);
       const dayGroups = cmp && Array.isArray(cmp.days) ? cmp.days.filter(d => d && (d.actual != null || d.sp != null)).map(d => ({ label: d.label, a: d.actual, b: d.sp })) : [];
       const pairGroups = cmp && Array.isArray(cmp.pairs) ? cmp.pairs.filter(p => p.actual != null || p.sp != null).map(p => ({ label: t(p.key), a: p.actual, b: p.sp, unit: p.unit })) : [];
       const groups = dayGroups.length >= 2 ? dayGroups : pairGroups;

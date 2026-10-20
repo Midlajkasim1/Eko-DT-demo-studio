@@ -54,7 +54,7 @@ window.EKO_WALL = (function(){
   const dashW = (n, d) => (n == null || n === '' || !isFinite(+n)) ? '--' : fmtW(n, d);
   const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   const toMin = s => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '').trim()); return m ? (+m[1]) * 60 + (+m[2]) : null; };
-  let E = null, timer = null, lastCounts = null, changedAt = 0, changedKeys = [], epoch = 0, shiftIdx = 0, hotTimer = null, listenersOn = false, boardFit = null;
+  let E = null, timer = null, lastCounts = null, changedAt = 0, changedKeys = [], epoch = 0, shiftIdx = 0, hotTimer = null, listenersOn = false, boardFit = null, shownPane = null;
 
   /* ------------------------------ settings -------------------------------- */
   /* Targets and their sources live in config so the client's alarm philosophy governs; the defaults are the published guidance. */
@@ -505,6 +505,10 @@ window.EKO_WALL = (function(){
     if(Date.now() - changedAt > 12000) changedKeys = [];
     lastCounts = Object.assign({}, counts);
     const p = paneAt(Date.now()); E.state.wallIdx = p.idx;
+    if(p.pane !== shownPane){
+      if(p.pane === 'model' && shownPane != null && E.engine && typeof E.engine.resetView === 'function') E.engine.resetView();
+      shownPane = p.pane;
+    }
     const pane = { model: paneModel, map: paneMap, board: paneBoard, trend: paneTrend, rate: paneRate, work: paneWork }[p.pane];
     const pw = PWA() ? PWA().state : { mode: 'online' };
     const stale = pw.mode !== 'online';

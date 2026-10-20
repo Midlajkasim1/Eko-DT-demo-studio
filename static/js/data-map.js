@@ -1415,6 +1415,7 @@
 
 
   var historyCache = {};
+  var HIST_DAYS = 31;
   var HIST_MONTHS = { january:0, february:1, march:2, april:3, may:4, june:5, july:6, august:7, september:8, october:9, november:10, december:11 };
   function foldPtName(n) {
     return String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -1495,10 +1496,14 @@
       Object.keys(hist[year] || {}).forEach(function (month) {
         Object.keys(hist[year][month] || {}).forEach(function (day) {
           var hData = hist[year][month][day];
-          var sum = 0, count = 0;
+          var sum = 0, count = 0, hours = [];
+          for (var h = 0; h < 24; h++) hours.push(null);
           Object.keys(hData || {}).forEach(function (hr) {
             var n = parseFloat(hData[hr]);
-            if (isFinite(n)) { sum += n; count++; }
+            if (!isFinite(n)) return;
+            sum += n; count++;
+            var at = HOUR_AT[String(hr).toLowerCase()];
+            if (at != null) hours[at] = n;
           });
           if (!count) return;
           var mi = HIST_MONTHS[String(month).toLowerCase()];
@@ -1506,13 +1511,14 @@
           rows.push({
             t: Date.UTC(+year, mi == null ? 0 : mi, dnum || 1),
             avg: Math.trunc((sum / count) * 100) / 100,
-            label: String(dnum || day)
+            label: String(dnum || day),
+            hours: hours
           });
         });
       });
     });
     rows.sort(function (a, b) { return a.t - b.t; });
-    return rows.slice(-7);
+    return rows;
   }
   function applyEquipment(payload) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
@@ -1612,7 +1618,8 @@
       var cached = historyCache[eq.name];
       assetData.compare = {
         pairs: pairs,
-        days: (cached && cached.compareV === 1 && cached.compare && cached.compare.days) || [],
+        days: (cached && cached.compareV === 2 && cached.compare && cached.compare.days) || [],
+        hist: (cached && cached.compareV === 2 && cached.compare && cached.compare.hist) || [],
         unit: (cached && cached.compare && cached.compare.unit) || ((pairs[0] && pairs[0].unit) || ""),
         actName: (cached && cached.compare && cached.compare.actName) || (pairs[0] && pairs[0].actName) || "",
         spName: (cached && cached.compare && cached.compare.spName) || (pairs[0] && pairs[0].spName) || ""
@@ -1623,20 +1630,25 @@
       }
 
       var primary = pairs.filter(function (p) { return p.actHis; })[0] || pairs[0];
-      if (primary && primary.actId && window.DashboardData && window.DashboardData.getPointHistory && !(cached && (cached.compareV === 1 || cached.fetching))) {
+      if (primary && primary.actId && window.DashboardData && window.DashboardData.getPointHistory && !(cached && (cached.compareV === 2 || cached.fetching))) {
         historyCache[eq.name] = { fetching: true };
-        var actP = window.DashboardData.getPointHistory(primary.actId, 7);
+        var actP = window.DashboardData.getPointHistory(primary.actId, HIST_DAYS);
         var spP = (primary.spHis && primary.spId)
-          ? window.DashboardData.getPointHistory(primary.spId, 7)
+          ? window.DashboardData.getPointHistory(primary.spId, HIST_DAYS)
           : Promise.resolve(null);
         Promise.all([actP, spP]).then(function (both) {
           if (!current()) return;
-          var actDays = histDaily(both[0] && both[0].history);
-          var spDays = histDaily(both[1] && both[1].history);
+          var actAll = histDaily(both[0] && both[0].history);
+          var spAll = histDaily(both[1] && both[1].history);
+          var actDays = actAll.slice(-7);
           var spByT = {};
-          spDays.forEach(function (d) { spByT[d.t] = d.avg; });
+          spAll.forEach(function (d) { spByT[d.t] = d; });
           var days = actDays.map(function (d) {
-            return { label: d.label, actual: d.avg, sp: spByT[d.t] };
+            return { label: d.label, actual: d.avg, sp: spByT[d.t] ? spByT[d.t].avg : undefined };
+          });
+          var hist = actAll.map(function (d) {
+            var sp = spByT[d.t];
+            return { t: d.t, a: d.hours, b: sp ? sp.hours : null, aAvg: d.avg, bAvg: sp ? sp.avg : null };
           });
           var vals = actDays.map(function (d) { return d.avg; });
           var spark7 = assetData.spark7;
@@ -1645,9 +1657,10 @@
             spark7 = vals.map(function (v) { return (v - mn) / range; });
           }
           var packed = {
-            compareV: 1,
+            compareV: 2,
             compare: {
               days: days,
+              hist: hist,
               unit: (both[0] && both[0].unit) || primary.unit || "",
               actName: primary.actName || "",
               spName: primary.spName || ""
@@ -1663,6 +1676,7 @@
               a.compare = {
                 pairs: (a.compare && a.compare.pairs) || pairs,
                 days: packed.compare.days,
+                hist: packed.compare.hist,
                 unit: packed.compare.unit,
                 actName: packed.compare.actName,
                 spName: packed.compare.spName
@@ -1673,7 +1687,7 @@
           }
           paint();
         }).catch(function () {
-          historyCache[eq.name] = { compareV: 1, failed: true, compare: { days: [], unit: primary.unit, actName: primary.actName, spName: primary.spName } };
+          historyCache[eq.name] = { compareV: 2, failed: true, compare: { days: [], hist: [], unit: primary.unit, actName: primary.actName, spName: primary.spName } };
         });
       }
 
