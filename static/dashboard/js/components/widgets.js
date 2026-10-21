@@ -1107,7 +1107,7 @@ window.EKO_C = (function(){
       ['CHW_SUP_TEMP', said(val('chwsuptemp'), ' °C')],
       ['CHW_RET_TEMP', said(val('chwrettemp'), ' °C')],
       ['SF_VFD_RUN_STS', flag(val('sfvfdrunsts', 'sfairflowsts'), 'On', 'Off')],
-      ['SF_VFD_SPD_POS', said(val('sfvfdspdpos', 'sfvfdspdcmd'), ' %')],
+      ['SF_VFD_SPD_POS', said(val('sfvfdspdpos'), ' %')],   // the feedback only, never SF_VFD_SPD_CMD under its name
       ['SF_TRIP_ALARM', flag(val('sftripalarm'), 'Trip', 'Normal')],
       ['SA_TEMP', said(val('satemp'), ' °C')],
       ['SA_TEMP_SP', said(val('satempsp'), ' °C')],

@@ -6,6 +6,8 @@ export const COIL_OPEN   = new THREE.Color(0xb56a3c)
 export const COIL_IDLE   = new THREE.Color(0x8d939b)
 export const FAN_ON      = new THREE.Color(0xc0392b)
 export const FAN_OFF     = new THREE.Color(0x4b5563)
+/** A fan whose trip/fault point is set: the dashboard's amber, apart from running red and stopped grey. */
+export const FAN_FAULT   = new THREE.Color(0xf59e0b)
 export const FILTER_CLEAN = new THREE.Color(0xc8d6df)
 export const FILTER_DIRTY = new THREE.Color(0x9c6b2e)
 /** A part whose reading is missing: neither the healthy nor the fault colour. */
@@ -77,6 +79,15 @@ export function stateOf(raw: string | null): boolean | null {
 
 export function isRunning(raw: string | null): boolean {
   return stateOf(raw) === true
+}
+
+/** A trip/alarm point: FIN's own label ("Trip", "Alarm", "Normal") or plain T/F; null when unknown.
+    stateOf alone reads a labelled "Trip" as unknown, so a real fault never showed. */
+export function faultOf(raw: string | null): boolean | null {
+  if (!raw) return null
+  if (/\bno\b|\bnot\b|normal|\bok\b|healthy|clear/i.test(raw)) return false
+  if (/alarm|trip|fault|fail/i.test(raw)) return true
+  return stateOf(raw)
 }
 
 /** A filter status: "Dirty"/"Clean" text, or a pressure switch's T/F (T = high DP = dirty); null when unknown. */
@@ -773,6 +784,18 @@ export function addPictureFrame(
   ctx.add(new THREE.BoxGeometry(depth, sideH, bar), mat, parent).position.set(x, 0, -w / 2 + bar / 2)
 }
 
+/** A damper blade's chord as a share of its slot: closed blades meet with a hairline seam. */
+export const DAMPER_CHORD = 0.96
+/** Blades of a damper whose open/closed reading is known; an unknown one is NO_DATA. */
+export const DAMPER_BLADE = new THREE.Color(0xb7c0c7)
+/** Pose and colour from a reading (0 closed .. 1 open). Unknown keeps a mid pose but turns no-data
+    grey, so it is not taken for a real open damper. All blades of one damper share a material. */
+export function setDamper(blades: THREE.Mesh[], open: number | null) {
+  const angle = (open == null ? 0.62 : open) * Math.PI * 0.45
+  blades.forEach(b => { b.rotation.z = angle })
+  if (blades[0]) (blades[0].material as THREE.MeshStandardMaterial).color.copy(open == null ? NO_DATA : DAMPER_BLADE)
+}
+
 export function buildDamper(
   ctx:     HvacCtx,
   parent:  THREE.Object3D,
@@ -788,18 +811,20 @@ export function buildDamper(
   const depth  = bar * 0.85
   addPictureFrame(ctx, parent, centerX, frameH, frameW, bar, depth, frameMat)
 
-  // Thin slats with a wide gap, so the damper does not read as a solid panel.
+  // At rotation 0 (closed) the blades stand across the air and meet, a hairline apart, so the
+  // frame reads shut; open, they turn edge-on. Narrower blades left a closed damper see-through.
   const count  = 5
   const innerH = frameH - bar * 2
   const stride = innerH / count
-  const chord  = stride * 0.28
+  const chord  = stride * DAMPER_CHORD
   const bladeW = frameW - bar * 2.4
   const blades: THREE.Mesh[] = []
-  const geo = new THREE.BoxGeometry(Math.max(depth * 0.18, chord * 0.22), chord, bladeW)
+  const geo = new THREE.BoxGeometry(Math.max(depth * 0.18, chord * 0.06), chord, bladeW)
   for (let i = 0; i < count; i++) {
     const y = -innerH / 2 + (i + 0.5) * stride
     const b = ctx.add(geo, bladeMat, parent)
     b.position.set(centerX, y, 0)
+    b.userData.ekoDamperBlade = true
     blades.push(b)
   }
 

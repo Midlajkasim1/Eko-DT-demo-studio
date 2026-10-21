@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import {
   HvacPoint,
-  FAN_ON, FAN_OFF, FILTER_CLEAN, FILTER_DIRTY, NO_DATA, UV_ON, UV_ALARM,
-  clean, findPoint, shown, stateOf, fractionOf, dirtyOf, bayCentres,
+  FAN_ON, FAN_OFF, FAN_FAULT, FILTER_CLEAN, FILTER_DIRTY, NO_DATA, UV_ON, UV_ALARM,
+  clean, findPoint, shown, stateOf, faultOf, fractionOf, dirtyOf, bayCentres,
   resolveFrame, makeHvacCtx,
   buildCentrifugalFan, buildFanOpening,
   buildPanelFilter, buildUvCanister,
@@ -27,6 +27,8 @@ export type EcoReading = {
   vfdSpeed:       string
   kefHoa:         string
   kefTrip:        string
+  /** KEF_TRIP_STS set: a fan fault, which is not the same as stopped (kefOn) */
+  kefTripped:     boolean | null
   allFilterAlarm: string
   commonAlarm:    string
   kefRate:        number
@@ -71,8 +73,8 @@ export function readEcoPoints(points: EcoPoint[]): EcoReading {
     return null
   }
   // A status in words; text FIN sends that is not a plain on/off is shown as sent.
-  const said = (raw: string | null, on: string, off: string) => {
-    const s = stateOf(raw)
+  const said = (raw: string | null, on: string, off: string, read = stateOf) => {
+    const s = read(raw)
     return s == null ? shown(raw, '') : s ? on : off
   }
   const filter = (raw: string | null) => {
@@ -98,18 +100,19 @@ export function readEcoPoints(points: EcoPoint[]): EcoReading {
     bagFilter:      bag.text,
     boxFilterDirty: box.dirty,
     boxFilter:      box.text,
-    uv1Alarm:       stateOf(uv1Raw),
-    uv1:            said(uv1Raw, 'Alarm', 'Normal'),
-    uv2Alarm:       stateOf(uv2Raw),
-    uv2:            said(uv2Raw, 'Alarm', 'Normal'),
+    uv1Alarm:       faultOf(uv1Raw),
+    uv1:            said(uv1Raw, 'Alarm', 'Normal', faultOf),
+    uv2Alarm:       faultOf(uv2Raw),
+    uv2:            said(uv2Raw, 'Alarm', 'Normal', faultOf),
     kefOn,
     kefStatus:      kefOn == null ? '—' : kefOn ? 'On' : 'Off',
     vfdRun:         said(runRaw, 'On', 'Off'),
     vfdSpeed:       shown(speedRaw, ' %'),
     kefHoa:         shown(val('kefhoa'), ''),
-    kefTrip:        said(val('keftripsts'), 'Trip', 'Normal'),
-    allFilterAlarm: said(val('allfilteralarm'), 'Alarm', 'Normal'),
-    commonAlarm:    said(val('commanalarm', 'commonalarm'), 'Alarm', 'Normal'),
+    kefTrip:        said(val('keftripsts'), 'Trip', 'Normal', faultOf),
+    kefTripped:     faultOf(val('keftripsts')),
+    allFilterAlarm: said(val('allfilteralarm'), 'Alarm', 'Normal', faultOf),
+    commonAlarm:    said(val('commanalarm', 'commonalarm'), 'Alarm', 'Normal', faultOf),
     kefRate:        kefOn ? (speed == null ? 1.9 : 0.5 + 2.6 * speed) : 0,
   }
 }
@@ -179,7 +182,8 @@ export function createEcoSchematic(
     filters.forEach((f, i) => filterMats[i].color.copy(filterColour(dirty[f])))
     lamp(uv1Mat, r.uv1Alarm)
     lamp(uv2Mat, r.uv2Alarm)
-    bladeMat.color.copy(r.kefOn == null ? NO_DATA : r.kefOn ? FAN_ON : FAN_OFF)
+    // A trip shows whatever the run status says; the blades still turn only on KEF_ON_STS / VFD_RUN_STS
+    bladeMat.color.copy(r.kefTripped ? FAN_FAULT : r.kefOn == null ? NO_DATA : r.kefOn ? FAN_ON : FAN_OFF)
     rate = r.kefRate
     return r
   }

@@ -39,9 +39,10 @@ const SCHEMATICS: Record<string, (localBox: THREE.Box3, modelMatrix: THREE.Matri
   FAHU: createFahuSchematic,
 }
 
-/* Types whose internals are driven by live FIN points (filter, UV and fan state).
-   FCU, AHU and FAHU stay at their default look: their readings live in the asset panel. */
-const LIVE_SCHEMATICS = new Set(['MAHU', 'ECO'])
+/* Types whose internals are driven by live FIN points (fan, coil, damper, filter, UV state).
+   A point FIN does not send shows the no-data grey, never a guessed off/clean.
+   AHU stays at its default look: its reader still treats a missing point as off/clean. */
+const LIVE_SCHEMATICS = new Set(['MAHU', 'ECO', 'FCU', 'FAHU'])
 
 function loadScripts(scripts: HTMLScriptElement[], signal: { mounted: boolean }) {
   return scripts.reduce<Promise<void>>((prev, s) => prev.then(() => new Promise((resolve) => {

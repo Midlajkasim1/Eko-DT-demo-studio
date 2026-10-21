@@ -128,7 +128,8 @@ def parse_zinc_csv(text: str) -> list[dict]:
                     row[header] = val
                 elif val == 'M':
                     row[header] = True
-                elif val == '':
+                elif val in ('', 'N', 'NA'):
+                    # Zinc null (N) and not-available (NA) are no value, not the text "N"/"NA"
                     row[header] = None
                 else:
                     try:

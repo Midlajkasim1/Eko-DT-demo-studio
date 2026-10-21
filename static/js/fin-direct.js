@@ -146,7 +146,7 @@
     }
     if (/^\d{4}-\d{2}-\d{2}T/.test(val)) return val;
     if (val === 'M') return true;
-    if (val === '') return null;
+    if (val === '' || val === 'N' || val === 'NA') return null;   // Zinc null / not-available, not text
     if (/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(val)) {
       var num = Number(val);
       if (isFinite(num)) return num;
