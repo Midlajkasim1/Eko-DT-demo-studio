@@ -198,7 +198,7 @@
     return 'Mechanical';
   }
 
-  function mapAlarm(a, i) {
+  function mapAlarm(a) {
     var src = a.source || '';
     var msg = a.message || src;
     var detail = String(a.detail || '').trim();
@@ -209,7 +209,9 @@
       return namesMatch(as.id, asset) || namesMatch(as.id, src);
     });
     return {
-      id: 'fin-' + i + '-' + String(a.occurred || '').replace(/\W/g, '').slice(0, 16),
+      // FIN's record id, else what the alarm is: never its place in the list, which moves when FIN
+      // adds or drops a record and made the same alarm look new (and lose its acknowledgement)
+      id: 'fin-' + slugId(a.id || [src, msg, a.occurred].join(' ')),
       fam: 'sys',
       asset: matchedAsset ? matchedAsset.id : asset,
       bimId: matchedAsset ? matchedAsset.bimId : null,
@@ -339,7 +341,10 @@
   function applyAlarms(payload) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !payload || !Array.isArray(payload.alarms)) return;
+    var acked = {};   // an acknowledgement made here lives on the alarm object: keep it across polls
+    (site.alarms || []).forEach(function (a) { if (a && a.ack) acked[a.id] = a.ack; });
     site.alarms = payload.alarms.map(mapAlarm);
+    site.alarms.forEach(function (a) { if (acked[a.id]) a.ack = acked[a.id]; });
     if (Array.isArray(site.assets)) {
       site.assets.forEach(function (asset) {
         asset.alarms = site.alarms.filter(function (a) { return namesMatch(a.asset, asset.id) || (asset.bimId && a.bimId === asset.bimId); }).map(function (a) { return a.id; });

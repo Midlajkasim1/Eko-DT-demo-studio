@@ -28,8 +28,8 @@ from fin_client import (
     PROJECT_ID_RE,
     FinScramClient,
     aggregate_and_restructure,
-    alarm_is_open,
     clip_decimals,
+    open_alarm_rows,
     parse_custom_response,
     parse_fin_projects,
     parse_zinc_csv,
@@ -452,9 +452,7 @@ def _flatten_alarms(rows: list, bands: dict) -> dict:
     alarms = []
     counts = {"critical": 0, "warning": 0, "info": 0}
 
-    for row in rows or []:
-        if not alarm_is_open(row):
-            continue
+    for row in open_alarm_rows(rows):   # one per logical alarm: a re-issued FIN record is not a second alarm
         priority = row.get("priority") if isinstance(row.get("priority"), (int, float)) else None
         severity = severity_for(priority, bands)
         counts[severity] += 1

@@ -17,6 +17,7 @@
     "test:mau": "node scripts/test-mau-points.mjs",
     "test:eco": "node scripts/test-eco-points.mjs",
     "test:hvac": "node scripts/test-hvac-schematics.mjs",
+    "test:alarms": "node scripts/test-alarm-dedup.mjs",
     "test:reports": "node scripts/test-reports.mjs",
     "test:backend": "python -m unittest discover -s backend/tests -t backend -v",
     "test:isolation": "node scripts/test-project-isolation.mjs",

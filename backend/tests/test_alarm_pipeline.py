@@ -8,6 +8,7 @@ answer (pollHandle, resultCount, totalRecordCount). No real FIN alarm row has be
 the acknowledgement column below is a placeholder, not FIN's confirmed name.
 """
 import os
+import sqlite3
 import sys
 import time
 import unittest
@@ -212,6 +213,133 @@ class CriticalAlarmTriggerTests(unittest.TestCase):
         self.poll([], site=OTHER)                                   # clearing OTHER's alarm
         self.assertEqual([r["status"] for r in self.rows(SITE)], ["active"], "never touches Marsa's")
         self.assertEqual([r["status"] for r in self.rows(OTHER)], ["resolved"])
+
+
+def rec(fin_id, src="e1", message="Supply temp high", when="2026-10-20T08:00:00+04:00 Dubai", priority=250, active="M",
+        dispatcher="CONTROL"):
+    """One FIN alarm record. Records of one condition share source/message/dispatcher, not their id."""
+    source = f'@{src} "AHU-{src}"' if src else ""
+    return f'@{fin_id} "Alarm {fin_id}",M,{active},"{message}",{priority},{source},"{dispatcher}",{when}'
+
+
+EQUIP = 'ver:"3.0"\nid,navName,equip,floorRef\n@e1 "AHU-e1","AHU-e1",M,@f1 "Basement"\n@e2 "AHU-e2","AHU-e2",M,@f1 "Basement"\n'
+T1, T2, T3 = ("2026-10-20T08:00:00+04:00 Dubai", "2026-10-20T08:30:00+04:00 Dubai", "2026-10-20T09:00:00+04:00 Dubai")
+
+
+def equip_alarm_counts(text):
+    """The equipment path: _build_realtime's per-equipment alarm lists, which drive inAlarm and the counts."""
+    holder = type("Holder", (), {})()
+    floors = FinScramClient._build_realtime(holder, "", EQUIP, text)
+    return {eq["name"]: len(eq["alarms"])
+            for cat in floors.get("Basement", {}).values() if isinstance(cat, list) for eq in cat}
+
+
+class AlarmDedupTests(unittest.TestCase):
+    """One logical alarm per open condition, whatever FIN re-sends: the alarm list, the equipment
+    counts and the notification store all count the same alarms."""
+
+    def test_the_reported_case_a_reissued_record_is_not_a_second_alarm(self):
+        # the AHU has three records, one open; a later poll brings another open record of the same alarm
+        first = grid(rec("a1", active="", when=T1), rec("a2", message="Return to normal", when=T1), rec("a3", when=T2))
+        later = grid(rec("a1", active="", when=T1), rec("a2", message="Return to normal", when=T1), rec("a3", when=T2),
+                     rec("a4", when=T3))
+        for text in (first, later):
+            out = flatten(text)
+            self.assertEqual([(a["id"], a["source"]) for a in out["alarms"]], [("@a3", "AHU-e1")])
+            self.assertEqual(out["counts"]["total"], 1)
+            self.assertEqual(equip_alarm_counts(text), {"AHU-e1": 1, "AHU-e2": 0})
+
+    def test_the_same_payload_any_number_of_times_gives_the_same_alarms(self):
+        text = grid(rec("a1"), rec("a1"), rec("a2", message="Filter dirty"))   # the same record twice in one answer
+        outs = [flatten(text) for _ in range(5)]
+        self.assertEqual({len(o["alarms"]) for o in outs}, {2})
+        self.assertEqual({tuple(sorted(a["id"] for a in o["alarms"])) for o in outs}, {("@a1", "@a2")})
+
+    def test_distinct_alarms_on_one_ahu_stay_separate(self):
+        out = flatten(grid(rec("a1", message="Supply temp high"), rec("a2", message="Filter dirty"),
+                           rec("a3", message="Supply fan trip"), rec("a4", message="Filter dirty", dispatcher="CONNECTOR")))
+        self.assertEqual(out["counts"]["total"], 4, "a different message or dispatcher is a different alarm")
+        self.assertEqual(equip_alarm_counts(grid(rec("a1"), rec("a2", message="Filter dirty"))), {"AHU-e1": 2, "AHU-e2": 0})
+
+    def test_the_same_alarm_on_two_pieces_of_equipment_is_two_alarms(self):
+        text = grid(rec("a1", src="e1"), rec("a2", src="e2"))
+        self.assertEqual(sorted(a["source"] for a in flatten(text)["alarms"]), ["AHU-e1", "AHU-e2"])
+        self.assertEqual(equip_alarm_counts(text), {"AHU-e1": 1, "AHU-e2": 1})
+
+    def test_records_with_no_source_are_merged_only_by_their_own_id(self):
+        out = flatten(grid(rec("a1", src=""), rec("a2", src=""), rec("a2", src="")))
+        self.assertEqual(sorted(a["id"] for a in out["alarms"]), ["@a1", "@a2"])
+
+    def test_a_change_updates_the_alarm_and_keeps_its_id_and_first_time(self):
+        out = flatten(grid(rec("a1", when=T1, priority=150), rec("a4", when=T3, priority=250, message="Supply  TEMP high")))
+        [a] = out["alarms"]
+        self.assertEqual((a["id"], a["occurred"][:19]), ("@a1", "2026-10-20T08:00:00"), "the occurrence: the first record")
+        self.assertEqual((a["priority"], a["severity"]), (250, "critical"), "the newest record's priority")
+        self.assertEqual(out["counts"], {"critical": 1, "warning": 0, "info": 0, "total": 1})
+        # the order FIN lists them in does not matter
+        self.assertEqual(flatten(grid(rec("a4", when=T3), rec("a1", when=T1)))["alarms"][0]["id"], "@a1")
+
+    def test_a_cleared_alarm_that_comes_back_is_a_new_occurrence(self):
+        out = flatten(grid(rec("a1", when=T1, active=""), rec("a2", when=T3)))
+        self.assertEqual([(a["id"], a["occurred"][:19]) for a in out["alarms"]], [("@a2", "2026-10-20T09:00:00")])
+
+
+class AlarmDedupNotificationTests(unittest.TestCase):
+    """The persisted side: alarm.critical rows in the notification store, fed by the deduplicated list."""
+
+    setUp = CriticalAlarmTriggerTests.setUp
+    tearDown = CriticalAlarmTriggerTests.tearDown
+    allow = CriticalAlarmTriggerTests.allow
+    toggle = CriticalAlarmTriggerTests.toggle
+    rows = CriticalAlarmTriggerTests.rows
+    poll = CriticalAlarmTriggerTests.poll
+
+    def feed(self, text, site=SITE):
+        self.allow(SITE, OTHER)
+        self.toggle(site, True)
+        self.poll(flatten(text)["alarms"], site=site)
+
+    def test_repeated_and_reissued_records_keep_one_row(self):
+        for text in [grid(rec("a1", when=T1))] * 3 + [grid(rec("a1", when=T1), rec("a4", when=T3))] * 3:
+            self.feed(text)
+        self.assertEqual([(r["state"], r["status"]) for r in self.rows()], [("@a1", "active")])
+
+    def test_each_project_keeps_its_own_row_for_the_same_payload(self):
+        text = grid(rec("a1"), rec("a4", when=T3))
+        for _ in range(3):
+            self.feed(text, SITE)
+            self.feed(text, OTHER)
+        self.assertEqual([r["state"] for r in self.rows(SITE)], ["@a1"])
+        self.assertEqual([r["state"] for r in self.rows(OTHER)], ["@a1"])
+
+    def test_a_reactivation_resolves_the_old_occurrence_and_opens_a_new_one(self):
+        self.feed(grid(rec("a1", when=T1)))
+        self.feed(grid(rec("a1", when=T1, active=""), rec("a2", when=T3)))
+        self.assertEqual(sorted((r["state"], r["status"]) for r in self.rows()), [("@a1", "resolved"), ("@a2", "active")])
+
+    def test_an_acknowledgement_keyed_by_the_alarm_id_still_matches_after_reissued_records(self):
+        db = notifications._store.db
+        self.feed(grid(rec("a1", when=T1)))
+        alarm_id = flatten(grid(rec("a1", when=T1)))["alarms"][0]["id"]
+        db.execute("INSERT INTO alarm_acknowledgements (id, site_id, alarm_id, occurrence_id, user_id, acknowledged_at)"
+                   " VALUES ('ack1', ?, ?, ?, 'u1', '2026-10-20T08:05:00Z')", (SITE, alarm_id, alarm_id))
+        for _ in range(3):
+            text = grid(rec("a1", when=T1), rec("a4", when=T3))
+            self.feed(text)
+            self.assertEqual([a["id"] for a in flatten(text)["alarms"]], [alarm_id], "the acknowledged id is still the alarm's")
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM alarm_acknowledgements").fetchone()[0], 1, "sync never touches it")
+
+    def test_the_store_refuses_a_second_active_row_for_one_alarm(self):
+        # the atomic guard under the poller: a unique index on the active dedup key, not an in-memory check
+        self.feed(grid(rec("a1")))
+        [row] = self.rows()
+        db = notifications._store.db
+        cols = [c[1] for c in db.execute("PRAGMA table_info(notification_events)")]
+        pick = ", ".join("id || '-copy'" if c == "id" else c for c in cols)
+        with self.assertRaises(sqlite3.IntegrityError) as err:
+            db.execute(f"INSERT INTO notification_events ({', '.join(cols)}) SELECT {pick} FROM notification_events WHERE id = ?",
+                       (row["id"],))
+        self.assertIn("dedup_key", str(err.exception))
 
 
 def wait_for(fn, timeout=6.0):

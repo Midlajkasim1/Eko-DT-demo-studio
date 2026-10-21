@@ -236,6 +236,31 @@
     return String(row.message || '').toLowerCase().indexOf('return to normal') < 0;
   }
 
+  // Same as open_alarm_rows in backend/fin_client.py: one row per logical open alarm. Open records
+  // with the same source, message and dispatcher are one alarm (FIN re-issues a record while the
+  // earlier one is still active); the earliest keeps its id and time, the newest its priority/state.
+  function openAlarmRows(rows) {
+    var merged = {}, order = [];
+    (rows || []).forEach(function (row, n) {
+      if (!alarmIsOpen(row)) return;
+      var src = String(safeGet(row.sourceRef, 'val') || '').replace(/^@/, '');
+      var recId = safeGet(row.id, 'val');
+      var key = src
+        ? 'c|' + src + '|' + String(row.message || '').split(/\s+/).join(' ').trim().toLowerCase() + '|' + String(row.dispatcher || '').trim().toUpperCase()
+        : recId ? 'i|' + recId : 'r|' + n;
+      var first = merged[key];
+      if (!first) { merged[key] = row; order.push(key); return; }
+      var when = function (r) { return String(r.occurred || r.created || ''); };
+      var early = when(first) <= when(row) ? first : row, late = early === first ? row : first;
+      var keep = {};
+      Object.keys(late).forEach(function (k) { keep[k] = late[k]; });
+      keep.id = early.id || late.id;
+      if (early.occurred != null) keep.occurred = early.occurred;
+      merged[key] = keep;
+    });
+    return order.map(function (k) { return merged[k]; });
+  }
+
   function alarmDetailFromTable(body) {
     var texts = [];
     var numbers = [];
@@ -363,6 +388,7 @@
       } else points.push(fp);
     });
 
+    var openAlarms = openAlarmRows(alarms);   // one per logical alarm, as the alarm list counts them
     var floors = {};
     equipment.forEach(function (equip) {
       var navName = equip.navName;
@@ -377,8 +403,8 @@
         return !!(navNorm && pDis.indexOf(navNorm) >= 0);
       });
       var equipAlarms = [];
-      alarms.forEach(function (a) {
-        if (safeGet(a.sourceRef, 'val') === equipId && alarmIsOpen(a)) {
+      openAlarms.forEach(function (a) {
+        if (safeGet(a.sourceRef, 'val') === equipId) {
           equipAlarms.push({ alarm: a.message || 'N/A', priority: a.priority || 0 });
         }
       });
@@ -505,8 +531,7 @@
   function flattenAlarms(rows, bands) {
     var alarms = [];
     var counts = { critical: 0, warning: 0, info: 0 };
-    (rows || []).forEach(function (row) {
-      if (!alarmIsOpen(row)) return;
+    openAlarmRows(rows).forEach(function (row) {   // a re-issued FIN record is not a second alarm
       var priority = typeof row.priority === 'number' ? row.priority : null;
       var severity = severityFor(priority, bands);
       counts[severity] += 1;
@@ -516,6 +541,7 @@
       var detail = clipDecimals(String(row.detail || '').trim());
       if (detail.toLowerCase() === message.trim().toLowerCase()) detail = '';
       alarms.push({
+        id: safeGet(row.id, 'val') || null,   // FIN's own record id, as the backend sends it
         source: safeGet(source, 'dis') || safeGet(source, 'val') || '',
         message: message,
         detail: detail,

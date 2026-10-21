@@ -210,6 +210,43 @@ def alarm_is_open(row: dict) -> bool:
     return "return to normal" not in msg
 
 
+def open_alarm_rows(rows: list) -> list[dict]:
+    """One row per logical open alarm, for every view (alarm list, equipment counts, notifications).
+
+    FIN can hold several open records for one condition (it issues a new record while the earlier
+    one still carries its active marker), and the same record can come back in one grid. A
+    condition cannot be active twice at once, so open records with the same source, message and
+    dispatcher are one alarm. The earliest record is the occurrence: its id and time are kept, so
+    acknowledgements and notifications keyed by that id survive later polls; the newest record's
+    priority, detail and state win. A record with no source is merged only with its own id (else
+    kept apart): without a source, equal messages may be different equipment.
+    A cleared record is not open, so a reactivation is a new occurrence with its own id and time.
+    """
+    merged: dict = {}
+    for n, row in enumerate(rows or []):
+        if not alarm_is_open(row):
+            continue
+        src = str(safe_get(row.get("sourceRef"), "val") or "").lstrip("@")
+        rec_id = safe_get(row.get("id"), "val")
+        if src:
+            msg = " ".join(str(row.get("message") or "").split()).lower()
+            key = ("cond", src, msg, str(row.get("dispatcher") or "").strip().upper())
+        else:
+            key = ("id", rec_id) if rec_id else ("row", n)
+        first = merged.get(key)
+        if first is None:
+            merged[key] = row
+            continue
+        when = lambda r: str(r.get("occurred") or r.get("created") or "")   # noqa: E731
+        early, late = (first, row) if when(first) <= when(row) else (row, first)
+        keep = dict(late)
+        keep["id"] = early.get("id") or late.get("id")
+        if early.get("occurred") is not None:
+            keep["occurred"] = early.get("occurred")
+        merged[key] = keep
+    return list(merged.values())
+
+
 def _split_zinc_csv(line: str) -> list[str]:
     parts: list[str] = []
     in_q = False
@@ -812,6 +849,7 @@ class FinScramClient:
         _diag_alarm_header(alarms_text, len(alarms))   # TEMP-DIAG: remove with the block above
         attach_alarm_details(alarms_text or "", alarms)
         self.last_alarm_rows = alarms
+        open_alarms = open_alarm_rows(alarms)   # one per logical alarm, as the alarm list counts them
         # Did FIN answer with a non-error Zinc grid? A failed read also parses to no rows, and must
         # never be taken for "all alarms cleared"
         first = (alarms_text or "").lstrip("\ufeff").lstrip().split("\n", 1)[0]
@@ -873,8 +911,8 @@ class FinScramClient:
 
             # Filter active alarms
             equip_alarms = []
-            for a in alarms:
-                if safe_get(a.get("sourceRef"), "val") == equip_id and alarm_is_open(a):
+            for a in open_alarms:
+                if safe_get(a.get("sourceRef"), "val") == equip_id:
                     equip_alarms.append({
                         "alarm": a.get("message", "N/A"),
                         "priority": a.get("priority", 0),
