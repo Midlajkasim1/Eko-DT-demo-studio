@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Box3 } from 'three'
 import { useModelStore } from '@/store/useModelStore'
 import { useProjectStore } from '@/store/useProjectStore'
@@ -6,6 +7,7 @@ import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import { useFragmentDownload } from '@/hooks/useFragmentDownload'
 import { useSpatialTree } from '@/hooks/useSpatialTree'
 import { ModelTreeViewer } from './ModelTreeViewer'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 interface ModelInfoPanelProps {
   engineRef: React.MutableRefObject<FragmentsEngine | null>
@@ -53,6 +55,8 @@ export function ModelInfoPanel({ engineRef }: ModelInfoPanelProps) {
 
   const currentProject = useProjectStore(s => s.currentProject)
   const removeModelEntry = useProjectStore(s => s.removeModelEntry)
+  const [pendingRemove, setPendingRemove] = useState<{ id: string; name: string } | null>(null)
+  const [removing, setRemoving] = useState(false)
 
   if (!models || models.length === 0) return null
 
@@ -119,6 +123,17 @@ export function ModelInfoPanel({ engineRef }: ModelInfoPanelProps) {
 
     // Remove from the model store
     removeModel(modelId)
+  }
+
+  const confirmRemove = async () => {
+    if (!pendingRemove) return
+    setRemoving(true)
+    try {
+      await handleRemoveModel(pendingRemove.id)
+    } finally {
+      setRemoving(false)
+      setPendingRemove(null)
+    }
   }
 
   return (
@@ -194,7 +209,7 @@ export function ModelInfoPanel({ engineRef }: ModelInfoPanelProps) {
                     </button>
                   )}
                   <button 
-                    onClick={() => handleRemoveModel(model.modelId)} 
+                    onClick={() => setPendingRemove({ id: model.modelId, name: model.originalFileName })}
                     className="model-remove-btn"
                     title="Remove model"
                   >
@@ -243,6 +258,27 @@ export function ModelInfoPanel({ engineRef }: ModelInfoPanelProps) {
           )
         })}
       </div>
+
+      {pendingRemove && (
+        <ConfirmDialog
+          title="Remove model?"
+          message={
+            <>
+              <p>Remove <b>{pendingRemove.name}</b>{currentProject ? <> from <b>{currentProject.name}</b></> : null}?</p>
+              <p className="confirm-note">
+                {currentProject
+                  ? 'Its converted file is deleted from the project folder. To bring it back, import the IFC again.'
+                  : 'It is unloaded from the viewer.'}
+              </p>
+            </>
+          }
+          confirmLabel="Remove"
+          busyLabel="Removing…"
+          busy={removing}
+          onConfirm={confirmRemove}
+          onCancel={() => setPendingRemove(null)}
+        />
+      )}
     </div>
   )
 }
