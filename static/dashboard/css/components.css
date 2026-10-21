@@ -846,6 +846,24 @@
   touch-action:none
 }
 
+/* Locate-in-3D focus (data-locfocus): no rail, its width given back to the viewer (--navw also
+   places #histframe). The register, summary and asset panel are simply not rendered. */
+.dashboard-native-container[data-locfocus="1"] {
+  --navw:0px
+}
+
+.dashboard-native-container[data-locfocus="1"] #ekonav {
+  display:none
+}
+
+.dashboard-native-container .vpback {
+  position:absolute;
+  top:10px;
+  inset-inline-start:12px;
+  z-index:58;
+  min-height:34px
+}
+
 .dashboard-native-container #enginehost {
   position:absolute;
   inset:0;
@@ -1205,7 +1223,11 @@
   color:var(--warnTx)
 }
 
+/* above the page beside it: in the host the dashboard is narrower than the window, so the register's
+   desktop grid can crush the table, whose spill (position:relative) otherwise took the panel's clicks */
 .dashboard-native-container #assetpanel {
+  position:relative;
+  z-index:1;
   flex:none;
   width:var(--spPan,380px);
   transition:width .2s ease;
@@ -3424,7 +3446,7 @@
   min-height:0;
   padding:6px 10px;
   transform:translate(-50%,-110%);
-  background:rgba(248,250,252,.88);
+  background:var(--sc1);
   visibility:hidden
 }
 .dashboard-native-container .hmlayer[data-proj] .hmzone3d {
@@ -5910,7 +5932,8 @@
   display:none
 }
 
-@media (max-width:760px) {
+/* 1023px = where the pills hide (stacked layout); at 760 tablets had no Locate in 3D at all */
+@media (max-width:1023px) {
   .dashboard-native-container .apfootmob {
     display:flex;
     position:sticky;
@@ -13520,7 +13543,222 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 }
 
 .dashboard-native-container .apcmpchart {
-  min-height:88px
+  padding-block:6px 2px
+}
+
+.dashboard-native-container .cbx {
+  --cbx-h:160px;
+  --cbx-pt:8px;
+  --cbx-lbl:22px;
+  --cbx-min:40px;
+  display:flex;
+  align-items:flex-start;
+  gap:6px;
+  direction:ltr
+}
+
+.dashboard-native-container .cbx[data-axis="0"] {
+  --cbx-pt:22px;
+  --cbx-min:96px
+}
+
+.dashboard-native-container #assetpanel[data-wide="1"] .cbx {
+  --cbx-h:230px
+}
+
+.dashboard-native-container .cbxaxis {
+  position:relative;
+  flex:none;
+  height:var(--cbx-h);
+  margin-block-start:var(--cbx-pt);
+  font-family:'JetBrains Mono',monospace;
+  font-size:var(--txCapSz);
+  font-variant-numeric:tabular-nums;
+  color:var(--t3)
+}
+
+.dashboard-native-container .cbxaxis span {
+  position:absolute;
+  right:0;
+  transform:translateY(50%);
+  line-height:1;
+  white-space:nowrap
+}
+
+.dashboard-native-container .cbxscroll {
+  flex:1;
+  min-width:0;
+  overflow-x:auto;
+  overflow-y:hidden;
+  scrollbar-width:thin;
+  scrollbar-color:var(--bd2) transparent
+}
+
+.dashboard-native-container .cbxplot {
+  position:relative;
+  display:flex;
+  min-width:calc(var(--cbx-n) * var(--cbx-min));
+  padding-block-start:var(--cbx-pt)
+}
+
+.dashboard-native-container .cbxgrid {
+  position:absolute;
+  left:0;
+  right:0;
+  top:var(--cbx-pt);
+  height:var(--cbx-h);
+  pointer-events:none
+}
+
+.dashboard-native-container .cbxgrid i {
+  position:absolute;
+  left:0;
+  right:0;
+  border-top:1px dashed var(--bd1)
+}
+
+.dashboard-native-container .cbxgrp {
+  flex:1 1 0;
+  min-width:var(--cbx-min);
+  display:flex;
+  flex-direction:column;
+  border-radius:4px;
+  cursor:default
+}
+
+.dashboard-native-container .cbxgrp:hover {
+  background:var(--s3)
+}
+
+.dashboard-native-container .cbxbars {
+  position:relative;
+  height:var(--cbx-h);
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  gap:2px;
+  border-bottom:1px solid var(--bd2)
+}
+
+.dashboard-native-container .cbx[data-axis="0"] .cbxbars {
+  gap:20px
+}
+
+.dashboard-native-container .cbxbar {
+  position:relative;
+  width:min(20px, 30%);
+  min-height:1px;
+  border-radius:4px 4px 0 0
+}
+
+.dashboard-native-container .cbxbar[data-k="act"] { background:var(--acc) }
+.dashboard-native-container .cbxbar[data-k="sp"] { background:var(--info) }
+.dashboard-native-container .cbxbar[data-none="1"] { visibility:hidden; height:0 }
+
+.dashboard-native-container .cbxval {
+  position:absolute;
+  bottom:100%;
+  left:50%;
+  transform:translateX(-50%);
+  margin-bottom:3px;
+  font-family:'JetBrains Mono',monospace;
+  font-size:var(--txCapSz);
+  font-weight:500;
+  font-variant-numeric:tabular-nums;
+  color:var(--t2);
+  white-space:nowrap
+}
+
+.dashboard-native-container .cbx[data-dense="1"] {
+  --cbx-min:11px
+}
+
+.dashboard-native-container .cbx[data-dense="1"] .cbxbars {
+  gap:1px
+}
+
+.dashboard-native-container .cbx[data-dense="1"] .cbxbar {
+  width:min(10px, 44%);
+  border-radius:2px 2px 0 0
+}
+
+.dashboard-native-container .cbx[data-dense="1"] .cbxlbl {
+  overflow:visible;
+  text-overflow:clip;
+  padding-inline:0
+}
+
+.dashboard-native-container .aphhead {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:6px;
+  direction:ltr
+}
+
+.dashboard-native-container .aphday {
+  font-size:var(--txValueSz);
+  font-weight:var(--txValueW);
+  color:var(--t1)
+}
+
+.dashboard-native-container .aphnav {
+  flex:none;
+  position:relative;
+  display:flex;
+  align-items:flex-end;
+  gap:1px;
+  height:36px;
+  margin-block-start:8px;
+  padding:3px 0 0;
+  border:1px solid var(--bd1);
+  border-radius:6px;
+  background:var(--s1);
+  cursor:pointer;
+  touch-action:none;
+  user-select:none;
+  direction:ltr
+}
+
+.dashboard-native-container .aphnav i {
+  flex:1 1 0;
+  min-width:0;
+  background:var(--bd2);
+  border-radius:2px 2px 0 0
+}
+
+.dashboard-native-container .aphnav i[data-on="1"] {
+  background:var(--acc)
+}
+
+.dashboard-native-container .aphwin {
+  position:absolute;
+  top:-1px;
+  bottom:-1px;
+  border:2px solid var(--acc);
+  border-radius:6px;
+  background:var(--accT);
+  pointer-events:none
+}
+
+.dashboard-native-container .aphends {
+  display:flex;
+  justify-content:space-between;
+  font-size:var(--txCapSz);
+  color:var(--t3);
+  direction:ltr
+}
+
+.dashboard-native-container .cbxlbl {
+  height:var(--cbx-lbl);
+  line-height:var(--cbx-lbl);
+  padding-inline:2px;
+  text-align:center;
+  font-size:var(--txCapSz);
+  color:var(--t3);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis
 }
 
 .dashboard-native-container .apcmpleg {
@@ -15818,7 +16056,7 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 }
 
 @media (min-width:1024px) {
-  .dashboard-native-container #modpanel #modcontent {
+  .dashboard-native-container #modpanel #modcontent,.dashboard-native-container #assetpanel .apbody {
     margin-block-end:var(--aiCornerH)
   }
   .dashboard-native-container .pwarea,.dashboard-native-container .rphub {

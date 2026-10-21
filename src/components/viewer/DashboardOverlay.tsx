@@ -39,9 +39,10 @@ const SCHEMATICS: Record<string, (localBox: THREE.Box3, modelMatrix: THREE.Matri
   FAHU: createFahuSchematic,
 }
 
-/* Types whose internals are driven by live FIN points (filter, UV and fan state).
-   FCU, AHU and FAHU stay at their default look: their readings live in the asset panel. */
-const LIVE_SCHEMATICS = new Set(['MAHU', 'ECO'])
+/* Types whose internals are driven by live FIN points (fan, coil, damper, filter, UV state).
+   A point FIN does not send shows the no-data grey, never a guessed off/clean.
+   AHU stays at its default look: its reader still treats a missing point as off/clean. */
+const LIVE_SCHEMATICS = new Set(['MAHU', 'ECO', 'FCU', 'FAHU'])
 
 function loadScripts(scripts: HTMLScriptElement[], signal: { mounted: boolean }) {
   return scripts.reduce<Promise<void>>((prev, s) => prev.then(() => new Promise((resolve) => {
@@ -277,6 +278,17 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     watchClipping(ghostFill)
     watchClipping(ghostEdge)
     let ghost: { group: THREE.Group; model: any } | null = null
+    // X-ray: alarmed equipment glows red, drawn in the selection highlight's pass
+    const alarmFill = ghostFill.clone()
+    alarmFill.uniforms.uColor.value.copy(ALARM)
+    alarmFill.uniforms.uOpacity.value = 0.5
+    const alarmEdge = new THREE.LineBasicMaterial({ color: ALARM, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false })
+    watchClipping(alarmFill)
+    watchClipping(alarmEdge)
+    const alarmGlow = new Map<string, { group: THREE.Group; model: any; localId: number; edges: THREE.BufferGeometry[] }>()
+    let alarmSeq = 0
+    // Items hidden by the Levels filter, per model
+    const levelHidden = new WeakMap<object, Set<number>>()
     type Internals = { assetId: string; type: string }
     let active: (Internals & { schematic: HvacSchematic; bimId: string; last: number; synced: number }) | null = null
     /* The asset whose internals to draw: the asked one if its type has a
@@ -319,7 +331,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ghost = null
     }
     const drawGhost = () => {
-      const hasHeat = heatRoots.size > 0
+      const hasHeat = heatRoots.size > 0 || alarmGlow.size > 0
       if ((!ghost || !ghost.group.visible) && !hasHeat) return
       // The selected equipment's internals, while its highlight is on screen
       const shown = ghost && ghost.group.visible ? active : null
@@ -369,6 +381,13 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         root.matrix.copy(model.object.matrixWorld)
         root.matrixWorldNeedsUpdate = true
         root.visible = model.object.visible !== false
+      })
+      // The selected equipment already has its own highlight
+      alarmGlow.forEach((rec, bimId) => {
+        rec.group.matrix.copy(rec.model.object.matrixWorld)
+        rec.group.matrixWorldNeedsUpdate = true
+        rec.group.visible = rec.model.object.visible !== false && colored?.bimId !== bimId
+          && !levelHidden.get(rec.model)?.has(rec.localId)
       })
     }
     const mountInternals = (group: THREE.Group, entry: Located, internals: Internals, bimId: string) => {
@@ -462,6 +481,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
       if (any) repositionMarkers()
       syncColour()
+      void syncAlarmGlow()
     }
 
     /* Canvas + host rects, read once per synchronous projection pass (viewer.js
@@ -756,10 +776,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const entry = await indexModel(m)
         if (seq !== levelSeq) return
         await m.resetVisible()
+        levelHidden.delete(m)
         if (!levelId || levelId === 'ALL' || !entry.byFloor.size) continue
         /* Basement is only itself. Each floor above also keeps everything below it. */
         const picked = floorCatalog.get(levelId)
         if (!picked) {
+          levelHidden.set(m, new Set(entry.geom))
           if (entry.geom.length) await m.setVisible(entry.geom, false)
           continue
         }
@@ -772,11 +794,13 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           for (const n of ids) show.add(n)
         }
         if (!covered) {
+          levelHidden.set(m, new Set(entry.geom))
           if (entry.geom.length) await m.setVisible(entry.geom, false)
           continue
         }
         if (!show.size) continue
         const hide = entry.geom.filter(id => !show.has(id))
+        levelHidden.set(m, new Set(hide))
         if (hide.length) await m.setVisible(hide, false)
       }
       if (seq === levelSeq) repositionMarkers()
@@ -890,6 +914,64 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       syncGhost()
     }
 
+    // Same rule as isAlarmed
+    const alarmedBimIds = () => {
+      const data = (window as any).EKO?.data || {}
+      const out = new Set<string>()
+      for (const a of data.alarms || []) {
+        const bimId = bimIdFor(a.asset) || (isGuid(a.bimId) ? a.bimId : null)
+        if (bimId) out.add(bimId)
+      }
+      for (const a of data.assets || []) {
+        if (a.st !== 'alarm') continue
+        const bimId = bimIdFor(a.id)
+        if (bimId) out.add(bimId)
+      }
+      return out
+    }
+    const dropAlarmGlow = (bimId: string) => {
+      const rec = alarmGlow.get(bimId)
+      if (!rec) return
+      rec.group.removeFromParent()
+      rec.edges.forEach(g => g.dispose())   // the meshes share heatGeoms' cached geometry
+      alarmGlow.delete(bimId)
+    }
+    // Only the latest call wins
+    const syncAlarmGlow = async () => {
+      const seq = ++alarmSeq
+      const want = useAppStore.getState().templateId === 'xray' ? alarmedBimIds() : new Set<string>()
+      for (const bimId of [...alarmGlow.keys()]) if (!want.has(bimId)) dropAlarmGlow(bimId)
+      for (const bimId of want) {
+        if (alarmGlow.has(bimId)) continue
+        const entry = await locate(bimId)
+        if (seq !== alarmSeq) return
+        if (!entry) continue
+        const geoms = await geomsFor(bimId, entry)
+        if (seq !== alarmSeq) return
+        if (!geoms.length) continue
+        const group = new THREE.Group()
+        group.matrixAutoUpdate = false
+        const edges: THREE.BufferGeometry[] = []
+        for (const geom of geoms) {
+          const edge = new THREE.EdgesGeometry(geom, 25)
+          edges.push(edge)
+          const depth = new THREE.Mesh(geom, ghostDepth)
+          const fill = new THREE.Mesh(geom, alarmFill)
+          const line = new THREE.LineSegments(edge, alarmEdge)
+          depth.renderOrder = 0
+          fill.renderOrder = 1
+          line.renderOrder = 2
+          group.add(depth, fill, line)
+        }
+        alarmGlow.set(bimId, { group, model: entry.model, localId: entry.localId, edges })
+        overlay.add(group)
+      }
+      syncGhost()
+    }
+    const unsubTemplate = useAppStore.subscribe((s, prev) => {
+      if (s.templateId !== prev.templateId) void syncAlarmGlow()
+    })
+
     /* Whole models, by the discipline in the file name. Item visibility
        (the floor filter) is left as it is. */
     let lastLayerKey = ''
@@ -935,7 +1017,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       projectPoint,
       resolveAllAssetPositions,
       // data-map.js calls this on refresh: keep the selected equipment's colour current
-      applyStatusColors: () => { syncColour() },
+      applyStatusColors: () => { syncColour(); void syncAlarmGlow() },
       flyToAsset,
       highlightAsset,
       clearHighlight,
@@ -1041,6 +1123,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const layer = (window as any).EKO?.state?.dock?.layer
         if (layer && layer !== 'all') isolateLayer(layer)
       }
+      // A control room opened from its own URL goes home once its models load
+      if (modelsChanged && live.length && document.querySelector('.dashboard-native-container[data-wall="1"]')) resetCameraToHome(engine)
     }, 3000)
     void resolveAllAssetPositions()
     void refreshLevels()
@@ -1063,6 +1147,13 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       void clearHighlight()
       void clearSpaceHeat()
       removeGhost()
+      unsubTemplate()
+      alarmSeq++
+      for (const bimId of [...alarmGlow.keys()]) dropAlarmGlow(bimId)
+      unwatchClipping(alarmFill)
+      unwatchClipping(alarmEdge)
+      alarmFill.dispose()
+      alarmEdge.dispose()
       unwatchClipping(ghostDepth)
       unwatchClipping(ghostFill)
       unwatchClipping(ghostEdge)

@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import {
   HvacPoint, HvacCtx,
-  COIL_CLOSED, COIL_OPEN, COIL_IDLE, FAN_ON, FAN_OFF,
-  clean, numberOf, findPoint, isRunning,
+  COIL_CLOSED, COIL_OPEN, COIL_IDLE, FAN_ON, FAN_OFF, FAN_FAULT, FILTER_CLEAN, FILTER_DIRTY, NO_DATA, DAMPER_CHORD,
+  clean, numberOf, findPoint, isRunning, stateOf, faultOf, dirtyOf, setDamper,
   makeHvacCtx,
   buildCoil, buildValve, buildCentrifugalFan,
 } from '@/lib/hvacGeometry'
@@ -25,12 +25,16 @@ export type FahuPoint = HvacPoint
 export type FahuReading = {
   eaDamperOpen: number | null
   saDamperOpen: number | null
-  preFilterDirty: boolean
-  bagFilterDirty: boolean
-  raFilterDirty: boolean
+  /** null = no reading: shown in the no-data grey, never as clean or off */
+  preFilterDirty: boolean | null
+  bagFilterDirty: boolean | null
+  raFilterDirty: boolean | null
   coolingValvePos: number | null
-  efFanOn: boolean
-  sfFanOn: boolean
+  efFanOn: boolean | null
+  sfFanOn: boolean | null
+  /** EF_TRIP / SF_TRIP_ALARM set: a fault, which is not the same as stopped */
+  efTripped: boolean | null
+  sfTripped: boolean | null
   hrwOn: boolean
   sensibleOn: boolean
 }
@@ -42,8 +46,6 @@ export type FahuSchematic = {
   dispose: () => void
 }
 
-const FILTER_CLEAN = new THREE.Color(0xc8d6df)
-const FILTER_DIRTY = new THREE.Color(0x9c6b2e)
 const SLAB_M = 0.18
 
 type Deck = { min: THREE.Vector3; max: THREE.Vector3 }
@@ -202,11 +204,13 @@ export function readFahuPoints(points: FahuPoint[]): FahuReading {
   const cvRaw = val(k =>
     k.includes('coolingvalvepos') ||
     (k.includes('coolingvalve') && k.includes('pos') && !k.includes('cmd')))
-  const efRaw = val(k => k.includes('efairflow') || k.endsWith('efvfdrunsts'))
-  const sfRaw = val(k => k.includes('sfairflow') || k.endsWith('sfvfdrunsts'))
-  const hrwRaw = val(k => k.endsWith('hrwcmd'))
+  // The VFD run status first, the airflow switch only when it is missing (not whichever FIN lists first)
+  const efRaw = val(k => k.endsWith('efvfdrunsts')) ?? val(k => k.includes('efairflow'))
+  const sfRaw = val(k => k.endsWith('sfvfdrunsts')) ?? val(k => k.includes('sfairflow'))
+  const efTrip = val(k => k.endsWith('eftrip') || k.endsWith('eftripalarm') || k.endsWith('eftripsts'))
+  const sfTrip = val(k => k.endsWith('sftrip') || k.endsWith('sftripalarm') || k.endsWith('sftripsts'))
+  // Wheels: only the speed feedback; HRW_CMD / SENSIBLE_CMD are commands, not proof a wheel turns
   const hrwPos = val(k => k.includes('hrw') && k.includes('spd') && k.includes('pos'))
-  const sensRaw = val(k => k.endsWith('sensiblecmd'))
   const sensPos = val(k => k.includes('sensible') && k.includes('spd') && k.includes('pos'))
 
   const cvN = numberOf(cvRaw)
@@ -224,14 +228,18 @@ export function readFahuPoints(points: FahuPoint[]): FahuReading {
   return {
     eaDamperOpen: damperOpen(eaRaw),
     saDamperOpen: damperOpen(saRaw),
-    preFilterDirty: preRaw != null && /dirty|alarm|fault|high/i.test(preRaw),
-    bagFilterDirty: bagRaw != null && /dirty|alarm|fault|high/i.test(bagRaw),
-    raFilterDirty: raRaw != null && /dirty|alarm|fault|high/i.test(raRaw),
+    // dirtyOf as on the MAHU/ECO: the backend sends a pressure switch's T as "On", which the old
+    // word-only test read as clean
+    preFilterDirty: dirtyOf(preRaw),
+    bagFilterDirty: dirtyOf(bagRaw),
+    raFilterDirty: dirtyOf(raRaw),
     coolingValvePos,
-    efFanOn: isRunning(efRaw),
-    sfFanOn: isRunning(sfRaw),
-    hrwOn: isRunning(hrwRaw) || speedOn(hrwPos),
-    sensibleOn: isRunning(sensRaw) || speedOn(sensPos),
+    efFanOn: stateOf(efRaw),
+    sfFanOn: stateOf(sfRaw),
+    efTripped: faultOf(efTrip),
+    sfTripped: faultOf(sfTrip),
+    hrwOn: speedOn(hrwPos),
+    sensibleOn: speedOn(sensPos),
   }
 }
 
@@ -272,15 +280,15 @@ function buildDamper(
   const count = 5
   const innerH = frameH - bar * 2
   const stride = innerH / count
-  const chord = stride * 0.28
+  const chord = stride * DAMPER_CHORD   // closed blades meet, as in hvacGeometry's buildDamper
   const bladeW = frameW - bar * 2.4
   const blades: THREE.Mesh[] = []
-  const geo = new THREE.BoxGeometry(Math.max(depth * 0.18, chord * 0.22), chord, bladeW)
+  const geo = new THREE.BoxGeometry(Math.max(depth * 0.18, chord * 0.06), chord, bladeW)
   for (let i = 0; i < count; i++) {
     const by = y - innerH / 2 + (i + 0.5) * stride
     const b = ctx.add(geo, bladeMat, parent)
     b.position.set(x, by, 0)
-    b.userData.fahuBlade = true
+    b.userData.ekoDamperBlade = true
     blades.push(b)
   }
 
@@ -567,19 +575,18 @@ export function createFahuSchematic(
 
   const apply = (points: FahuPoint[]): FahuReading => {
     const r = readFahuPoints(points || [])
-    const setBlades = (blades: THREE.Mesh[], open: number | null) => {
-      const angle = (open == null ? 0.62 : open) * Math.PI * 0.45
-      blades.forEach(b => { b.rotation.z = angle })
-    }
-    setBlades(eaBlades, r.eaDamperOpen)
-    setBlades(saBlades, r.saDamperOpen)
-    preMat.color.copy(r.preFilterDirty ? FILTER_DIRTY : FILTER_CLEAN)
-    bagMat.color.copy(r.bagFilterDirty ? FILTER_DIRTY : FILTER_CLEAN)
-    raMat.color.copy(r.raFilterDirty ? FILTER_DIRTY : FILTER_CLEAN)
+    setDamper(eaBlades, r.eaDamperOpen)
+    setDamper(saBlades, r.saDamperOpen)
+    const filterColour = (d: boolean | null) => d == null ? NO_DATA : d ? FILTER_DIRTY : FILTER_CLEAN
+    // a trip is amber whatever the run status says; the blades still turn only on the run status
+    const fanColour = (on: boolean | null, trip: boolean | null) => trip ? FAN_FAULT : on == null ? NO_DATA : on ? FAN_ON : FAN_OFF
+    preMat.color.copy(filterColour(r.preFilterDirty))
+    bagMat.color.copy(filterColour(r.bagFilterDirty))
+    raMat.color.copy(filterColour(r.raFilterDirty))
     if (r.coolingValvePos == null) coilR.coilMat.color.copy(COIL_IDLE)
     else coilR.coilMat.color.copy(COIL_CLOSED).lerp(COIL_OPEN, r.coolingValvePos)
-    efFan.bladeMat.color.copy(r.efFanOn ? FAN_ON : FAN_OFF)
-    sfFan.bladeMat.color.copy(r.sfFanOn ? FAN_ON : FAN_OFF)
+    efFan.bladeMat.color.copy(fanColour(r.efFanOn, r.efTripped))
+    sfFan.bladeMat.color.copy(fanColour(r.sfFanOn, r.sfTripped))
     efRate = r.efFanOn ? 1.9 : 0
     sfRate = r.sfFanOn ? 1.9 : 0
     hrwRate = r.hrwOn ? 1.15 : 0

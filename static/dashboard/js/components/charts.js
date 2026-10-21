@@ -49,35 +49,49 @@ function ekoTrend(vals,w,h){
 }
 
 // Grouped actual-vs-setpoint bars for the asset Analytics tab.
-function ekoCompareBars(groups,w,h){
-  const padT=8,padB=18,padX=6;
-  const innerW=w-padX*2,innerH=h-padT-padB;
-  const nums=[];
-  (groups||[]).forEach(g=>{
-    if(g.a!=null&&isFinite(g.a)) nums.push(+g.a);
-    if(g.b!=null&&isFinite(g.b)) nums.push(+g.b);
-  });
-  if(!nums.length) return {svg:'',min:0,max:0};
-  let lo=Math.min.apply(null,nums),hi=Math.max.apply(null,nums);
-  const span=(hi-lo)||1;
-  lo=lo-span*0.28; hi=hi+span*0.18;
-  const y=v=>padT+innerH-((v-lo)/((hi-lo)||1))*innerH;
-  const n=groups.length,slot=innerW/n,bw=Math.max(3.5,slot*0.3);
-  const base=y(lo);
-  let bars='';
-  groups.forEach((g,i)=>{
-    const cx=padX+i*slot+slot/2;
-    const rect=(val,shift,fill)=>{
-      if(val==null||!isFinite(val)) return '';
-      const yv=y(val), top=Math.min(yv,base), ht=Math.max(Math.abs(yv-base),1);
-      return `<rect x="${(cx+shift).toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${ht.toFixed(1)}" rx="1.4" fill="${fill}"/>`;
-    };
-    bars+=rect(g.a,-bw-0.8,'var(--acc)')+rect(g.b,0.8,'var(--info)');
-  });
-  const labels=groups.map((g,i)=>{
-    const x=padX+i*slot+slot/2;
-    const t=String(g.label==null?'':g.label);
-    return `<text x="${x.toFixed(1)}" y="${h-4}" text-anchor="middle" fill="var(--t3)" font-size="8">${t}</text>`;
+function ekoCompareBars(groups,o){
+  o=o||{};
+  const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const ok=v=>v!=null&&v!==''&&isFinite(v);
+  const fmt=o.fmt||(v=>String(Math.round(v*10)/10));
+  const list=o.keep?(groups||[]):(groups||[]).filter(g=>ok(g.a)||ok(g.b));
+  if(!list.some(g=>ok(g.a)||ok(g.b))) return {html:'',min:0,max:0};
+  const unitOf=g=>(g.unit!=null&&g.unit!=='')?g.unit:(o.unit||'');
+  const withU=(v,u)=>ok(v)?fmt(+v)+(u?(/^[°%]/.test(u)?u:' '+u):''):'—';
+  const shared=new Set(list.map(unitOf)).size<=1;
+  let lo=0,hi=1,ticks=[];
+  if(shared){
+    const nums=[];
+    list.forEach(g=>{ if(ok(g.a)) nums.push(+g.a); if(ok(g.b)) nums.push(+g.b); });
+    const mn=Math.min.apply(null,nums),mx=Math.max.apply(null,nums);
+    const span=(mx-mn)||Math.abs(mx)||1,raw=span/3;
+    const mag=Math.pow(10,Math.floor(Math.log10(raw)));
+    const step=[1,2,2.5,5,10].map(m=>m*mag).find(s=>s>=raw*(1-1e-9));
+    lo=Math.floor((mn-span*0.15)/step)*step; hi=Math.ceil((mx+span*0.1)/step)*step;
+    if(mn>=0&&lo<0) lo=0;
+    if(hi<=lo) hi=lo+step;
+    const dec=Math.max(0,Math.ceil(-Math.log10(step)-1e-9))+(String(Math.round(step/mag*10)/10).indexOf('.')!==-1?1:0);
+    for(let v=lo;v<=hi+step*1e-6;v+=step) ticks.push(+v.toFixed(dec));
+    ticks=ticks.map(v=>({v:v,t:v.toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec})}));
+  }
+  const pct=(v,l,h)=>Math.max(0,Math.min(100,(v-l)/((h-l)||1)*100)).toFixed(2);
+  const rows=list.map(g=>{
+    let l=lo,h=hi;
+    if(!shared){
+      const vs=[g.a,g.b].filter(ok).map(Number);
+      l=Math.min.apply(null,[0].concat(vs)); h=Math.max.apply(null,vs);
+      if(h<=l) h=l+1;
+    }
+    const bar=(v,k)=>ok(v)
+      ? `<span class="cbxbar" data-k="${k}" style="height:${pct(+v,l,h)}%">${shared?'':`<b class="cbxval">${esc(fmt(+v))}</b>`}</span>`
+      : `<span class="cbxbar" data-k="${k}" data-none="1"></span>`;
+    const u=unitOf(g);
+    const tip=`${g.tip!=null?g.tip:(g.label==null?'':g.label)} · ${o.actLbl||'Actual'} ${withU(g.a,u)} · ${o.spLbl||'Setpoint'} ${withU(g.b,u)}`;
+    return `<div class="cbxgrp" data-tip="${esc(tip)}"><div class="cbxbars">${bar(g.a,'act')}${bar(g.b,'sp')}</div><span class="cbxlbl">${esc(g.label)}</span></div>`;
   }).join('');
-  return {svg:bars+labels,min:lo,max:hi,w:w,h:h};
+  const axisW=ticks.reduce((m,x)=>Math.max(m,x.t.length),0);
+  const axis=shared?`<div class="cbxaxis" style="width:${axisW+0.5}ch">${ticks.map(x=>`<span style="bottom:${pct(x.v,lo,hi)}%">${esc(x.t)}</span>`).join('')}</div>`:'';
+  const grid=shared?`<div class="cbxgrid">${ticks.filter(x=>x.v>lo).map(x=>`<i style="bottom:${pct(x.v,lo,hi)}%"></i>`).join('')}</div>`:'';
+  const html=`<div class="cbx" data-axis="${shared?1:0}" data-dense="${o.dense?1:0}" style="--cbx-n:${list.length}">${axis}<div class="cbxscroll"><div class="cbxplot">${grid}${rows}</div></div></div>`;
+  return {html:html,min:lo,max:hi};
 }

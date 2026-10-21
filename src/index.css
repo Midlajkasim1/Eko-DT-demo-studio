@@ -1906,6 +1906,41 @@ Wait, if iframe has pointer-events: auto, it works. Let's fix this in iframe bod
   opacity: 0.7;
   cursor: not-allowed;
 }
+.ds-btn-danger {
+  background: var(--red);
+  color: white;
+}
+.ds-btn-danger:hover {
+  filter: brightness(0.9);
+}
+.ds-btn-danger:disabled,
+.ds-btn-secondary:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.confirm-modal {
+  max-width: 440px;
+  width: calc(100% - 32px);
+}
+.confirm-body {
+  padding: 20px 24px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.confirm-body p {
+  margin: 0;
+}
+.confirm-body b {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.confirm-body .confirm-note {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
 
 /* ── Model Loading Progress ── */
 

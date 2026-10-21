@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import {
   HvacPoint,
-  COIL_CLOSED, COIL_OPEN, COIL_IDLE, FAN_ON, FAN_OFF, FILTER_CLEAN, FILTER_DIRTY, NO_DATA,
-  clean, findPoint, shown, stateOf, fractionOf, dirtyOf, bayCentres,
+  COIL_CLOSED, COIL_OPEN, COIL_IDLE, FAN_ON, FAN_OFF, FAN_FAULT, FILTER_CLEAN, FILTER_DIRTY, NO_DATA,
+  clean, findPoint, shown, stateOf, faultOf, fractionOf, dirtyOf, bayCentres, setDamper,
   resolveFrame, makeHvacCtx,
   buildCoil, buildValve, buildCentrifugalFan, buildFanOpening,
   buildDamper, buildPanelFilter, buildBagFilter, buildSensorProbe, buildHeatPipe,
@@ -31,6 +31,8 @@ export type MauReading = {
   sfStatus:        string
   sfSpeed:         string
   sfTrip:          string
+  /** SF_TRIP_ALARM set: a fault, which is not the same as stopped (sfOn) */
+  sfTripped:       boolean | null
   sfRate:          number
   saTemp:          string
   saTempSp:        string
@@ -83,13 +85,13 @@ export function readMauPoints(points: MauPoint[]): MauReading {
   const bagRaw = val('bagfilter')
   const cvPosRaw = val('coolingvalvepos')
   const runRaw = val('sfvfdrunsts', 'sfairflowsts')
-  const speedRaw = val('sfvfdspdpos', 'sfvfdspdcmd')
+  const speedRaw = val('sfvfdspdpos')   // feedback only: SF_VFD_SPD_CMD is what was asked, not the speed
 
   const sfOn = stateOf(runRaw)
   const speed = fractionOf(speedRaw)
   const sfRate = sfOn ? (speed == null ? 1.9 : 0.5 + 2.6 * speed) : 0
   const tripRaw = val('sftripalarm')
-  const trip = stateOf(tripRaw)
+  const trip = faultOf(tripRaw)
 
   return {
     faDamperOpen,
@@ -111,6 +113,7 @@ export function readMauPoints(points: MauPoint[]): MauReading {
     sfStatus:        sfOn == null ? '—' : sfOn ? 'On' : 'Off',
     sfSpeed:         shown(speedRaw, ' %'),
     sfTrip:          trip == null ? '—' : trip ? 'Trip' : 'Normal',
+    sfTripped:       trip,
     sfRate,
     saTemp:          shown(val('satemp'),       ' °C'),
     saTempSp:        shown(val('satempsp'),     ' °C'),
@@ -206,9 +209,7 @@ export function createMauSchematic(
   const apply = (points: MauPoint[]): MauReading => {
     const r = readMauPoints(points || [])
 
-    // Unknown damper state: the AHU's half-open pose, so the blades still read as blades.
-    const open = r.faDamperOpen == null ? 0.62 : r.faDamperOpen
-    damperBlades.forEach(b => { b.rotation.z = open * Math.PI * 0.45 })
+    setDamper(damperBlades, r.faDamperOpen)
 
     preFilterMat.color.copy(filterColour(r.preFilterDirty))
     bagFilterMat?.color.copy(filterColour(r.bagFilterDirty))
@@ -216,7 +217,8 @@ export function createMauSchematic(
     if (r.coolingValvePos == null) coilMat.color.copy(COIL_IDLE)
     else coilMat.color.copy(COIL_CLOSED).lerp(COIL_OPEN, r.coolingValvePos)
 
-    bladeMat.color.copy(r.sfOn == null ? NO_DATA : r.sfOn ? FAN_ON : FAN_OFF)
+    // A trip shows whatever the run status says; the blades still turn only on SF_VFD_RUN_STS
+    bladeMat.color.copy(r.sfTripped ? FAN_FAULT : r.sfOn == null ? NO_DATA : r.sfOn ? FAN_ON : FAN_OFF)
     rate = r.sfRate
 
     return r

@@ -4,8 +4,13 @@
 export interface FinEquipmentPoint {
   navName: string
   currentValue: string
-  status: string
+  /** FIN's curStatus */
+  status: string | null
   kind?: 'Bool' | 'Number' | 'Str' | 'Null'
+  /** A Bool point's state and its enum word */
+  bool?: boolean | null
+  text?: string | null
+  alarmPoint?: boolean
 }
 
 export interface FinAlarm {

@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import {
   HvacPoint,
-  COIL_CLOSED, COIL_OPEN, COIL_IDLE, FAN_ON, FAN_OFF,
-  clean, numberOf, findPoint, shown, isRunning,
+  COIL_CLOSED, COIL_OPEN, COIL_IDLE, FAN_ON, FAN_OFF, NO_DATA,
+  clean, numberOf, findPoint, shown, stateOf, keyOf,
   resolveFrame, makeHvacCtx,
   buildCoil, buildValve, buildCentrifugalFan,
 } from '@/lib/hvacGeometry'
@@ -16,7 +16,8 @@ export type FcuReading = {
   fanSpeed: string
   fanRun:   string
   valveOpen: number | null
-  fanOn:     boolean
+  /** From the fan's run STATUS; null when FIN sends none (a run command is not proof it runs) */
+  fanOn:     boolean | null
   fanRate:   number
 }
 
@@ -38,8 +39,12 @@ export function readFcuPoints(points: FcuPoint[]): FcuReading {
   const zone  = clean(findPoint(points, k => k.includes('zonetemp') && !k.includes('set') && !k.endsWith('sp'))?.currentValue)
   const pos   = clean(findPoint(points, k => k.includes('coolingvalvepos') || (k.includes('valve') && k.includes('pos') && !k.includes('cmd')))?.currentValue)
   const cmd   = clean(findPoint(points, k => k.includes('coolingvalvecmd') || (k.includes('valve') && (k.includes('cmd') || k.includes('command'))))?.currentValue)
-  const speed = clean(findPoint(points, k => k.includes('fanspeed'))?.currentValue)
-  const run   = clean(findPoint(points, k => k.includes('fanrun') || k === 'fanstatus')?.currentValue)
+  const speedPt = findPoint(points, k => k.includes('fanspeed'))
+  const speed = clean(speedPt?.currentValue)
+  // FAN_SPEED_MODE is a mode setting (a gear on the FIN page), not a speed: never a %, never a spin rate
+  const isMode = keyOf(speedPt?.navName || '').includes('mode')
+  const isCmd = (k: string) => k.includes('cmd') || k.includes('command')
+  const run   = clean(findPoint(points, k => (k.includes('fanrun') || k.endsWith('fanstatus') || k.endsWith('fansts')) && !isCmd(k))?.currentValue)
 
   const posN = numberOf(pos)
   let valveOpen: number | null = null
@@ -48,8 +53,8 @@ export function readFcuPoints(points: FcuPoint[]): FcuReading {
     valveOpen = Math.min(1, Math.max(0, fraction ? posN : posN / 100))
   }
 
-  const on     = isRunning(run)
-  const speedN = numberOf(speed)
+  const on     = stateOf(run)
+  const speedN = isMode ? null : numberOf(speed)
   let fanRate  = 0
   if (on) {
     fanRate = speedN == null
@@ -61,7 +66,7 @@ export function readFcuPoints(points: FcuPoint[]): FcuReading {
     zoneTemp: shown(zone,  ' °C'),
     valvePos: shown(pos,   ' %'),
     valveCmd: shown(cmd,   ' %'),
-    fanSpeed: shown(speed, ' %'),
+    fanSpeed: shown(speed, isMode ? '' : ' %'),
     fanRun:   shown(run,   ''),
     valveOpen,
     fanOn: on,
@@ -121,7 +126,7 @@ export function createFcuSchematic(
     const reading = readFcuPoints(points || [])
     if (reading.valveOpen == null) coilMat.color.copy(COIL_IDLE)
     else coilMat.color.copy(COIL_CLOSED).lerp(COIL_OPEN, reading.valveOpen)
-    bladeMat.color.copy(reading.fanOn ? FAN_ON : FAN_OFF)
+    bladeMat.color.copy(reading.fanOn == null ? NO_DATA : reading.fanOn ? FAN_ON : FAN_OFF)
     rate = reading.fanRate
     return reading
   }

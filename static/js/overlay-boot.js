@@ -111,6 +111,7 @@
     if (fill) fill.remove();
     dropOrbitHit();
     if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.bindWallOrbit) window.EKO_HOST_ENGINE.bindWallOrbit();
+    if (E.pageView) E.pageView(E.state.pageId, E.state.module, E.state.sub, null, true);
     E.set({ born: 'boot' });
   };
 

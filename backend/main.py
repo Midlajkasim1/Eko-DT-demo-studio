@@ -11,15 +11,16 @@ import json
 import mimetypes
 import os
 import re
+import sqlite3
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -27,14 +28,15 @@ from fin_client import (
     PROJECT_ID_RE,
     FinScramClient,
     aggregate_and_restructure,
-    alarm_is_open,
     clip_decimals,
+    open_alarm_rows,
     parse_custom_response,
     parse_fin_projects,
     parse_zinc_csv,
     safe_get,
 )
 from workorders import error_payload, live_payload, norm_id, orders_by_equipment
+import notifications
 
 # ─── Load Config ─────────────────────────────────────────────────────────────
 
@@ -295,10 +297,13 @@ async def realtime_loop():
                 "timestamp": datetime.now().isoformat(),
                 "equipment": _flatten_equip(realtime),
             }
+            await refresh_workorders()
             _compute_sensor_averages(realtime)
             cached_fdd_summary = _build_fdd_summary(realtime)
             cached_meter_data = _extract_meters(realtime, CONFIG.get("meter_profile", {}))
             cached_alarm_data = _flatten_alarms(client.last_alarm_rows, CONFIG.get("severity_bands", {}))
+            _note_critical_alarms(client.project_name, cached_alarm_data["alarms"],
+                                  getattr(client, "last_alarm_read_ok", False))
             cached_facility = _compute_facility_services(realtime)
             cached_power_history = await client.fetch_power_histories(pw_endpoints)
             if (
@@ -308,7 +313,6 @@ async def realtime_loop():
                 cached_power_history["Total_Power_Consumption_his"] = cached_power_history[
                     "Hourly_Energy_Consumption_his"
                 ]
-            await refresh_workorders()
             cached_building_data = {
                 "status": "success",
                 "Building_Info": {
@@ -448,9 +452,7 @@ def _flatten_alarms(rows: list, bands: dict) -> dict:
     alarms = []
     counts = {"critical": 0, "warning": 0, "info": 0}
 
-    for row in rows or []:
-        if not alarm_is_open(row):
-            continue
+    for row in open_alarm_rows(rows):   # one per logical alarm: a re-issued FIN record is not a second alarm
         priority = row.get("priority") if isinstance(row.get("priority"), (int, float)) else None
         severity = severity_for(priority, bands)
         counts[severity] += 1
@@ -463,6 +465,8 @@ def _flatten_alarms(rows: list, bands: dict) -> dict:
         if detail.lower() == message.strip().lower():
             detail = ""
         alarms.append({
+            # FIN's own record id, as sent (None when FIN sends none: never made up)
+            "id": safe_get(row.get("id"), "val") or None,
             "source": safe_get(source, "dis") or safe_get(source, "val") or "",
             "message": message,
             "detail": detail,
@@ -649,6 +653,8 @@ async def lifespan(app: FastAPI):
     # An exported project ships its own project.json beside this file; its settings
     # become the active configuration, with config.json as the fallback
     apply_project_settings(*_bundled_project())
+    # a deployment setting, never a project's: projects cannot point the history elsewhere
+    notifications.configure(BASE_CONFIG.get("notification_db_path"))
     yield
     # Cleanup
     global polling_tasks, client
@@ -713,7 +719,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # No cross-origin browser access by default: every page this backend serves is same-origin, and
+    # the Studio reaches it through its dev proxy. "*" let any web page read FIN data through the
+    # shared session; a deployment that needs another origin lists it in config.json.
+    allow_origins=[o for o in (BASE_CONFIG.get("cors_allow_origins") or []) if isinstance(o, str) and o != "*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1242,10 +1251,20 @@ def _stamp(response: Response) -> None:
     response.headers[PROJECT_HEADER] = quote(ACTIVE_PROJECT_ID or "", safe="")
 
 
+def _workorder_state() -> str:
+    """off: no query configured; pending: not read yet; error; ok."""
+    if not (CONFIG.get("workorder_expr") or "").strip():
+        return "off"
+    if not cached_workorders:
+        return "pending"
+    return "error" if cached_workorders.get("error") else "ok"
+
+
 def _attach_workorders():
     """Copy the live jobs onto each equipment row. The only key is equipId."""
     if isinstance(cached_equip_data, dict):
         cached_equip_data["workOrderError"] = (cached_workorders or {}).get("error") or ""
+        cached_equip_data["workOrderState"] = _workorder_state()
     equipment = (cached_equip_data or {}).get("equipment")
     if not isinstance(equipment, list):
         return
@@ -1253,6 +1272,44 @@ def _attach_workorders():
     for eq in equipment:
         equip_id = norm_id(eq.get("equipId"))
         eq["workOrders"] = list(grouped.get(equip_id, []))
+
+
+CRITICAL_ALARM = "alarm.critical"
+
+
+def _note_critical_alarms(site: str, alarms: list, read_ok: bool) -> None:
+    """Contract trigger "critical alarm": only when the site allows it (config.json
+    critical_alarm_sites lists its FIN project) AND the project's alarm.critical toggle is on; both
+    are off by default. One row per open critical FIN alarm, keyed by FIN's own id (an alarm with
+    no id is not notified), resolved once FIN stops reporting it. A failed or error read changes
+    nothing: an answer FIN did not give is not "all clear"."""
+    if not read_ok or not site:
+        return
+    try:
+        store = notifications.store()
+        open_now = {a["id"]: a for a in alarms if a.get("severity") == "critical" and a.get("id")}
+        fields = dict(severity="critical", source_kind="alarm")
+        for asset, state in store.active_states(site, CRITICAL_ALARM):   # cleared since the last poll
+            if state not in open_now:
+                store.condition(site, CRITICAL_ALARM, False, asset_id=asset, state=state, source_ref=state, **fields)
+        allowed = site in [s for s in (BASE_CONFIG.get("critical_alarm_sites") or []) if isinstance(s, str)]
+        if not allowed or not store.wants(notifications.project_recipient(site), CRITICAL_ALARM, default=False):
+            return
+        for fin_id, a in open_now.items():
+            store.condition(site, CRITICAL_ALARM, True, asset_id=a.get("source") or None, state=fin_id,
+                            source_ref=fin_id, params={"asset": a.get("source") or "", "message": a.get("message") or "",
+                                                       "occurred": a.get("occurred") or "", "priority": a.get("priority")},
+                            **fields)
+    except (notifications.StoreError, sqlite3.Error, ValueError) as exc:
+        print(f"[notifications] critical alarms not recorded: {exc.__cause__ or exc}")
+
+
+def _note_workorder_sync(error: str) -> None:
+    """Contract trigger "integration sync failed": one row while the FIN work-order read fails,
+    resolved by the next good read. The site is the FIN project this session reads."""
+    notifications.condition(client.project_name, "int.sync_failed", bool(error), severity="warning",
+                            source_kind="integration", source_ref="fin-workorders",
+                            params={"system": "FIN", "reason": error} if error else None)
 
 
 async def refresh_workorders():
@@ -1270,12 +1327,148 @@ async def refresh_workorders():
         print(f"[FIN] work order fetch error: {exc}")
         cached_workorders = error_payload(str(exc))
         _attach_workorders()
+        _note_workorder_sync(cached_workorders["error"])
         return
     cached_workorders = live_payload(text or "")
     _attach_workorders()
     err = cached_workorders.get("error") or ""
+    _note_workorder_sync(err)
     count = len(cached_workorders.get("orders") or [])
     print(f"[FIN] work orders: {err or str(count) + ' rows'}")
+
+
+# ─── Notifications API (project-scoped) ─────────────────────────────────────
+# The site is the FIN project this backend's own session serves and FIN validated; a browser
+# cannot pick it. X-Eko-Project names the Eko-DT project the browser shows: it must equal the one
+# the backend serves, so a dashboard left on another project is refused rather than served this
+# one, and being a custom header it forces a CORS preflight that foreign origins fail.
+# ponytail: read/dismissed/preference state belongs to the PROJECT (one shared recipient), not to a
+# person: there is no per-user FIN identity yet. Upgrade to per-user recipients with sign-in identity.
+
+NOTIF_BASE = "/api/notifications/v1"
+
+
+class NotificationApiError(Exception):
+    def __init__(self, status: int, code: str, message: str):
+        super().__init__(message)
+        self.status, self.code, self.message = status, code, message
+
+
+@app.exception_handler(NotificationApiError)
+async def _notification_error(request: Request, exc: NotificationApiError):
+    """The contract's error shape; never a stack trace or a database message."""
+    return JSONResponse(status_code=exc.status,
+                        content={"error": {"code": exc.code, "message": exc.message, "details": {}}},
+                        headers={PROJECT_HEADER: quote(ACTIVE_PROJECT_ID or "", safe="")})
+
+
+def _notification_scope(request: Request) -> tuple[str, str]:
+    """(recipient, site) for this request, taken only from the backend's own session."""
+    if not client or not client.is_authenticated:
+        raise NotificationApiError(401, "unauthenticated", "The backend is not signed in to FIN.")
+    asked = request.headers.get(PROJECT_HEADER)
+    if not asked:
+        raise NotificationApiError(400, "project_required", f"The {PROJECT_HEADER} header is required.")
+    if not ACTIVE_PROJECT_ID or unquote(asked) != ACTIVE_PROJECT_ID:
+        raise NotificationApiError(409, "project_mismatch", "The backend is serving a different project.")
+    site = client.project_name or ""
+    if not notifications.SITE_RE.match(site) or PROJECT_CHECK.get("validated") is not True:
+        raise NotificationApiError(409, "project_not_validated", "The open project is not validated on FIN.")
+    return notifications.project_recipient(site), site
+
+
+def _notif_call(op):
+    """Run op(store): bad input is a 400, a storage fault a 500 with the fixed message only."""
+    try:
+        return op(notifications.store())
+    except ValueError as exc:
+        raise NotificationApiError(400, "invalid_input", str(exc))
+    except notifications.StoreError:
+        raise NotificationApiError(500, "storage_failed", notifications.STORE_FAILED)
+
+
+def _found(item):
+    if item is None:
+        raise NotificationApiError(404, "not_found", "No such notification for this project.")
+    return item
+
+
+@app.get(NOTIF_BASE + "/notifications")
+async def notifications_list(request: Request, response: Response, view: str = "all",
+                             type_: Optional[str] = Query(None, alias="type"), severity: Optional[str] = None,
+                             asset_id: Optional[str] = None, q: Optional[str] = None,
+                             limit: str = str(notifications.PAGE_DEFAULT), cursor: Optional[str] = None):
+    who, site = _notification_scope(request)
+    _stamp(response)
+    page = _notif_call(lambda s: s.list_notifications(
+        who, site, view=view, type_=type_, severity=severity, asset_id=asset_id, q=q,
+        limit=int(limit) if limit.lstrip("-").isdigit() else limit, cursor=cursor))
+    page["unread_count"] = _notif_call(lambda s: s.unread_count(who, site))
+    page["scope"] = "project"   # state shared by everyone viewing this project
+    return page
+
+
+@app.get(NOTIF_BASE + "/notifications/{notification_id}")
+async def notifications_get(notification_id: str, request: Request, response: Response):
+    who, site = _notification_scope(request)
+    _stamp(response)
+    return _found(_notif_call(lambda s: s.get_notification(who, site, notification_id)))
+
+
+@app.post(NOTIF_BASE + "/notifications/{notification_id}/opened")
+async def notifications_opened(notification_id: str, request: Request, response: Response):
+    who, site = _notification_scope(request)
+    _stamp(response)
+    return _found(_notif_call(lambda s: s.mark_opened(who, site, notification_id)))
+
+
+@app.post(NOTIF_BASE + "/notifications/{notification_id}/dismiss")
+async def notifications_dismiss(notification_id: str, request: Request, response: Response):
+    who, site = _notification_scope(request)
+    _stamp(response)
+    return _found(_notif_call(lambda s: s.dismiss(who, site, notification_id)))
+
+
+@app.delete(NOTIF_BASE + "/notifications/{notification_id}/dismiss")
+async def notifications_undismiss(notification_id: str, request: Request, response: Response):
+    who, site = _notification_scope(request)
+    _stamp(response)
+    return _found(_notif_call(lambda s: s.undismiss(who, site, notification_id)))
+
+
+@app.post(NOTIF_BASE + "/notifications/opened-all")
+async def notifications_opened_all(request: Request, response: Response):
+    who, site = _notification_scope(request)
+    _stamp(response)
+    return {"updated": _notif_call(lambda s: s.mark_all_opened(who, site))}
+
+
+@app.post(NOTIF_BASE + "/notifications/dismiss-opened")
+async def notifications_dismiss_opened(request: Request, response: Response):
+    who, site = _notification_scope(request)
+    _stamp(response)
+    return {"updated": _notif_call(lambda s: s.dismiss_opened(who, site))}
+
+
+@app.get(NOTIF_BASE + "/preferences")
+async def notifications_preferences(request: Request, response: Response):
+    who, site = _notification_scope(request)
+    _stamp(response)
+    return _notif_call(lambda s: s.get_preferences(who))
+
+
+@app.put(NOTIF_BASE + "/preferences")
+async def notifications_preferences_update(request: Request, response: Response):
+    who, site = _notification_scope(request)
+    _stamp(response)
+    try:
+        body = await request.json()
+    except ValueError:
+        raise NotificationApiError(400, "invalid_input", "The body must be JSON.")
+    if not isinstance(body, dict) or set(body) - {"master_enabled", "types"}:
+        raise NotificationApiError(400, "invalid_input", "Only master_enabled and types can be set.")
+    return _notif_call(lambda s: s.update_preferences(
+        who, master_enabled=body.get("master_enabled"), types=body.get("types")))
 
 
 @app.get("/api/fin/workorders")
@@ -1284,7 +1477,7 @@ async def get_workorders(response: Response):
     if not client or not client.is_authenticated:
         raise HTTPException(status_code=401, detail="Not authenticated")
     _stamp(response)
-    return cached_workorders or {"timestamp": None, "source": "fin", "orders": [], "error": ""}
+    return {**(cached_workorders or {"timestamp": None, "source": "fin", "orders": [], "error": ""}), "state": _workorder_state()}
 
 
 @app.get("/api/fin/equip-live")
@@ -1434,6 +1627,61 @@ async def get_alarm_history(response: Response, days: int = 30):
     )
     if text is None:
         raise HTTPException(status_code=502, detail="FIN request failed")
+    # ── TEMP-DIAG alarm-history: remove after investigation ──
+    parsed_rows = parse_zinc_csv(text)
+    print(
+        "[TEMP-DIAG alarm-history]",
+        {
+            "raw_chars": len(text),
+            "parsed_rows": len(parsed_rows),
+            "columns": sorted(   # names only: parse_zinc_csv can take an error grid's text as its header
+                {key for row in parsed_rows for key in row.keys() if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)}
+            ),
+            "alarm_types": sorted(
+                {type(row.get("alarm")).__name__ for row in parsed_rows}
+            ),
+            "alarm_true_count": sum(
+                row.get("alarm") is True for row in parsed_rows
+            ),
+        },
+    )
+    # Response shape, names and flags only: quoted values are blanked and unquoted values dropped.
+    # HTTP status is 200 by construction (fetch_api returns text only for 200).
+    from fin_client import _split_zinc_csv, collapse_metadata_blocks
+    _lines = [l.strip() for l in collapse_metadata_blocks(text.lstrip("\ufeff")).splitlines() if l.strip()]
+    _first = _lines[0] if _lines else ""
+    _zinc = _first.startswith("ver:")
+    _bare = re.sub(r'"(?:\\.|[^"\\])*"', '""', _first) if _zinc else ""
+    _ident = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+    _meta = sorted({t.split(":", 1)[0] for t in _bare.split()[1:] if _ident.match(t.split(":", 1)[0])})
+    _cols = ([c for c in (x.strip().split(" ", 1)[0] for x in _split_zinc_csv(_lines[1])) if _ident.match(c)]
+             if _zinc and len(_lines) > 1 else [])
+    print(
+        "[TEMP-DIAG alarm-history shape]",
+        {
+            "lines": len(_lines),
+            "zinc_grid": _zinc,
+            "starts_as": ("blank" if not _first else "zinc" if _zinc else "html" if _first[0] == "<"
+                          else "json" if _first[0] in "{[" else "other"),
+            "error_grid": _zinc and "err" in _meta,
+            "grid_meta_names": _meta,
+            "column_names": _cols,
+            "data_lines": max(0, len(_lines) - 2) if _zinc else None,
+            # Numeric counts only; never print the pollHandle value.
+            "counts": {
+                n: float(m.group(1))
+                for n in ("resultCount", "totalRecordCount")
+                if (
+                    m := re.search(
+                        rf"(?:^|\s){n}:(-?\d+(?:\.\d+)?)(?=\s|$)",
+                        _bare,
+                    )
+                )
+            },
+            "poll_handle_present": "pollHandle" in _meta,
+        },
+    )
+    # ── end TEMP-DIAG alarm-history ──
 
     bands = CONFIG.get("severity_bands", {})
     by_day: dict[str, dict] = {}

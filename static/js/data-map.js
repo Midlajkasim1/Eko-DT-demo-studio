@@ -198,7 +198,11 @@
     return 'Mechanical';
   }
 
-  function mapAlarm(a, i) {
+  /* a readable, stable id part (mapAlarm's alarm ids) */
+  function slugId(s) {
+    return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  }
+  function mapAlarm(a) {
     var src = a.source || '';
     var msg = a.message || src;
     var detail = String(a.detail || '').trim();
@@ -209,7 +213,9 @@
       return namesMatch(as.id, asset) || namesMatch(as.id, src);
     });
     return {
-      id: 'fin-' + i + '-' + String(a.occurred || '').replace(/\W/g, '').slice(0, 16),
+      // FIN's record id, else what the alarm is: never its place in the list, which moves when FIN
+      // adds or drops a record and made the same alarm look new (and lose its acknowledgement)
+      id: 'fin-' + slugId(a.id || [src, msg, a.occurred].join(' ')),
       fam: 'sys',
       asset: matchedAsset ? matchedAsset.id : asset,
       bimId: matchedAsset ? matchedAsset.bimId : null,
@@ -243,7 +249,8 @@
     var s = String(v == null ? '' : v).trim();
     if (!s || isOffVal(s)) return true;
     if (isOnVal(s)) return false;
-    return /[-–]\s*normal\s*$/i.test(s) || /^normal$/i.test(s);
+    // " - Normal" or " : Normal"
+    return /[-–:]\s*normal\s*$/i.test(s) || /^normal$/i.test(s);
   }
   function fddLooksFault(v) {
     var s = String(v == null ? '' : v).trim();
@@ -251,102 +258,40 @@
     if (isOnVal(s)) return true;
     return /possible\s+fault|not\s+maintaining|no\s+response|not\s+working|\bfault\b|\balarm\b|energy\s+waste/i.test(s);
   }
+  function looksHealthy(v) {
+    var s = String(v == null ? '' : v).trim();
+    if (!s || s === '—' || s === '--' || isOffVal(s)) return true;
+    if (/^-?\d+(?:\.\d+)?$/.test(s)) return Number(s) === 0;
+    return /^(normal|ok|healthy|clean|closed?|inactive|none|no\s+(alarm|fault|trip))\b/i.test(s) || /[-–:]\s*normal\s*$/i.test(s);
+  }
+  /* A flag is in alarm unless its word is healthy; free text only when it reads as a fault */
+  function readingInAlarm(v, isFlag) {
+    return isFlag ? !looksHealthy(v) : fddLooksFault(v);
+  }
   function fddGroup(name) {
     var u = String(name || '').toUpperCase();
     var m = u.match(/^(FD&D[_-]?\d+|FDD[_-]?\d+|RULE[_-][A-Z0-9]+)/);
     return m ? m[1].replace(/-/g, '_') : u;
   }
-  function pointFaultsFor(asset) {
-    var groups = {};
-    var extra = [];
-    (asset.points || []).forEach(function (p) {
-      if (!p || !p.reporting) return;
-      var name = p.navName || '';
-      var folded = String(name).toLowerCase().replace(/[^a-z0-9]/g, '');
-      var val = p.currentValue;
-      if (folded.indexOf('fdd') === 0 || folded.indexOf('rule') === 0) {
-        var g = fddGroup(name);
-        if (!groups[g]) groups[g] = { names: [], strings: [], on: false, off: false };
-        groups[g].names.push(name);
-        if (isOnVal(val)) groups[g].on = true;
-        else if (isOffVal(val)) groups[g].off = true;
-        else if (String(val == null ? '' : val).trim()) groups[g].strings.push(String(val).trim());
-        return;
-      }
-      if (folded.indexOf('alarm') !== -1 && isOnVal(val)) extra.push({ group: name, msg: name.replace(/_/g, ' '), tech: name });
-    });
-    var out = [];
-    Object.keys(groups).forEach(function (g) {
-      var fam = groups[g];
-      var active = fam.on || (!fam.off && fam.strings.some(fddLooksFault));
-      if (!active) return;
-      var faultStr = fam.strings.filter(fddLooksFault);
-      var msg = (faultStr.sort(function (a, b) { return b.length - a.length; })[0]
-        || fam.strings.sort(function (a, b) { return b.length - a.length; })[0]
-        || fam.names[0]);
-      out.push({ group: g, msg: msg, tech: fam.names.join(' · ') });
-    });
-    return out.concat(extra);
-  }
-  function slugId(s) {
-    return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  }
-  function syncPointAlarms(site) {
+  /* In alarm only while FIN lists an alarm on it or flags it inAlarm */
+  function linkAlarms(site) {
     if (!site || !Array.isArray(site.assets)) return;
-    var kept = (site.alarms || []).filter(function (a) { return String(a.id || '').indexOf('fdd-') !== 0; });
     site.assets.forEach(function (asset) {
-      pointFaultsFor(asset).forEach(function (fault) {
-        var dup = kept.some(function (a) {
-          if (!namesMatch(a.asset, asset.id) && !(asset.bimId && a.bimId === asset.bimId)) return false;
-          var t = String(a.plainEn || a.techEn || '').toLowerCase();
-          var m = String(fault.msg || '').toLowerCase();
-          return t && m && (t.indexOf(m.slice(0, 48)) !== -1 || m.indexOf(t.slice(0, 48)) !== -1);
-        });
-        if (dup) return;
-        kept.push({
-          id: 'fdd-' + slugId(asset.id) + '-' + slugId(fault.group),
-          fam: 'sys',
-          asset: asset.id,
-          bimId: asset.bimId,
-          sev: 'high',
-          cat: 'fdd',
-          sys: asset.sys || 'Mechanical',
-          ack: null,
-          ageH: 0,
-          locEn: (asset.typeEn || 'Equipment') + ' · ' + (asset.floor || 'Level'),
-          locAr: (asset.typeAr || 'معدات') + ' · ' + (asset.floor || 'الطابق'),
-          plainEn: fault.msg,
-          plainAr: fault.msg,
-          techEn: fault.tech,
-          techAr: fault.tech,
-          impactAedMo: null,
-          raised: 'Live',
-          untimed: true,
-          lifecycle: []
-        });
-      });
-    });
-    site.alarms = kept;
-    site.assets.forEach(function (asset) {
-      asset.alarms = kept.filter(function (a) {
+      asset.alarms = (site.alarms || []).filter(function (a) {
         return namesMatch(a.asset, asset.id) || (asset.bimId && a.bimId === asset.bimId);
       }).map(function (a) { return a.id; });
-      if (asset.alarms.length && asset.st !== 'stale') asset.st = 'alarm';
-      else if (asset.st === 'alarm' && !asset.alarms.length) asset.st = 'ok';
+      if (asset.st !== 'stale') asset.st = asset.alarms.length || asset.inAlarm ? 'alarm' : 'ok';
     });
   }
 
   function applyAlarms(payload) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !payload || !Array.isArray(payload.alarms)) return;
+    var acked = {};   // an acknowledgement made here lives on the alarm object: keep it across polls
+    (site.alarms || []).forEach(function (a) { if (a && a.ack) acked[a.id] = a.ack; });
     site.alarms = payload.alarms.map(mapAlarm);
-    if (Array.isArray(site.assets)) {
-      site.assets.forEach(function (asset) {
-        asset.alarms = site.alarms.filter(function (a) { return namesMatch(a.asset, asset.id) || (asset.bimId && a.bimId === asset.bimId); }).map(function (a) { return a.id; });
-        if (asset.alarms.length && asset.st !== 'stale') asset.st = 'alarm';
-      });
-      syncPointAlarms(site);
-    }
+    site.alarms.forEach(function (a) { if (acked[a.id]) a.ack = acked[a.id]; });
+    linkAlarms(site);
     if (window.EKO_HOST_ENGINE && typeof window.EKO_HOST_ENGINE.resolveAllAssetPositions === 'function') {
       window.EKO_HOST_ENGINE.resolveAllAssetPositions();
     }
@@ -1479,6 +1424,7 @@
 
 
   var historyCache = {};
+  var HIST_DAYS = 31;
   var HIST_MONTHS = { january:0, february:1, march:2, april:3, may:4, june:5, july:6, august:7, september:8, october:9, november:10, december:11 };
   function foldPtName(n) {
     return String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -1499,7 +1445,7 @@
     }
     return null;
   }
-  function makePair(points, key, actTest, spTest, unit) {
+  function makePair(points, key, actTest, spTest) {
     var a = findPt(points, actTest);
     var s = findPt(points, spTest);
     var av = ptNumVal(a);
@@ -1509,7 +1455,7 @@
       key: key,
       actual: av,
       sp: sv,
-      unit: unit,
+      unit: (a && a.unit) || (s && s.unit) || "",
       actId: a && a.id,
       spId: s && s.id,
       actName: a && a.navName,
@@ -1529,25 +1475,25 @@
     var specs = [];
     if (kind === "fcu") {
       specs = [
-        makePair(points, "apCmpZone", function (k) { return k.indexOf("zonetemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("zonetemp") !== -1 && isSpName(k); }, "°C")
+        makePair(points, "apCmpZone", function (k) { return k.indexOf("zonetemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("zonetemp") !== -1 && isSpName(k); })
       ];
     } else if (kind === "ahu") {
       specs = [
-        makePair(points, "apCmpRA", function (k) { return k.indexOf("ratemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("ratemp") !== -1 && isSpName(k); }, "°C"),
-        makePair(points, "apCmpSA", function (k) { return k.indexOf("satemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("satemp") !== -1 && isSpName(k); }, "°C"),
-        makePair(points, "apCmpRAHum", function (k) { return k.indexOf("rahum") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("rahum") !== -1 && isSpName(k); }, "%"),
-        makePair(points, "apCmpRACO2", function (k) { return (k.indexOf("raco2") !== -1 || k === "raco2" || (k.indexOf("co2") !== -1 && k.indexOf("ra") !== -1)) && !isSpName(k); }, function (k) { return k.indexOf("co2") !== -1 && isSpName(k); }, "ppm")
+        makePair(points, "apCmpRA", function (k) { return k.indexOf("ratemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("ratemp") !== -1 && isSpName(k); }),
+        makePair(points, "apCmpSA", function (k) { return k.indexOf("satemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("satemp") !== -1 && isSpName(k); }),
+        makePair(points, "apCmpRAHum", function (k) { return k.indexOf("rahum") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("rahum") !== -1 && isSpName(k); }),
+        makePair(points, "apCmpRACO2", function (k) { return (k.indexOf("raco2") !== -1 || k === "raco2" || (k.indexOf("co2") !== -1 && k.indexOf("ra") !== -1)) && !isSpName(k); }, function (k) { return k.indexOf("co2") !== -1 && isSpName(k); })
       ];
     } else if (kind === "fahu") {
       specs = [
-        makePair(points, "apCmpFA", function (k) { return k.indexOf("fatemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("fatemp") !== -1 && isSpName(k); }, "°C"),
-        makePair(points, "apCmpRA", function (k) { return k.indexOf("ratemp") !== -1 && k.indexOf("sensible") === -1 && !isSpName(k); }, function (k) { return k.indexOf("ratemp") !== -1 && k.indexOf("sensible") === -1 && isSpName(k); }, "°C"),
-        makePair(points, "apCmpSA", function (k) { return k.indexOf("satemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("satemp") !== -1 && isSpName(k); }, "°C"),
-        makePair(points, "apCmpOffCoil", function (k) { return (k.indexOf("offcoil") !== -1 || (k.indexOf("off") !== -1 && k.indexOf("temp") !== -1 && k.indexOf("hum") === -1 && k.indexOf("sensible") === -1)) && !isSpName(k); }, function (k) { return (k.indexOf("offcoil") !== -1 || k.indexOf("offtemp") !== -1) && isSpName(k); }, "°C")
+        makePair(points, "apCmpFA", function (k) { return k.indexOf("fatemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("fatemp") !== -1 && isSpName(k); }),
+        makePair(points, "apCmpRA", function (k) { return k.indexOf("ratemp") !== -1 && k.indexOf("sensible") === -1 && !isSpName(k); }, function (k) { return k.indexOf("ratemp") !== -1 && k.indexOf("sensible") === -1 && isSpName(k); }),
+        makePair(points, "apCmpSA", function (k) { return k.indexOf("satemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("satemp") !== -1 && isSpName(k); }),
+        makePair(points, "apCmpOffCoil", function (k) { return (k.indexOf("offcoil") !== -1 || (k.indexOf("off") !== -1 && k.indexOf("temp") !== -1 && k.indexOf("hum") === -1 && k.indexOf("sensible") === -1)) && !isSpName(k); }, function (k) { return (k.indexOf("offcoil") !== -1 || k.indexOf("offtemp") !== -1) && isSpName(k); })
       ];
     } else {
       specs = [
-        makePair(points, "apCmpTemp", function (k) { return k.indexOf("temp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("temp") !== -1 && isSpName(k); }, "°C")
+        makePair(points, "apCmpTemp", function (k) { return k.indexOf("temp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("temp") !== -1 && isSpName(k); })
       ];
     }
     return specs.filter(Boolean);
@@ -1559,10 +1505,14 @@
       Object.keys(hist[year] || {}).forEach(function (month) {
         Object.keys(hist[year][month] || {}).forEach(function (day) {
           var hData = hist[year][month][day];
-          var sum = 0, count = 0;
+          var sum = 0, count = 0, hours = [];
+          for (var h = 0; h < 24; h++) hours.push(null);
           Object.keys(hData || {}).forEach(function (hr) {
             var n = parseFloat(hData[hr]);
-            if (isFinite(n)) { sum += n; count++; }
+            if (!isFinite(n)) return;
+            sum += n; count++;
+            var at = HOUR_AT[String(hr).toLowerCase()];
+            if (at != null) hours[at] = n;
           });
           if (!count) return;
           var mi = HIST_MONTHS[String(month).toLowerCase()];
@@ -1570,13 +1520,14 @@
           rows.push({
             t: Date.UTC(+year, mi == null ? 0 : mi, dnum || 1),
             avg: Math.trunc((sum / count) * 100) / 100,
-            label: String(dnum || day)
+            label: String(dnum || day),
+            hours: hours
           });
         });
       });
     });
     rows.sort(function (a, b) { return a.t - b.t; });
-    return rows.slice(-7);
+    return rows;
   }
   function applyEquipment(payload) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
@@ -1584,6 +1535,7 @@
     if (!site || !Array.isArray(list)) return;
     if (Object.prototype.hasOwnProperty.call(payload, 'workOrderError')) {
       site.workOrderError = payload.workOrderError || '';
+      site.workOrderState = payload.workOrderState || '';
     }
 
     // Build fresh asset list from FIN live data
@@ -1599,6 +1551,8 @@
       var params = [];
       var analog = [];
       var alarmPts = [];
+      var fddGroups = {};
+      var fddOrder = [];
       (eq.points || []).forEach(function (p) {
         if (!p || !p.reporting) return;
         var folded = String(p.navName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -1610,13 +1564,27 @@
         if (!raw || raw === "—" || raw === "--") return;
         var rawU = raw.toUpperCase();
         var isFdd = folded.indexOf("fdd") === 0 || folded.indexOf("rule") === 0;
-        var isAlarmPt = folded.indexOf("alarm") !== -1 || /(?:^|_)alm(?:$|_)/.test(String(p.navName || "").toLowerCase());
-        var isFlag = p.kind === "Bool" || rawU === "T" || rawU === "F" || rawU === "TRUE" || rawU === "FALSE";
-        if (isFdd && isFlag) return;
-        var row = [p.navName, "", p.currentValue];
-        if (isAlarmPt) alarmPts.push(row);
-        else if (isFdd) params.push(row);
-        else analog.push(row);
+        var isAlarmPt = p.alarmPoint === true;
+        var isFlag = p.kind === "Bool" || typeof p.bool === "boolean" || rawU === "T" || rawU === "F" || rawU === "TRUE" || rawU === "FALSE";
+        // FIN's enum word (NORMAL, FAULT…), not On/Off
+        var row = [p.navName, "", p.text || p.currentValue];
+        if (isFdd) {
+          // Shown while in fault; a message also beside its faulted flag
+          var g = fddGroup(p.navName);
+          if (!fddGroups[g]) { fddGroups[g] = { rows: [], flagOn: false }; fddOrder.push(g); }
+          var active = readingInAlarm(row[2], isFlag);
+          fddGroups[g].rows.push({ row: row, isFlag: isFlag, active: active });
+          if (isFlag && active) fddGroups[g].flagOn = true;
+        } else if (isAlarmPt) {
+          // FD&D rules also carry alarmPoint, so they are checked first
+          if (readingInAlarm(row[2], isFlag)) alarmPts.push(row);
+        } else analog.push(row);
+      });
+      fddOrder.forEach(function (g) {
+        var fam = fddGroups[g];
+        fam.rows.forEach(function (r) {
+          if (r.active || (!r.isFlag && fam.flagOn && !looksHealthy(r.row[2]))) params.push(r.row);
+        });
       });
 
       var alarmIds = (site.alarms || []).filter(function(a) { return namesMatch(a.asset, eq.name) || namesMatch(a.asset, eq.bimId); }).map(function(a) { return a.id; });
@@ -1629,6 +1597,7 @@
         wtyEnd: wtyEnd,
         tags: eq.tags || [],
         st: (alarmIds.length || eq.inAlarm) ? "alarm" : "ok",
+        inAlarm: !!eq.inAlarm,
         alarms: alarmIds,
         floor: eq.floor || "Unknown",
         zone: "General",
@@ -1652,15 +1621,16 @@
         alarmPts: alarmPts,
         points: eq.points || [],
         activity: [],
-        spark7: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+        spark7: null   // set from FIN history below
       };
 
       var pairs = comparePairs(eq);
       var cached = historyCache[eq.name];
       assetData.compare = {
         pairs: pairs,
-        days: (cached && cached.compareV === 1 && cached.compare && cached.compare.days) || [],
-        unit: (cached && cached.compare && cached.compare.unit) || ((pairs[0] && pairs[0].unit) || "°C"),
+        days: (cached && cached.compareV === 2 && cached.compare && cached.compare.days) || [],
+        hist: (cached && cached.compareV === 2 && cached.compare && cached.compare.hist) || [],
+        unit: (cached && cached.compare && cached.compare.unit) || ((pairs[0] && pairs[0].unit) || ""),
         actName: (cached && cached.compare && cached.compare.actName) || (pairs[0] && pairs[0].actName) || "",
         spName: (cached && cached.compare && cached.compare.spName) || (pairs[0] && pairs[0].spName) || ""
       };
@@ -1670,23 +1640,25 @@
       }
 
       var primary = pairs.filter(function (p) { return p.actHis; })[0] || pairs[0];
-      if (primary && primary.actId && window.DashboardData && window.DashboardData.getPointHistory && !(cached && (cached.compareV === 1 || cached.fetching))) {
+      if (primary && primary.actId && window.DashboardData && window.DashboardData.getPointHistory && !(cached && (cached.compareV === 2 || cached.fetching))) {
         historyCache[eq.name] = { fetching: true };
-        var liveSp = primary.sp;
-        var actP = window.DashboardData.getPointHistory(primary.actId, 7);
+        var actP = window.DashboardData.getPointHistory(primary.actId, HIST_DAYS);
         var spP = (primary.spHis && primary.spId)
-          ? window.DashboardData.getPointHistory(primary.spId, 7)
+          ? window.DashboardData.getPointHistory(primary.spId, HIST_DAYS)
           : Promise.resolve(null);
         Promise.all([actP, spP]).then(function (both) {
           if (!current()) return;
-          var actDays = histDaily(both[0] && both[0].history);
-          var spDays = histDaily(both[1] && both[1].history);
+          var actAll = histDaily(both[0] && both[0].history);
+          var spAll = histDaily(both[1] && both[1].history);
+          var actDays = actAll.slice(-7);
           var spByT = {};
-          spDays.forEach(function (d) { spByT[d.t] = d.avg; });
+          spAll.forEach(function (d) { spByT[d.t] = d; });
           var days = actDays.map(function (d) {
-            var spv = spByT[d.t];
-            if (spv == null && liveSp != null) spv = liveSp;
-            return { label: d.label, actual: d.avg, sp: spv };
+            return { label: d.label, actual: d.avg, sp: spByT[d.t] ? spByT[d.t].avg : undefined };
+          });
+          var hist = actAll.map(function (d) {
+            var sp = spByT[d.t];
+            return { t: d.t, a: d.hours, b: sp ? sp.hours : null, aAvg: d.avg, bAvg: sp ? sp.avg : null };
           });
           var vals = actDays.map(function (d) { return d.avg; });
           var spark7 = assetData.spark7;
@@ -1695,10 +1667,11 @@
             spark7 = vals.map(function (v) { return (v - mn) / range; });
           }
           var packed = {
-            compareV: 1,
+            compareV: 2,
             compare: {
               days: days,
-              unit: (both[0] && both[0].unit) || primary.unit || "°C",
+              hist: hist,
+              unit: (both[0] && both[0].unit) || primary.unit || "",
               actName: primary.actName || "",
               spName: primary.spName || ""
             },
@@ -1713,6 +1686,7 @@
               a.compare = {
                 pairs: (a.compare && a.compare.pairs) || pairs,
                 days: packed.compare.days,
+                hist: packed.compare.hist,
                 unit: packed.compare.unit,
                 actName: packed.compare.actName,
                 spName: packed.compare.spName
@@ -1723,7 +1697,7 @@
           }
           paint();
         }).catch(function () {
-          historyCache[eq.name] = { compareV: 1, failed: true, compare: { days: [], unit: primary.unit, actName: primary.actName, spName: primary.spName } };
+          historyCache[eq.name] = { compareV: 2, failed: true, compare: { days: [], hist: [], unit: primary.unit, actName: primary.actName, spName: primary.spName } };
         });
       }
 
@@ -1738,37 +1712,8 @@
       site.landing.reg.headAr = newAssets.length + " أصلًا";
     }
 
-    // Link assets to alarms and ensure inAlarm assets have alarms with bimId
+    // Link FIN's alarms to their equipment
     newAssets.forEach(function(asset) {
-      if (asset.st === 'alarm') {
-        var hasAlarm = (site.alarms || []).some(function(al) {
-          return namesMatch(al.asset, asset.id) || (asset.bimId && al.bimId === asset.bimId);
-        });
-        if (!hasAlarm) {
-          if (!site.alarms) site.alarms = [];
-          site.alarms.push({
-            id: 'al-live-' + asset.id.toLowerCase().replace(/\W/g, '-'),
-            fam: 'sys',
-            asset: asset.id,
-            bimId: asset.bimId,
-            sev: 'high',
-            cat: 'sys',
-            sys: asset.sys || 'Mechanical',
-            ack: null,
-            ageH: 0.5,
-            locEn: (asset.typeEn || 'Equipment') + ' · ' + (asset.floor || 'Level'),
-            locAr: (asset.typeAr || 'معدات') + ' · ' + (asset.floor || 'الطابق'),
-            plainEn: 'Abnormal condition reported from BMS',
-            plainAr: 'حالة غير طبيعية من نظام إدارة المبنى',
-            techEn: 'Fault status active',
-            techAr: 'حالة العطل نشطة',
-            impactAedMo: null,
-            raised: 'Live',
-            untimed: true,   /* no alarm record, so no time it was raised: kept off the timeline */
-            lifecycle: []
-          });
-        }
-      }
       (site.alarms || []).forEach(function(al) {
         if (namesMatch(al.asset, asset.id) || (asset.bimId && al.bimId === asset.bimId)) {
           al.bimId = al.bimId || asset.bimId;
@@ -1776,7 +1721,7 @@
         }
       });
     });
-    syncPointAlarms(site);
+    linkAlarms(site);
 
     if (site.power) {
       applyMeters((window.DashboardData && window.DashboardData.meters) || {});
@@ -1886,7 +1831,10 @@
   function applyWorkOrders(payload) {
     woState = { byId: {} };
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
-    if (site) site.workOrderError = (payload && payload.error) || '';
+    if (site) {
+      site.workOrderError = (payload && payload.error) || '';
+      site.workOrderState = (payload && payload.state) || '';
+    }
     ((payload && payload.orders) || []).forEach(function (order) {
       var equipId = normEquipId(order.equipment);
       if (!equipId) return;

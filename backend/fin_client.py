@@ -128,7 +128,8 @@ def parse_zinc_csv(text: str) -> list[dict]:
                     row[header] = val
                 elif val == 'M':
                     row[header] = True
-                elif val == '':
+                elif val in ('', 'N', 'NA'):
+                    # Zinc null (N) and not-available (NA) are no value, not the text "N"/"NA"
                     row[header] = None
                 else:
                     try:
@@ -187,13 +188,36 @@ def display_cur_val(val: Any, nav_lower: str, unit: str) -> tuple[str, str]:
             return clip_decimals(s), "Str"
     if isinstance(val, (int, float)):
         is_fdd = nav_lower.startswith("fd") or "fdd" in nav_lower or nav_lower.startswith("rule")
-        if not is_fdd and (unit == "%" or any(x in nav_lower for x in ["valve", "coil", "demand"])):
+        if not is_fdd and unit == "%":
             return f"{int(val)}%", "Number"
         shown = trunc2(float(val))
         if unit:
             shown = f"{shown}{unit}"
         return shown, "Number"
     return clip_decimals(str(val)), "Str"
+
+
+def bool_state(val: Any) -> bool | None:
+    """True/False for a FIN Bool curVal (T, F, or T "display"), else None."""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        m = re.match(r'^(T|F|true|false)\b', val.strip(), re.I)
+        if m:
+            return m.group(1)[0].upper() == "T"
+    return None
+
+
+def bool_text(point: dict, state: bool | None) -> str | None:
+    """FIN keeps a Bool's false/true text in enum ("NORMAL,FAULT")."""
+    if state is None:
+        return None
+    enum = point.get("enum")
+    if isinstance(enum, str):
+        words = [w.strip() for w in enum.split(",")]
+        if len(words) == 2 and words[int(state)]:
+            return words[int(state)]
+    return "true" if state else "false"
 
 
 def alarm_is_open(row: dict) -> bool:
@@ -207,6 +231,43 @@ def alarm_is_open(row: dict) -> bool:
         return False
     msg = str(row.get("message") or "").lower()
     return "return to normal" not in msg
+
+
+def open_alarm_rows(rows: list) -> list[dict]:
+    """One row per logical open alarm, for every view (alarm list, equipment counts, notifications).
+
+    FIN can hold several open records for one condition (it issues a new record while the earlier
+    one still carries its active marker), and the same record can come back in one grid. A
+    condition cannot be active twice at once, so open records with the same source, message and
+    dispatcher are one alarm. The earliest record is the occurrence: its id and time are kept, so
+    acknowledgements and notifications keyed by that id survive later polls; the newest record's
+    priority, detail and state win. A record with no source is merged only with its own id (else
+    kept apart): without a source, equal messages may be different equipment.
+    A cleared record is not open, so a reactivation is a new occurrence with its own id and time.
+    """
+    merged: dict = {}
+    for n, row in enumerate(rows or []):
+        if not alarm_is_open(row):
+            continue
+        src = str(safe_get(row.get("sourceRef"), "val") or "").lstrip("@")
+        rec_id = safe_get(row.get("id"), "val")
+        if src:
+            msg = " ".join(str(row.get("message") or "").split()).lower()
+            key = ("cond", src, msg, str(row.get("dispatcher") or "").strip().upper())
+        else:
+            key = ("id", rec_id) if rec_id else ("row", n)
+        first = merged.get(key)
+        if first is None:
+            merged[key] = row
+            continue
+        when = lambda r: str(r.get("occurred") or r.get("created") or "")   # noqa: E731
+        early, late = (first, row) if when(first) <= when(row) else (row, first)
+        keep = dict(late)
+        keep["id"] = early.get("id") or late.get("id")
+        if early.get("occurred") is not None:
+            keep["occurred"] = early.get("occurred")
+        merged[key] = keep
+    return list(merged.values())
 
 
 def _split_zinc_csv(line: str) -> list[str]:
@@ -325,88 +386,6 @@ def parse_custom_response(text: str) -> dict:
     return {"rows": rows, "curVal": cur_val, "unit": unit}
 
 
-def parse_alarm_fdd_points(alarms_text: str) -> list[dict]:
-    """Extract FDD Rule_ diagnostic points from << ... >> alarm metadata blocks."""
-    if not alarms_text:
-        return []
-
-    fdd_points = []
-    seen_ids: set[str] = set()
-    segments = alarms_text.split('<<')
-
-    for seg in segments[1:]:
-        if '>>' not in seg:
-            continue
-        block_content, remainder = seg.split('>>', 1)
-        eq_m = re.search(r'(@p:[^\"\s,]+)\s+"([^"]+)"', remainder)
-        if not eq_m:
-            continue
-        eq_val = eq_m.group(1)
-        eq_dis = eq_m.group(2)
-
-        in_table = False
-        for line in block_content.split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith('name,sourceRef,value'):
-                in_table = True
-                continue
-            if not in_table:
-                continue
-
-            # Robust CSV split
-            parts: list[str] = []
-            in_q = False
-            cur: list[str] = []
-            for ch in line:
-                if ch == '"':
-                    in_q = not in_q
-                elif ch == ',' and not in_q:
-                    parts.append(''.join(cur).strip())
-                    cur = []
-                    continue
-                cur.append(ch)
-            parts.append(''.join(cur).strip())
-
-            if len(parts) < 3:
-                continue
-
-            decoded_name = decode_zinc_unicode(parts[0].strip('"'))
-            d_upper = decoded_name.upper()
-            if not (d_upper.startswith("RULE_") or d_upper.startswith("FD&D_")):
-                continue
-
-            synthetic_id = f"fdd_{eq_val}_{decoded_name}"
-            if synthetic_id in seen_ids:
-                continue
-            seen_ids.add(synthetic_id)
-
-            val_raw = parts[2].strip().strip('"')
-            cur_val: Any = decode_zinc_unicode(val_raw)
-            kind = "Bool"
-            if cur_val in ("T", "true"):
-                cur_val = True
-            elif cur_val in ("F", "false"):
-                cur_val = False
-            else:
-                try:
-                    cur_val = float(cur_val)
-                    kind = "Number"
-                except ValueError:
-                    pass
-
-            fdd_points.append({
-                "navName": decoded_name,
-                "id": {"val": synthetic_id, "dis": f"{eq_dis} {decoded_name}"},
-                "equipRef": {"val": eq_val, "dis": eq_dis},
-                "curVal": cur_val,
-                "kind": kind
-            })
-
-    return fdd_points
-
-
 # ─── FIN project list ────────────────────────────────────────────────────────
 
 PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
@@ -519,6 +498,53 @@ def aggregate_and_restructure(data: list[dict]) -> dict:
 
 
 # ─── SCRAM-SHA-256 Client ────────────────────────────────────────────────────
+
+# ── TEMP-DIAG alarm header: remove this block and its one call in _build_realtime ──────────
+# Off unless EKO_ALARM_HEADER_DIAG=1. Reports the shape and column names of the alarm response
+# FIN already returned: no extra FIN request, no row values, error text or credentials.
+_ALARM_DIAG_REPORTS = 0
+_ALARM_DIAG_MAX = 3          # a failed or unreadable poll may be followed by a readable one
+_ZINC_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _diag_alarm_header(alarms_text: Optional[str], row_count: int) -> None:
+    global _ALARM_DIAG_REPORTS
+    if os.environ.get("EKO_ALARM_HEADER_DIAG") != "1" or _ALARM_DIAG_REPORTS >= _ALARM_DIAG_MAX:
+        return
+    _ALARM_DIAG_REPORTS += 1
+    say = lambda msg: print(f"[TEMP-DIAG alarms] {msg}")   # noqa: E731
+    try:
+        if alarms_text is None:
+            return say("no response text (the FIN request failed or was refused)")
+        text = alarms_text.lstrip("\ufeff")
+        lines = [l.strip() for l in collapse_metadata_blocks(text).splitlines() if l.strip()]
+        if not lines:
+            return say("response is blank")
+        first = lines[0]
+        if not first.startswith("ver:"):
+            kind = ("HTML page (often a sign-in page: session not accepted)" if first.startswith("<")
+                    else "JSON" if first[:1] in "{[" else "not a Zinc grid")
+            return say(f"unrecognised format: {kind}; {len(lines)} non-blank lines; nothing printed from it")
+        if re.search(r"\berr\b", first):
+            _ALARM_DIAG_REPORTS = _ALARM_DIAG_MAX   # an answer, not a transient failure
+            return say("FIN returned an error grid (message not printed); no alarm columns to report")
+        if len(lines) < 2:
+            return say("Zinc grid with no column line")
+        cells = [c.strip().split(" ", 1)[0] for c in _split_zinc_csv(lines[1])]
+        columns = [c for c in cells if _ZINC_NAME_RE.match(c)]
+        odd = len(cells) - len(columns)   # not a column name: counted, never printed
+        _ALARM_DIAG_REPORTS = _ALARM_DIAG_MAX   # a readable header: report once
+        if columns == ["empty"]:
+            return say("empty grid: no alarm rows in this window, so no alarm columns to report")
+        ack_like = [c for c in columns if re.search(r"ack", c, re.I)]
+        say(f"Zinc grid, {len(lines) - 2} data lines, parser rows: {row_count}"
+            + (f", {odd} cell(s) in the header line were not column names" if odd else ""))
+        say(f"columns: {columns or 'none identifiable'}")
+        say(f"acknowledgement-like columns: {ack_like or 'none'}")
+    except Exception as exc:   # a diagnostic must never break polling
+        say(f"diagnostic failed: {type(exc).__name__}")
+# ── end TEMP-DIAG ───────────────────────────────────────────────────────────────────────────
+
 
 class FinScramClient:
     """Async FIN Framework client with SCRAM-SHA-256 authentication."""
@@ -761,37 +787,15 @@ class FinScramClient:
         points = parse_zinc_csv(points_text)
         equipment = parse_zinc_csv(equip_text)
         alarms = parse_zinc_csv(alarms_text)
+        _diag_alarm_header(alarms_text, len(alarms))   # TEMP-DIAG: remove with the block above
         attach_alarm_details(alarms_text or "", alarms)
         self.last_alarm_rows = alarms
+        open_alarms = open_alarm_rows(alarms)   # one per logical alarm, as the alarm list counts them
+        # Did FIN answer with a non-error Zinc grid? A failed read also parses to no rows, and must
+        # never be taken for "all alarms cleared"
+        first = (alarms_text or "").lstrip("\ufeff").lstrip().split("\n", 1)[0]
+        self.last_alarm_read_ok = first.startswith("ver:") and not re.search(r"\berr\b", first)
         self.last_point_rows = points
-
-        # Extract FDD points from alarm metadata
-        fdd_points = parse_alarm_fdd_points(alarms_text)
-
-        # Merge extracted FDD points into main points list
-        for fp in fdd_points:
-            fp_nav = fp.get("navName", "").upper()
-            fp_eq_id = safe_get(fp.get("equipRef"), "val")
-            fp_eq_dis = str(safe_get(fp.get("equipRef"), "dis") or "").upper()
-
-            existing = None
-            for p in points:
-                p_nav = str(p.get("navName") or "").upper()
-                if p_nav == fp_nav:
-                    if safe_get(p.get("equipRef"), "val") == fp_eq_id:
-                        existing = p
-                        break
-                    p_id_dis = str(safe_get(p.get("id"), "dis") or "").upper()
-                    if fp_eq_dis and fp_eq_dis in p_id_dis:
-                        existing = p
-                        break
-
-            if existing:
-                existing["curVal"] = fp.get("curVal")
-                if not existing.get("equipRef"):
-                    existing["equipRef"] = fp.get("equipRef")
-            else:
-                points.append(fp)
 
         # Build floor-wise equipment data
         floor_wise: dict[str, dict] = {}
@@ -802,26 +806,13 @@ class FinScramClient:
                 continue
 
             equip_id = safe_get(equip.get("id"), "val")
-            equip_nav_upper = nav_name.upper()
-            nav_norm = equip_nav_upper.replace("-", " ").replace("_", " ").strip()
 
-            def is_match(p: dict) -> bool:
-                if safe_get(p.get("equipRef"), "val") == equip_id:
-                    return True
-                dis = str(safe_get(p.get("id"), "dis") or "").upper().replace("-", " ").replace("_", " ")
-                if nav_norm and nav_norm in dis:
-                    return True
-                p_dis = str(p.get("dis") or "").upper().replace("-", " ").replace("_", " ")
-                if nav_norm and nav_norm in p_dis:
-                    return True
-                return False
-
-            equip_points = [p for p in points if is_match(p)]
+            equip_points = [p for p in points if equip_id and safe_get(p.get("equipRef"), "val") == equip_id]
 
             # Filter active alarms
             equip_alarms = []
-            for a in alarms:
-                if safe_get(a.get("sourceRef"), "val") == equip_id and alarm_is_open(a):
+            for a in open_alarms:
+                if safe_get(a.get("sourceRef"), "val") == equip_id:
                     equip_alarms.append({
                         "alarm": a.get("message", "N/A"),
                         "priority": a.get("priority", 0),
@@ -858,10 +849,6 @@ class FinScramClient:
                         continue
 
                 val = p.get("curVal")
-                if val is None:
-                    val = p.get("val")
-                if val is None:
-                    val = p.get("v0")
 
                 # A point with no current value is not reporting, but if it is
                 # historized we still keep it so its trend stays chartable.
@@ -881,6 +868,7 @@ class FinScramClient:
                     kind = "Null"
                 else:
                     display_val, kind = display_cur_val(val, nav_lower, unit)
+                state = bool_state(val)
 
                 nav_key = nav_lower.replace(" ", "_")
                 if nav_key in seen_navs:
@@ -890,13 +878,16 @@ class FinScramClient:
                 formatted_points.append({
                     "navName": p_nav,
                     "currentValue": display_val,
-                    # A missing/blank status tag means "no fault reported", not a fault
-                    "status": p.get("status") or p.get("curStatus") or "ok",
+                    "status": p.get("curStatus"),
                     "id": str(safe_get(p.get("id"), "val") or "").lstrip("@"),
                     "his": is_his,
                     "reporting": reporting,
                     "unit": unit,
                     "kind": kind,
+                    # currentValue stays On/Off for the 3D schematics
+                    "bool": state,
+                    "text": bool_text(p, state),
+                    "alarmPoint": p.get("alarmPoint") is True,
                 })
 
             floor = safe_get(equip.get("floorRef"), "dis", "Unknown Floor")
