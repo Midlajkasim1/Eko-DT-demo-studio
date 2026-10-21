@@ -52,9 +52,10 @@ window.EKO_P = (function(){
     const cfg = Object.assign({}, (model&&model.config)||{ markers:true });
     const scene = E.state.modelFs
       ? `<div id="modelfs" role="region" aria-label="${C().esc(E.t('mModel'))}">${V().viewer(E, Object.assign({}, cfg, { timeline:false }), '')}
-           <button class="btnG btnSm mfsclose" data-act="modelFs">${C().icon('x',14)} ${C().esc(E.t('mCloseModel'))}</button></div>`
+           ${E.state.locFocus ? '' : `<button class="btnG btnSm mfsclose" data-act="modelFs">${C().icon('x',14)} ${C().esc(E.t('mCloseModel'))}</button>`}</div>`   /* in focus, Back to Assets closes it */
       : (peek ? `<div class="mpeek">${V().viewer(E, Object.assign({}, cfg, { dock:'none', pills:false, timeline:false }), '')}
            <button class="btnP btnSm mpeekopen" data-act="modelFs">${C().icon('maximize',14)} ${C().esc(E.t('mOpenModel'))}</button></div>` : '');
+    if(E.state.locFocus) return `<div class="mpage">${scene}</div>`;   /* Locate in 3D: the model alone */
     return `<div class="mpage">${scene}${summary ? widget(E,summary) : ''}${E.state.assetSel ? C().assetPanel(E) : (panel ? widget(E,panel) : '')}</div>`;
   }
 
@@ -64,6 +65,7 @@ window.EKO_P = (function(){
     const model = byType(doc,'viewer3d');
     const alarms = byType(doc,'alarmPanel');
     if(E.stacked()) return stackedLanding(E, doc, summary, alarms, true);
+    if(E.state.locFocus) return V().viewer(E, (model&&model.config)||{}, '');   /* Locate in 3D: the viewer alone */
     return V().viewer(E, (model&&model.config)||{}, summary ? widget(E,summary) : '')
       + (E.state.assetSel ? C().assetPanel(E) : (alarms ? widget(E,alarms) : ''));
   }

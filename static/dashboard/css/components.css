@@ -846,11 +846,19 @@
   touch-action:none
 }
 
-/* Back to Assets in the Locate-in-3D view: start side, under the folded summary's header (top 10 +
-   ~40px), so a narrow viewer (the host beside its side panel) never puts it over that header */
+/* Locate-in-3D focus (data-locfocus): no rail, its width given back to the viewer (--navw also
+   places #histframe). The register, summary and asset panel are simply not rendered. */
+.dashboard-native-container[data-locfocus="1"] {
+  --navw:0px
+}
+
+.dashboard-native-container[data-locfocus="1"] #ekonav {
+  display:none
+}
+
 .dashboard-native-container .vpback {
   position:absolute;
-  top:58px;
+  top:10px;
   inset-inline-start:12px;
   z-index:58;
   min-height:34px

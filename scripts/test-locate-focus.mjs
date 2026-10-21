@@ -83,68 +83,89 @@ async function openStandalone(width) {
 // what is on screen: sizes from the rendered layout, the register/summary/rail as the user sees them
 const layout = p => p.evaluate(() => {
   const q = s => [...document.querySelectorAll(s)].find(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden')
-  const w = s => { const e = q(s); return e ? Math.round(e.getBoundingClientRect().width) : 0 }
-  const ovp = q('#ovp'), root = window.DASHBOARD_ROOT || document.querySelector('.dashboard-native-container')
+  const box = s => { const e = q(s); if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) } }
+  const st = window.EKO.state, root = window.DASHBOARD_ROOT || document.querySelector('.dashboard-native-container')
+  const canvas = document.querySelector('.viewer-canvas-container canvas')                    // the host's BIM canvas, under the overlay
+  const c = canvas && canvas.getBoundingClientRect(), v = box('#vpmain')
   return {
-    pageId: window.EKO.state.pageId,
+    pageId: st.pageId, focus: !!st.locFocus, kept: st.locFocus && st.locFocus.assetSel, assetSel: st.assetSel, paint: st.paint, modelFs: !!st.modelFs,
     register: !!q('.dgwrap[data-grid="assets"]'), strip: !!q('.regmodelwrap'),
-    viewer: w('#vpmain'), mount: w('#mount'), panel: w('#assetpanel'), rail: w('#ekonav'),
+    viewer: v, mount: box('#mount'), panel: box('#assetpanel'), rail: box('#ekonav'), summary: box('#ovp'), back: box('.vpback'),
     navMode: root.getAttribute('data-nav'),
-    summaryFolded: ovp ? ovp.dataset.min === '1' : null, summaryHeight: ovp ? Math.round(ovp.getBoundingClientRect().height) : 0,
-    back: !!q('.vpback'), fits: (m => !m || m.scrollWidth <= m.clientWidth + 1)(document.querySelector('#mount')),
+    canvasCovers: !c || !v || (c.left <= v.x + 1 && c.top <= v.y + 1 && c.right >= v.x + v.w - 1 && c.bottom >= v.y + v.h - 1),
     saved: [localStorage.getItem('eko-nav'), localStorage.getItem('eko-ovp')],
   }
 })
+const rows = '.dgwrap[data-grid="assets"] tr[data-asset]'
+// until two looks 100ms apart agree: the panel slide-in and the width transitions have finished
+const settle = async p => { let a = JSON.stringify(await layout(p)); for (let i = 0; i < 30; i++) { await sleep(100); const b = JSON.stringify(await layout(p)); if (a === b) return; a = b } throw new Error('layout never settled') }
 const register = async p => {
   await p.evaluate(() => window.EKO.go('assets-register', 'assets', 'reg'))
-  await p.locator('.dgwrap[data-grid="assets"] tr[data-asset]').first().waitFor()
+  await p.locator(rows).first().waitFor()
 }
 // a register row, clicked where a user would: its asset id cell
 async function pickRow(p, n) {
-  const row = p.locator('.dgwrap[data-grid="assets"] tr[data-asset]').nth(n)
+  const row = p.locator(rows).nth(n)
   const id = await row.getAttribute('data-asset')
   await row.locator('td.mono').first().click()
   await p.locator(`[data-act="locate"][data-asset="${id}"]`).filter({ visible: true }).first().waitFor()
+  await settle(p)
   return id
 }
-const locate = (p, id) => p.locator(`[data-act="locate"][data-asset="${id}"]`).filter({ visible: true }).first().click()
+const locate = async (p, id) => {
+  await p.locator(`[data-act="locate"][data-asset="${id}"]`).filter({ visible: true }).first().click()
+  await p.locator('.vpback').waitFor()
+  await settle(p)
+}
+// ponytail: Escape, not the panel's x: in the host its Render side tab covers that corner (a host overlap, not this feature)
+const closePanel = async p => { await p.keyboard.press('Escape'); await p.waitForFunction(() => !window.EKO.state.assetSel) }
+
+// focus mode as the user sees it: the 3D view alone, the asset kept and still highlighted
+async function assertFocus(p, id, { stacked, saved = [null, null] }) {
+  const f = await layout(p)
+  const ctx = JSON.stringify(f)
+  assert.strictEqual(f.register, false, 'the Assets Register is gone: ' + ctx)
+  assert.strictEqual(f.strip, false)
+  assert.strictEqual(f.summary, null, 'no Overview summary over the model: ' + ctx)
+  assert.strictEqual(f.panel, null, 'no asset panel taking width: ' + ctx)
+  assert.strictEqual(f.rail, null, 'no navigation rail: ' + ctx)
+  assert.ok(f.back, 'Back to Assets is shown')
+  assert.deepStrictEqual([f.kept, f.paint], [id, id], 'the asset is kept and stays highlighted: ' + ctx)
+  assert.deepStrictEqual(f.saved, saved, 'nothing about the temporary layout is saved')
+  if (stacked) assert.strictEqual(f.modelFs, true, 'the model is full screen')
+  else {
+    // the viewer fills the whole page area: nothing beside it, nothing over it
+    assert.ok(f.viewer.x <= f.mount.x + 1 && f.viewer.w >= f.mount.w - 1, 'the 3D view takes the whole page width: ' + ctx)
+    assert.ok(f.canvasCovers, 'the 3D canvas covers the whole viewer: ' + ctx)
+  }
+  return f
+}
+async function assertRegister(p, id, railMode) {
+  const b = await layout(p)
+  assert.ok(b.register && !b.back && !b.focus, 'Back to Assets shows the register again: ' + JSON.stringify(b))
+  assert.strictEqual(b.navMode, railMode, 'the rail is as it was')
+  assert.ok(b.rail === null || b.rail.w > 0)
+  assert.deepStrictEqual([b.assetSel, b.paint], [id, id], "the asset's panel is open again and it is still highlighted")
+  return b
+}
 
 // the full workflow: register -> asset -> Locate in 3D -> Back to Assets, twice with two assets
 async function workflow(p, { stacked }) {
   await register(p)
   const before = await layout(p)
   assert.ok(before.register && before.navMode === 'full', 'the register is open with the full rail: ' + JSON.stringify(before))
-  const stripViewer = before.viewer
-  const panelOpen = { fits: null }
   for (const n of [0, 1]) {
+    if (n) await closePanel(p)                                           // the previous asset's panel, reopened by Back
     const id = await pickRow(p, n)
-    panelOpen.fits = (await layout(p)).fits                                // the register with the asset panel, as clicked from
+    const opened = await layout(p)                                      // the layout Locate is clicked from
     await locate(p, id)
-    await p.locator('.vpback').waitFor()
-    await sleep(400)                                                     // the rail's width transition
-    const f = await layout(p)
-    assert.strictEqual(f.register, false, 'the Assets Register is no longer on screen')
-    assert.strictEqual(f.strip, false)
-    assert.strictEqual(f.summaryFolded, true, 'the Overview summary is folded')
-    assert.ok(f.summaryHeight < 80, 'the folded summary is only its header: ' + f.summaryHeight)
-    assert.deepStrictEqual(f.saved, [null, null], 'the temporary layout is never saved')
-    assert.strictEqual(await p.evaluate(() => window.EKO.state.assetSel), id, 'the asset stays selected')
-    if (stacked) {
-      assert.strictEqual(await p.evaluate(() => window.EKO.state.modelFs), true, 'the model is full screen')
-    } else {
-      assert.strictEqual(f.navMode, 'min'); assert.ok(f.rail <= 64, 'the rail is folded: ' + f.rail)
-      // ponytail: only where the register fit; a too-narrow host already pushes the asset panel off-screen there
-      if (panelOpen.fits) assert.ok(f.viewer > stripViewer, `the 3D view grows past the register's strip: ${stripViewer} -> ${f.viewer}`)
-      assert.ok(f.viewer >= f.mount - f.panel - 2, `the 3D view takes all the room beside the asset panel: ${JSON.stringify(f)}`)
-    }
+    await assertFocus(p, id, { stacked })
     await p.locator('.vpback').click()
-    await p.locator('.dgwrap[data-grid="assets"] tr[data-asset]').first().waitFor()
-    await sleep(400)
-    const b = await layout(p)
-    assert.ok(b.register && !b.back, 'Back to Assets shows the register again: ' + JSON.stringify(b))
-    assert.strictEqual(b.navMode, 'full', 'the rail is back')
-    assert.strictEqual(b.viewer, stripViewer, 'the register layout is as it was')
-    assert.strictEqual(await p.evaluate(() => !!window.EKO.state.locFocus), false)
+    await p.locator(rows).first().waitFor()
+    await settle(p)
+    const b = await assertRegister(p, id, 'full')
+    // the strip and the panel as before; not the panel's x: in the host the register already overflows by a content-dependent amount
+    if (!stacked) assert.deepStrictEqual([b.viewer, b.panel && b.panel.w], [opened.viewer, opened.panel && opened.panel.w], 'the register layout is as before')
   }
 }
 
@@ -165,23 +186,28 @@ try {
     await p.evaluate(() => { localStorage.setItem('eko-nav', 'min'); window.EKO.set({ navMin: true }) })
     const id = await pickRow(p, 0)
     await locate(p, id)
+    await assertFocus(p, id, { stacked: false, saved: ['min', null] })   // the user's own folded rail, untouched
     await p.locator('.vpback').click()
-    await p.locator('.dgwrap[data-grid="assets"] tr[data-asset]').first().waitFor()
-    const b = await layout(p)
-    assert.deepStrictEqual([b.navMode, b.saved[0]], ['min', 'min'])
+    await p.locator(rows).first().waitFor()
+    const b = await assertRegister(p, id, 'min')
+    assert.strictEqual(b.saved[0], 'min')
     assert.deepStrictEqual(errors, [])
     await ctx.close()
   })
 
-  await test('host: leaving the 3D view by the rail also restores the panels', async () => {
+  await test('host: Escape leaves focus like Back to Assets; the logo leaves it for the normal Overview', async () => {
     const { p, ctx, errors } = await openHost(1400)
     await register(p)
-    await locate(p, await pickRow(p, 0))
-    await p.locator('.vpback').waitFor()
-    await p.locator('#ekonav [data-act="goMod"][data-mod="energy"]').click()
+    let id = await pickRow(p, 0)
+    await locate(p, id)
+    await p.keyboard.press('Escape')
+    await p.locator(rows).first().waitFor()
+    await assertRegister(p, id, 'full')
+    await locate(p, id)
+    await p.locator('.brandslot').click()
     await sleep(400)
     const s = await layout(p)
-    assert.deepStrictEqual([s.navMode, s.back, s.summaryFolded === true], ['full', false, false])
+    assert.ok(!s.focus && !s.back && s.rail && s.summary && s.pageId === 'marsa-overview', 'the normal Overview: ' + JSON.stringify(s))
     assert.deepStrictEqual(errors, [])
     await ctx.close()
   })
