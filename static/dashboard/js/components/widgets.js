@@ -1023,11 +1023,9 @@ window.EKO_C = (function(){
     const n = parseFloat(m[0]);
     return Number.isFinite(n) ? n : null;
   }
+  /* The unit is added only if the value lacks it */
   function fcuShown(raw, unit) {
     if (!raw) return null;
-    const upper = raw.trim().toUpperCase();
-    if (upper === 'T' || upper === 'TRUE' || upper === 'ON' || upper === 'RUN' || upper === 'RUNNING') return 'On';
-    if (upper === 'F' || upper === 'FALSE' || upper === 'OFF' || upper === 'STOP' || upper === 'STOPPED') return 'Off';
     if (/[a-zA-Z°%]/.test(raw)) return raw;
     const n = fcuNumber(raw);
     if (n != null && unit && raw.indexOf(unit.trim()) === -1) {
@@ -1040,23 +1038,10 @@ window.EKO_C = (function(){
     const k = fcuFold(name);
     return k.indexOf('fdd') === 0 || k.indexOf('rule') === 0;
   }
-  function isAlarmNav(name) {
-    const k = fcuFold(name);
-    return k.indexOf('alarm') !== -1 || /(?:^|_)alm(?:$|_)/.test(String(name || '').toLowerCase());
-  }
-  function analogUnit(name, unit) {
-    if (unit) {
-      const u = String(unit).trim();
-      return u ? (u.charAt(0) === '°' || u.charAt(0) === '%' ? ' ' + u : ' ' + u) : '';
-    }
-    const k = fcuFold(name);
-    if (k.indexOf('alarm') !== -1 || k.indexOf('filter') !== -1 || k.indexOf('occup') !== -1 || k.indexOf('enable') !== -1) return '';
-    if (k.indexOf('temp') !== -1) return ' °C';
-    if (k.indexOf('hum') !== -1) return ' %';
-    if (k.indexOf('co2') !== -1) return ' ppm';
-    if (k.indexOf('press') !== -1 || /dp$/.test(k)) return ' Pa';
-    if (k.indexOf('valve') !== -1 || k.indexOf('damper') !== -1 || k.indexOf('speed') !== -1 || k.indexOf('pos') !== -1 || k.indexOf('cmd') !== -1) return ' %';
-    return '';
+  /* FIN's unit tag; never guessed from the name */
+  function analogUnit(unit) {
+    const u = String(unit || '').trim();
+    return u ? ' ' + u : '';
   }
   /* The air-handler family as a whole word of the id or type: "MAHU-ANC09-BF-01" is MAHU,
      never AHU, and "ILIANA ECO-ANC09-BF-01" is the kitchen-exhaust ecology unit whatever
@@ -1070,21 +1055,13 @@ window.EKO_C = (function(){
   function pointVal(points, ...names) {
     for (const n of names) {
       const p = fcuFind(points, k => k.endsWith(n));
-      const v = fcuClean(p && (p.currentValue != null ? p.currentValue : p[2]));
+      const v = fcuClean(p && (p.text || (p.currentValue != null ? p.currentValue : p[2])));
       if (v != null) return v;
     }
     return null;
   }
-  /* On/Off readings in the words of the part they describe */
-  function pointSaid(raw, unit, on, off) {
-    const s = fcuShown(raw, unit);
-    return s === 'On' ? on : s === 'Off' ? off : (s || '—');
-  }
-  /* A status point: T/F or 1/0 in words, never a number or a percentage */
-  function pointFlag(raw, on, off) {
-    const s = pointSaid(raw, '', on, off);
-    const n = raw == null ? null : fcuNumber(raw);
-    return s !== on && s !== off && n != null ? (n > 0 ? on : off) : s;
+  function pointShown(raw) {
+    return fcuShown(raw, '') || '—';
   }
   /* Same names as readMauPoints. Every row is shown, a missing point as "—",
      so the panel says which MAHU points FIN is not sending. */
@@ -1093,27 +1070,26 @@ window.EKO_C = (function(){
     const points = (asset && asset.points) || [];
     if (!points.length) return '';
     const val = (...names) => pointVal(points, ...names);
-    const said = pointSaid, flag = pointFlag;
     const rows = [
-      ['FA_DAMPER_STS', flag(val('fadampersts'), 'Open', 'Closed')],
-      ['PRE_FILTER', flag(val('prefilter'), 'Dirty', 'Clean')],
-      ['BAG_FILTER', flag(val('bagfilter'), 'Dirty', 'Clean')],
-      ['TEMP_BEFORE_HEATPIPE', said(val('tempbeforeheatpipe'), ' °C')],
-      ['HUM_BEFORE_HEATPIPE', said(val('humbeforeheatpipe'), ' %')],
-      ['TEMP_AFTER_HEATPIPE', said(val('tempafterheatpipe'), ' °C')],
-      ['HUM_AFTER_HEATPIPE', said(val('humafterheatpipe'), ' %')],
-      ['COOLING_VALVE_POS', said(val('coolingvalvepos'), ' %')],
-      ['COOLING_VALVE_CMD', said(val('coolingvalvecmd'), ' %')],
-      ['CHW_SUP_TEMP', said(val('chwsuptemp'), ' °C')],
-      ['CHW_RET_TEMP', said(val('chwrettemp'), ' °C')],
-      ['SF_VFD_RUN_STS', flag(val('sfvfdrunsts', 'sfairflowsts'), 'On', 'Off')],
-      ['SF_VFD_SPD_POS', said(val('sfvfdspdpos'), ' %')],   // the feedback only, never SF_VFD_SPD_CMD under its name
-      ['SF_TRIP_ALARM', flag(val('sftripalarm'), 'Trip', 'Normal')],
-      ['SA_TEMP', said(val('satemp'), ' °C')],
-      ['SA_TEMP_SP', said(val('satempsp'), ' °C')],
-      ['SA_HUM', said(val('sahum'), ' %')],
-      ['SA_PRESSURE', said(val('sapressure'), ' Pa')],
-      ['SA_PRESSURE_SP', said(val('sapressuresp'), ' Pa')],
+      ['FA_DAMPER_STS', pointShown(val('fadampersts'))],
+      ['PRE_FILTER', pointShown(val('prefilter'))],
+      ['BAG_FILTER', pointShown(val('bagfilter'))],
+      ['TEMP_BEFORE_HEATPIPE', pointShown(val('tempbeforeheatpipe'))],
+      ['HUM_BEFORE_HEATPIPE', pointShown(val('humbeforeheatpipe'))],
+      ['TEMP_AFTER_HEATPIPE', pointShown(val('tempafterheatpipe'))],
+      ['HUM_AFTER_HEATPIPE', pointShown(val('humafterheatpipe'))],
+      ['COOLING_VALVE_POS', pointShown(val('coolingvalvepos'))],
+      ['COOLING_VALVE_CMD', pointShown(val('coolingvalvecmd'))],
+      ['CHW_SUP_TEMP', pointShown(val('chwsuptemp'))],
+      ['CHW_RET_TEMP', pointShown(val('chwrettemp'))],
+      ['SF_VFD_RUN_STS', pointShown(val('sfvfdrunsts'))],
+      ['SF_VFD_SPD_POS', pointShown(val('sfvfdspdpos'))],
+      ['SF_TRIP_ALARM', pointShown(val('sftripalarm'))],
+      ['SA_TEMP', pointShown(val('satemp'))],
+      ['SA_TEMP_SP', pointShown(val('satempsp'))],
+      ['SA_HUM', pointShown(val('sahum'))],
+      ['SA_PRESSURE', pointShown(val('sapressure'))],
+      ['SA_PRESSURE_SP', pointShown(val('sapressuresp'))],
     ];
     return rows.map(row => `<div class="aprow"><dt>${esc(row[0])}</dt><dd>${esc(row[1])}</dd></div>`).join('');
   }
@@ -1124,18 +1100,18 @@ window.EKO_C = (function(){
     if (!points.length) return '';
     const val = (...names) => pointVal(points, ...names);
     const rows = [
-      ['BOX_FILTER', pointFlag(val('boxfilter'), 'Dirty', 'Clean')],
-      ['2ND_STAGE_UV_ALARM', pointFlag(val('2ndstageuvalarm'), 'Alarm', 'Normal')],
-      ['KEF_ON_STS', pointFlag(val('kefonsts'), 'On', 'Off')],
-      ['PRE_FILTER', pointFlag(val('prefilter'), 'Dirty', 'Clean')],
-      ['BAG_FILTER', pointFlag(val('bagfilter'), 'Dirty', 'Clean')],
-      ['1ST_STAGE_UV_ALARM', pointFlag(val('1ststageuvalarm'), 'Alarm', 'Normal')],
-      ['VFD_SPEED_POS', pointSaid(val('vfdspeedpos'), ' %')],
-      ['KEF_HOA', pointSaid(val('kefhoa'), '')],
-      ['KEF_TRIP_STS', pointFlag(val('keftripsts'), 'Trip', 'Normal')],
-      ['VFD_RUN_STS', pointFlag(val('vfdrunsts'), 'On', 'Off')],
-      ['ALL_FILTER_ALARM', pointFlag(val('allfilteralarm'), 'Alarm', 'Normal')],
-      ['COMMAN_ALARM', pointFlag(val('commanalarm', 'commonalarm'), 'Alarm', 'Normal')],
+      ['BOX_FILTER', pointShown(val('boxfilter'))],
+      ['2ND_STAGE_UV_ALARM', pointShown(val('2ndstageuvalarm'))],
+      ['KEF_ON_STS', pointShown(val('kefonsts'))],
+      ['PRE_FILTER', pointShown(val('prefilter'))],
+      ['BAG_FILTER', pointShown(val('bagfilter'))],
+      ['1ST_STAGE_UV_ALARM', pointShown(val('1ststageuvalarm'))],
+      ['VFD_SPEED_POS', pointShown(val('vfdspeedpos'))],
+      ['KEF_HOA', pointShown(val('kefhoa'))],
+      ['KEF_TRIP_STS', pointShown(val('keftripsts'))],
+      ['VFD_RUN_STS', pointShown(val('vfdrunsts'))],
+      ['ALL_FILTER_ALARM', pointShown(val('allfilteralarm'))],
+      ['COMMAN_ALARM', pointShown(val('commanalarm', 'commonalarm'))],
     ];
     return rows.map(row => `<div class="aprow"><dt>${esc(row[0])}</dt><dd>${esc(row[1])}</dd></div>`).join('');
   }
@@ -1143,12 +1119,13 @@ window.EKO_C = (function(){
     const listed = Array.isArray(asset && asset.analog) ? asset.analog : null;
     const rows = [];
     const push = (name, raw, unit) => {
-      const shown = fcuShown(fcuClean(raw), analogUnit(name, unit));
+      const shown = fcuShown(fcuClean(raw), analogUnit(unit));
       if (shown) rows.push([name, shown]);
     };
+    // data-map has already removed the alarm points
     if (listed && listed.length) {
       listed.forEach(p => {
-        if (!p || !p[0] || isFddNav(p[0]) || isAlarmNav(p[0])) return;
+        if (!p || !p[0] || isFddNav(p[0])) return;
         push(p[0], p[2], p[3]);
       });
     } else {
@@ -1156,14 +1133,14 @@ window.EKO_C = (function(){
       if (fromPts.length) {
         fromPts.forEach(p => {
           if (!p || !p.reporting) return;
-          if (isFddNav(p.navName) || isAlarmNav(p.navName)) return;
+          if (isFddNav(p.navName) || p.alarmPoint === true) return;
           const folded = fcuFold(p.navName);
           if (folded.indexOf('warrant') !== -1) return;
-          push(p.navName, p.currentValue, p.unit);
+          push(p.navName, p.text || p.currentValue, p.unit);
         });
       } else {
         ((asset && asset.params) || []).forEach(p => {
-          if (!p || !p[0] || isFddNav(p[0]) || isAlarmNav(p[0])) return;
+          if (!p || !p[0] || isFddNav(p[0])) return;
           const folded = fcuFold(p[0]);
           if (folded.indexOf('warrant') !== -1) return;
           push(p[0], p[2], p[3]);
@@ -1187,7 +1164,8 @@ window.EKO_C = (function(){
     };
     if (!orders.length) {
       const err = (E.data && E.data.workOrderError) || '';
-      const note = err ? `${t('apWoReadFail')} ${err}` : t(r.equipId ? 'apWoNoRows' : 'apWoUnlinked');
+      const st = (E.data && E.data.workOrderState) || '';
+      const note = err ? `${t('apWoReadFail')} ${err}` : st === 'off' ? t('apWoOff') : st === 'pending' ? t('apWoPending') : t(r.equipId ? 'apWoNoRows' : 'apWoUnlinked');
       return `<p class="alempty">${esc(t('apWoEmpty'))}</p>`
         + (r.equipId ? row(t('apWoEquip'), r.equipId) : '')
         + `<p class="apnote">${esc(note)}</p>`;
@@ -1217,6 +1195,31 @@ window.EKO_C = (function(){
     return cards + `<p class="apnote">${esc(t('apWoNote'))}</p>`;
   }
 
+  function histChart(E, r, cmp){
+    const t = E.t.bind(E), loc = E.lang === 'ar' ? 'ar-AE' : 'en-GB';
+    const hist = cmp.hist, n = hist.length;
+    const sel = E.state.apHist && E.state.apHist.id === r.id ? E.state.apHist.i : n - 1;
+    const i = Math.max(0, Math.min(n - 1, sel)), day = hist[i];
+    const now = new Date(), today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    const dateOf = (d, o) => new Date(d.t).toLocaleDateString(loc, Object.assign({ timeZone: 'UTC' }, o));
+    const dayName = d => d.t === today ? t('apHistToday') : d.t === today - 864e5 ? t('apHistYesterday') : dateOf(d, { weekday: 'short', day: 'numeric', month: 'short' });
+    const hh = h => String(h).padStart(2, '0');
+    const groups = [];
+    for (let h = 0; h < 24; h++) groups.push({ label: h % 3 ? '' : hh(h), tip: `${dayName(day)} ${hh(h)}:00`, a: day.a ? day.a[h] : null, b: day.b ? day.b[h] : null });
+    const bars = window.ekoCompareBars(groups, { unit: cmp.unit, fmt: v => fmt(v, 1), actLbl: t('apCmpActual'), spLbl: t('apCmpSp'), keep: true, dense: true });
+    const avgs = hist.map(d => d.aAvg).filter(v => v != null && isFinite(v));
+    const lo = Math.min.apply(null, avgs), span = (Math.max.apply(null, avgs) - lo) || 1;
+    const cells = hist.map((d, k) => `<i data-on="${k === i ? 1 : 0}" style="height:${d.aAvg == null ? 0 : (25 + (d.aAvg - lo) / span * 75).toFixed(1)}%"></i>`).join('');
+    const step = (v, dis, lbl, ic) => `<button class="iconbtn icon26" data-act="apHistStep" data-v="${v}" aria-label="${esc(lbl)}"${dis ? ' disabled' : ''}>${icon(ic, 14)}</button>`;
+    const cap = `${esc(E.ph(cmp.actName || t('apCmpActual')))} · ${esc(t('apHistHourly'))}${cmp.unit ? ` · ${esc(cmp.unit)}` : ''}`;
+    return `<p class="tCap">${cap}</p>
+      <div class="aphhead">${step(-1, i === 0, t('apHistPrev'), 'chevL')}<span class="aphday">${esc(dayName(day))}</span>${step(1, i === n - 1, t('apHistNext'), 'chevR')}</div>
+      <div class="apcmpleg"><span class="apcmpdot" data-k="act"></span>${esc(t('apCmpActual'))}<span class="apcmpdot" data-k="sp"></span>${esc(t('apCmpSp'))}</div>
+      <div class="apcmpchart">${bars.html}</div>
+      <div class="aphnav" role="slider" tabindex="0" data-id="${esc(r.id)}" data-n="${n}" aria-label="${esc(t('apHistNav'))}" aria-valuemin="0" aria-valuemax="${n - 1}" aria-valuenow="${i}" aria-valuetext="${esc(dayName(day))}">${cells}<span class="aphwin" style="left:${(i / n * 100).toFixed(3)}%;width:${(100 / n).toFixed(3)}%"></span></div>
+      <div class="aphends"><span>${esc(dateOf(hist[0], { day: 'numeric', month: 'short' }))}</span><span>${esc(dateOf(hist[n - 1], { day: 'numeric', month: 'short' }))}</span></div>`;
+  }
+
   function assetPanel(E){
     const id = E.state.assetSel;
     if(!id) return '';
@@ -1236,41 +1239,37 @@ window.EKO_C = (function(){
     if(tab === 'control' && !ctl) tab = 'alarms';
     const trP = x => E.ph(x);
     const foldNav = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const isBoolLive = v => { const s = String(v == null ? '' : v).trim().toUpperCase(); return s === 'T' || s === 'F' || s === 'TRUE' || s === 'FALSE' || s === 'ON' || s === 'OFF'; };
     const wtySlot = n => { const f = foldNav(n); if (f.indexOf('warrant') === -1) return null; if (f.indexOf('start') !== -1) return 'start'; if (f.indexOf('end') !== -1) return 'end'; return null; };
     const alsText = als.map(a => String((a && (a.plainEn || a.techEn)) || '').toLowerCase());
     const fddRows = (r.params || []).filter(p => {
-      if (!isFddNav(p[0]) || wtySlot(p[0]) || isBoolLive(p[2])) return false;
+      if (!isFddNav(p[0]) || wtySlot(p[0])) return false;
       const msg = String(p[2] || '').toLowerCase();
       if (!msg) return false;
+      if (msg.length < 16) return true;   // a state word (FAULT), not a message
       return !alsText.some(t => t && (t.indexOf(msg.slice(0, 48)) !== -1 || msg.indexOf(t.slice(0, 48)) !== -1));
     });
-    const alarmPtSrc = Array.isArray(r.alarmPts) && r.alarmPts.length
-      ? r.alarmPts
-      : ((r.points || []).filter(p => p && p.reporting && isAlarmNav(p.navName)).map(p => [p.navName, '', p.currentValue]));
-    const alarmPtRows = alarmPtSrc.filter(p => fcuClean(p[2])).map(p => {
-      const shown = fcuShown(fcuClean(p[2]), '');
-      return shown ? [p[0], shown] : null;
-    }).filter(Boolean);
+    const alarmPtRows = (r.alarmPts || []).filter(p => fcuClean(p[2])).map(p => [p[0], fcuClean(p[2])]);
     const analogRows = analogPointRows(r);
     /* MAHU and ECO list every FIN point they draw, a missing one as "—"; the rest use the generic analog rows */
     const typeRows = mauPointRows(r) || ecoPointRows(r);
     const cmp = r.compare || null;
     const reason = r.st === 'stale' ? 'dgNoTrend.stale' : (r.trendKind === 'state' ? 'dgNoTrend.state' : 'dgNoTrend.none');
     const graphBlock = (() => {
+      if (cmp && Array.isArray(cmp.hist) && cmp.hist.length && typeof window.ekoCompareBars === 'function') return histChart(E, r, cmp);
       const dayGroups = cmp && Array.isArray(cmp.days) ? cmp.days.filter(d => d && (d.actual != null || d.sp != null)).map(d => ({ label: d.label, a: d.actual, b: d.sp })) : [];
       const pairGroups = cmp && Array.isArray(cmp.pairs) ? cmp.pairs.filter(p => p.actual != null || p.sp != null).map(p => ({ label: t(p.key), a: p.actual, b: p.sp, unit: p.unit })) : [];
       const groups = dayGroups.length >= 2 ? dayGroups : pairGroups;
       if (!groups.length || typeof window.ekoCompareBars !== 'function') {
         return `<p class="tCap">${esc(t('emptyDash'))} · ${esc(t(reason))}</p>`;
       }
-      const cap = dayGroups.length >= 2
-        ? `${esc(trP(cmp.actName || t('apCmpActual')))} · ${esc(t('apCmpDays'))}`
+      const days = dayGroups.length >= 2;
+      const cap = days
+        ? `${esc(trP(cmp.actName || t('apCmpActual')))} · ${esc(t('apCmpDays'))}${cmp.unit ? ` · ${esc(cmp.unit)}` : ''}`
         : esc(t('apCmpCap'));
-      const bars = window.ekoCompareBars(groups, 240, 88);
+      const bars = window.ekoCompareBars(groups, { unit: days ? cmp.unit : '', fmt: v => fmt(v, 1), actLbl: t('apCmpActual'), spLbl: t('apCmpSp') });
       return `<p class="tCap">${cap}</p>
         <div class="apcmpleg"><span class="apcmpdot" data-k="act"></span>${esc(t('apCmpActual'))}<span class="apcmpdot" data-k="sp"></span>${esc(t('apCmpSp'))}</div>
-        <div class="systrend apcmpchart"><svg viewBox="0 0 240 88" preserveAspectRatio="xMidYMid meet">${bars.svg}</svg></div>`;
+        <div class="apcmpchart">${bars.html}</div>`;
     })();
     const pack = docsFor(E, r);
     const omDocs = pack ? (pack.om ? [pack.om] : []) : (r.omDocs || []);

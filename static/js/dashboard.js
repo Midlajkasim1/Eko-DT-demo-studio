@@ -298,7 +298,7 @@
       ...eqPayload,
       equipment: eqPayload.equipment.map((eq) => ({
         ...eq,
-        points: (eq.points || []).map((p) => ({ ...p, currentValue: null })),
+        points: (eq.points || []).map((p) => ({ ...p, currentValue: null, bool: null, text: null })),
       })),
     };
     histMemo.srcEquip = eqPayload; histMemo.equip = out;
@@ -1291,7 +1291,9 @@
       (e.points || []).forEach((p) => {
         total++;
         if (p.his) historized++;
-        if (String(p.status || 'ok').toLowerCase() === 'ok') healthy++;
+        // No curStatus: neither healthy nor faulted
+        if (p.status == null || p.status === '') return;
+        if (String(p.status).toLowerCase() === 'ok') healthy++;
         else faulted++;
       });
     });
@@ -1433,10 +1435,10 @@
     // EKO-020: a point with no value is absent and a faulted point names its FIN
     // status ("conn fault") — colour alone never carried which of the two it was.
     const pointRows = points.length ? points.map((p) => {
-      const status = String(p.status || 'ok').toLowerCase();
-      const ok = status === 'ok';
+      const status = String(p.status == null ? '' : p.status).toLowerCase();
+      const ok = !status || status === 'ok';
       const has = p.currentValue != null && p.currentValue !== '';
-      const val = has ? String(p.currentValue) : '—';
+      const val = has ? String(p.text || p.currentValue) : '—';
       const stacked = val.length > 22;
       const valStyle = `font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1.45;` +
         `color:${!has ? 'var(--t3)' : (ok ? 'var(--t1)' : 'var(--warnTx)')};overflow-wrap:anywhere`;

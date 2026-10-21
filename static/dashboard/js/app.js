@@ -182,8 +182,18 @@
       if(window.EKO_SURF) window.EKO_SURF.closeAll();          /* R4 (D67) */
       const targetModule = module ?? this.state.module;
       const targetSub = sub ?? null;
-      const enteringHeat = pageId === 'heatmap' && this.state.pageId !== 'heatmap';
-      const leavingHeat = this.state.pageId === 'heatmap' && pageId !== 'heatmap';
+      const moved = pageId !== this.state.pageId || targetModule !== this.state.module || targetSub !== this.state.sub;
+      if (moved) Object.assign(this.state, { paint: null, mkPulse: null });
+      this.pageView(pageId, targetModule, targetSub, this.state.pageId, moved);
+
+      this.set({ born: this.state.born || 'nav',
+                 pageId, module: targetModule, sub: targetSub,
+                 mkPop: null, dlg: null, mobMore: false, modelFs: false });
+    },
+    /* The model's setup for a page: the heat map isolates the ground floor and looks down; other pages show their layer and go home. */
+    pageView(pageId, targetModule, targetSub, from, moved){
+      const enteringHeat = pageId === 'heatmap' && from !== 'heatmap';
+      const leavingHeat = from === 'heatmap' && pageId !== 'heatmap';
       const HEAT_LAYERS = ['arch','elec','int','mech'];
 
       if (pageId === 'heatmap') {
@@ -208,11 +218,8 @@
         }
         if (this.state.dock) this.state.dock.layer = targetLayer;
         if (this.engine && this.engine.setLayerVisibility) this.engine.setLayerVisibility(targetLayer);
+        if (moved && this.engine && typeof this.engine.resetView === 'function') this.engine.resetView();
       }
-
-      this.set({ born: this.state.born || 'nav',
-                 pageId, module: targetModule, sub: targetSub,
-                 mkPop: null, dlg: null, mobMore: false, modelFs: false });
     }
   };
 
@@ -811,12 +818,32 @@
     return true;
   }
   function goHome(){ if(E.engine && typeof E.engine.resetView === 'function') E.engine.resetView(); }
+  const apHistAt = () => { const nav = document.querySelector('.aphnav'); return nav ? +nav.getAttribute('aria-valuenow') : 0; };
+  function apHistGo(i, focus){
+    const nav = document.querySelector('.aphnav'); if(!nav) return;
+    const k = Math.max(0, Math.min(+nav.dataset.n - 1, i));
+    if(k !== apHistAt()) E.set({ apHist: { id: nav.dataset.id, i: k } });
+    if(focus){ const el = document.querySelector('.aphnav'); if(el) el.focus({ preventScroll: true }); }
+  }
+  function leavePanel(pageId){ if(pageId === E.state.pageId) return; Object.assign(E.state, { paint: null, mkPulse: null }); goHome(); }
   /* Nothing selected: no popup, no equipment colour, no asset panel, no locate
      pulse. Reset uses it, and so does the host's orientation-cube home button. */
   const NO_SEL = { mkPop: null, mkPopN: 0, mkPulse: null, paint: null, assetSel: null, pickEl: null };
   E.clearSelection = () => E.set(NO_SEL);
   /* Mutate only. The caller renders once, after the tool change. */
   E.dropSelection = () => Object.assign(E.state, NO_SEL);
+  /* The model as the viewer opens it: camera, floors, layers, tools, heat colours and selection. Mutate only. */
+  E.resetModel = () => {
+    const en = E.engine, H = window.EKO_HOST_ENGINE;
+    if(H && typeof H.clearSpaceHeat === 'function') H.clearSpaceHeat();
+    E.state._heatOn = false;
+    ['clearHighlight', 'clearMeasure', 'clearSection'].forEach(k => { if(typeof en[k] === 'function') en[k](); });
+    if(en.isolateLevel) en.isolateLevel('ALL', true);
+    if(en.setLayerVisibility) en.setLayerVisibility('all', true);
+    if(en.resetView) en.resetView();
+    Object.assign(E.state.dock, { tool: null, slice: false, bloom: null, level: 'ALL', layer: 'all' });
+    E.dropSelection();
+  };
   /* close=true dismisses the floor menu (a pick). The stepper leaves it open. */
   function showLevel(id, close){
     E.state.dock.level = id;
@@ -1023,6 +1050,7 @@
     },
     closeAsset(){ E.set({ assetSel: null, paint: null }); goHome(); },   /* closing the panel is back to the home view */
     apTab(el){ E.set({ apTab: el.dataset.v }); },
+    apHistStep(el){ apHistGo(apHistAt() + (+el.dataset.v)); },
     alAll(){ E.set({ alAll: !E.state.alAll }); },
     resetLayout(){ E.set({ rlAsk:true }); },
     resetLayout2(){ E.state.rlAsk = false;
@@ -1048,9 +1076,10 @@
               mkPulse: a ? a.id : null, paint: id });   /* located equipment is coloured like a marker tap */
       E.engine.flyTo(id);
       setTimeout(() => { E.state.mkPulse = null; render(); }, 2200); },
-    /* Back to Assets (also Escape): the register as it was, the asset's panel open again */
+    /* Back to Assets (also Escape): the register as it was, the asset's panel open again. go() resets
+       the model for the new page (camera home, no highlight); the asset just located stays coloured */
     locBack(){ const sel = E.state.locFocus && E.state.locFocus.assetSel;
-      E.go('assets-register', 'assets', 'reg'); if(sel) E.set({ assetSel: sel }); },
+      E.go('assets-register', 'assets', 'reg'); if(sel) E.set({ assetSel: sel, paint: sel }); },
 
     /* One handler for the bar, the sheet, the radial, and the shortcut keys.
        Select and Measure share the click. Slice stays on until it is clicked off or Reset. */
@@ -1204,7 +1233,7 @@
       render(); },
     /* By-system row: ONE click from the Overview filters the register to
        that system's alarmed assets (spec: filter by system, ≤2 clicks). */
-    fltSysGo(el){ E.set({ pageId:'assets-register', module:'assets', sub:'reg',
+    fltSysGo(el){ leavePanel('assets-register'); E.set({ pageId:'assets-register', module:'assets', sub:'reg',
       regQ:'', regStF:null, regSysF: el.dataset.v, regSevF:null }); },
     regSysClear(){ E.set({ regSysF:null }); },
     /* D100: a quick filter link ("2 stale") sets one grid filter */
@@ -1237,7 +1266,7 @@
     /* Palette + ask. */
     palGo(el){ const h = E._palHits[Number(el.dataset.i)];
       if(!h) return;
-      if(h.kind === 'asset') E.set({ dlg:null, assetSel:h.label, pageId:'assets-register', module:'assets', sub:'reg' });
+      if(h.kind === 'asset'){ leavePanel('assets-register'); E.set({ dlg:null, assetSel:h.label, pageId:'assets-register', module:'assets', sub:'reg' }); }
       else if(h.kind === 'tool'){ E.state.dlg = null;
         if(!document.getElementById('vbar')) E.go('marsa-overview', 'overview', null);
         ACTS.vtool({ dataset:{ v:h.tool } }); }
@@ -1332,6 +1361,11 @@
   document.addEventListener('keydown', ev => {
     if (window.EKO !== E) return;
     if(E.state.wall){ if(window.EKO_WALL) window.EKO_WALL.onKey(ev); return; }   /* D108: Escape exits; any other key only raises the exit hint */
+    if(ev.target.classList && ev.target.classList.contains('aphnav')){
+      const d = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1, PageDown: -7, PageUp: 7 }[ev.key], n = +ev.target.dataset.n;
+      const k = ev.key === 'Home' ? 0 : ev.key === 'End' ? n - 1 : d != null ? apHistAt() + d : null;
+      if(k != null){ ev.preventDefault(); apHistGo(k, true); return; }
+    }
     if(ev.key === 'Escape' && ev.target.id === 'aiin' && E.state.askHint){ E.set({ askHint:null }); return; }   /* D133: leave report mode, keep the conversation */
     if((ev.ctrlKey || ev.metaKey) && ev.key === '/' && !E.state.signedOut){ ev.preventDefault();   /* D133: the launcher's shortcut */
       if(window.EKO_SURF) window.EKO_SURF.noteOpener({ act:'aiOpen', id:'ailaunch' });
@@ -1392,6 +1426,15 @@
       window.EKO_RX.printView(E, E.state.report);
   });
   window.addEventListener('afterprint', () => { if(window.EKO_RX) window.EKO_RX.removePrintView(); });
+  document.addEventListener('pointerdown', ev => {
+    if(window.EKO !== E || ev.button !== 0 || !(ev.target.closest && ev.target.closest('.aphnav'))) return;
+    ev.preventDefault();
+    const pick = x => { const el = document.querySelector('.aphnav'); if(!el) return; const b = el.getBoundingClientRect(); apHistGo(Math.floor((x - b.left) / b.width * +el.dataset.n)); };
+    const move = e => pick(e.clientX);
+    const end = () => { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', end); document.removeEventListener('pointercancel', end); apHistGo(apHistAt(), true); };
+    pick(ev.clientX);
+    document.addEventListener('pointermove', move); document.addEventListener('pointerup', end); document.addEventListener('pointercancel', end);
+  });
   document.addEventListener('keydown', ev => {
     if(ev.key === 'Enter' && ev.target.matches && ev.target.matches('tr[data-act]')){
       if(window.EKO_SURF) window.EKO_SURF.noteClick(ev.target); ACTS.openAsset(ev.target); }

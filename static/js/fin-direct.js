@@ -223,12 +223,31 @@
     }
     if (typeof val === 'number' && isFinite(val)) {
       var isFdd = navLower.indexOf('fd') === 0 || navLower.indexOf('fdd') >= 0 || navLower.indexOf('rule') === 0;
-      if (!isFdd && (unit === '%' || /valve|coil|demand/.test(navLower))) return [String(Math.trunc(val)) + '%', 'Number'];
+      if (!isFdd && unit === '%') return [String(Math.trunc(val)) + '%', 'Number'];
       var text = trunc2(val);
       if (unit) text += unit;
       return [text, 'Number'];
     }
     return [clipDecimals(String(val)), 'Str'];
+  }
+
+  function boolState(val) {
+    if (typeof val === 'boolean') return val;
+    if (typeof val === 'string') {
+      var m = val.trim().match(/^(T|F|true|false)\b/i);
+      if (m) return m[1].charAt(0).toUpperCase() === 'T';
+    }
+    return null;
+  }
+
+  /* FIN keeps a Bool's false/true text in enum ("NORMAL,FAULT") */
+  function boolText(p, state) {
+    if (state == null) return null;
+    if (typeof p.enum === 'string') {
+      var words = p.enum.split(',').map(function (w) { return w.trim(); });
+      if (words.length === 2 && words[state ? 1 : 0]) return words[state ? 1 : 0];
+    }
+    return state ? 'true' : 'false';
   }
 
   function alarmIsOpen(row) {
@@ -301,54 +320,6 @@
     });
   }
 
-  function parseAlarmFddPoints(text) {
-    if (!text) return [];
-    var points = [];
-    var seen = {};
-    var segments = String(text).split('<<');
-    for (var s = 1; s < segments.length; s++) {
-      var seg = segments[s];
-      var end = seg.indexOf('>>');
-      if (end < 0) continue;
-      var block = seg.slice(0, end);
-      var remainder = seg.slice(end + 2);
-      var eq = remainder.match(/(@p:[^"\s,]+)\s+"([^"]+)"/);
-      if (!eq) continue;
-      var inTable = false;
-      block.split('\n').forEach(function (line) {
-        line = line.trim();
-        if (!line) return;
-        if (line.indexOf('name,sourceRef,value') === 0) { inTable = true; return; }
-        if (!inTable) return;
-        var parts = splitZincLine(line);
-        if (parts.length < 3) return;
-        var name = decodeZinc(parts[0].replace(/^"|"$/g, ''));
-        var upper = name.toUpperCase();
-        if (upper.indexOf('RULE_') !== 0 && upper.indexOf('FD&D_') !== 0) return;
-        var id = 'fdd_' + eq[1] + '_' + name;
-        if (seen[id]) return;
-        seen[id] = true;
-        var raw = decodeZinc(parts[2].trim().replace(/^"|"$/g, ''));
-        var cur = raw;
-        var kind = 'Bool';
-        if (cur === 'T' || cur === 'true') cur = true;
-        else if (cur === 'F' || cur === 'false') cur = false;
-        else {
-          var n = Number(cur);
-          if (cur !== '' && isFinite(n) && /^-?\d+(?:\.\d+)?$/.test(String(cur))) { cur = n; kind = 'Number'; }
-        }
-        points.push({
-          navName: name,
-          id: { val: id, dis: eq[2] + ' ' + name },
-          equipRef: { val: eq[1], dis: eq[2] },
-          curVal: cur,
-          kind: kind
-        });
-      });
-    }
-    return points;
-  }
-
   function pointNav(p, equipName) {
     var nav = String(p.navName || '');
     if (!nav || nav === 'N/A') {
@@ -370,37 +341,14 @@
     var equipment = parseZincCsv(equipText);
     var alarms = parseZincCsv(alarmsText);
     attachAlarmDetails(alarmsText || '', alarms);
-    parseAlarmFddPoints(alarmsText).forEach(function (fp) {
-      var fpNav = String(fp.navName || '').toUpperCase();
-      var fpEq = safeGet(fp.equipRef, 'val');
-      var fpDis = String(safeGet(fp.equipRef, 'dis') || '').toUpperCase();
-      var existing = null;
-      for (var i = 0; i < points.length; i++) {
-        var p = points[i];
-        if (String(p.navName || '').toUpperCase() !== fpNav) continue;
-        if (safeGet(p.equipRef, 'val') === fpEq) { existing = p; break; }
-        var idDis = String(safeGet(p.id, 'dis') || '').toUpperCase();
-        if (fpDis && idDis.indexOf(fpDis) >= 0) { existing = p; break; }
-      }
-      if (existing) {
-        existing.curVal = fp.curVal;
-        if (!existing.equipRef) existing.equipRef = fp.equipRef;
-      } else points.push(fp);
-    });
-
     var openAlarms = openAlarmRows(alarms);   // one per logical alarm, as the alarm list counts them
     var floors = {};
     equipment.forEach(function (equip) {
       var navName = equip.navName;
       if (!navName) return;
       var equipId = safeGet(equip.id, 'val');
-      var navNorm = String(navName).toUpperCase().replace(/[-_]/g, ' ').trim();
       var matched = points.filter(function (p) {
-        if (safeGet(p.equipRef, 'val') === equipId) return true;
-        var dis = String(safeGet(p.id, 'dis') || '').toUpperCase().replace(/[-_]/g, ' ');
-        if (navNorm && dis.indexOf(navNorm) >= 0) return true;
-        var pDis = String(p.dis || '').toUpperCase().replace(/[-_]/g, ' ');
-        return !!(navNorm && pDis.indexOf(navNorm) >= 0);
+        return !!equipId && safeGet(p.equipRef, 'val') === equipId;
       });
       var equipAlarms = [];
       openAlarms.forEach(function (a) {
@@ -420,8 +368,6 @@
           if (navLower === 'start/stop' || navLower === 'start_stop' || navLower === 'startstop') return;
         }
         var val = p.curVal;
-        if (val == null) val = p.val;
-        if (val == null) val = p.v0;
         var isHis = p.his === true;
         var empty = val == null || val === '' || val === 'N/A';
         if (val && typeof val === 'object') empty = !(val.dis || val.val);
@@ -438,18 +384,23 @@
           display = shown[0];
           kind = shown[1];
         }
+        var state = boolState(val);
         var key = navLower.replace(/ /g, '_');
         if (seen[key]) return;
         seen[key] = true;
         formatted.push({
           navName: pNav,
           currentValue: display,
-          status: p.status || p.curStatus || 'ok',
+          status: p.curStatus,
           id: String(safeGet(p.id, 'val') || '').replace(/^@/, ''),
           his: isHis,
           reporting: reporting,
           unit: unit,
-          kind: kind
+          kind: kind,
+          // currentValue stays On/Off for the 3D schematics
+          bool: state,
+          text: boolText(p, state),
+          alarmPoint: p.alarmPoint === true
         });
       });
       var floor = safeGet(equip.floorRef, 'dis') || 'Unknown Floor';
