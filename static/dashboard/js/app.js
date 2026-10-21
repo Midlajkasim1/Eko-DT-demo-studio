@@ -181,10 +181,18 @@
       if(window.EKO_SURF) window.EKO_SURF.closeAll();          /* R4 (D67) */
       const targetModule = module ?? this.state.module;
       const targetSub = sub ?? null;
-      const located = !!this.state.paint && (pageId !== this.state.pageId || targetModule !== this.state.module || targetSub !== this.state.sub);
-      if (located) Object.assign(this.state, { paint: null, mkPulse: null });
-      const enteringHeat = pageId === 'heatmap' && this.state.pageId !== 'heatmap';
-      const leavingHeat = this.state.pageId === 'heatmap' && pageId !== 'heatmap';
+      const moved = pageId !== this.state.pageId || targetModule !== this.state.module || targetSub !== this.state.sub;
+      if (moved) Object.assign(this.state, { paint: null, mkPulse: null });
+      this.pageView(pageId, targetModule, targetSub, this.state.pageId, moved);
+
+      this.set({ born: this.state.born || 'nav',
+                 pageId, module: targetModule, sub: targetSub,
+                 mkPop: null, dlg: null, mobMore: false, modelFs: false });
+    },
+    /* The model's setup for a page: the heat map isolates the ground floor and looks down; other pages show their layer and go home. */
+    pageView(pageId, targetModule, targetSub, from, moved){
+      const enteringHeat = pageId === 'heatmap' && from !== 'heatmap';
+      const leavingHeat = from === 'heatmap' && pageId !== 'heatmap';
       const HEAT_LAYERS = ['arch','elec','int','mech'];
 
       if (pageId === 'heatmap') {
@@ -209,12 +217,8 @@
         }
         if (this.state.dock) this.state.dock.layer = targetLayer;
         if (this.engine && this.engine.setLayerVisibility) this.engine.setLayerVisibility(targetLayer);
-        if (located && this.engine && typeof this.engine.resetView === 'function') this.engine.resetView();
+        if (moved && this.engine && typeof this.engine.resetView === 'function') this.engine.resetView();
       }
-
-      this.set({ born: this.state.born || 'nav',
-                 pageId, module: targetModule, sub: targetSub,
-                 mkPop: null, dlg: null, mobMore: false, modelFs: false });
     }
   };
 
@@ -819,13 +823,25 @@
     if(k !== apHistAt()) E.set({ apHist: { id: nav.dataset.id, i: k } });
     if(focus){ const el = document.querySelector('.aphnav'); if(el) el.focus({ preventScroll: true }); }
   }
-  function leaveLocated(pageId){ if(!E.state.paint || pageId === E.state.pageId) return; Object.assign(E.state, { paint: null, mkPulse: null }); goHome(); }
+  function leavePanel(pageId){ if(pageId === E.state.pageId) return; Object.assign(E.state, { paint: null, mkPulse: null }); goHome(); }
   /* Nothing selected: no popup, no equipment colour, no asset panel, no locate
      pulse. Reset uses it, and so does the host's orientation-cube home button. */
   const NO_SEL = { mkPop: null, mkPopN: 0, mkPulse: null, paint: null, assetSel: null, pickEl: null };
   E.clearSelection = () => E.set(NO_SEL);
   /* Mutate only. The caller renders once, after the tool change. */
   E.dropSelection = () => Object.assign(E.state, NO_SEL);
+  /* The model as the viewer opens it: camera, floors, layers, tools, heat colours and selection. Mutate only. */
+  E.resetModel = () => {
+    const en = E.engine, H = window.EKO_HOST_ENGINE;
+    if(H && typeof H.clearSpaceHeat === 'function') H.clearSpaceHeat();
+    E.state._heatOn = false;
+    ['clearHighlight', 'clearMeasure', 'clearSection'].forEach(k => { if(typeof en[k] === 'function') en[k](); });
+    if(en.isolateLevel) en.isolateLevel('ALL', true);
+    if(en.setLayerVisibility) en.setLayerVisibility('all', true);
+    if(en.resetView) en.resetView();
+    Object.assign(E.state.dock, { tool: null, slice: false, bloom: null, level: 'ALL', layer: 'all' });
+    E.dropSelection();
+  };
   /* close=true dismisses the floor menu (a pick). The stepper leaves it open. */
   function showLevel(id, close){
     E.state.dock.level = id;
@@ -1208,7 +1224,7 @@
       render(); },
     /* By-system row: ONE click from the Overview filters the register to
        that system's alarmed assets (spec: filter by system, ≤2 clicks). */
-    fltSysGo(el){ leaveLocated('assets-register'); E.set({ pageId:'assets-register', module:'assets', sub:'reg',
+    fltSysGo(el){ leavePanel('assets-register'); E.set({ pageId:'assets-register', module:'assets', sub:'reg',
       regQ:'', regStF:null, regSysF: el.dataset.v, regSevF:null }); },
     regSysClear(){ E.set({ regSysF:null }); },
     /* D100: a quick filter link ("2 stale") sets one grid filter */
@@ -1241,7 +1257,7 @@
     /* Palette + ask. */
     palGo(el){ const h = E._palHits[Number(el.dataset.i)];
       if(!h) return;
-      if(h.kind === 'asset'){ leaveLocated('assets-register'); E.set({ dlg:null, assetSel:h.label, pageId:'assets-register', module:'assets', sub:'reg' }); }
+      if(h.kind === 'asset'){ leavePanel('assets-register'); E.set({ dlg:null, assetSel:h.label, pageId:'assets-register', module:'assets', sub:'reg' }); }
       else if(h.kind === 'tool'){ E.state.dlg = null;
         if(!document.getElementById('vbar')) E.go('marsa-overview', 'overview', null);
         ACTS.vtool({ dataset:{ v:h.tool } }); }

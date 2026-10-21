@@ -1526,6 +1526,7 @@
     if (!site || !Array.isArray(list)) return;
     if (Object.prototype.hasOwnProperty.call(payload, 'workOrderError')) {
       site.workOrderError = payload.workOrderError || '';
+      site.workOrderState = payload.workOrderState || '';
     }
 
     // Build fresh asset list from FIN live data
@@ -1821,7 +1822,10 @@
   function applyWorkOrders(payload) {
     woState = { byId: {} };
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
-    if (site) site.workOrderError = (payload && payload.error) || '';
+    if (site) {
+      site.workOrderError = (payload && payload.error) || '';
+      site.workOrderState = (payload && payload.state) || '';
+    }
     ((payload && payload.orders) || []).forEach(function (order) {
       var equipId = normEquipId(order.equipment);
       if (!equipId) return;

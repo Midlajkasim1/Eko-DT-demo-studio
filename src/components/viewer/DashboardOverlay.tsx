@@ -1122,6 +1122,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const layer = (window as any).EKO?.state?.dock?.layer
         if (layer && layer !== 'all') isolateLayer(layer)
       }
+      // A control room opened from its own URL goes home once its models load
+      if (modelsChanged && live.length && document.querySelector('.dashboard-native-container[data-wall="1"]')) resetCameraToHome(engine)
     }, 3000)
     void resolveAllAssetPositions()
     void refreshLevels()

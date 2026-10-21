@@ -295,6 +295,7 @@ async def realtime_loop():
                 "timestamp": datetime.now().isoformat(),
                 "equipment": _flatten_equip(realtime),
             }
+            await refresh_workorders()
             _compute_sensor_averages(realtime)
             cached_fdd_summary = _build_fdd_summary(realtime)
             cached_meter_data = _extract_meters(realtime, CONFIG.get("meter_profile", {}))
@@ -308,7 +309,6 @@ async def realtime_loop():
                 cached_power_history["Total_Power_Consumption_his"] = cached_power_history[
                     "Hourly_Energy_Consumption_his"
                 ]
-            await refresh_workorders()
             cached_building_data = {
                 "status": "success",
                 "Building_Info": {
@@ -1242,10 +1242,20 @@ def _stamp(response: Response) -> None:
     response.headers[PROJECT_HEADER] = quote(ACTIVE_PROJECT_ID or "", safe="")
 
 
+def _workorder_state() -> str:
+    """off: no query configured; pending: not read yet; error; ok."""
+    if not (CONFIG.get("workorder_expr") or "").strip():
+        return "off"
+    if not cached_workorders:
+        return "pending"
+    return "error" if cached_workorders.get("error") else "ok"
+
+
 def _attach_workorders():
     """Copy the live jobs onto each equipment row. The only key is equipId."""
     if isinstance(cached_equip_data, dict):
         cached_equip_data["workOrderError"] = (cached_workorders or {}).get("error") or ""
+        cached_equip_data["workOrderState"] = _workorder_state()
     equipment = (cached_equip_data or {}).get("equipment")
     if not isinstance(equipment, list):
         return
@@ -1284,7 +1294,7 @@ async def get_workorders(response: Response):
     if not client or not client.is_authenticated:
         raise HTTPException(status_code=401, detail="Not authenticated")
     _stamp(response)
-    return cached_workorders or {"timestamp": None, "source": "fin", "orders": [], "error": ""}
+    return {**(cached_workorders or {"timestamp": None, "source": "fin", "orders": [], "error": ""}), "state": _workorder_state()}
 
 
 @app.get("/api/fin/equip-live")

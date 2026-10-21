@@ -490,6 +490,8 @@ window.EKO_I18N.en = {
   "apWoUnlinked": "FIN has no equipId on this machine that matches a work-order equipment number.",
   "apWoNoRows": "This equipment number is on the machine, and no work-order row uses it.",
   "apWoReadFail": "FIN did not return work orders.",
+  "apWoOff": "No work-order query is set for this project.",
+  "apWoPending": "Work orders are still being read from FIN.",
   "apWoNote": "Linked by the equipment number. The work-order name can differ from the model name.",
   "apWoEquip": "Equipment number",
   "apWoId": "Work order",

@@ -1164,7 +1164,8 @@ window.EKO_C = (function(){
     };
     if (!orders.length) {
       const err = (E.data && E.data.workOrderError) || '';
-      const note = err ? `${t('apWoReadFail')} ${err}` : t(r.equipId ? 'apWoNoRows' : 'apWoUnlinked');
+      const st = (E.data && E.data.workOrderState) || '';
+      const note = err ? `${t('apWoReadFail')} ${err}` : st === 'off' ? t('apWoOff') : st === 'pending' ? t('apWoPending') : t(r.equipId ? 'apWoNoRows' : 'apWoUnlinked');
       return `<p class="alempty">${esc(t('apWoEmpty'))}</p>`
         + (r.equipId ? row(t('apWoEquip'), r.equipId) : '')
         + `<p class="apnote">${esc(note)}</p>`;

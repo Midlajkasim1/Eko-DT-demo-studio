@@ -3424,7 +3424,7 @@
   min-height:0;
   padding:6px 10px;
   transform:translate(-50%,-110%);
-  background:rgba(248,250,252,.88);
+  background:var(--sc1);
   visibility:hidden
 }
 .dashboard-native-container .hmlayer[data-proj] .hmzone3d {

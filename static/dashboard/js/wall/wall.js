@@ -137,6 +137,7 @@ window.EKO_WALL = (function(){
   function applyShift(){ const w = document.querySelector('.wall'); if(w) w.style.transform = ''; }
   function start(app){
     E = app;
+    if(E.resetModel) E.resetModel();
     try{ epoch = +(sessionStorage.getItem('eko-wall-epoch') || 0); }catch(e){ epoch = 0; }
     if(!epoch){ epoch = Date.now(); try{ sessionStorage.setItem('eko-wall-epoch', String(epoch)); }catch(e){} }
     E.state.wallIdx = paneAt(Date.now()).idx; E.state.wallPage = 0;
