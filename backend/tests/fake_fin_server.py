@@ -18,6 +18,16 @@ from fake_fin import FakeFinClient  # noqa: E402
 
 main.FinScramClient = FakeFinClient
 
+# A browser test proves it reached THIS backend (and not a real one on another port) by reading this
+# marker through the app's own /api proxy before it signs in to anything: scripts/fake-backend.mjs.
+# main.py mounts static files at "/", so the route goes in front of that mount.
+_nonce = os.environ.get("EKO_FAKE_NONCE")
+if _nonce:
+    @main.app.get("/api/fin/__fake_backend__")
+    async def _fake_backend_marker():
+        return {"fake": True, "nonce": _nonce}
+    main.app.router.routes.insert(0, main.app.router.routes.pop())
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8000)

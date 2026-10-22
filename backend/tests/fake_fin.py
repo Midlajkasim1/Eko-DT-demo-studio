@@ -25,13 +25,18 @@ ALARM_ROW = {
 
 
 def _equipment():
+    # EKO_FAKE_EQUIPMENT="FCU-ANC09-BF-01,FAHU-ANC09-BF-01": extra named air units, so a browser test can
+    # link assets to a real model through the repo's own asset-to-model mapping (nothing else uses it)
+    extra = [{"name": n.strip(), "bimId": n.strip(), "alarms": [], "tags": ["ahu"], "points": []}
+             for n in os.environ.get("EKO_FAKE_EQUIPMENT", "").split(",") if n.strip()]
+
     def meter(name):
         return {"name": name, "bimId": name, "alarms": [], "tags": ["meter"],
                 "points": [{"navName": "active power", "currentValue": "12.5", "reporting": True}]}
     return {"L1": {"cctv": [], "hvac": [
         {"name": "EQ-1", "bimId": "EQ-1", "alarms": [{"alarm": "High temperature", "priority": 200}],
          "tags": ["ahu"], "points": [{"navName": "supply temp", "currentValue": "14", "reporting": True}]},
-        meter("PMU-1"), meter("MTR-1"),
+        meter("PMU-1"), meter("MTR-1"), *extra,
     ]}}
 
 
