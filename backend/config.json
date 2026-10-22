@@ -105,7 +105,7 @@
     "expr": "secureEval(projs())"
   },
   "point_control": {
-    "_comment": "Points the dashboard may write: per equipment class, setpoint (writable Number points tagged sp or named *SP) and status (writable Bool points named below). A setpoint needs a safe range from its minVal/maxVal tags or setpoint_ranges for its unit, or it is not offered. Writes are FIN priority level write_level, like FIN's Manual Set; 'Return to auto' clears that level.",
+    "_comment": "Points the dashboard may write: per equipment class, setpoint (writable Number points tagged sp or named *SP) and status (writable Bool points named below). A setpoint's range is setpoint_ranges for its unit, narrowed (never widened) by the point's own minVal/maxVal; a unit with no entry needs both tags, or the setpoint is not offered. Writes are FIN priority level write_level, like FIN's Manual Set; 'Return to auto' clears that level.",
     "enabled": true,
     "write_level": 8,
     "equipment": {

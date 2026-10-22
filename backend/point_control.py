@@ -9,7 +9,8 @@ from typing import Any, Optional
 
 # Most specific first: an MAHU or FAHU also carries the letters AHU
 EQUIPMENT_CLASSES = ("mahu", "fahu", "vav", "fcu", "ahu")
-EQUIPMENT_NAME_RE = re.compile(r"(?:^|[^A-Z])(MAHU|FAHU|AHU|FCU|VAV)(?=[^A-Z]|$)")
+# The type leads the name ("FCU-L3-02", "MAHU-ANC09-BF-01"); a meter named PMU03_MAHU_... is not an MAHU
+EQUIPMENT_NAME_RE = re.compile(r"^(MAHU|FAHU|AHU|FCU|VAV)(?=[^A-Z]|$)")
 ZINC_UNIT_RE = re.compile(r"^[A-Za-z%_/$\u0080-\uffff]+$")
 LIFE_SAFETY_RE = re.compile(r"fire|smoke|life|emergency", re.IGNORECASE)
 NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
@@ -74,10 +75,17 @@ def control_for(point: dict, eq_class: Optional[str], policy: dict) -> Optional[
                 "level": level, "manual": manual}
     unit = str(point.get("unit") or "")
     preset = (policy.get("setpoint_ranges") or {}).get(unit) or {}
-    low, high = number_of(point.get("minVal")), number_of(point.get("maxVal"))
-    low = low if low is not None else number_of(preset.get("min"))
-    high = high if high is not None else number_of(preset.get("max"))
-    if low is None or high is None or low >= high:
+    own_low, own_high = number_of(point.get("minVal")), number_of(point.get("maxVal"))
+    site_low, site_high = number_of(preset.get("min")), number_of(preset.get("max"))
+    own = own_low is not None and own_high is not None and own_low < own_high
+    if site_low is not None and site_high is not None:
+        # The site range is the outer limit: a point's own minVal/maxVal narrows it, never widens it
+        low, high = site_low, site_high
+        if own and max(own_low, site_low) < min(own_high, site_high):
+            low, high = max(own_low, site_low), min(own_high, site_high)
+    elif own:
+        low, high = own_low, own_high
+    else:
         return None
     step = number_of(preset.get("step")) or 1.0
     return {"role": "setpoint", "unit": unit, "min": low, "max": high, "step": step, "level": level, "manual": manual}
