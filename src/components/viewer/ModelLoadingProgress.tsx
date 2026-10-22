@@ -49,7 +49,7 @@ export function ModelLoadingProgress() {
     loggedRef.current = true
 
     const totalMs = performance.now() - startedAt
-    console.groupCollapsed(`[ModelLoading] ${models.length} models in ${fmtMs(totalMs)} — timing breakdown`)
+    // console.groupCollapsed(`[ModelLoading] ${models.length} models in ${fmtMs(totalMs)} — timing breakdown`)
     console.table(models.map(e => ({
       model: e.name,
       size: fmtMB(e.sizeBytes || e.bytesRead),
