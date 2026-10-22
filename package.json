@@ -20,7 +20,6 @@
     "test:hvac": "node scripts/test-hvac-schematics.mjs",
     "test:alarms": "node scripts/test-alarm-dedup.mjs",
     "test:reports": "node scripts/test-reports.mjs",
-    "test:backend": "python -m unittest discover -s backend/tests -t backend -v",
     "test:isolation": "node scripts/test-project-isolation.mjs",
     "test:fin-switch": "node scripts/test-fin-project-switch.mjs",
     "build:renders": "node scripts/buildBuiltinRenders.mjs"
