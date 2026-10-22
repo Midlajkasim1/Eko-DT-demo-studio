@@ -23,6 +23,7 @@ window.EKO_SURF = (function(){
     { id:'doc',      kind:'dialog',  isOpen:()=>!!document.getElementById('docov'),             close:()=>{ const o=document.getElementById('docov'); if(o) o.remove(); } },
     { id:'wmax',     kind:'dialog',  isOpen:()=>!!document.getElementById('wmaxov'),            close:()=>{ const o=document.getElementById('wmaxov'); if(o) o.remove(); } },
     { id:'big',      kind:'dialog',  isOpen:()=>!!(CTL()&&CTL().big&&CTL().big(E)),              close:()=>CTL().closeBig(E) },
+    { id:'pointEdit',kind:'dialog',  isOpen:()=>!!E.state.pointEdit,                            close:()=>{ if(!(E.state.pointEdit&&E.state.pointEdit.busy)) E.state.pointEdit=null; } },
     { id:'ctl',      kind:'dialog',  isOpen:()=>!!(CTL()&&CTL().dialog&&CTL().dialog(E)),        close:()=>CTL().closeDialog(E) },
     { id:'prefs',    kind:'dialog',  isOpen:()=>!!(NF()&&NF().st(E).prefs),                     close:()=>{ NF().st(E).prefs=false; } },
     { id:'help',     kind:'dialog',  isOpen:()=>E.state.dlg==='help',                           close:()=>{ E.state.dlg=null; } },

@@ -15,6 +15,7 @@
     "test:logic": "node scripts/test-mapping-logic.mts",
     "test:notif": "node scripts/test-notif-store.mjs",
     "test:mau": "node scripts/test-mau-points.mjs",
+    "test:point-control": "node scripts/test-point-control.mjs",
     "test:eco": "node scripts/test-eco-points.mjs",
     "test:hvac": "node scripts/test-hvac-schematics.mjs",
     "test:alarms": "node scripts/test-alarm-dedup.mjs",

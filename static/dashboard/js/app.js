@@ -397,7 +397,7 @@
     }
     if(E.state.signedOut) return `<div class="signedout" role="dialog" aria-modal="true" aria-label="${esc(E.t('signedOutT'))}"><div class="signedoutcard">${C.brandLogo(E)}<h2>${esc(E.t('signedOutT'))}</h2><p class="tCap">${esc(E.t('signedOutD'))}</p><button class="btnP" data-act="signIn">${esc(E.t('signIn'))}</button></div></div>`;   /* D129 */
     if(window.EKO_AI) out += window.EKO_AI.launcher(E) + window.EKO_AI.panel(E);   /* D132/D133: the launcher, the scrim and the conversation, with or without a dialog */
-    if(!d) return out + (window.EKO_CTL ? window.EKO_CTL.overlays(E) : '') + (window.EKO_NF ? window.EKO_NF.overlays(E) : '') + (window.EKO_PWA ? window.EKO_PWA.overlays(E) : '');
+    if(!d) return out + (window.EKO_POINT_CONTROL ? window.EKO_POINT_CONTROL.overlay(E) : '') + (window.EKO_CTL ? window.EKO_CTL.overlays(E) : '') + (window.EKO_NF ? window.EKO_NF.overlays(E) : '') + (window.EKO_PWA ? window.EKO_PWA.overlays(E) : '');
     if(d === 'display'){
       /* D107: the Display control — workstation or the control-room wall */
       const scope = wallScope();
@@ -624,7 +624,7 @@
             ${h.kind==='tool'?'':h.locked?`<span class="tCap">${esc(E.t('lockedTip'))}</span>`:h.sub?`<span class="tCap">${esc(h.sub)}</span>`:''}</button>`).join('')
           : `<p class="alempty">${esc(E.t('palEmpty'))}</p>`}</div></div>`;
     }
-    return out + (window.EKO_CTL ? window.EKO_CTL.overlays(E) : '') + (window.EKO_NF ? window.EKO_NF.overlays(E) : '') + (window.EKO_PWA ? window.EKO_PWA.overlays(E) : '');
+    return out + (window.EKO_POINT_CONTROL ? window.EKO_POINT_CONTROL.overlay(E) : '') + (window.EKO_CTL ? window.EKO_CTL.overlays(E) : '') + (window.EKO_NF ? window.EKO_NF.overlays(E) : '') + (window.EKO_PWA ? window.EKO_PWA.overlays(E) : '');
   }
 
   /* -------------------------------- render --------------------------------- */
@@ -1313,7 +1313,7 @@
     const el = ev.target.closest('[data-act]');
     if(!el) return;
     if(window.EKO_SURF) window.EKO_SURF.noteClick(el);           /* R5: remember the opener */
-    const fn = ACTS[el.dataset.act] || (window.EKO_AI && window.EKO_AI.ACTS[el.dataset.act]) || (window.EKO_CTL && window.EKO_CTL.ACTS[el.dataset.act]) || (window.EKO_NF && window.EKO_NF.ACTS[el.dataset.act]) || (window.EKO_PWA && window.EKO_PWA.ACTS[el.dataset.act]) || (window.EKO_FB && window.EKO_FB.ACTS[el.dataset.act]) || (window.EKO_DG && window.EKO_DG.ACTS[el.dataset.act]) || (window.EKO_PF && window.EKO_PF.ACTS[el.dataset.act]);
+    const fn = ACTS[el.dataset.act] || (window.EKO_AI && window.EKO_AI.ACTS[el.dataset.act]) || (window.EKO_CTL && window.EKO_CTL.ACTS[el.dataset.act]) || (window.EKO_NF && window.EKO_NF.ACTS[el.dataset.act]) || (window.EKO_PWA && window.EKO_PWA.ACTS[el.dataset.act]) || (window.EKO_FB && window.EKO_FB.ACTS[el.dataset.act]) || (window.EKO_DG && window.EKO_DG.ACTS[el.dataset.act]) || (window.EKO_PF && window.EKO_PF.ACTS[el.dataset.act]) || (window.EKO_POINT_CONTROL && window.EKO_POINT_CONTROL.ACTS[el.dataset.act]);
     if(fn) fn(el, ev);
   });
 

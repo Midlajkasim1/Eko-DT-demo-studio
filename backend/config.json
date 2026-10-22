@@ -104,6 +104,25 @@
     "endpoint": "/api/sys/eval",
     "expr": "secureEval(projs())"
   },
+  "point_control": {
+    "_comment": "Points the dashboard may write: per equipment class, setpoint (writable Number points tagged sp or named *SP) and status (writable Bool points named below). A setpoint needs a safe range from its minVal/maxVal tags or setpoint_ranges for its unit, or it is not offered. Writes are FIN priority level write_level, like FIN's Manual Set; 'Return to auto' clears that level.",
+    "enabled": true,
+    "write_level": 8,
+    "equipment": {
+      "fcu": ["setpoint", "status"],
+      "vav": ["setpoint", "status"],
+      "ahu": ["setpoint"],
+      "mahu": ["setpoint"],
+      "fahu": ["setpoint"]
+    },
+    "status_points": ["Start_Stop", "Start/Stop", "StartStop", "Run_Cmd", "On_Off"],
+    "setpoint_ranges": {
+      "°C": { "min": 16, "max": 30, "step": 0.5 },
+      "%": { "min": 0, "max": 100, "step": 1 },
+      "%RH": { "min": 30, "max": 70, "step": 1 },
+      "ppm": { "min": 400, "max": 1500, "step": 50 }
+    }
+  },
   "workorder_expr": "sqlQuery(read(sqlConn), \"SELECT * FROM workOrderMarsa\")",
   "power_endpoints": {
     "Hourly_Energy_Consumption_his": "/api/{project}/eval?expr=hisRead(@p:{project}:r:3181ee6e-67dac181,2026-05-21..today()%2C%7B-limit%7D)",
