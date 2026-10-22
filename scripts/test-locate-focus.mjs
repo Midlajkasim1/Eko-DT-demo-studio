@@ -90,7 +90,7 @@ const layout = p => p.evaluate(() => {
     pageId: st.pageId, focus: !!st.locFocus, kept: st.locFocus && st.locFocus.assetSel, assetSel: st.assetSel, paint: st.paint, modelFs: !!st.modelFs,
     register: !!q('.dgwrap[data-grid="assets"]'), strip: !!q('.regmodelwrap'),
     viewer: v, mount: box('#mount'), root: box('.dashboard-native-container'), panel: box('#assetpanel'), rail: box('#ekonav'), summary: box('#ovp'), back: box('.vpback'), topbar: box('#topbar'),
-    overflowX: root.scrollWidth > root.clientWidth + 1, stripBox: box('.regmodelwrap'), side: box('aside.sidebar'), panelAsset: (q('#assetpanel .aphead') || {}).textContent || '',
+    overviewText: (q('#ovp') || {}).innerText || '', overflowX: root.scrollWidth > root.clientWidth + 1, stripBox: box('.regmodelwrap'), side: box('aside.sidebar'), panelAsset: (q('#assetpanel .aphead') || {}).textContent || '',
     navMode: root.getAttribute('data-nav'),
     canvasCovers: !c || !v || (c.left <= v.x + 1 && c.top <= v.y + 1 && c.right >= v.x + v.w - 1 && c.bottom >= v.y + v.h - 1),
     saved: [localStorage.getItem('eko-nav'), localStorage.getItem('eko-ovp')],
@@ -173,7 +173,10 @@ async function assertFocus(p, id, { stacked, saved = [null, null], opened }) {
   if (!stacked) {
     assert.ok(f.strip && f.stripBox, 'the desktop model strip remains: ' + ctx)
     assert.ok(f.panel && f.rail && f.topbar, 'Studio chrome and the asset panel remain visible: ' + ctx)
-    assert.strictEqual(f.summary, null, 'the Asset Register has no Overview summary: ' + ctx)
+    // the Assets Overview stays on the left, over the model strip: its three figures and its fold control, inside the strip
+    assert.ok(f.summary && f.summary.x >= f.stripBox.x - 1 && f.summary.x + f.summary.w <= f.stripBox.x + f.stripBox.w + 1, 'the Assets Overview is inside the model strip: ' + ctx)
+    for (const label of ['ASSETS OVERVIEW', 'ASSETS REGISTERED', 'OPEN WORK ORDERS', 'ASSETS IN ALARM']) assert.ok(f.overviewText.toUpperCase().includes(label), `the Assets Overview shows ${label}: ` + ctx)
+    await assertReachable(p, '#ovp [data-act="ovpMin"]', "the Assets Overview's fold control")
     assert.ok(f.panelAsset.includes(id), 'the panel still shows the selected asset: ' + ctx)
     // nothing but the table moved: the Studio sidebar, the top bar and the rail are exactly as before
     for (const k of ['side', 'topbar', 'rail']) assert.deepStrictEqual(f[k], opened[k], `${k} is unchanged: ` + ctx)
@@ -192,6 +195,7 @@ async function assertFocus(p, id, { stacked, saved = [null, null], opened }) {
 async function assertRegister(p, id, railMode) {
   const b = await layout(p)
   assert.ok(b.register && !b.back && !b.focus, 'Back to Assets shows the register again: ' + JSON.stringify(b))
+  assert.strictEqual(b.summary, null, 'the Assets Overview was only for Locate in 3D, not the register itself: ' + JSON.stringify(b))
   assert.strictEqual(b.navMode, railMode, 'the rail is as it was')
   assert.ok(b.rail === null || b.rail.w > 0)
   assert.deepStrictEqual([b.assetSel, b.paint], [id, id], "the asset's panel is open again and it is still highlighted")
@@ -211,6 +215,7 @@ async function workflow(p, { stacked }) {
       assert.ok(opened.panelAsset.includes(id), 'the asset panel shows the selected asset: ' + JSON.stringify(opened))
       // the register itself (before Locate): the panel sits inside the dashboard, which does not scroll sideways,
       // and its close button is not under a Studio tab
+      assert.strictEqual(opened.summary, null, 'the register itself shows no Assets Overview: ' + JSON.stringify(opened))
       assert.strictEqual(opened.overflowX, false, 'the register does not overflow the dashboard sideways: ' + JSON.stringify(opened))
       assert.ok(opened.panel.x >= opened.root.x && opened.panel.x + opened.panel.w <= opened.root.x + opened.root.w, 'the asset panel is inside the dashboard: ' + JSON.stringify(opened))
       await assertReachable(p, '#assetpanel [data-act="closeAsset"]', "the panel's close button (register)")
@@ -297,6 +302,27 @@ try {
     assert.ok(f.panel && f.panel.x + f.panel.w <= f.root.x + f.root.w + 1, 'the right-hand energy panel is inside the dashboard: ' + ctxs)
     await assertReachable(p, '#topbar [data-act="nfTgl"]', 'the notification bell (top right)')
     await assertReachable(p, '#modpanel', 'the energy panel')
+    assert.deepStrictEqual(errors, [])
+    await ctx.close()
+  })
+
+  // "its existing controls": the Assets Overview folds and unfolds by a real click, with Back and the right panel unaffected.
+  // The fold is the user's own, saved preference (eko-ovp), so the test puts it back.
+  await test('host: the Assets Overview folds and unfolds during Locate in 3D; Back to Assets and the asset panel stay', async () => {
+    const { p, ctx, errors } = await openHost(1400)
+    await register(p)
+    const id = await pickRow(p, 0)
+    await locate(p, id)
+    await p.locator('#ovp [data-act="ovpMin"]').click()
+    await p.waitForFunction(() => document.getElementById('ovp')?.getAttribute('data-min') === '1')
+    await settle(p)
+    await assertReachable(p, '.vpback', 'Back to Assets (summary folded)')
+    await assertReachable(p, '#assetpanel [data-act="closeAsset"]', "the panel's close button (summary folded)")
+    assert.ok((await layout(p)).panelAsset.includes(id), 'the asset panel is still for the selected asset')
+    await p.locator('#ovp [data-act="ovpMin"]').click()
+    await p.waitForFunction(() => document.getElementById('ovp')?.getAttribute('data-min') === '0')
+    await p.locator('.vpback').click()
+    await p.locator(rows).first().waitFor()
     assert.deepStrictEqual(errors, [])
     await ctx.close()
   })

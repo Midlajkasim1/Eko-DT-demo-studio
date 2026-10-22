@@ -570,7 +570,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const vp = document.getElementById('vpmain')
       if (!el || !vp || !vp.getClientRects().length) return null
       const c = el.getBoundingClientRect(), v = vp.getBoundingClientRect()
-      const x = Math.max(c.left, v.left), y = Math.max(c.top, v.top)
+      let x = Math.max(c.left, v.left)
+      const y = Math.max(c.top, v.top)
+      // Locate in 3D on the register keeps the Assets Overview (#ovp) over the model's left: what it covers is not visible
+      const ovp = (window as any).EKO?.state?.locFocus ? document.getElementById('ovp') : null
+      if (ovp && ovp.getClientRects().length && ovp.getAttribute('data-min') !== '1') x = Math.max(x, ovp.getBoundingClientRect().right)
       const w = Math.min(c.right, v.right) - x, h = Math.min(c.bottom, v.bottom) - y
       if (w < 80 || h < 80 || c.width < 2 || c.height < 2) return null
       const smaller = w < c.width - 2 || h < c.height - 2

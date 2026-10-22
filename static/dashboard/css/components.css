@@ -873,6 +873,22 @@
   min-height:34px
 }
 
+/* The Assets Overview shown over the register's model strip (Locate in 3D) sizes to the strip: 70% of it, between its
+   own 220px floor and its normal width, instead of a fixed width that overflows a 270-400px strip */
+.dashboard-native-container .regmodelwrap #ovp {
+  min-width:0;
+  width:clamp(220px, 70%, var(--ovw,352px))
+}
+
+/* In the register's model strip the Assets Overview (#ovp) owns the top-left and its collapse chevron the top, in a
+   strip as narrow as 400px: Back to Assets goes bottom-right, above the Studio toolbar */
+.dashboard-native-container .regmodelwrap .vpback {
+  top:auto;
+  bottom:76px;
+  inset-inline-start:auto;
+  inset-inline-end:12px
+}
+
 .dashboard-native-container #enginehost {
   position:absolute;
   inset:0;

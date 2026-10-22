@@ -89,9 +89,10 @@ window.EKO_P = (function(){
   function registerPage(E, doc){
     const model = byType(doc,'viewerStrip');
     const table = byType(doc,'registerTable');
+    /* Locate in 3D (locFocus) also shows the Assets Overview over the model's left, as on the Assets landing */
     const mn = !!E.state.regMin && !E.state.locFocus;   /* D128: the strip collapses like the side panels (chevron, Home/Enter on the splitter); Locate in 3D opens it */
     return (model ? `<div class="regmodelwrap deskwide" data-min="${mn ? 1 : 0}">${
-        V().viewer(E, (model&&model.config)||{ markers:true, dock:'none', pills:false }, '')}
+        V().viewer(E, (model&&model.config)||{ markers:true, dock:'none', pills:false }, E.state.locFocus ? widget(E, { type:'assetsSummary' }) : '')}
         <button class="ovcollapse regcollapse tipU" data-act="regMin" data-tip="${C().esc(E.t(mn ? 'mpExpand' : 'mpCollapse'))}" aria-label="${C().esc(E.t(mn ? 'mpExpand' : 'mpCollapse'))}" aria-expanded="${!mn}">${C().icon(mn ? 'chevR' : 'chevL', 12)}</button>
         <span class="tCap regmodelhint">${C().esc(E.t('regModelHint'))}</span></div>` : '')
       + (table ? widget(E,table) : '')
