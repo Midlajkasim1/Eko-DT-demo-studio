@@ -880,10 +880,44 @@
   width:clamp(220px, 70%, var(--ovw,352px))
 }
 
-/* Its cards run to the panel's own right edge, where the fold chevron is: the 76px the full-width panel keeps free on
-   that side (for the glass fade) only left a gap between the cards and the chevron in a strip this narrow */
+/* Compact cards: the three figures (Assets Registered, Open Work Orders, Assets in Alarm) take about a quarter less height
+   in the register's strip. Only the strip: the same classes on every other page keep their size. The line heights are
+   set because 'normal' made the 28px figure a 34px row on its own; no heights are fixed, so nothing can clip. */
+.dashboard-native-container .regmodelwrap #ovp .ovhead {
+  padding-block:8px 2px
+}
+
 .dashboard-native-container .regmodelwrap #ovp .ovpad {
-  padding-inline-end:16px
+  padding-block-start:4px
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovklist {
+  gap:6px
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovk {
+  padding:7px 12px
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovklbl {
+  font-size:calc(var(--txCapSz) - 1px);
+  line-height:1.25;
+  letter-spacing:.6px
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovkval {
+  margin-block-start:0
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovknum {
+  font-size:var(--txKpiSz);
+  line-height:1.15
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovkcap {
+  font-size:calc(var(--txCapSz) - 1px);
+  line-height:1.3;
+  margin-block-start:1px
 }
 
 /* The model strip is narrower than the full toolbar (about 465px): its buttons are a little smaller, and the bar wraps
@@ -2034,6 +2068,18 @@
   border-radius:6px;
   border:3px solid transparent;
   background-clip:content-box
+}
+
+/* Desktop summary panel (#ovp: the Executive, Energy, Assets ... summaries): the cards run to the edge the fold chevron sits
+   on, and the panel is 52px narrower. The 76px kept free on that side (for the glass fade) and the 352px width left a gap of
+   about 70px between the cards and the chevron. Narrower layouts (up to 1023px) keep their own rules. */
+@media (min-width:1024px) {
+  .dashboard-native-container #ovp {
+    --ovw:var(--spOvp,300px)
+  }
+  .dashboard-native-container #ovp .ovpad {
+    padding-inline-end:16px
+  }
 }
 
 .dashboard-native-container .ovklist {
