@@ -542,9 +542,12 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
   position: absolute;
   inset: 0;
   overflow: hidden;
-  /* clip, not hidden: the side panels' hidden bodies stick out past this box (--right-tab-w is all that shows),
-     and a hidden box can still be scrolled by a focus or scrollIntoView, shifting the whole canvas and dashboard
-     sideways. A clipped box cannot scroll at all. */
+}
+
+/* The Studio only (it alone has .right-panels-container): clip, not hidden. Its side panels' hidden bodies stick out
+   past this box (--right-tab-w is all that shows), and a hidden box can still be scrolled by a focus or scrollIntoView,
+   shifting the whole canvas and dashboard sideways. A clipped box cannot scroll at all. The exported viewer keeps hidden. */
+.viewer-canvas-wrapper:has(> .right-panels-container) {
   overflow: clip;
 }
 
@@ -561,6 +564,15 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
 :root { --right-tab-w: 36px; }
 .viewer-canvas-wrapper:has(> .right-panels-container) > .dashboard-overlay-container {
   right: var(--right-tab-w);
+}
+
+/* Studio only, stacked (window <= 1023px): the Studio's toolbar sits at the bottom centre, over the dashboard's bottom
+   module tabs, so their middle buttons could not be clicked. The dashboard ends above the toolbar instead (its sheet and
+   full-screen model are position:fixed and unaffected). No toolbar (the exported viewer, or hidden), no reserve. */
+@media (max-width: 1023px) {
+  .viewer-canvas-wrapper:has(> .viewer-toolbar) > .dashboard-overlay-container {
+    bottom: 76px;
+  }
 }
 
 /* A stacked asset sheet (window <= 1023px) spans the whole window and keeps its Locate / Work order buttons at

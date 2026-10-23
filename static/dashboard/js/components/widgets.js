@@ -221,9 +221,9 @@ window.EKO_C = (function(){
   /* --------------------- summary panel (#ovp overlay) ----------------------
      Reference anatomy: absolute overlay on the viewer; ovglass blur mask,
      ovtint gradient, ovvs shade, title row, KPI rows. */
-  function summaryShell(E, title, inner){
+  function summaryShell(E, title, inner, fit){   /* fit: the Energy summary, as tall as its cards (components.css, #ovp[data-fit]) */
     const mn = E.state.ovpMin;
-    return `<div id="ovp" data-min="${mn?1:0}">
+    return `<div id="ovp" data-min="${mn?1:0}"${fit ? ' data-fit="1"' : ''}>
       <div class="ovglass" aria-hidden="true"></div>
       <div class="ovtint" aria-hidden="true"></div>
       <div class="ovvs" aria-hidden="true"></div>
@@ -321,7 +321,7 @@ window.EKO_C = (function(){
             ${chip ? `<div class="scrow"><span class="ovkcap msA" data-tone="warn">${esc(chip)}</span></div>`
                    : `<div class="scrow"><span class="ovkcap msA" data-tone="t3">${esc(cap)}</span></div>`}</div>`;
         })()
-      + '</div>');
+      + '</div>', true);
   }
 
   /* Utilities landing summary (D40, Final mock): domain-hue 5% washed rows
@@ -1390,6 +1390,7 @@ window.EKO_C = (function(){
     const tabBtn = (k, lbl, n, sev) => `<button class="aptab" data-on="${tab===k}" data-act="apTab" data-v="${k}">${esc(lbl)}${n?`<span class="cbadge" data-sev="${sev || (worst?worst.sev:'medium')}">${n}</span>`:''}</button>`;
     return `<aside id="assetpanel" data-born="${E.state.born==='asset'?1:0}" data-wide="${E.state.apWide?1:0}" role="dialog" aria-label="${esc(id)}">
       <div class="draghandle"></div>
+      ${E.state.locFocus && !E.stacked() ? `<div class="apback"><button class="btnG btnSm" data-act="locBack">${icon('chevL',14)} ${esc(t('backToAssets'))}</button></div>` : ''}
       <div class="aphead">
         <span class="tMono grow fw6">${esc(id)}</span>
         ${sevChips ? `<span class="regsevs">${sevChips}</span>` : ''}

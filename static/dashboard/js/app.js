@@ -674,6 +674,9 @@
   }
   function render(){
     if(!$('topbar') || !$('ekonav') || !$('mount') || !$('mobtabs') || !$('overlays')) return;
+    /* Locate in 3D on the register's strip lasts while the located asset's panel is open: its Back to Assets is in that
+       panel. Closing the panel, or Reset clearing the selection, brings the table back instead of leaving the view stuck. */
+    if(E.state.locFocus && !E.state.assetSel && !E.state.locFocus.back && !E.stacked()) E.state.locFocus = null;
     if(window.EKO_ADDONS) window.EKO_ADDONS.apply(E);   /* D125: entitlements stamp locked/hidden before anything reads the nav */
     if(E.state.wall && window.EKO_WALL){   /* D106: a display context — no rail, no ask bar, no overlays, no pointer */
       (document.querySelector('.dashboard-native-container') || window.DASHBOARD_ROOT || document.documentElement).setAttribute('data-wall', '1');

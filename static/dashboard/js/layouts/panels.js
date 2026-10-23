@@ -25,7 +25,7 @@ window.EKO_LAYOUTS.panels = {
     { "id": "regviewer", "labelKey": "spViewer", "varName": "--spReg", "enabled": true,
       "target": ".regmodelwrap", "side": "start",
       "min": 360, "max": 900, "def": 430, "compactBelow": 0,   "collapse": "regMin", "lsKey": "eko-reg",
-      "centerMin": 480 }
+      "centerMin": 480, "hideWhen": "locFocus" }
   ],
   "centerMin": 360
 };
