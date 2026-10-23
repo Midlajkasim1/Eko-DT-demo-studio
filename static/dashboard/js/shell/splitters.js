@@ -170,9 +170,12 @@ window.EKO_SPLIT = (function(){
   function position(s){
     const h = handles[s.id];
     const el = target(s);
-    if(!el || window.innerWidth < 768){ if(h) h.style.display = 'none'; return; }
+    if(!el || window.innerWidth < 768 || (s.hideWhen && E.state[s.hideWhen])){ if(h) h.style.display = 'none'; return; }
     const r = el.getBoundingClientRect();
     if(r.height < 40 || r.width < 1){ h.style.display = 'none'; return; }
+    /* a width the CSS pins (the Studio's laptop band caps the asset panel at its minimum) has nothing to drag: no dead handle */
+    const cap = parseFloat(getComputedStyle(el).maxWidth);
+    if(!collapsed(s) && cap <= s.min){ h.style.display = 'none'; return; }
     /* the REAL rendered edge (so the handle glides with the width
        transition); the summary overlay shrink-wraps, so it alone uses its
        declared width from its start edge */

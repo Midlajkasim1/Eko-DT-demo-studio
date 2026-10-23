@@ -880,13 +880,38 @@
   width:clamp(220px, 70%, var(--ovw,352px))
 }
 
-/* In the register's model strip the Assets Overview (#ovp) owns the top-left and its collapse chevron the top, in a
-   strip as narrow as 400px: Back to Assets goes bottom-right, above the Studio toolbar */
-.dashboard-native-container .regmodelwrap .vpback {
-  top:auto;
-  bottom:76px;
-  inset-inline-start:auto;
-  inset-inline-end:12px
+/* Its cards run to the panel's own right edge, where the fold chevron is: the 76px the full-width panel keeps free on
+   that side (for the glass fade) only left a gap between the cards and the chevron in a strip this narrow */
+.dashboard-native-container .regmodelwrap #ovp .ovpad {
+  padding-inline-end:16px
+}
+
+/* The model strip is narrower than the full toolbar (about 465px): its buttons are a little smaller, and the bar wraps
+   to a second row when the strip is narrower still, instead of running past the strip's edges. It sits above the
+   strip's hint line */
+.dashboard-native-container .regmodelwrap #vbottom {
+  --vtBtn:34px;
+  bottom:40px;
+  inset-inline:8px;
+  transform:none
+}
+
+.dashboard-native-container .regmodelwrap #vbar {
+  flex-wrap:wrap;
+  justify-content:center;
+  height:auto;
+  min-height:var(--vtBar);
+  max-width:100%
+}
+
+.dashboard-native-container .regmodelwrap #vbar .vdiv {
+  display:none
+}
+
+/* Locate in 3D: Back to Assets is the first row of the asset panel, above its title and actions, which stay below it */
+.dashboard-native-container #assetpanel .apback {
+  flex:none;
+  padding:12px 14px 0
 }
 
 .dashboard-native-container #enginehost {
@@ -2959,7 +2984,7 @@
 
 .dashboard-native-container .regmodelwrap {
   position:relative;
-  flex:0 1 var(--spReg,30%);   /* a fixed column that yields (to its min-width) rather than push the asset panel past the edge */
+  flex:0 0 var(--spReg,30%);
   min-width:220px;
   display:flex;
   flex-direction:column;
@@ -3017,22 +3042,62 @@
   }
 }
 
-/* A docked asset panel must never extend past the Studio surface on laptop
-   widths. The rail becomes icon-only before the three-column register runs
-   out of room; the table remains the flexible (and scrollable) column. */
+/* STUDIO ONLY (.app-body:has(> .sidebar): the exported viewer has no sidebar, so it keeps the layout it always had).
+   The Studio's 340px sidebar sits beside the dashboard, which sizes itself to the whole window: a docked asset panel
+   must never extend past the Studio surface on laptop widths. The model strip yields first; below 1200px the rail
+   becomes icon-only before the three-column register runs out of room, and the table remains the flexible (and
+   scrollable) column. */
+.app-body:has(> .sidebar) .dashboard-native-container .regmodelwrap { flex-shrink:1 }
 @media (max-width:1200px) and (min-width:1024px) {
-  .dashboard-native-container { --navw:56px }
-  .dashboard-native-container #ekonav .nlbl,
-  .dashboard-native-container #ekonav .nchevb,
-  .dashboard-native-container #ekonav .nsubs { display:none }
-  .dashboard-native-container #assetpanel {
+  .app-body:has(> .sidebar) .dashboard-native-container { --navw:56px }
+  .app-body:has(> .sidebar) .dashboard-native-container #ekonav .nlbl,
+  .app-body:has(> .sidebar) .dashboard-native-container #ekonav .nchevb,
+  .app-body:has(> .sidebar) .dashboard-native-container #ekonav .nsubs { display:none }
+  .app-body:has(> .sidebar) .dashboard-native-container #assetpanel {
     width:min(var(--spPan,320px), 320px);
     max-width:320px
   }
   /* Five tabs (Alarms .. Work orders) need ~336px at their normal padding: inside 320px the last one ended
      past the window edge. Tighter padding keeps all of them on the panel, so each can be reached. */
-  .dashboard-native-container #assetpanel .aptab { padding-inline:5px }
-  .dashboard-native-container .regmodelwrap { min-width:220px }
+  .app-body:has(> .sidebar) .dashboard-native-container #assetpanel .aptab { padding-inline:5px }
+}
+
+/* STUDIO ONLY, up to 1050px. Beside the 340px sidebar and the 36px of Render/Transform tabs the dashboard is under
+   ~680px wide, phone-sized, but its phone rules key on the WINDOW (max-width:767px), so at tablet window widths the top bar
+   overflowed: the breadcrumb drew over the alarm ribbon and the connection pill, and at 861-768px the account menu ended
+   outside the dashboard where no click reaches it. The top bar gets the phone rules from 1050px down (the same
+   declarations as the max-width:767px blocks): the breadcrumb truncates, the connection pill is a dot, and language and
+   theme stay one tap away in the account menu. */
+@media (min-width:768px) and (max-width:1050px) {
+  .app-body:has(> .sidebar) .dashboard-native-container .brandslot { width:56px }
+  .app-body:has(> .sidebar) .dashboard-native-container #alarmribbon,
+  .app-body:has(> .sidebar) .dashboard-native-container #estateribbon { flex:none }
+  .app-body:has(> .sidebar) .dashboard-native-container #crumb { min-width:60px }
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar #crumb { flex:1 1 auto; min-width:0; overflow:hidden }
+  .app-body:has(> .sidebar) .dashboard-native-container #crumb .flexnone,
+  .app-body:has(> .sidebar) .dashboard-native-container #crumb .crumbbtn.cT2,
+  .app-body:has(> .sidebar) .dashboard-native-container #crumb span.cT2 { display:none }
+  .app-body:has(> .sidebar) .dashboard-native-container #crumb .crumbbtn {
+    display:block;
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap
+  }
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar .tbstatus { flex:none; overflow:visible }
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar .langgrp,
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar .tbdisp,
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar .langbtn,
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar .themebtn { display:none }
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar .connpill {
+    display:inline-flex;
+    width:28px;
+    height:28px;
+    padding:0;
+    justify-content:center;
+    border-radius:50%
+  }
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar .connpill .conntext { display:none }
 }
 
 @media (max-width:1024px) {
@@ -8426,25 +8491,30 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   padding-block-end:calc(var(--ovFade) - 36px)
 }
 
-/* The Energy timeline reserves its own physical space instead of faking it
-   with excess padding in the summary scroller. This leaves a consistent 16px
-   card-to-panel gap when the cards fit; on a short viewport .ovpad remains the
-   only scrolling region. Chromium, Firefox and Safari all support the base
-   rule; :has only refines the two taller timeline captions. */
-.dashboard-native-container #vpmain[data-tl="1"] > #ovp:not([data-min="1"]) {
-  bottom:84px
-}
-
-.dashboard-native-container #vpmain[data-tl="1"] > #ovp:not([data-min="1"]) .ovpad {
-  padding-block-end:16px
-}
-
-.dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="1"]) > #ovp:not([data-min="1"]) {
-  bottom:104px
-}
-
-.dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="2"]) > #ovp:not([data-min="1"]) {
-  bottom:116px
+/* ENERGY SUMMARY ONLY (#ovp[data-fit], set by widgets.js energySummary). Its panel is as tall as its cards with 16px under
+   the last, instead of the viewer's full height, and never reaches the timeline and the toolbar at the foot of the
+   viewer: max-height reserves that space (--ovFoot: one value per timeline caption height, more on a short window) and the
+   cards scroll inside the panel when they do not fit. Percentages and plain flex only, no intrinsic-size keywords, so
+   every browser lays it out the same. The two taller caption variants use :has() (Chrome 105, Safari 15.4, Firefox 121):
+   where it is missing the base reserve applies and a taller caption can sit up to 32px under the panel's foot. Every
+   other summary keeps its full-height panel exactly as before. Desktop only: the stacked shell lays the summary out in
+   the page. */
+@media (min-width:1024px) {
+  .dashboard-native-container #ovp[data-fit="1"]:not([data-min="1"]) {
+    --ovFoot:0px;
+    --ovFade:16px;
+    bottom:auto !important;   /* the full-height boxes (timeline, short window) set bottom; max-height does that job here */
+    max-height:calc(100% - var(--ovFoot))
+  }
+  .dashboard-native-container #ovp[data-fit="1"]:not([data-min="1"]) .ovpad {
+    padding-block-end:16px !important   /* the timeline variants reserve room for a taller fade */
+  }
+  .dashboard-native-container #vpmain[data-tl="1"] > #ovp[data-fit="1"]:not([data-min="1"]) { --ovFoot:84px }
+  .dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="1"]) > #ovp[data-fit="1"]:not([data-min="1"]) { --ovFoot:104px }
+  .dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="2"]) > #ovp[data-fit="1"]:not([data-min="1"]) { --ovFoot:116px }
+  .dashboard-native-container[data-short="1"] #vpmain[data-tl="1"] > #ovp[data-fit="1"]:not([data-min="1"]) { --ovFoot:calc(var(--vtBar) + 56px + 44px) }
+  .dashboard-native-container[data-short="1"] #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="1"]) > #ovp[data-fit="1"]:not([data-min="1"]) { --ovFoot:calc(var(--vtBar) + 76px + 44px) }
+  .dashboard-native-container[data-short="1"] #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="2"]) > #ovp[data-fit="1"]:not([data-min="1"]) { --ovFoot:calc(var(--vtBar) + 88px + 44px) }
 }
 
 .dashboard-native-container .minimap {
@@ -11184,13 +11254,10 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
     bottom:calc(var(--vtBar) + 32px)
   }
   .dashboard-native-container[data-short="1"] #vpmain[data-tl="1"] > #ovp:not([data-min="1"]) {
-    bottom:84px
+    bottom:calc(var(--vtBar) + 56px + 44px)
   }
   .dashboard-native-container[data-short="1"] #vpmain > #ovp:not([data-min="1"]) .ovpad {
     padding-block-end:12px
-  }
-  .dashboard-native-container[data-short="1"] #vpmain[data-tl="1"] > #ovp:not([data-min="1"]) .ovpad {
-    padding-block-end:16px
   }
 }
 
