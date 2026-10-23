@@ -542,6 +542,10 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
   position: absolute;
   inset: 0;
   overflow: hidden;
+  /* clip, not hidden: the side panels' hidden bodies stick out past this box (--right-tab-w is all that shows),
+     and a hidden box can still be scrolled by a focus or scrollIntoView, shifting the whole canvas and dashboard
+     sideways. A clipped box cannot scroll at all. */
+  overflow: clip;
 }
 
 .dashboard-overlay-container {
@@ -549,6 +553,22 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
   inset: 0;
   z-index: 15; /* Above canvas, below toolbar */
   pointer-events: none; /* Let clicks pass through where there's no UI */
+}
+
+/* The Studio's Render / Transform tabs are a strip (--right-tab-w) over the right edge, above the dashboard.
+   The dashboard stops where the strip starts, so the tabs sit beside the asset panel instead of on its close
+   button and its last tab. Only while those tabs exist (the exported viewer has none). */
+:root { --right-tab-w: 36px; }
+.viewer-canvas-wrapper:has(> .right-panels-container) > .dashboard-overlay-container {
+  right: var(--right-tab-w);
+}
+
+/* A stacked asset sheet (window <= 1023px) spans the whole window and keeps its Locate / Work order buttons at
+   the bottom. The Studio's toolbar and side tabs are drawn over it, so while it is open they step aside. */
+@media (max-width: 1023px) {
+  .viewer-canvas-wrapper:has(.dashboard-native-container #assetpanel) :is(.viewer-toolbar, .right-panels-container) {
+    display: none;
+  }
 }
 
 .dashboard-overlay-iframe {
@@ -1252,7 +1272,7 @@ Wait, if iframe has pointer-events: auto, it works. Let's fix this in iframe bod
 
 .position-panel {
   position: relative;
-  transform: translateX(calc(100% - 36px));
+  transform: translateX(calc(100% - var(--right-tab-w)));
   transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   align-items: stretch;

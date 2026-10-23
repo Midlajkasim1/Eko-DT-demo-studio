@@ -1068,18 +1068,28 @@
     woOpen(el){ E.set({ assetSel: el.dataset.asset, apTab: 'alarms' }); },
     locate(el){ const id = el.dataset.asset;
       const a = E.data.alarms.find(x => x.asset === id);
-      /* Locate in 3D = focus mode (locFocus): the Overview's viewer alone, no rail, register, summary or
-         asset panel (go() closes it, R4). The asset is kept for Back to Assets; its highlight stays.
-         Nothing here is saved: the rail and summary preferences are untouched. */
-      if(E.state.pageId !== 'marsa-overview') E.go('marsa-overview', 'overview', null);
-      E.set({ locFocus: { assetSel: id }, assetSel: null, mkPop: null, modelFs: E.stacked(),
-              mkPulse: a ? a.id : null, paint: id });   /* located equipment is coloured like a marker tap */
+      /* Three cases, none saved. The desktop Asset Register has its own model strip: Locate in 3D is a view
+         state there (locFocus) that hides only the central grid, so the Studio chrome and the asset panel stay.
+         A stacked layout (no strip) opens the Overview's full-screen model, and Back returns to this page.
+         Any other page just moves the camera, as it always did. */
+      const strip = document.querySelector('.regmodelwrap');
+      const onStrip = !!strip && strip.getClientRects().length > 0;
+      const from = { pageId: E.state.pageId, module: E.state.module, sub: E.state.sub };
+      if(!onStrip && E.stacked()){
+        if(E.state.pageId !== 'marsa-overview') E.go('marsa-overview', 'overview', null);   /* go() ends any focus and resets the model */
+        E.state.locFocus = { assetSel: id, back: from.pageId === 'marsa-overview' ? null : from };
+        E.state.assetSel = id; E.state.modelFs = true; E.state.mkPop = null;
+      } else if(onStrip){
+        E.state.locFocus = { assetSel: id, back: null }; E.state.assetSel = id; E.state.mkPop = null;
+      }
+      E.state.mkPulse = a ? a.id : null; E.state.paint = id; render();   /* located equipment is coloured like a marker tap */
       E.engine.flyTo(id);
       setTimeout(() => { E.state.mkPulse = null; render(); }, 2200); },
-    /* Back to Assets (also Escape): the register as it was, the asset's panel open again. go() resets
-       the model for the new page (camera home, no highlight); the asset just located stays coloured */
-    locBack(){ const sel = E.state.locFocus && E.state.locFocus.assetSel;
-      E.go('assets-register', 'assets', 'reg'); if(sel) E.set({ assetSel: sel, paint: sel }); },
+    /* Back to Assets (also Escape): leaves the focus. On the strip that is only the flag (the panel and the
+       highlight stay); a stacked layout goes back to the page it came from, and go() resets the model for it. */
+    locBack(){ const lf = E.state.locFocus; if(!lf) return;
+      if(lf.back){ E.go(lf.back.pageId, lf.back.module, lf.back.sub); E.set({ assetSel: lf.assetSel, paint: lf.assetSel }); }
+      else E.set({ locFocus: null, modelFs: false, assetSel: lf.assetSel || E.state.assetSel, paint: lf.assetSel || E.state.paint }); },
 
     /* One handler for the bar, the sheet, the radial, and the shortcut keys.
        Select and Measure share the click. Slice stays on until it is clicked off or Reset. */

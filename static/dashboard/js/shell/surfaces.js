@@ -128,6 +128,9 @@ window.EKO_SURF = (function(){
   }
   function escape(){
     const top = topmost();
+    /* Locate in 3D keeps the asset panel open, so the panel is the topmost surface: Escape leaves the focus
+       first (the table comes back, the panel stays). Any surface opened since still closes before that. */
+    if(top === 'asset' && E.state.locFocus && E.locExit){ E.locExit(); return 'locate'; }
     if(top){
       if(top === 'pal' && E.state.palQ){ E.state.palQ = ''; E.state.palSel = 0; E.set({}); return 'cleared'; }
       byId[top].close(); E.set({}); return top;

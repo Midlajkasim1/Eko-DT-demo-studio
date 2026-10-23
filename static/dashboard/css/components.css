@@ -846,14 +846,23 @@
   touch-action:none
 }
 
-/* Locate-in-3D focus (data-locfocus): no rail, its width given back to the viewer (--navw also
-   places #histframe). The register, summary and asset panel are simply not rendered. */
-.dashboard-native-container[data-locfocus="1"] {
-  --navw:0px
-}
-
-.dashboard-native-container[data-locfocus="1"] #ekonav {
-  display:none
+/* Locate-in-3D is deliberately narrow in scope: on the desktop Asset
+   Register, keep Studio chrome and the selected asset panel in place and give
+   only the central grid back to the model strip. The strip is not rendered below
+   1024px (the same breakpoint as E.stacked()), where the full-screen model owns this state. */
+@media (min-width:1024px) {
+  .dashboard-native-container[data-locfocus="1"] .dgwrap[data-grid="assets"] {
+    display:none
+  }
+  /* The grid's width goes to the model: the strip takes whatever the asset panel leaves, so the panel
+     stays flush right and no empty column is kept for the hidden table. Its fold chevron is inert here
+     (the strip is opened for this view in registerPage). */
+  .dashboard-native-container[data-locfocus="1"] .regmodelwrap {
+    flex:1 1 0
+  }
+  .dashboard-native-container[data-locfocus="1"] .regmodelwrap .regcollapse {
+    display:none
+  }
 }
 
 .dashboard-native-container .vpback {
@@ -862,6 +871,22 @@
   inset-inline-start:12px;
   z-index:58;
   min-height:34px
+}
+
+/* The Assets Overview shown over the register's model strip (Locate in 3D) sizes to the strip: 70% of it, between its
+   own 220px floor and its normal width, instead of a fixed width that overflows a 270-400px strip */
+.dashboard-native-container .regmodelwrap #ovp {
+  min-width:0;
+  width:clamp(220px, 70%, var(--ovw,352px))
+}
+
+/* In the register's model strip the Assets Overview (#ovp) owns the top-left and its collapse chevron the top, in a
+   strip as narrow as 400px: Back to Assets goes bottom-right, above the Studio toolbar */
+.dashboard-native-container .regmodelwrap .vpback {
+  top:auto;
+  bottom:76px;
+  inset-inline-start:auto;
+  inset-inline-end:12px
 }
 
 .dashboard-native-container #enginehost {
@@ -2934,7 +2959,7 @@
 
 .dashboard-native-container .regmodelwrap {
   position:relative;
-  flex:0 0 var(--spReg,30%);
+  flex:0 1 var(--spReg,30%);   /* a fixed column that yields (to its min-width) rather than push the asset panel past the edge */
   min-width:220px;
   display:flex;
   flex-direction:column;
@@ -2990,6 +3015,24 @@
   .dashboard-native-container #modpanel {
     width:var(--spPan,340px)
   }
+}
+
+/* A docked asset panel must never extend past the Studio surface on laptop
+   widths. The rail becomes icon-only before the three-column register runs
+   out of room; the table remains the flexible (and scrollable) column. */
+@media (max-width:1200px) and (min-width:1024px) {
+  .dashboard-native-container { --navw:56px }
+  .dashboard-native-container #ekonav .nlbl,
+  .dashboard-native-container #ekonav .nchevb,
+  .dashboard-native-container #ekonav .nsubs { display:none }
+  .dashboard-native-container #assetpanel {
+    width:min(var(--spPan,320px), 320px);
+    max-width:320px
+  }
+  /* Five tabs (Alarms .. Work orders) need ~336px at their normal padding: inside 320px the last one ended
+     past the window edge. Tighter padding keeps all of them on the panel, so each can be reached. */
+  .dashboard-native-container #assetpanel .aptab { padding-inline:5px }
+  .dashboard-native-container .regmodelwrap { min-width:220px }
 }
 
 @media (max-width:1024px) {
@@ -8383,6 +8426,27 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   padding-block-end:calc(var(--ovFade) - 36px)
 }
 
+/* The Energy timeline reserves its own physical space instead of faking it
+   with excess padding in the summary scroller. This leaves a consistent 16px
+   card-to-panel gap when the cards fit; on a short viewport .ovpad remains the
+   only scrolling region. Chromium, Firefox and Safari all support the base
+   rule; :has only refines the two taller timeline captions. */
+.dashboard-native-container #vpmain[data-tl="1"] > #ovp:not([data-min="1"]) {
+  bottom:84px
+}
+
+.dashboard-native-container #vpmain[data-tl="1"] > #ovp:not([data-min="1"]) .ovpad {
+  padding-block-end:16px
+}
+
+.dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="1"]) > #ovp:not([data-min="1"]) {
+  bottom:104px
+}
+
+.dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="2"]) > #ovp:not([data-min="1"]) {
+  bottom:116px
+}
+
 .dashboard-native-container .minimap {
   top:56px;
   bottom:auto;
@@ -11120,10 +11184,13 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
     bottom:calc(var(--vtBar) + 32px)
   }
   .dashboard-native-container[data-short="1"] #vpmain[data-tl="1"] > #ovp:not([data-min="1"]) {
-    bottom:calc(var(--vtBar) + 56px + 44px)
+    bottom:84px
   }
   .dashboard-native-container[data-short="1"] #vpmain > #ovp:not([data-min="1"]) .ovpad {
     padding-block-end:12px
+  }
+  .dashboard-native-container[data-short="1"] #vpmain[data-tl="1"] > #ovp:not([data-min="1"]) .ovpad {
+    padding-block-end:16px
   }
 }
 

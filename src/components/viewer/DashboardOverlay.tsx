@@ -7,6 +7,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
 import { ASSET_BIM_MAPPING } from '@/constants/assetBimMapping'
 import { resetCameraToHome } from '@/lib/cameraUtils'
+import { frameSphereInView } from '@/lib/viewFraming'
 import { createMiniMap } from '@/lib/miniMap'
 import { disciplineOf, layersFor, layerShows } from '@/lib/modelDiscipline'
 import { measureTool } from '@/lib/measureTool'
@@ -561,12 +562,41 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
 
     /* Moves the camera only; colouring follows the dashboard's selection. */
+    /* The canvas fills the window and the dashboard covers most of it: the part of the canvas the user sees is
+       the dashboard's own model area (#vpmain: the register's strip, or the Overview's viewer beside its panel).
+       null when there is no such area, or it is the whole canvas. */
+    const visibleView = () => {
+      const el = engine?.world?.renderer?.three?.domElement as HTMLElement | undefined
+      const vp = document.getElementById('vpmain')
+      if (!el || !vp || !vp.getClientRects().length) return null
+      const c = el.getBoundingClientRect(), v = vp.getBoundingClientRect()
+      let x = Math.max(c.left, v.left)
+      const y = Math.max(c.top, v.top)
+      // Locate in 3D on the register keeps the Assets Overview (#ovp) over the model's left: what it covers is not visible
+      const ovp = (window as any).EKO?.state?.locFocus ? document.getElementById('ovp') : null
+      if (ovp && ovp.getClientRects().length && ovp.getAttribute('data-min') !== '1') x = Math.max(x, ovp.getBoundingClientRect().right)
+      const w = Math.min(c.right, v.right) - x, h = Math.min(c.bottom, v.bottom) - y
+      if (w < 80 || h < 80 || c.width < 2 || c.height < 2) return null
+      const smaller = w < c.width - 2 || h < c.height - 2
+      return smaller ? { canvas: { x: c.left, y: c.top, w: c.width, h: c.height }, visible: { x, y, w, h } } : null
+    }
+
     const flyToAsset = async (assetIdOrBimId: string) => {
       const controls = engine?.world?.camera?.controls
       const bimId = toBimId(assetIdOrBimId)
       const entry = bimId ? await locate(bimId) : null
       if (!controls || !entry) return false
-      await controls.fitToBox(worldBoxOf(entry), true)
+      const box = worldBoxOf(entry)
+      const camera = engine?.world?.camera?.three as THREE.PerspectiveCamera | undefined
+      const view = visibleView()
+      if (view && camera?.isPerspectiveCamera) {
+        // fit it into what the user can see, not the whole canvas (its edge was hidden under the asset panel)
+        const sphere = box.getBoundingSphere(new THREE.Sphere())
+        const pose = frameSphereInView(camera, sphere.center, sphere.radius, view.canvas, view.visible)
+        await controls.setLookAt(pose.position.x, pose.position.y, pose.position.z, pose.target.x, pose.target.y, pose.target.z, true)
+      } else {
+        await controls.fitToBox(box, true)
+      }
       return true
     }
 
