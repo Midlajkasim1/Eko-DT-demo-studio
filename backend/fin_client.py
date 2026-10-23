@@ -9,12 +9,12 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import re
 import secrets
 import time
 from datetime import datetime
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -499,52 +499,6 @@ def aggregate_and_restructure(data: list[dict]) -> dict:
 
 # ─── SCRAM-SHA-256 Client ────────────────────────────────────────────────────
 
-# ── TEMP-DIAG alarm header: remove this block and its one call in _build_realtime ──────────
-# Off unless EKO_ALARM_HEADER_DIAG=1. Reports the shape and column names of the alarm response
-# FIN already returned: no extra FIN request, no row values, error text or credentials.
-_ALARM_DIAG_REPORTS = 0
-_ALARM_DIAG_MAX = 3          # a failed or unreadable poll may be followed by a readable one
-_ZINC_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
-def _diag_alarm_header(alarms_text: Optional[str], row_count: int) -> None:
-    global _ALARM_DIAG_REPORTS
-    if os.environ.get("EKO_ALARM_HEADER_DIAG") != "1" or _ALARM_DIAG_REPORTS >= _ALARM_DIAG_MAX:
-        return
-    _ALARM_DIAG_REPORTS += 1
-    say = lambda msg: print(f"[TEMP-DIAG alarms] {msg}")   # noqa: E731
-    try:
-        if alarms_text is None:
-            return say("no response text (the FIN request failed or was refused)")
-        text = alarms_text.lstrip("\ufeff")
-        lines = [l.strip() for l in collapse_metadata_blocks(text).splitlines() if l.strip()]
-        if not lines:
-            return say("response is blank")
-        first = lines[0]
-        if not first.startswith("ver:"):
-            kind = ("HTML page (often a sign-in page: session not accepted)" if first.startswith("<")
-                    else "JSON" if first[:1] in "{[" else "not a Zinc grid")
-            return say(f"unrecognised format: {kind}; {len(lines)} non-blank lines; nothing printed from it")
-        if re.search(r"\berr\b", first):
-            _ALARM_DIAG_REPORTS = _ALARM_DIAG_MAX   # an answer, not a transient failure
-            return say("FIN returned an error grid (message not printed); no alarm columns to report")
-        if len(lines) < 2:
-            return say("Zinc grid with no column line")
-        cells = [c.strip().split(" ", 1)[0] for c in _split_zinc_csv(lines[1])]
-        columns = [c for c in cells if _ZINC_NAME_RE.match(c)]
-        odd = len(cells) - len(columns)   # not a column name: counted, never printed
-        _ALARM_DIAG_REPORTS = _ALARM_DIAG_MAX   # a readable header: report once
-        if columns == ["empty"]:
-            return say("empty grid: no alarm rows in this window, so no alarm columns to report")
-        ack_like = [c for c in columns if re.search(r"ack", c, re.I)]
-        say(f"Zinc grid, {len(lines) - 2} data lines, parser rows: {row_count}"
-            + (f", {odd} cell(s) in the header line were not column names" if odd else ""))
-        say(f"columns: {columns or 'none identifiable'}")
-        say(f"acknowledgement-like columns: {ack_like or 'none'}")
-    except Exception as exc:   # a diagnostic must never break polling
-        say(f"diagnostic failed: {type(exc).__name__}")
-# ── end TEMP-DIAG ───────────────────────────────────────────────────────────────────────────
-
 
 class FinScramClient:
     """Async FIN Framework client with SCRAM-SHA-256 authentication."""
@@ -674,9 +628,29 @@ class FinScramClient:
             print(f"[FIN] ✗ Auth error: {e}")
             return False
 
+    def _url(self, endpoint: str) -> Optional[str]:
+        """The URL for an endpoint on THIS FIN server, or None for one anywhere else: the session's credentials are
+        sent with every request, so a request that would reach another host is refused. That is an absolute URL to another
+        server (scheme, host or port), one that cannot be read as a URL, and a path that does not start with "/" (after
+        the server's own address, "@host/..." would make the server's name a user name and "host" the real host)."""
+        if not isinstance(endpoint, str):
+            return None
+        absolute = endpoint.startswith(("http://", "https://"))
+        if not absolute and not endpoint.startswith("/"):
+            return None
+        url = endpoint if absolute else f"{self.base_url}{endpoint}"
+        try:
+            a, b = urlsplit(url), urlsplit(self.base_url)
+        except ValueError:
+            return None
+        return url if (a.scheme, a.netloc.lower()) == (b.scheme, b.netloc.lower()) else None
+
     async def fetch_api(self, endpoint: str, is_text: bool = False) -> Optional[Any]:
         """Fetch a FIN API endpoint. Returns parsed JSON or raw text."""
-        url = endpoint if endpoint.startswith("http") else f"{self.base_url}{endpoint}"
+        url = self._url(endpoint)
+        if url is None:
+            print("[FIN] refused a request to another host: FIN credentials stay with the FIN server")
+            return None
         try:
             resp = await self.client.get(url, headers=self.auth_headers)
             if resp.status_code == 200:
@@ -695,7 +669,10 @@ class FinScramClient:
         Unlike fetch_api it never ends the session, so a caller can tell "FIN says this
         record does not exist" from "the request failed".
         """
-        url = endpoint if endpoint.startswith("http") else f"{self.base_url}{endpoint}"
+        url = self._url(endpoint)
+        if url is None:
+            print("[FIN] refused a request to another host: FIN credentials stay with the FIN server")
+            return None, None
         try:
             resp = await self.client.get(url, headers=self.auth_headers)
             return resp.status_code, resp.text
@@ -705,8 +682,12 @@ class FinScramClient:
 
     async def get_probe(self, endpoint: str, params: dict[str, str]) -> tuple[Optional[int], Optional[str]]:
         """fetch_probe with query parameters, which httpx URL-encodes: (status, text), or
-        (None, None) if FIN is unreachable. The session's auth headers are reused."""
-        url = endpoint if endpoint.startswith("http") else f"{self.base_url}{endpoint}"
+        (None, None) if FIN is unreachable. The session's auth headers are reused, so, like every request that carries
+        them, it only ever goes to this FIN server (_url)."""
+        url = self._url(endpoint)
+        if url is None:
+            print("[FIN] refused a request to another host: FIN credentials stay with the FIN server")
+            return None, None
         try:
             resp = await self.client.get(url, params=params, headers=self.auth_headers)
             return resp.status_code, resp.text
@@ -794,7 +775,6 @@ class FinScramClient:
         points = parse_zinc_csv(points_text)
         equipment = parse_zinc_csv(equip_text)
         alarms = parse_zinc_csv(alarms_text)
-        _diag_alarm_header(alarms_text, len(alarms))   # TEMP-DIAG: remove with the block above
         attach_alarm_details(alarms_text or "", alarms)
         self.last_alarm_rows = alarms
         open_alarms = open_alarm_rows(alarms)   # one per logical alarm, as the alarm list counts them

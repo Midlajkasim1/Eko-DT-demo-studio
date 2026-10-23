@@ -140,6 +140,62 @@ MIGRATIONS = [
     INSERT OR IGNORE INTO notification_recipients (id, event_id, user_id, role, channel, delivery_status)
     SELECT 'rcp_' || e.id, e.id, '#project:' || e.site_id, NULL, 'inapp', 'delivered' FROM notification_events e;
     """),
+    # Who an event is for (role routing reads this in a later phase), and roles and preferences per
+    # site. Existing events keep their shared project-wide visibility: audience ('project', site).
+    # Preferences saved so far belong to a project recipient ('#project:<site>'): they keep that
+    # site; a row with no site in its owner gets '' (no such rows are written by this code).
+    (3, """
+    CREATE TABLE notification_audience (
+      event_id TEXT NOT NULL REFERENCES notification_events (id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK (kind IN ('project', 'role', 'user')),
+      value TEXT NOT NULL,
+      PRIMARY KEY (event_id, kind, value)
+    );
+    CREATE INDEX ix_audience_kind_value ON notification_audience (kind, value);
+    INSERT OR IGNORE INTO notification_audience (event_id, kind, value)
+    SELECT id, 'project', site_id FROM notification_events;
+
+    CREATE TABLE notification_preferences_v3 (
+      user_id TEXT NOT NULL,
+      site_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+      PRIMARY KEY (user_id, site_id, type)
+    );
+    INSERT INTO notification_preferences_v3 (user_id, site_id, type, enabled)
+    SELECT user_id, CASE WHEN substr(user_id, 1, 9) = '#project:' THEN substr(user_id, 10) ELSE '' END, type, enabled
+    FROM notification_preferences;
+    DROP TABLE notification_preferences;
+    ALTER TABLE notification_preferences_v3 RENAME TO notification_preferences;
+
+    CREATE TABLE eko_role_mapping_v3 (
+      site_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      eko_role TEXT NOT NULL,
+      updated_by TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (site_id, user_id)
+    );
+    INSERT INTO eko_role_mapping_v3 (site_id, user_id, eko_role, updated_by, updated_at)
+    SELECT '', user_id, eko_role, updated_by, updated_at FROM eko_role_mapping;
+    DROP TABLE eko_role_mapping;
+    ALTER TABLE eko_role_mapping_v3 RENAME TO eko_role_mapping;
+    """),
+    # Per-user read/dismissed state and preferences. No row is rewritten: the project's shared recipient
+    # ('#project:<site>') and its preferences stay as they are and become the BASELINE every user starts
+    # from (what was read or dismissed so far stays so for everyone); a user's own rows, created when
+    # that user first acts, override it for that user alone. This records, per site, how much state was
+    # inherited, so the change is on the audit trail.
+    (4, """
+    INSERT OR IGNORE INTO notification_audit_log (id, site_id, actor_id, action, target_type, target_id, occurred_at, details_json)
+    SELECT 'aud_mig4_' || s.site_id, s.site_id, 'system', 'notifications.per_user_state', 'site', s.site_id,
+           strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+           '{"baseline_notifications":' || s.n || ',"baseline_opened":' || s.opened || ',"baseline_dismissed":' || s.dismissed
+           || ',"baseline_preferences":' || (SELECT count(*) FROM notification_preferences x WHERE x.user_id = s.owner) || '}'
+    FROM (SELECT user_id AS owner, substr(user_id, 10) AS site_id, count(*) AS n, count(opened_at) AS opened,
+                 count(dismissed_at) AS dismissed
+          FROM notification_recipients WHERE substr(user_id, 1, 9) = '#project:' GROUP BY user_id) s;
+    """),
 ]
 
 
@@ -173,22 +229,43 @@ VIEWS = ("all", "unread", "read")            # read = opened (contract: POST /op
 SEVERITIES = ("critical", "warning", "info")
 CHANNEL = "inapp"                            # the only channel the contract defines
 MASTER = "*"                                 # notification_preferences row for the master toggle
-# ponytail: no per-person FIN identity yet, so each site has ONE shared recipient: read, dismissed
-# and preference state is the project's, not a person's. Per-user recipients replace it once
-# sign-in carries identity. The '#project:' prefix is meant never to match a FIN user id
-# (FIN's username rules are not confirmed: check before per-user recipients share this table).
+# Types a user can switch off so they are not shown at all: left out of their list, count and bulk actions.
+# (alarm.critical is the one type the site creates for everyone; the others are the user's own anyway.)
+USER_HIDEABLE = ("alarm.critical",)
+# Read, dismissed and preference state is per signed-in user and site. The site's shared recipient
+# ('#project:<site>', the state before per-user sign-in) is the baseline every user starts from: a
+# user's own recipient row, created the first time that user acts on a notification, overrides it for
+# that user alone. The baseline row is only ever read, so one user's action cannot reach another's.
+# A real user id never starts with the reserved prefix (_check_user refuses one that does).
 PROJECT_RECIPIENT_PREFIX = "#project:"
 
 
 def project_recipient(site_id: str) -> str:
     return PROJECT_RECIPIENT_PREFIX + site_id
+
+
 PAGE_DEFAULT, PAGE_MAX = 50, 100
 SEARCHED = ("e.type", "e.asset_id", "e.source_ref", "e.params_json")
+# u = this user's own row, p = the site's baseline row; the user's row wins once it exists.
+# A notification is visible to a user when the event is for the whole project (audience) or the user
+# has a row of their own for it. Placeholders: user id (the joins), then site id (the visibility test).
+_OPENED = "(CASE WHEN u.id IS NULL THEN p.opened_at ELSE u.opened_at END)"
+_DISMISSED = "(CASE WHEN u.id IS NULL THEN p.dismissed_at ELSE u.dismissed_at END)"
+_JOINS = (
+    " FROM notification_events e"
+    f" LEFT JOIN notification_recipients u ON u.event_id = e.id AND u.user_id = ? AND u.channel = '{CHANNEL}'"
+    f" LEFT JOIN notification_recipients p ON p.event_id = e.id AND p.user_id = '{PROJECT_RECIPIENT_PREFIX}' || e.site_id"
+    f" AND p.channel = '{CHANNEL}'"
+)
+_VISIBLE = (
+    "e.site_id = ? AND (u.id IS NOT NULL OR EXISTS (SELECT 1 FROM notification_audience a"
+    " WHERE a.event_id = e.id AND a.kind = 'project' AND a.value = e.site_id))"
+)
 _ITEM_SQL = (
     "SELECT e.id, e.type, e.severity, e.site_id, e.asset_id, e.source_kind, e.source_ref, e.created_at,"
-    " e.params_json, r.opened_at, r.dismissed_at"
-    " FROM notification_recipients r JOIN notification_events e ON e.id = r.event_id"
+    f" e.params_json, {_OPENED} AS opened_at, {_DISMISSED} AS dismissed_at" + _JOINS
 )
+_STATE_SQL = f"SELECT e.id AS event_id, u.id AS own_id, {_OPENED} AS opened_at, {_DISMISSED} AS dismissed_at" + _JOINS
 
 
 class StoreError(Exception):
@@ -202,6 +279,8 @@ STORE_FAILED = "notification storage failed"
 def _check_user(user_id) -> None:
     if not isinstance(user_id, str) or not user_id.strip():
         raise ValueError("a user id is required")
+    if user_id.startswith(PROJECT_RECIPIENT_PREFIX):
+        raise ValueError("this user id is reserved")
 
 
 def _check_ids(user_id, site_id) -> None:
@@ -256,12 +335,20 @@ def _decode_cursor(cursor: str) -> tuple[str, str]:
     raise ValueError("invalid cursor")
 
 
+def _private(path: str) -> None:
+    """Owner-only on POSIX (a database, its backup). Windows: the folder's ACL decides (README)."""
+    if os.name == "posix":
+        os.chmod(path, 0o600)
+
+
 class Store:
     def __init__(self, path: str):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        # a folder this creates is the owner's only (POSIX; ignored on Windows); an existing one is left as set up
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
         self.path = path
         # one writer, this process; not tied to the opening thread (a test client runs the app on its own)
         self.db = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+        _private(path)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
@@ -273,13 +360,31 @@ class Store:
     def _migrate(self) -> None:
         self.db.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
         done = {r[0] for r in self.db.execute("SELECT version FROM schema_migrations")}
-        for version, sql in MIGRATIONS:
-            if version in done:
-                continue
-            # one transaction per version: a failed migration leaves the previous schema intact
-            self.db.executescript(
-                f"BEGIN;\n{sql}\nINSERT INTO schema_migrations VALUES ({int(version)}, '{utc_iso(datetime.now(timezone.utc))}');\nCOMMIT;"
-            )
+        pending = [(v, sql) for v, sql in MIGRATIONS if v not in done]
+        if pending and done:   # a database that holds data: copy it as it is before changing it
+            self.backup_path = self._backup(max(done))
+        for version, sql in pending:
+            # one transaction per version: a failed migration leaves the previous schema and data intact
+            try:
+                self.db.executescript(
+                    f"BEGIN IMMEDIATE;\n{sql}\nINSERT INTO schema_migrations VALUES ({int(version)}, '{utc_iso(datetime.now(timezone.utc))}');\nCOMMIT;"
+                )
+            except sqlite3.Error:
+                self._rollback()
+                raise
+
+    def _backup(self, version: int) -> str:
+        """A consistent copy (SQLite's online backup, WAL included) next to the database:
+        <name>.v<version>-<UTC time>.bak. A backup that fails stops the migration."""
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        target = f"{self.path}.v{int(version)}-{stamp}.bak"
+        copy = sqlite3.connect(target)
+        try:
+            self.db.backup(copy)
+        finally:
+            copy.close()
+        _private(target)
+        return target
 
     def close(self) -> None:
         self.db.close()
@@ -314,13 +419,16 @@ class Store:
             )
             return row["id"]
         event_id = "ntf_" + uuid.uuid4().hex
-        with self._write():   # the event and its project recipient together, or neither
+        with self._write():   # the event, its audience and its project recipient together, or neither
             self.db.execute(
                 "INSERT INTO notification_events (id, site_id, type, severity, source_kind, source_ref, asset_id,"
                 " created_at, last_at, state, status, dedup_key, params_json) VALUES (?,?,?,?,?,?,?,?,?,?,'active',?,?)",
                 (event_id, site_id, type_, severity, source_kind, source_ref, asset_id, stamp, stamp, state, key,
                  _params_json(params)),
             )
+            # everyone on the project, as every event so far; role routing (a later phase) narrows it
+            self.db.execute("INSERT INTO notification_audience (event_id, kind, value) VALUES (?, 'project', ?)",
+                            (event_id, site_id))
             self.db.execute(
                 "INSERT INTO notification_recipients (id, event_id, user_id, role, channel, delivery_status)"
                 " VALUES (?, ?, ?, NULL, ?, 'delivered')", ("rcp_" + event_id, event_id, project_recipient(site_id), CHANNEL),
@@ -342,8 +450,8 @@ class Store:
         )
         return [dict(r) for r in rows]
 
-    # ── Recipient reads and writes (contract §2). Inputs are trusted values from the server's
-    # session, never from a request; no HTTP route reaches these until FIN identity exists.
+    # ── Recipient reads and writes (contract §2). user_id and site_id are trusted values from the
+    # server's own user session, never from a request (main._notification_scope).
 
     def list_notifications(self, user_id: str, site_id: str, *, view: str = "all", type_: Optional[str] = None,
                            severity: Optional[str] = None, asset_id: Optional[str] = None,
@@ -368,12 +476,13 @@ class Store:
             raise ValueError(f"limit must be 1..{PAGE_MAX}")
         for name, value in (("type", type_), ("asset_id", asset_id), ("q", q)):
             _check_text(name, value)
-        sql = [_ITEM_SQL, "WHERE r.user_id = ? AND r.channel = ? AND e.site_id = ? AND r.dismissed_at IS NULL"]
-        args: list = [user_id, CHANNEL, site_id]
+        hide, hidden = self._hidden(user_id, site_id)
+        sql = [_ITEM_SQL, "WHERE", _VISIBLE + hide, f"AND {_DISMISSED} IS NULL"]
+        args: list = [user_id, site_id, *hidden]
         if view == "unread":
-            sql.append("AND r.opened_at IS NULL")
+            sql.append(f"AND {_OPENED} IS NULL")
         elif view == "read":
-            sql.append("AND r.opened_at IS NOT NULL")
+            sql.append(f"AND {_OPENED} IS NOT NULL")
         for column, value in (("e.type", type_), ("e.severity", severity), ("e.asset_id", asset_id)):
             if value is not None:
                 sql.append(f"AND {column} = ?")
@@ -394,12 +503,12 @@ class Store:
         return {"items": items, "next_cursor": _encode_cursor(items[-1]) if more else None}
 
     def get_notification(self, user_id: str, site_id: str, notification_id: str) -> Optional[dict]:
-        """The notification only when this user is its in-app recipient on this site, else None
-        (the caller answers 404 either way, so another user's or site's id reveals nothing)."""
+        """The notification only when it is visible to this user on this site, else None (the caller
+        answers 404 either way, so another site's id reveals nothing), with this user's own state."""
         _check_ids(user_id, site_id)
         _check_notification_id(notification_id)
-        rows = self._read(_ITEM_SQL + " WHERE e.id = ? AND r.user_id = ? AND r.channel = ? AND e.site_id = ?",
-                          [notification_id, user_id, CHANNEL, site_id])
+        hide, hidden = self._hidden(user_id, site_id)
+        rows = self._read(_ITEM_SQL + " WHERE e.id = ? AND " + _VISIBLE + hide, [user_id, notification_id, site_id, *hidden])
         return _item(rows[0]) if rows else None
 
     def mark_opened(self, user_id: str, site_id: str, notification_id: str,
@@ -414,60 +523,50 @@ class Store:
 
     def undismiss(self, user_id: str, site_id: str, notification_id: str,
                   now: Optional[datetime] = None) -> Optional[dict]:
-        """Undo a dismiss (the bell's Undo). A notification that is not dismissed is left alone."""
+        """Undo this user's dismiss (the bell's Undo). A notification that is not dismissed is left alone."""
         _check_ids(user_id, site_id)
         _check_notification_id(notification_id)
         stamp = utc_iso(now or datetime.now(timezone.utc))
+        hide, hidden = self._hidden(user_id, site_id)
         with self._write():
-            row = self.db.execute(
-                "SELECT r.id, r.dismissed_at FROM notification_recipients r JOIN notification_events e ON e.id = r.event_id"
-                " WHERE e.id = ? AND r.user_id = ? AND r.channel = ? AND e.site_id = ?",
-                (notification_id, user_id, CHANNEL, site_id),
-            ).fetchone()
+            row = self.db.execute(_STATE_SQL + " WHERE e.id = ? AND " + _VISIBLE + hide,
+                                  (user_id, notification_id, site_id, *hidden)).fetchone()
             if row is None:
                 return None
             if row["dismissed_at"] is not None:
-                self.db.execute("UPDATE notification_recipients SET dismissed_at = NULL WHERE id = ?", (row["id"],))
-                self.db.execute(
-                    "INSERT INTO notification_delivery_history (id, event_id, user_id, channel, status, occurred_at)"
-                    " VALUES (?, ?, ?, ?, 'undismissed', ?)", ("dlv_" + uuid.uuid4().hex, notification_id, user_id, CHANNEL, stamp),
-                )
+                self._set_own(user_id, row, "dismissed_at", None)
+                self._history(notification_id, user_id, "undismissed", stamp)
         return self.get_notification(user_id, site_id, notification_id)
 
     def unread_count(self, user_id: str, site_id: str) -> int:
         """Listed (not dismissed) notifications not yet opened, for this recipient on this site."""
         _check_ids(user_id, site_id)
+        hide, hidden = self._hidden(user_id, site_id)
         rows = self._read(
-            "SELECT count(*) AS n FROM notification_recipients r JOIN notification_events e ON e.id = r.event_id"
-            " WHERE r.user_id = ? AND r.channel = ? AND e.site_id = ? AND r.opened_at IS NULL AND r.dismissed_at IS NULL",
-            [user_id, CHANNEL, site_id])
+            "SELECT count(*) AS n" + _JOINS + f" WHERE {_VISIBLE}{hide} AND {_OPENED} IS NULL AND {_DISMISSED} IS NULL",
+            [user_id, site_id, *hidden])
         return int(rows[0]["n"])
 
     def mark_all_opened(self, user_id: str, site_id: str, now: Optional[datetime] = None) -> int:
         """Open every listed, unopened notification (the bell's "mark all read"). Returns how many."""
-        return self._stamp_all("opened_at", "opened", "r.dismissed_at IS NULL", user_id, site_id, now)
+        return self._stamp_all("opened_at", "opened", f"{_DISMISSED} IS NULL", user_id, site_id, now)
 
     def dismiss_opened(self, user_id: str, site_id: str, now: Optional[datetime] = None) -> int:
         """Dismiss every opened notification still listed (the bell's "archive read"). Returns how many."""
-        return self._stamp_all("dismissed_at", "dismissed", "r.opened_at IS NOT NULL", user_id, site_id, now)
+        return self._stamp_all("dismissed_at", "dismissed", f"{_OPENED} IS NOT NULL", user_id, site_id, now)
 
     def _stamp_all(self, column: str, status: str, also: str, user_id: str, site_id: str,
                    now: Optional[datetime]) -> int:
         _check_ids(user_id, site_id)
         stamp = utc_iso(now or datetime.now(timezone.utc))
+        state = {"opened_at": _OPENED, "dismissed_at": _DISMISSED}[column]
+        hide, hidden = self._hidden(user_id, site_id)   # a notification the user cannot see is not theirs to open or dismiss
         with self._write():
-            rows = self.db.execute(
-                "SELECT r.id, r.event_id FROM notification_recipients r JOIN notification_events e ON e.id = r.event_id"
-                f" WHERE r.user_id = ? AND r.channel = ? AND e.site_id = ? AND r.{column} IS NULL AND {also}",
-                (user_id, CHANNEL, site_id),
-            ).fetchall()
-            self.db.executemany(f"UPDATE notification_recipients SET {column} = ? WHERE id = ?",
-                                [(stamp, r["id"]) for r in rows])
-            self.db.executemany(
-                "INSERT INTO notification_delivery_history (id, event_id, user_id, channel, status, occurred_at)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
-                [("dlv_" + uuid.uuid4().hex, r["event_id"], user_id, CHANNEL, status, stamp) for r in rows],
-            )
+            rows = self.db.execute(_STATE_SQL + f" WHERE {_VISIBLE}{hide} AND {state} IS NULL AND {also}",
+                                   (user_id, site_id, *hidden)).fetchall()
+            for r in rows:
+                self._set_own(user_id, r, column, stamp)
+                self._history(r["event_id"], user_id, status, stamp)
         return len(rows)
 
     def _stamp_once(self, column: str, status: str, user_id: str, site_id: str, notification_id: str,
@@ -475,34 +574,80 @@ class Store:
         _check_ids(user_id, site_id)
         _check_notification_id(notification_id)
         stamp = utc_iso(now or datetime.now(timezone.utc))
+        hide, hidden = self._hidden(user_id, site_id)
         with self._write():
-            row = self.db.execute(
-                f"SELECT r.id, r.{column} AS was FROM notification_recipients r JOIN notification_events e ON e.id = r.event_id"
-                " WHERE e.id = ? AND r.user_id = ? AND r.channel = ? AND e.site_id = ?",
-                (notification_id, user_id, CHANNEL, site_id),
-            ).fetchone()
+            row = self.db.execute(_STATE_SQL + " WHERE e.id = ? AND " + _VISIBLE + hide,
+                                  (user_id, notification_id, site_id, *hidden)).fetchone()
             if row is None:
                 return None
-            if row["was"] is None:   # the first time only: a repeat leaves the time and the history alone
-                self.db.execute(f"UPDATE notification_recipients SET {column} = ? WHERE id = ?", (stamp, row["id"]))
-                self.db.execute(
-                    "INSERT INTO notification_delivery_history (id, event_id, user_id, channel, status, occurred_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?)", ("dlv_" + uuid.uuid4().hex, notification_id, user_id, CHANNEL, status, stamp),
-                )
+            if row[column] is None:   # the first time only: a repeat leaves the time and the history alone
+                self._set_own(user_id, row, column, stamp)
+                self._history(notification_id, user_id, status, stamp)
         return self.get_notification(user_id, site_id, notification_id)
 
-    def get_preferences(self, user_id: str) -> dict:
-        """{"master_enabled", "types": {type: enabled}}. A type with no saved toggle is absent:
-        its default comes from the type registry, not from here. No saved master means on."""
-        _check_user(user_id)
-        rows = self._read("SELECT type, enabled FROM notification_preferences WHERE user_id = ?", [user_id])
-        saved = {r["type"]: bool(r["enabled"]) for r in rows}
+    def _set_own(self, user_id: str, row, column: str, value: Optional[str]) -> None:
+        """Set one state column on THIS user's recipient row. The row is created on the first write,
+        starting from the state the user was seeing (the site baseline), so nothing else changes."""
+        if row["own_id"] is None:
+            self.db.execute(
+                "INSERT INTO notification_recipients (id, event_id, user_id, role, channel, delivery_status, opened_at, dismissed_at)"
+                " VALUES (?, ?, ?, NULL, ?, 'delivered', ?, ?)",
+                ("rcp_" + uuid.uuid4().hex, row["event_id"], user_id, CHANNEL, row["opened_at"], row["dismissed_at"]),
+            )
+        self.db.execute(f"UPDATE notification_recipients SET {column} = ? WHERE event_id = ? AND user_id = ? AND channel = ?",
+                        (value, row["event_id"], user_id, CHANNEL))
+
+    def _history(self, event_id: str, user_id: str, status: str, stamp: str) -> None:
+        self.db.execute(
+            "INSERT INTO notification_delivery_history (id, event_id, user_id, channel, status, occurred_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)", ("dlv_" + uuid.uuid4().hex, event_id, user_id, CHANNEL, status, stamp),
+        )
+
+    def _hidden(self, user_id: str, site_id: str) -> tuple[str, list]:
+        """(SQL clause, args) leaving out the types this user's EFFECTIVE preferences switch off: their own
+        toggle over the site's baseline, or their master toggle off. One rule for the list, its pages, the
+        unread count and the bulk actions, so they always describe the same notifications. It only narrows
+        what one user sees: whether the site creates a type is decided elsewhere (project_wants)."""
+        prefs = self.get_preferences(user_id, site_id)
+        off = [t for t in USER_HIDEABLE if not prefs["master_enabled"] or prefs["types"].get(t) is False]
+        return (" AND e.type NOT IN (" + ",".join("?" * len(off)) + ")", off) if off else ("", [])
+
+    def _saved(self, owner: str, site_id: str) -> dict:
+        rows = self._read("SELECT type, enabled FROM notification_preferences WHERE user_id = ? AND site_id = ?", [owner, site_id])
+        return {r["type"]: bool(r["enabled"]) for r in rows}
+
+    def get_preferences(self, user_id: str, site_id: str) -> dict:
+        """{"master_enabled", "types": {type: enabled}} for this user on this site: the user's own
+        toggles over the site's baseline ones. A type with no saved toggle is absent: its default
+        comes from the type registry, not from here. No saved master means on."""
+        _check_ids(user_id, site_id)
+        saved = {**self._saved(project_recipient(site_id), site_id), **self._saved(user_id, site_id)}
         return {"master_enabled": saved.pop(MASTER, True), "types": saved}
 
-    def update_preferences(self, user_id: str, *, master_enabled: Optional[bool] = None,
+    def update_preferences(self, user_id: str, site_id: str, *, master_enabled: Optional[bool] = None,
                            types: Optional[dict] = None) -> dict:
-        """Save the given toggles in one transaction (all or none); toggles not given are kept."""
-        _check_user(user_id)
+        """Save the given toggles for this user on this site in one transaction (all or none);
+        toggles not given are kept. The site's baseline is never touched from here."""
+        _check_ids(user_id, site_id)
+        self._save_preferences(user_id, site_id, master_enabled, types)
+        return self.get_preferences(user_id, site_id)
+
+    def update_project_preferences(self, site_id: str, *, master_enabled: Optional[bool] = None,
+                                   types: Optional[dict] = None) -> None:
+        """The site's baseline toggles (what every user starts from, and the site-level switch for
+        whether alarm.critical notifications are created). No HTTP route reaches this: it is the
+        seam for the later administration phase and for operators."""
+        _check_ids("system", site_id)
+        self._save_preferences(project_recipient(site_id), site_id, master_enabled, types)
+
+    def project_wants(self, site_id: str, type_: str, default: bool) -> bool:
+        """Whether the SITE creates notifications of this type (its baseline master and toggle,
+        else the caller's default): one setting for the project, not any user's preference."""
+        _check_ids("system", site_id)
+        saved = self._saved(project_recipient(site_id), site_id)
+        return saved.get(MASTER, True) and saved.get(type_, default)
+
+    def _save_preferences(self, owner: str, site_id: str, master_enabled, types) -> None:
         if master_enabled is not None and not isinstance(master_enabled, bool):
             raise ValueError("master_enabled must be true or false")
         types = types or {}
@@ -516,16 +661,21 @@ class Store:
         changes = list(types.items()) + ([(MASTER, master_enabled)] if master_enabled is not None else [])
         with self._write():
             self.db.executemany(
-                "INSERT INTO notification_preferences (user_id, type, enabled) VALUES (?, ?, ?)"
-                " ON CONFLICT (user_id, type) DO UPDATE SET enabled = excluded.enabled",
-                [(user_id, key, int(value)) for key, value in changes],
+                "INSERT INTO notification_preferences (user_id, site_id, type, enabled) VALUES (?, ?, ?, ?)"
+                " ON CONFLICT (user_id, site_id, type) DO UPDATE SET enabled = excluded.enabled",
+                [(owner, site_id, key, int(value)) for key, value in changes],
             )
-        return self.get_preferences(user_id)
 
-    def wants(self, user_id: str, type_: str, default: bool) -> bool:
-        """Whether a notification of this type reaches the user: master off overrides every type;
-        otherwise the saved toggle, else the type's registry default (the caller's to supply)."""
-        prefs = self.get_preferences(user_id)
+    def role_of(self, site_id: str, user_id: str) -> Optional[str]:
+        """The EKO role mapped to this user on this site, or None. Read only: mapping is a later phase."""
+        _check_ids(user_id, site_id)
+        rows = self._read("SELECT eko_role FROM eko_role_mapping WHERE site_id = ? AND user_id = ?", [site_id, user_id])
+        return rows[0]["eko_role"] if rows else None
+
+    def wants(self, user_id: str, site_id: str, type_: str, default: bool) -> bool:
+        """Whether this user wants notifications of this type on this site: master off overrides
+        every type; otherwise the saved toggle, else the type's registry default (the caller's)."""
+        prefs = self.get_preferences(user_id, site_id)
         return prefs["master_enabled"] and prefs["types"].get(type_, default)
 
     def _read(self, sql: str, args: list) -> list:

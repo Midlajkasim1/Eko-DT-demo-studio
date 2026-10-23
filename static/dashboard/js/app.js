@@ -868,9 +868,11 @@
   function endFinSession(){
     try { if(window.DashboardData && window.DashboardData.stop) window.DashboardData.stop(); } catch(e){}
     try { window.dispatchEvent(new CustomEvent('dashboard-event', { detail:{ action:'finSignOut' } })); } catch(e){}
-    const post = (url) => fetch(url, { method:'POST', cache:'no-store' }).then(res => res.status === 404 ? null : res);
+    const post = (url) => fetch(url, { method:'POST', cache:'no-store', credentials:'same-origin' }).then(res => res.status === 404 ? null : res);
     const done = post('/api/auth/logout').then(res => res || post('/api/fin/logout')).catch(() => {});
-    return Promise.race([done, new Promise(resolve => setTimeout(resolve, 4000))]);
+    return Promise.race([done, new Promise(resolve => setTimeout(resolve, 4000))]).finally(() => {
+      try { window.dispatchEvent(new Event('eko-auth-changed')); } catch(e){}
+    });
   }
 
   const ACTS = {
@@ -1011,7 +1013,10 @@
       ls.set('eko-nav', E.state.navMin?'min':'full'); render(); },
     sysExpTgl(el, ev){ ev.stopPropagation(); const g = el.dataset.v;
       E.state.sysExp[g] = E.state.sysExp[g] === false; render(); },
-    ovpMin(){ E.state.ovpMin = !E.state.ovpMin; ls.set('eko-ovp', E.state.ovpMin?'min':'full'); render(); },
+    ovpMin(){
+      const lf = E.state.locFocus;
+      if(lf && E.state.pageId === 'assets-register'){ lf.ovOpen = !lf.ovOpen; render(); return; }   /* during Locate in 3D: this visit's own fold, nothing saved */
+      E.state.ovpMin = !E.state.ovpMin; ls.set('eko-ovp', E.state.ovpMin?'min':'full'); render(); },
     panMin(){ E.state.panMin = !E.state.panMin; ls.set('eko-pan', E.state.panMin?'min':'full'); render(); },
     regMin(){ E.state.regMin = !E.state.regMin; ls.set('eko-reg', E.state.regMin?'min':'full'); render(); },
     mobMore(){ E.set({ born: E.state.mobMore?null:'dlg', mobMore: !E.state.mobMore }); },

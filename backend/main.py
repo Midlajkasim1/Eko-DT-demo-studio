@@ -7,13 +7,16 @@ Also serves the compiled viewer app from the 'static/' directory.
 
 import asyncio
 import copy
+import hashlib
 import json
 import mimetypes
 import os
 import re
+import secrets
 import sqlite3
+import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from urllib.parse import quote, unquote
 
@@ -676,6 +679,21 @@ async def lifespan(app: FastAPI):
         await client.close()
 
 
+# Whatever replaces or reconfigures the shared FIN connection (a sign-in, a project switch, the last sign-out) runs one at a
+# time: they all await FIN in the middle of changing the client, the project, the caches and the polling, and two of them
+# interleaving would leave a mix of both. The lock belongs to the running event loop (the tests start a new loop per client).
+_fin_lock_loop: Optional[asyncio.AbstractEventLoop] = None
+_fin_lock_obj: Optional[asyncio.Lock] = None
+
+
+def _fin_lock() -> asyncio.Lock:
+    global _fin_lock_loop, _fin_lock_obj
+    loop = asyncio.get_running_loop()
+    if _fin_lock_obj is None or _fin_lock_loop is not loop:
+        _fin_lock_loop, _fin_lock_obj = loop, asyncio.Lock()
+    return _fin_lock_obj
+
+
 def _cancel_polling():
     global polling_tasks
     for task in polling_tasks:
@@ -685,7 +703,10 @@ def _cancel_polling():
 
 
 def _start_polling():
+    """Start the polling loops for the shared FIN client. The set already running is stopped first, so there are never
+    two sets (a replaced list would leave the old loops running with nothing holding them)."""
     global polling_tasks
+    _cancel_polling()
     polling_tasks = [
         asyncio.create_task(realtime_loop()),
         asyncio.create_task(live_loop()),
@@ -855,47 +876,133 @@ def _display_name() -> str:
     return PROJECT_NAME
 
 
+# ─── User sessions ──────────────────────────────────────────────────────────
+# Who is at this browser: the FIN username FIN just accepted at /api/fin/login (SCRAM: FIN checked
+# the password), never a name a request states. The FIN *polling* session stays one, shared: the
+# last sign-in drives it, as before. A user session only says who this browser is and which FIN
+# project (site) that sign-in was for.
+# ponytail: sessions live in this process's memory, so a backend restart signs everyone out. The FIN
+# session they rely on does not survive a restart either; persist them only if that changes.
+SESSION_COOKIE = "eko_session"
+SESSIONS: dict[str, dict] = {}   # sha256(token) -> {"user_id", "site", "expires_at"}; the token itself is never kept
+POLL_OWNER: Optional[str] = None  # the user whose FIN credentials the shared polling session uses
+
+
+def _session_seconds() -> int:
+    hours = BASE_CONFIG.get("session_hours", 12)
+    return int(hours * 3600) if isinstance(hours, (int, float)) and not isinstance(hours, bool) and 0 < hours <= 24 * 30 else 12 * 3600
+
+
+def _token_key(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _drop_expired() -> None:
+    now = time.time()
+    for key in [k for k, v in SESSIONS.items() if v["expires_at"] <= now]:
+        del SESSIONS[key]
+
+
+def _open_session(request: Request, response: Response, user_id: str, site: str) -> None:
+    """A new sign-in at this browser replaces its previous session; other browsers' are untouched."""
+    _drop_expired()
+    old = request.cookies.get(SESSION_COOKIE)
+    if old:
+        SESSIONS.pop(_token_key(old), None)
+    token = secrets.token_urlsafe(32)
+    ttl = _session_seconds()
+    SESSIONS[_token_key(token)] = {"user_id": user_id, "site": site, "expires_at": time.time() + ttl}
+    https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https"
+    response.set_cookie(SESSION_COOKIE, token, max_age=ttl, httponly=True, samesite="strict", secure=https, path="/")
+
+
+def _session_of(request: Request) -> tuple[Optional[dict], Optional[str]]:
+    """(session, None), or (None, "session_required" | "session_expired"). Only the cookie counts."""
+    token = request.cookies.get(SESSION_COOKIE)
+    found = SESSIONS.get(_token_key(token)) if token else None
+    if found is None:
+        return None, "session_required"
+    if found["expires_at"] <= time.time():
+        SESSIONS.pop(_token_key(token), None)
+        return None, "session_expired"
+    return found, None
+
+
+def _close_session(request: Request, response: Response) -> None:
+    token = request.cookies.get(SESSION_COOKIE)
+    if token:
+        SESSIONS.pop(_token_key(token), None)
+    response.delete_cookie(SESSION_COOKIE, path="/")
+
+
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
-@app.post("/api/fin/login")
-async def login(req: LoginRequest):
-    """Authenticate with FIN server using SCRAM-SHA-256."""
-    global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK, TYPED_NAME, STANDARD_VERIFIED
-    STANDARD_VERIFIED = None   # a new session proves the standard site again (below), or not at all
+def _login_target(req, managed: bool, typed: str) -> tuple[str, str]:
+    """(FIN server, FIN project) a sign-in is for, worked out WITHOUT touching the active configuration: the
+    project's own settings when the Studio sent them, else what is active now."""
+    if managed:
+        overrides = project_overrides(req.settings)
+        base_url = overrides.get("fin_server_url") or BASE_CONFIG.get("fin_server_url", "https://localhost")
+        base_name = overrides.get("project_name") or BASE_CONFIG["project_name"]
+        has_name = "project_name" in overrides
+    else:
+        base_url, base_name, has_name = FIN_SERVER_URL, PROJECT_NAME, True
+    server_url = req.server_url or base_url
+    if managed and not typed and not has_name:
+        return server_url, ""   # this project has no FIN Project Name: unconfigured, not the default site
+    return server_url, typed or base_name
 
+
+@app.post("/api/fin/login")
+async def login(req: LoginRequest, request: Request, response: Response):
+    """Authenticate with FIN server using SCRAM-SHA-256. Success also opens this browser's user
+    session (HttpOnly cookie) for the username FIN accepted."""
     # Settings sent with the login belong to the Studio project being opened, and only they
     # configure it. Without them the configuration already active (bundled project or
     # config.json) stays in force
     managed = req.settings is not None
     typed = (req.project_name or "").strip()
+    server_url, project = _login_target(req, managed, typed)
+
+    # FIN is asked first, with a client of its own: a wrong password (anyone's) must not disconnect the users who are
+    # signed in, stop their polling, empty their data or change the project the backend serves
+    candidate = FinScramClient(server_url, project)
+    if not await candidate.authenticate(req.username, req.password):
+        await candidate.close()
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    try:
+        async with _fin_lock():
+            return await _install_login(req, request, response, candidate, managed, typed, server_url, project)
+    except BaseException:
+        if client is not candidate:   # it never became the shared client (the request ended while it waited)
+            try:
+                await candidate.close()
+            except Exception:
+                pass
+        raise
+
+
+async def _install_login(req, request: Request, response: Response, candidate, managed: bool, typed: str,
+                         server_url: str, project: str):
+    """FIN accepted the sign-in: only now does anything shared change. Runs under _fin_lock, so no other sign-in, project
+    switch or sign-out changes the client, the project or the polling while this one is part way through."""
+    global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK, TYPED_NAME, STANDARD_VERIFIED, POLL_OWNER
+    STANDARD_VERIFIED = None   # a new session proves the standard site again (below), or not at all
     if managed:
         # its own mappings until the signed-in session proves it reads config.json's site (below)
         apply_studio_settings(req.settings, req.project_id, standard=False)
-
-    server_url = req.server_url or FIN_SERVER_URL
-    if managed and not typed and "project_name" not in ACTIVE_OVERRIDES:
-        project = ""   # this project has no FIN Project Name: unconfigured, not the default site
-    else:
-        project = typed or PROJECT_NAME
     TYPED_NAME = (req.project_id, typed) if managed and typed else None
-
-    # Update globals if overridden
     FIN_SERVER_URL = server_url
     PROJECT_NAME = project
     name_source = _name_source(bool(typed))
 
     _cancel_polling()
     _reset_caches()
-
-    # Close existing client
-    if client:
-        await client.close()
-
-    client = FinScramClient(server_url, project)
-    success = await client.authenticate(req.username, req.password)
-
-    if not success:
-        raise HTTPException(status_code=401, detail="Authentication failed")
+    previous, client = client, candidate
+    if previous:
+        await previous.close()
+    POLL_OWNER = req.username
 
     # Signed in is not the same as usable: the project name must resolve on this server too.
     # With no project name there is nothing to check or poll.
@@ -907,6 +1014,7 @@ async def login(req: LoginRequest):
         _start_polling()
     else:
         PROJECT_CHECK = {"validated": None, "source": name_source}
+    _open_session(request, response, req.username, candidate.project_name or "")   # this sign-in's own project
 
     return {
         "status": "success",
@@ -918,14 +1026,28 @@ async def login(req: LoginRequest):
 
 
 @app.post("/api/fin/project-settings")
-async def set_project_settings(req: ProjectSettingsRequest):
+async def set_project_settings(req: ProjectSettingsRequest, request: Request):
     """Switch the live session to another project's FIN configuration, without a new sign-in.
 
     Needs an authenticated session, since it changes what the shared session polls.
     The FIN server cannot change here — that needs a fresh sign-in, so it is reported.
     """
+    _require_user(request)
+    async with _fin_lock():
+        _require_client()   # a sign-out while this waited for its turn
+        # The old polling stops first: a poll still running while the project changes would read the new project's name
+        # for the old project's answer, and record its alarms and notifications under the wrong project
+        _cancel_polling()
+        try:
+            return await _switch_project(req, request)
+        except BaseException:
+            if client and client.is_authenticated and PROJECT_NAME:
+                _start_polling()   # a failed switch must not leave the backend without polling
+            raise
+
+
+async def _switch_project(req: ProjectSettingsRequest, request: Request):
     global FIN_SERVER_URL, PROJECT_CHECK, PROJECT_NAME, TYPED_NAME
-    _require_client()
 
     # A project without its own FIN Project Name is unconfigured, except for the name typed at
     # sign-in for this same project. Never the config.json default, never another project's name.
@@ -956,6 +1078,11 @@ async def set_project_settings(req: ProjectSettingsRequest):
     _reset_caches()
     if PROJECT_NAME:
         _start_polling()
+    # The switch was validated with the polling session's FIN credentials: only their owner's own
+    # user session moves to the new site. Anyone else's stays on the site they signed in for.
+    mine, _ = _session_of(request)
+    if mine and mine["user_id"] == POLL_OWNER:
+        mine["site"] = client.project_name or ""
 
     return {
         "status": "success",
@@ -967,14 +1094,14 @@ async def set_project_settings(req: ProjectSettingsRequest):
 
 
 @app.get("/api/fin/project-settings")
-async def get_project_settings():
+async def get_project_settings(request: Request):
     """The configuration the backend is serving right now, and where each block comes from.
 
     Needs a session: it returns point IDs. `source` is "project" when the open project
     supplies the block, "default" when config.json does (standalone / default site only), and
     "not_configured" when a Studio project has not set it (its config is then empty).
     """
-    _require_client()
+    _require_user(request)
     blocks = ["live_point_ids", "power_endpoints", "equipment_classes", "meter_profile", "severity_bands"]
     return {
         "project_id": ACTIVE_PROJECT_ID,
@@ -1069,9 +1196,9 @@ def _meter_items(profile: dict) -> dict:
 
 
 @app.post("/api/fin/validate-mapping")
-async def validate_mapping(req: ValidateMappingRequest):
+async def validate_mapping(request: Request, req: ValidateMappingRequest):
     """Check the given mapping blocks against the FIN project this session is signed in to."""
-    _require_client()
+    _require_user(request)
     # The session serves one project at a time; refuse rather than check another project's mappings
     if req.project_id != ACTIVE_PROJECT_ID:
         raise HTTPException(status_code=409, detail="The backend is serving a different project.")
@@ -1150,7 +1277,7 @@ def _fin_failure(status: Optional[int], text: Optional[str], what: str) -> HTTPE
 
 
 @app.get("/api/fin/projects")
-async def get_fin_projects():
+async def get_fin_projects(request: Request):
     """The projects on the FIN server: [{"id": "marsaAlArab", "name": "..."}].
 
     `id` is the identifier FIN uses in `/api/{id}/...`; `name` is only for display. The request is
@@ -1158,7 +1285,7 @@ async def get_fin_projects():
     page makes needs a browser-issued Attest-Key, which a backend session does not have.) The
     endpoint and expression come from config.json `project_discovery`.
     """
-    _require_client()
+    _require_user(request)
     cfg = CONFIG.get("project_discovery") or {}
     endpoint = str(cfg.get("endpoint") or "").strip()
     expr = str(cfg.get("expr") or "").strip()
@@ -1175,14 +1302,14 @@ async def get_fin_projects():
 
 
 @app.get("/api/fin/resources")
-async def get_fin_resources(project: str):
+async def get_fin_resources(request: Request, project: str):
     """The points of ONE FIN project, for the Data Mapping pickers.
 
     Read-only, and keyed by the `project` asked about, never the session's: choosing a project
     in Dashboard Settings loads that project's own points before anything is saved.
     `ref` is the point ID with the project name written as {project}, ready to store in a mapping.
     """
-    _require_client()
+    _require_user(request)
     if not PROJECT_ID_RE.match(project):
         raise HTTPException(status_code=400, detail="Not a FIN project identifier.")
     template = (CONFIG.get("realtime_endpoints") or {}).get("points")
@@ -1290,10 +1417,17 @@ def _attach_workorders():
 CRITICAL_ALARM = "alarm.critical"
 
 
+def _critical_alarms_enabled(store, site: str) -> bool:
+    """Whether this SITE creates critical-alarm notifications: config.json's critical_alarm_sites lists
+    its FIN project AND its own alarm.critical toggle is on. No user's preference enters into it."""
+    allowed = site in [s for s in (BASE_CONFIG.get("critical_alarm_sites") or []) if isinstance(s, str)]
+    return allowed and store.project_wants(site, CRITICAL_ALARM, default=False)
+
+
 def _note_critical_alarms(site: str, alarms: list, read_ok: bool) -> None:
     """Contract trigger "critical alarm": only when the site allows it (config.json
-    critical_alarm_sites lists its FIN project) AND the project's alarm.critical toggle is on; both
-    are off by default. One row per open critical FIN alarm, keyed by FIN's own id (an alarm with
+    critical_alarm_sites lists its FIN project) AND the project's alarm.critical toggle is on (the
+    site's baseline setting, not any user's preference); both are off by default. One row per open critical FIN alarm, keyed by FIN's own id (an alarm with
     no id is not notified), resolved once FIN stops reporting it. A failed or error read changes
     nothing: an answer FIN did not give is not "all clear"."""
     if not read_ok or not site:
@@ -1305,8 +1439,7 @@ def _note_critical_alarms(site: str, alarms: list, read_ok: bool) -> None:
         for asset, state in store.active_states(site, CRITICAL_ALARM):   # cleared since the last poll
             if state not in open_now:
                 store.condition(site, CRITICAL_ALARM, False, asset_id=asset, state=state, source_ref=state, **fields)
-        allowed = site in [s for s in (BASE_CONFIG.get("critical_alarm_sites") or []) if isinstance(s, str)]
-        if not allowed or not store.wants(notifications.project_recipient(site), CRITICAL_ALARM, default=False):
+        if not _critical_alarms_enabled(store, site):
             return
         for fin_id, a in open_now.items():
             store.condition(site, CRITICAL_ALARM, True, asset_id=a.get("source") or None, state=fin_id,
@@ -1355,8 +1488,9 @@ async def refresh_workorders():
 # cannot pick it. X-Eko-Project names the Eko-DT project the browser shows: it must equal the one
 # the backend serves, so a dashboard left on another project is refused rather than served this
 # one, and being a custom header it forces a CORS preflight that foreign origins fail.
-# ponytail: read/dismissed/preference state belongs to the PROJECT (one shared recipient), not to a
-# person: there is no per-user FIN identity yet. Upgrade to per-user recipients with sign-in identity.
+# Read, dismissed and preference state belongs to the signed-in USER on this site: the user id comes
+# from the server-side session (the username FIN accepted), never from the request. Events are still
+# created once per site from the one shared FIN polling session (see backend/README.md).
 
 NOTIF_BASE = "/api/notifications/v1"
 
@@ -1376,9 +1510,14 @@ async def _notification_error(request: Request, exc: NotificationApiError):
 
 
 def _notification_scope(request: Request) -> tuple[str, str]:
-    """(recipient, site) for this request, taken only from the backend's own session."""
+    """(user id, site) for this request, taken only from the backend's own sessions: the FIN
+    session it polls with, and this browser's user session (cookie), whose site must be the one
+    served. Nothing a request states (a user id, a role, a site) is read."""
     if not client or not client.is_authenticated:
         raise NotificationApiError(401, "unauthenticated", "The backend is not signed in to FIN.")
+    user, why = _session_of(request)
+    if user is None:
+        raise NotificationApiError(401, why, "Sign in to see notifications.")
     asked = request.headers.get(PROJECT_HEADER)
     if not asked:
         raise NotificationApiError(400, "project_required", f"The {PROJECT_HEADER} header is required.")
@@ -1387,7 +1526,10 @@ def _notification_scope(request: Request) -> tuple[str, str]:
     site = client.project_name or ""
     if not notifications.SITE_RE.match(site) or PROJECT_CHECK.get("validated") is not True:
         raise NotificationApiError(409, "project_not_validated", "The open project is not validated on FIN.")
-    return notifications.project_recipient(site), site
+    if user["site"] != site:
+        raise NotificationApiError(409, "session_project_mismatch",
+                                   "You signed in for another project. Sign in again for this one.")
+    return user["user_id"], site
 
 
 def _notif_call(op):
@@ -1417,7 +1559,7 @@ async def notifications_list(request: Request, response: Response, view: str = "
         who, site, view=view, type_=type_, severity=severity, asset_id=asset_id, q=q,
         limit=int(limit) if limit.lstrip("-").isdigit() else limit, cursor=cursor))
     page["unread_count"] = _notif_call(lambda s: s.unread_count(who, site))
-    page["scope"] = "project"   # state shared by everyone viewing this project
+    page["scope"] = "user"   # read and dismissed state of the signed-in user on this project
     return page
 
 
@@ -1463,11 +1605,24 @@ async def notifications_dismiss_opened(request: Request, response: Response):
     return {"updated": _notif_call(lambda s: s.dismiss_opened(who, site))}
 
 
+def _preferences_answer(who: str, site: str) -> dict:
+    """The signed-in user's own preferences, plus read-only facts about the SITE next to them so the
+    page can tell the two apart. site.critical_alarms is true/false, or null when it cannot be read
+    (never assumed on). Nothing in a request can change the site part."""
+    answer = _notif_call(lambda s: s.get_preferences(who, site))
+    try:
+        enabled = _critical_alarms_enabled(notifications.store(), site)
+    except (notifications.StoreError, sqlite3.Error, ValueError):
+        enabled = None
+    answer["site"] = {"critical_alarms": enabled}
+    return answer
+
+
 @app.get(NOTIF_BASE + "/preferences")
 async def notifications_preferences(request: Request, response: Response):
     who, site = _notification_scope(request)
     _stamp(response)
-    return _notif_call(lambda s: s.get_preferences(who))
+    return _preferences_answer(who, site)
 
 
 @app.put(NOTIF_BASE + "/preferences")
@@ -1480,24 +1635,22 @@ async def notifications_preferences_update(request: Request, response: Response)
         raise NotificationApiError(400, "invalid_input", "The body must be JSON.")
     if not isinstance(body, dict) or set(body) - {"master_enabled", "types"}:
         raise NotificationApiError(400, "invalid_input", "Only master_enabled and types can be set.")
-    return _notif_call(lambda s: s.update_preferences(
-        who, master_enabled=body.get("master_enabled"), types=body.get("types")))
+    _notif_call(lambda s: s.update_preferences(who, site, master_enabled=body.get("master_enabled"), types=body.get("types")))
+    return _preferences_answer(who, site)
 
 
 @app.get("/api/fin/workorders")
-async def get_workorders(response: Response):
+async def get_workorders(request: Request, response: Response):
     """Live PPM rows. Empty until the FIN read succeeds."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     _stamp(response)
     return {**(cached_workorders or {"timestamp": None, "source": "fin", "orders": [], "error": ""}), "state": _workorder_state()}
 
 
 @app.get("/api/fin/equip-live")
-async def get_equip_live(response: Response):
+async def get_equip_live(request: Request, response: Response):
     """Get live equipment data (floor-wise with points and alarms)."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     _stamp(response)
     if cached_equip_data:
         _attach_workorders()
@@ -1505,37 +1658,33 @@ async def get_equip_live(response: Response):
 
 
 @app.get("/api/fin/power-live")
-async def get_power_live(response: Response):
+async def get_power_live(request: Request, response: Response):
     """Get live power/energy/sensor data."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     _stamp(response)
     return cached_power_data or {}
 
 
 @app.get("/api/fin/power-history")
-async def get_power_history(response: Response):
+async def get_power_history(request: Request, response: Response):
     """Get the historian series. Refreshed once per realtime cycle, not per live poll."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     _stamp(response)
     return cached_power_history or {}
 
 
 @app.get("/api/fin/pmu-live")
-async def get_meter_live(response: Response):
+async def get_meter_live(request: Request, response: Response):
     """Get power-meter equipment metrics keyed by meter name."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     _stamp(response)
     return cached_meter_data
 
 
 @app.get("/api/fin/alarms")
-async def get_alarms(response: Response):
+async def get_alarms(request: Request, response: Response):
     """Get the flat active-alarm list with counts by severity."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     _stamp(response)
     return cached_alarm_data or {
         "timestamp": None,
@@ -1553,17 +1702,12 @@ BLOCKED_EXPR = re.compile(
 
 
 @app.get("/api/fin/eval")
-async def eval_read(expr: str):
+async def eval_read(request: Request, expr: str):
     """Read-only Axon passthrough for history charts and trends."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     if len(expr) > 2000 or not READ_ONLY_EXPR.match(expr) or BLOCKED_EXPR.search(expr):
         raise HTTPException(status_code=400, detail="Only readById, readAll, and hisRead expressions are allowed")
-    text = await client.fetch_api(
-        f"/api/{client.project_name}/eval?expr={quote(expr, safe='')}", is_text=True
-    )
-    if text is None:
-        raise HTTPException(status_code=502, detail="FIN request failed")
+    text = await _user_read(f"/api/{client.project_name}/eval?expr={quote(expr, safe='')}")
     return PlainTextResponse(text, media_type="text/zinc")
 
 
@@ -1660,10 +1804,33 @@ async def write_point(req: PointWriteRequest):
     }
 
 
-@app.get("/api/fin/his-points")
-async def get_his_points():
-    """Catalogue of historized points for the History Charts picker."""
+async def _user_read(path: str) -> str:
+    """A FIN read for one user's request (an expression or point they chose). FIN refusing it (401/403: not allowed for
+    the shared account) answers that request with 403; unlike the polling reads it never marks the shared FIN session ended."""
+    status, text = await client.fetch_probe(path)
+    if status is None or text is None:
+        raise HTTPException(status_code=502, detail="FIN request failed")
+    if status in (401, 403):
+        raise HTTPException(status_code=403, detail="FIN refused this request")
+    if status != 200:
+        raise HTTPException(status_code=502, detail="FIN request failed")
+    return text
+
+
+def _require_user(request: Request) -> dict:
+    """The backend is signed in to FIN AND this browser has its own user session (cookie). The backend being
+    connected for somebody else is not enough: live data, configuration and the FIN passthrough are for signed-in users."""
     _require_client()
+    user, _why = _session_of(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+
+@app.get("/api/fin/his-points")
+async def get_his_points(request: Request):
+    """Catalogue of historized points for the History Charts picker."""
+    _require_user(request)
     out = []
     for row in client.last_point_rows or []:
         if row.get("his") is not True:
@@ -1683,20 +1850,16 @@ async def get_his_points():
 
 
 @app.get("/api/fin/point-history")
-async def get_point_history(id: str, days: int = 7):
+async def get_point_history(request: Request, id: str, days: int = 7):
     """hisRead one point and return the same nested shape as power_history."""
-    _require_client()
+    _require_user(request)
     pid = id.lstrip("@")
     if not POINT_ID_RE.match(pid):
         raise HTTPException(status_code=400, detail="Invalid point id")
     days = max(1, min(int(days), 365))
     start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     expr = f"hisRead(@{pid},{start}..today(),{{-limit}})"
-    text = await client.fetch_api(
-        f"/api/{client.project_name}/eval?expr={quote(expr, safe='')}", is_text=True
-    )
-    if text is None:
-        raise HTTPException(status_code=502, detail="FIN request failed")
+    text = await _user_read(f"/api/{client.project_name}/eval?expr={quote(expr, safe='')}")
     parsed = parse_custom_response(text)
     return {
         "id": pid,
@@ -1709,13 +1872,13 @@ async def get_point_history(id: str, days: int = 7):
 
 
 @app.get("/api/fin/alarm-history")
-async def get_alarm_history(response: Response, days: int = 30):
+async def get_alarm_history(request: Request, response: Response, days: int = 30):
     """Alarm counts by day and severity. Empty when FIN retains no history.
 
     Defaults to 30 days: at Marsa a 7-day window catches 4 of 343 retained
     alarms and hides the 6 July cooling-valve event (196 alarms) entirely.
     """
-    _require_client()
+    _require_user(request)
     _stamp(response)
     days = max(1, min(int(days), 90))
     start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -1725,61 +1888,6 @@ async def get_alarm_history(response: Response, days: int = 30):
     )
     if text is None:
         raise HTTPException(status_code=502, detail="FIN request failed")
-    # ── TEMP-DIAG alarm-history: remove after investigation ──
-    parsed_rows = parse_zinc_csv(text)
-    print(
-        "[TEMP-DIAG alarm-history]",
-        {
-            "raw_chars": len(text),
-            "parsed_rows": len(parsed_rows),
-            "columns": sorted(   # names only: parse_zinc_csv can take an error grid's text as its header
-                {key for row in parsed_rows for key in row.keys() if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)}
-            ),
-            "alarm_types": sorted(
-                {type(row.get("alarm")).__name__ for row in parsed_rows}
-            ),
-            "alarm_true_count": sum(
-                row.get("alarm") is True for row in parsed_rows
-            ),
-        },
-    )
-    # Response shape, names and flags only: quoted values are blanked and unquoted values dropped.
-    # HTTP status is 200 by construction (fetch_api returns text only for 200).
-    from fin_client import _split_zinc_csv, collapse_metadata_blocks
-    _lines = [l.strip() for l in collapse_metadata_blocks(text.lstrip("\ufeff")).splitlines() if l.strip()]
-    _first = _lines[0] if _lines else ""
-    _zinc = _first.startswith("ver:")
-    _bare = re.sub(r'"(?:\\.|[^"\\])*"', '""', _first) if _zinc else ""
-    _ident = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-    _meta = sorted({t.split(":", 1)[0] for t in _bare.split()[1:] if _ident.match(t.split(":", 1)[0])})
-    _cols = ([c for c in (x.strip().split(" ", 1)[0] for x in _split_zinc_csv(_lines[1])) if _ident.match(c)]
-             if _zinc and len(_lines) > 1 else [])
-    print(
-        "[TEMP-DIAG alarm-history shape]",
-        {
-            "lines": len(_lines),
-            "zinc_grid": _zinc,
-            "starts_as": ("blank" if not _first else "zinc" if _zinc else "html" if _first[0] == "<"
-                          else "json" if _first[0] in "{[" else "other"),
-            "error_grid": _zinc and "err" in _meta,
-            "grid_meta_names": _meta,
-            "column_names": _cols,
-            "data_lines": max(0, len(_lines) - 2) if _zinc else None,
-            # Numeric counts only; never print the pollHandle value.
-            "counts": {
-                n: float(m.group(1))
-                for n in ("resultCount", "totalRecordCount")
-                if (
-                    m := re.search(
-                        rf"(?:^|\s){n}:(-?\d+(?:\.\d+)?)(?=\s|$)",
-                        _bare,
-                    )
-                )
-            },
-            "poll_handle_present": "pollHandle" in _meta,
-        },
-    )
-    # ── end TEMP-DIAG alarm-history ──
 
     bands = CONFIG.get("severity_bands", {})
     by_day: dict[str, dict] = {}
@@ -1821,29 +1929,35 @@ async def get_alarm_history(response: Response, days: int = 30):
 
 
 @app.get("/api/fin/building-info")
-async def get_building_info():
+async def get_building_info(request: Request):
     """Get full building data with history."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     return cached_building_data or {}
 
 
 @app.post("/api/fin/logout")
-async def logout():
-    """End the FIN session. The server process stays up so the operator can sign in again."""
-    global client, PROJECT_CHECK, STANDARD_VERIFIED
-    STANDARD_VERIFIED = None
-    _cancel_polling()
-    # Drop the reference before the await so a second sign-out does not close the same client twice.
-    current = client
-    client = None
-    PROJECT_CHECK = {"validated": None, "source": None}
-    if current:
-        try:
-            await current.close()
-        except Exception:
-            pass
-    return {"status": "disconnected"}
+async def logout(request: Request, response: Response):
+    """End this browser's user session. The shared FIN session closes only when no other user is
+    still signed in. The server process stays up so the operator can sign in again."""
+    global client, PROJECT_CHECK, STANDARD_VERIFIED, POLL_OWNER
+    _close_session(request, response)
+    async with _fin_lock():   # not while a sign-in or a project switch is part way through changing the shared connection
+        _drop_expired()
+        if SESSIONS:
+            return {"status": "signed_out", "fin": "connected for other users"}
+        POLL_OWNER = None
+        STANDARD_VERIFIED = None
+        _cancel_polling()
+        # Drop the reference before the await so a second sign-out does not close the same client twice.
+        current = client
+        client = None
+        PROJECT_CHECK = {"validated": None, "source": None}
+        if current:
+            try:
+                await current.close()
+            except Exception:
+                pass
+        return {"status": "disconnected"}
 
 
 @app.get("/api/fin/documents")
@@ -1854,10 +1968,9 @@ async def get_documents(response: Response):
 
 
 @app.get("/api/fin/file")
-async def get_fin_file(ref: str, download: int = 0):
+async def get_fin_file(request: Request, ref: str, download: int = 0):
     """Stream a catalog PDF through the FIN session that is already signed in."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     if not re.fullmatch(r"@p:[A-Za-z0-9_]+:r:[0-9a-fA-F-]+", ref or ""):
         raise HTTPException(status_code=404, detail="Unknown document")
     doc = _catalog_doc(ref) if _ref_project(ref) == client.project_name else None
@@ -1923,13 +2036,26 @@ async def auth_status():
 
 
 @app.post("/api/auth/login")
-async def auth_login(req: LoginRequest):
-    return await login(req)
+async def auth_login(req: LoginRequest, request: Request, response: Response):
+    return await login(req, request, response)
 
 
 @app.post("/api/auth/logout")
-async def auth_logout():
-    return await logout()
+async def auth_logout(request: Request, response: Response):
+    return await logout(request, response)
+
+
+@app.get("/api/auth/me")
+@app.get("/api/fin/me")
+async def me(request: Request):
+    """Who this browser is signed in as: from the session cookie only. The role is the site's own
+    mapping (eko_role_mapping), None when nobody has mapped one; never one the browser names."""
+    found, why = _session_of(request)
+    if found is None:
+        raise NotificationApiError(401, why, "Sign in to see who you are signed in as.")
+    role = _notif_call(lambda s: s.role_of(found["site"], found["user_id"])) if found["site"] else None
+    return {"user_id": found["user_id"], "site": found["site"], "role": role,
+            "expires_at": notifications.utc_iso(datetime.fromtimestamp(found["expires_at"], timezone.utc))}
 
 
 # ─── Static Viewer App ────────────────────────────────────────────────────────

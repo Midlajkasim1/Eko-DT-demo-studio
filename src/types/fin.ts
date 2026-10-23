@@ -96,6 +96,14 @@ export interface FinStatusResponse {
   project_id?: string | null
 }
 
+/** /api/auth/me: who this browser is signed in as. The role is the site's own mapping (null when none). */
+export interface FinSession {
+  user_id: string
+  site: string
+  role: string | null
+  expires_at: string
+}
+
 export interface FinLoginRequest {
   username: string
   password: string

@@ -10,6 +10,8 @@ export function FinLoginPanel() {
   const login = useFinStore(s => s.login)
   const logout = useFinStore(s => s.logout)
   const fetchStatus = useFinStore(s => s.fetchStatus)
+  const session = useFinStore(s => s.session)
+  const sessionCheck = useFinStore(s => s.sessionCheck)
 
   const [serverUrl, setServerUrl] = useState('https://localhost')
   const [username, setUsername] = useState('')
@@ -21,9 +23,13 @@ export function FinLoginPanel() {
   const projectId = useProjectStore(s => s.currentProject?.projectId)
   const apiSettings = useProjectStore(s => s.currentProject?.apiSettings)
 
-  // Check backend status on mount
+  // On mount, and whenever this browser signs in or out elsewhere (the dashboard's Sign out): the
+  // server says whether THIS browser is signed in. FIN being connected by someone else is not enough.
   useEffect(() => {
     fetchStatus()
+    const recheck = () => { void fetchStatus() }
+    window.addEventListener('eko-auth-changed', recheck)
+    return () => window.removeEventListener('eko-auth-changed', recheck)
   }, [fetchStatus])
 
   // A connected session follows the open project: switching projects or saving
@@ -73,6 +79,7 @@ export function FinLoginPanel() {
           </div>
         )}
         <div className="fin-connected-info">
+          {session && <span className="fin-server-url" data-testid="fin-signed-in-as">Signed in as {session.user_id}</span>}
           <span className="fin-project-name">{status?.display_name || status?.project_name || 'FIN'}</span>
           <span className="fin-server-url">{status?.server_url || serverUrl}</span>
           {status?.project_source === 'default' && (
@@ -96,6 +103,18 @@ export function FinLoginPanel() {
         </svg>
         <h3>FIN Connect</h3>
       </div>
+
+      {status?.connected && sessionCheck === 'signed_out' && (
+        <div className="fin-validated" data-testid="fin-shared-hint" style={{ fontSize: '12px', opacity: 0.85 }}>
+          FIN is already connected from another browser. Sign in to use it in this one.
+        </div>
+      )}
+      {sessionCheck === 'error' && (
+        <div className="fin-error" role="alert" data-testid="fin-session-error">
+          Your sign-in could not be checked (server or network error).
+          <button type="button" className="fin-advanced-toggle" onClick={() => { void fetchStatus() }}>Retry</button>
+        </div>
+      )}
 
       <form className="fin-login-form" onSubmit={handleLogin}>
         <div className="fin-field">

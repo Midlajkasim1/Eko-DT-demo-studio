@@ -3,6 +3,7 @@ import { useModelStore } from '@/store/useModelStore'
 import { useProjectStore } from '@/store/useProjectStore'
 import { useAppStore } from '@/store/useAppStore'
 import { useMapStore } from '@/store/useMapStore'
+import { useFinStore } from '@/store/useFinStore'
 import { unloadAllModels } from '@/lib/sceneTeardown'
 import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
@@ -17,7 +18,7 @@ export function attachDevBridge(engineRef: React.MutableRefObject<FragmentsEngin
 
   ;(window as any).__twin = {
     get engine() { return engineRef.current },
-    stores: { model: useModelStore, project: useProjectStore, app: useAppStore, map: useMapStore },
+    stores: { model: useModelStore, project: useProjectStore, app: useAppStore, map: useMapStore, fin: useFinStore },
 
     loadedModelIds() {
       const engine = engineRef.current
