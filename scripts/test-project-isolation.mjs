@@ -77,7 +77,12 @@ try {
     const root = await navigator.storage.getDirectory(); const dir = await root.getDirectoryHandle(id)
     return JSON.parse(await (await (await dir.getFileHandle('project.json')).getFile()).text())
   }, id)
-  const backend = async p => (await fetch(API + p)).json()
+  // what the signed-in browser itself would read: the backend's data routes need that browser's own session cookie
+  const asBrowser = async p => {
+    const c = (await page.context().cookies()).find(k => k.name === 'eko_session')
+    return fetch(API + p, c ? { headers: { cookie: `${c.name}=${c.value}` } } : {})
+  }
+  const backend = async p => (await asBrowser(p)).json()
 
   const section = t => page.locator('.ds-field', { has: page.locator(`h3:text-is("${t}")`) }).last()
   const rows = async t => section(t).locator('input[aria-label="Key"]').evaluateAll(ks =>
@@ -132,7 +137,7 @@ try {
       alarms[0].severity === (s.finSeverityBands.order === 'desc' ? 'warning' : 'critical'),
       `${label}: API output follows ${meta.name} (total_power=${power}, history=${hist}, severity=${alarms[0].severity})`)
     // the dashboard drops data stamped for another project, so the stamp must name this one
-    const stamp = (await fetch(API + '/api/fin/power-live')).headers.get('x-eko-project')
+    const stamp = (await asBrowser('/api/fin/power-live')).headers.get('x-eko-project')
     check(stamp === meta.projectId, `${label}: live data is stamped for ${meta.projectId} (got ${stamp})`)
   }
 

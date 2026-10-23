@@ -70,6 +70,21 @@ session (401) or one signed in for another project (409). A user id or role in a
 read.
 
 - There is still one FIN connection, used for polling: the latest sign-in's credentials drive it.
+- **Which routes need a session.** Every route that reads FIN data or steers the shared connection needs the
+  browser's own session cookie, not merely a backend that someone else connected: live data (`equip-live`,
+  `power-live`, `power-history`, `pmu-live`, `alarms`, `workorders`, `building-info`, `alarm-history`,
+  `his-points`, `point-history`), `eval`, `file`, `projects`, `resources`, `validate-mapping` and
+  `project-settings` (GET and POST). A browser without one gets 401. Public on purpose: `/login`,
+  `/project.json`, the models, textures and static viewer, `status`, `auth/status`, `config`, `mapping-schema`,
+  `documents`, and the sign-in and sign-out routes themselves.
+- **A failed sign-in changes nothing.** FIN is asked first, with a client of its own. Only a success replaces the
+  shared client, applies the project's settings, stops and restarts polling and empties the caches. A wrong
+  password (anyone's) no longer disconnects the signed-in users.
+- **FIN credentials go only to the FIN server.** A request to another host (an absolute URL in configuration) is
+  refused. A user's own `eval` or `point-history` request that FIN refuses (401/403) answers that request with
+  403; it no longer marks the shared FIN session as ended for everybody.
+- **A project switch stops the old polling first**, so a poll still running cannot record alarms and
+  notifications for the old project under the new one.
 - Signing out ends only that browser's session. The FIN connection closes when the last signed-in
   user signs out; a sign-out from a browser with no session changes nothing.
 - Sessions are kept in memory: restarting the backend signs everyone out (as the FIN connection

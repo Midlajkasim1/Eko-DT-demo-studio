@@ -666,6 +666,21 @@ async def lifespan(app: FastAPI):
         await client.close()
 
 
+# Whatever replaces or reconfigures the shared FIN connection (a sign-in, a project switch, the last sign-out) runs one at a
+# time: they all await FIN in the middle of changing the client, the project, the caches and the polling, and two of them
+# interleaving would leave a mix of both. The lock belongs to the running event loop (the tests start a new loop per client).
+_fin_lock_loop: Optional[asyncio.AbstractEventLoop] = None
+_fin_lock_obj: Optional[asyncio.Lock] = None
+
+
+def _fin_lock() -> asyncio.Lock:
+    global _fin_lock_loop, _fin_lock_obj
+    loop = asyncio.get_running_loop()
+    if _fin_lock_obj is None or _fin_lock_loop is not loop:
+        _fin_lock_loop, _fin_lock_obj = loop, asyncio.Lock()
+    return _fin_lock_obj
+
+
 def _cancel_polling():
     global polling_tasks
     for task in polling_tasks:
@@ -675,7 +690,10 @@ def _cancel_polling():
 
 
 def _start_polling():
+    """Start the polling loops for the shared FIN client. The set already running is stopped first, so there are never
+    two sets (a replaced list would leave the old loops running with nothing holding them)."""
     global polling_tasks
+    _cancel_polling()
     polling_tasks = [
         asyncio.create_task(realtime_loop()),
         asyncio.create_task(live_loop()),
@@ -906,46 +924,71 @@ def _close_session(request: Request, response: Response) -> None:
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
+def _login_target(req, managed: bool, typed: str) -> tuple[str, str]:
+    """(FIN server, FIN project) a sign-in is for, worked out WITHOUT touching the active configuration: the
+    project's own settings when the Studio sent them, else what is active now."""
+    if managed:
+        overrides = project_overrides(req.settings)
+        base_url = overrides.get("fin_server_url") or BASE_CONFIG.get("fin_server_url", "https://localhost")
+        base_name = overrides.get("project_name") or BASE_CONFIG["project_name"]
+        has_name = "project_name" in overrides
+    else:
+        base_url, base_name, has_name = FIN_SERVER_URL, PROJECT_NAME, True
+    server_url = req.server_url or base_url
+    if managed and not typed and not has_name:
+        return server_url, ""   # this project has no FIN Project Name: unconfigured, not the default site
+    return server_url, typed or base_name
+
+
 @app.post("/api/fin/login")
 async def login(req: LoginRequest, request: Request, response: Response):
     """Authenticate with FIN server using SCRAM-SHA-256. Success also opens this browser's user
     session (HttpOnly cookie) for the username FIN accepted."""
-    global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK, TYPED_NAME, STANDARD_VERIFIED, POLL_OWNER
-    STANDARD_VERIFIED = None   # a new session proves the standard site again (below), or not at all
-
     # Settings sent with the login belong to the Studio project being opened, and only they
     # configure it. Without them the configuration already active (bundled project or
     # config.json) stays in force
     managed = req.settings is not None
     typed = (req.project_name or "").strip()
+    server_url, project = _login_target(req, managed, typed)
+
+    # FIN is asked first, with a client of its own: a wrong password (anyone's) must not disconnect the users who are
+    # signed in, stop their polling, empty their data or change the project the backend serves
+    candidate = FinScramClient(server_url, project)
+    if not await candidate.authenticate(req.username, req.password):
+        await candidate.close()
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    try:
+        async with _fin_lock():
+            return await _install_login(req, request, response, candidate, managed, typed, server_url, project)
+    except BaseException:
+        if client is not candidate:   # it never became the shared client (the request ended while it waited)
+            try:
+                await candidate.close()
+            except Exception:
+                pass
+        raise
+
+
+async def _install_login(req, request: Request, response: Response, candidate, managed: bool, typed: str,
+                         server_url: str, project: str):
+    """FIN accepted the sign-in: only now does anything shared change. Runs under _fin_lock, so no other sign-in, project
+    switch or sign-out changes the client, the project or the polling while this one is part way through."""
+    global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK, TYPED_NAME, STANDARD_VERIFIED, POLL_OWNER
+    STANDARD_VERIFIED = None   # a new session proves the standard site again (below), or not at all
     if managed:
         # its own mappings until the signed-in session proves it reads config.json's site (below)
         apply_studio_settings(req.settings, req.project_id, standard=False)
-
-    server_url = req.server_url or FIN_SERVER_URL
-    if managed and not typed and "project_name" not in ACTIVE_OVERRIDES:
-        project = ""   # this project has no FIN Project Name: unconfigured, not the default site
-    else:
-        project = typed or PROJECT_NAME
     TYPED_NAME = (req.project_id, typed) if managed and typed else None
-
-    # Update globals if overridden
     FIN_SERVER_URL = server_url
     PROJECT_NAME = project
     name_source = _name_source(bool(typed))
 
     _cancel_polling()
     _reset_caches()
-
-    # Close existing client
-    if client:
-        await client.close()
-
-    client = FinScramClient(server_url, project)
-    success = await client.authenticate(req.username, req.password)
-
-    if not success:
-        raise HTTPException(status_code=401, detail="Authentication failed")
+    previous, client = client, candidate
+    if previous:
+        await previous.close()
     POLL_OWNER = req.username
 
     # Signed in is not the same as usable: the project name must resolve on this server too.
@@ -958,7 +1001,7 @@ async def login(req: LoginRequest, request: Request, response: Response):
         _start_polling()
     else:
         PROJECT_CHECK = {"validated": None, "source": name_source}
-    _open_session(request, response, req.username, client.project_name or "")
+    _open_session(request, response, req.username, candidate.project_name or "")   # this sign-in's own project
 
     return {
         "status": "success",
@@ -976,8 +1019,22 @@ async def set_project_settings(req: ProjectSettingsRequest, request: Request):
     Needs an authenticated session, since it changes what the shared session polls.
     The FIN server cannot change here — that needs a fresh sign-in, so it is reported.
     """
+    _require_user(request)
+    async with _fin_lock():
+        _require_client()   # a sign-out while this waited for its turn
+        # The old polling stops first: a poll still running while the project changes would read the new project's name
+        # for the old project's answer, and record its alarms and notifications under the wrong project
+        _cancel_polling()
+        try:
+            return await _switch_project(req, request)
+        except BaseException:
+            if client and client.is_authenticated and PROJECT_NAME:
+                _start_polling()   # a failed switch must not leave the backend without polling
+            raise
+
+
+async def _switch_project(req: ProjectSettingsRequest, request: Request):
     global FIN_SERVER_URL, PROJECT_CHECK, PROJECT_NAME, TYPED_NAME
-    _require_client()
 
     # A project without its own FIN Project Name is unconfigured, except for the name typed at
     # sign-in for this same project. Never the config.json default, never another project's name.
@@ -1024,14 +1081,14 @@ async def set_project_settings(req: ProjectSettingsRequest, request: Request):
 
 
 @app.get("/api/fin/project-settings")
-async def get_project_settings():
+async def get_project_settings(request: Request):
     """The configuration the backend is serving right now, and where each block comes from.
 
     Needs a session: it returns point IDs. `source` is "project" when the open project
     supplies the block, "default" when config.json does (standalone / default site only), and
     "not_configured" when a Studio project has not set it (its config is then empty).
     """
-    _require_client()
+    _require_user(request)
     blocks = ["live_point_ids", "power_endpoints", "equipment_classes", "meter_profile", "severity_bands"]
     return {
         "project_id": ACTIVE_PROJECT_ID,
@@ -1126,9 +1183,9 @@ def _meter_items(profile: dict) -> dict:
 
 
 @app.post("/api/fin/validate-mapping")
-async def validate_mapping(req: ValidateMappingRequest):
+async def validate_mapping(request: Request, req: ValidateMappingRequest):
     """Check the given mapping blocks against the FIN project this session is signed in to."""
-    _require_client()
+    _require_user(request)
     # The session serves one project at a time; refuse rather than check another project's mappings
     if req.project_id != ACTIVE_PROJECT_ID:
         raise HTTPException(status_code=409, detail="The backend is serving a different project.")
@@ -1207,7 +1264,7 @@ def _fin_failure(status: Optional[int], text: Optional[str], what: str) -> HTTPE
 
 
 @app.get("/api/fin/projects")
-async def get_fin_projects():
+async def get_fin_projects(request: Request):
     """The projects on the FIN server: [{"id": "marsaAlArab", "name": "..."}].
 
     `id` is the identifier FIN uses in `/api/{id}/...`; `name` is only for display. The request is
@@ -1215,7 +1272,7 @@ async def get_fin_projects():
     page makes needs a browser-issued Attest-Key, which a backend session does not have.) The
     endpoint and expression come from config.json `project_discovery`.
     """
-    _require_client()
+    _require_user(request)
     cfg = CONFIG.get("project_discovery") or {}
     endpoint = str(cfg.get("endpoint") or "").strip()
     expr = str(cfg.get("expr") or "").strip()
@@ -1232,14 +1289,14 @@ async def get_fin_projects():
 
 
 @app.get("/api/fin/resources")
-async def get_fin_resources(project: str):
+async def get_fin_resources(request: Request, project: str):
     """The points of ONE FIN project, for the Data Mapping pickers.
 
     Read-only, and keyed by the `project` asked about, never the session's: choosing a project
     in Dashboard Settings loads that project's own points before anything is saved.
     `ref` is the point ID with the project name written as {project}, ready to store in a mapping.
     """
-    _require_client()
+    _require_user(request)
     if not PROJECT_ID_RE.match(project):
         raise HTTPException(status_code=400, detail="Not a FIN project identifier.")
     template = (CONFIG.get("realtime_endpoints") or {}).get("points")
@@ -1570,19 +1627,17 @@ async def notifications_preferences_update(request: Request, response: Response)
 
 
 @app.get("/api/fin/workorders")
-async def get_workorders(response: Response):
+async def get_workorders(request: Request, response: Response):
     """Live PPM rows. Empty until the FIN read succeeds."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     _stamp(response)
     return {**(cached_workorders or {"timestamp": None, "source": "fin", "orders": [], "error": ""}), "state": _workorder_state()}
 
 
 @app.get("/api/fin/equip-live")
-async def get_equip_live(response: Response):
+async def get_equip_live(request: Request, response: Response):
     """Get live equipment data (floor-wise with points and alarms)."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     _stamp(response)
     if cached_equip_data:
         _attach_workorders()
@@ -1590,37 +1645,33 @@ async def get_equip_live(response: Response):
 
 
 @app.get("/api/fin/power-live")
-async def get_power_live(response: Response):
+async def get_power_live(request: Request, response: Response):
     """Get live power/energy/sensor data."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     _stamp(response)
     return cached_power_data or {}
 
 
 @app.get("/api/fin/power-history")
-async def get_power_history(response: Response):
+async def get_power_history(request: Request, response: Response):
     """Get the historian series. Refreshed once per realtime cycle, not per live poll."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     _stamp(response)
     return cached_power_history or {}
 
 
 @app.get("/api/fin/pmu-live")
-async def get_meter_live(response: Response):
+async def get_meter_live(request: Request, response: Response):
     """Get power-meter equipment metrics keyed by meter name."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     _stamp(response)
     return cached_meter_data
 
 
 @app.get("/api/fin/alarms")
-async def get_alarms(response: Response):
+async def get_alarms(request: Request, response: Response):
     """Get the flat active-alarm list with counts by severity."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     _stamp(response)
     return cached_alarm_data or {
         "timestamp": None,
@@ -1638,17 +1689,12 @@ BLOCKED_EXPR = re.compile(
 
 
 @app.get("/api/fin/eval")
-async def eval_read(expr: str):
+async def eval_read(request: Request, expr: str):
     """Read-only Axon passthrough for history charts and trends."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     if len(expr) > 2000 or not READ_ONLY_EXPR.match(expr) or BLOCKED_EXPR.search(expr):
         raise HTTPException(status_code=400, detail="Only readById, readAll, and hisRead expressions are allowed")
-    text = await client.fetch_api(
-        f"/api/{client.project_name}/eval?expr={quote(expr, safe='')}", is_text=True
-    )
-    if text is None:
-        raise HTTPException(status_code=502, detail="FIN request failed")
+    text = await _user_read(f"/api/{client.project_name}/eval?expr={quote(expr, safe='')}")
     return PlainTextResponse(text, media_type="text/zinc")
 
 
@@ -1660,10 +1706,33 @@ def _require_client():
         raise HTTPException(status_code=401, detail="Not authenticated")
 
 
-@app.get("/api/fin/his-points")
-async def get_his_points():
-    """Catalogue of historized points for the History Charts picker."""
+async def _user_read(path: str) -> str:
+    """A FIN read for one user's request (an expression or point they chose). FIN refusing it (401/403: not allowed for
+    the shared account) answers that request with 403; unlike the polling reads it never marks the shared FIN session ended."""
+    status, text = await client.fetch_probe(path)
+    if status is None or text is None:
+        raise HTTPException(status_code=502, detail="FIN request failed")
+    if status in (401, 403):
+        raise HTTPException(status_code=403, detail="FIN refused this request")
+    if status != 200:
+        raise HTTPException(status_code=502, detail="FIN request failed")
+    return text
+
+
+def _require_user(request: Request) -> dict:
+    """The backend is signed in to FIN AND this browser has its own user session (cookie). The backend being
+    connected for somebody else is not enough: live data, configuration and the FIN passthrough are for signed-in users."""
     _require_client()
+    user, _why = _session_of(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+
+@app.get("/api/fin/his-points")
+async def get_his_points(request: Request):
+    """Catalogue of historized points for the History Charts picker."""
+    _require_user(request)
     out = []
     for row in client.last_point_rows or []:
         if row.get("his") is not True:
@@ -1683,20 +1752,16 @@ async def get_his_points():
 
 
 @app.get("/api/fin/point-history")
-async def get_point_history(id: str, days: int = 7):
+async def get_point_history(request: Request, id: str, days: int = 7):
     """hisRead one point and return the same nested shape as power_history."""
-    _require_client()
+    _require_user(request)
     pid = id.lstrip("@")
     if not POINT_ID_RE.match(pid):
         raise HTTPException(status_code=400, detail="Invalid point id")
     days = max(1, min(int(days), 365))
     start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     expr = f"hisRead(@{pid},{start}..today(),{{-limit}})"
-    text = await client.fetch_api(
-        f"/api/{client.project_name}/eval?expr={quote(expr, safe='')}", is_text=True
-    )
-    if text is None:
-        raise HTTPException(status_code=502, detail="FIN request failed")
+    text = await _user_read(f"/api/{client.project_name}/eval?expr={quote(expr, safe='')}")
     parsed = parse_custom_response(text)
     return {
         "id": pid,
@@ -1709,13 +1774,13 @@ async def get_point_history(id: str, days: int = 7):
 
 
 @app.get("/api/fin/alarm-history")
-async def get_alarm_history(response: Response, days: int = 30):
+async def get_alarm_history(request: Request, response: Response, days: int = 30):
     """Alarm counts by day and severity. Empty when FIN retains no history.
 
     Defaults to 30 days: at Marsa a 7-day window catches 4 of 343 retained
     alarms and hides the 6 July cooling-valve event (196 alarms) entirely.
     """
-    _require_client()
+    _require_user(request)
     _stamp(response)
     days = max(1, min(int(days), 90))
     start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -1766,10 +1831,9 @@ async def get_alarm_history(response: Response, days: int = 30):
 
 
 @app.get("/api/fin/building-info")
-async def get_building_info():
+async def get_building_info(request: Request):
     """Get full building data with history."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     return cached_building_data or {}
 
 
@@ -1779,17 +1843,18 @@ async def logout(request: Request, response: Response):
     still signed in: one user's sign-out never cuts another user's session or live data."""
     global client, PROJECT_CHECK, STANDARD_VERIFIED, POLL_OWNER
     _close_session(request, response)
-    _drop_expired()
-    if SESSIONS:
-        return {"status": "signed_out", "fin": "connected for other users"}
-    POLL_OWNER = None
-    STANDARD_VERIFIED = None
-    _cancel_polling()
-    if client:
-        await client.close()
-        client = None
-    PROJECT_CHECK = {"validated": None, "source": None}
-    return {"status": "disconnected"}
+    async with _fin_lock():   # not while a sign-in or a project switch is part way through changing the shared connection
+        _drop_expired()
+        if SESSIONS:
+            return {"status": "signed_out", "fin": "connected for other users"}
+        POLL_OWNER = None
+        STANDARD_VERIFIED = None
+        _cancel_polling()
+        if client:
+            await client.close()
+            client = None
+        PROJECT_CHECK = {"validated": None, "source": None}
+        return {"status": "disconnected"}
 
 
 @app.get("/api/fin/documents")
@@ -1800,10 +1865,9 @@ async def get_documents(response: Response):
 
 
 @app.get("/api/fin/file")
-async def get_fin_file(ref: str, download: int = 0):
+async def get_fin_file(request: Request, ref: str, download: int = 0):
     """Stream a catalog PDF through the FIN session that is already signed in."""
-    if not client or not client.is_authenticated:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    _require_user(request)
     if not re.fullmatch(r"@p:[A-Za-z0-9_]+:r:[0-9a-fA-F-]+", ref or ""):
         raise HTTPException(status_code=404, detail="Unknown document")
     doc = _catalog_doc(ref) if _ref_project(ref) == client.project_name else None

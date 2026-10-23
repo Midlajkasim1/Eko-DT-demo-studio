@@ -14,6 +14,7 @@ import secrets
 import time
 from datetime import datetime
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -620,9 +621,29 @@ class FinScramClient:
             print(f"[FIN] ✗ Auth error: {e}")
             return False
 
+    def _url(self, endpoint: str) -> Optional[str]:
+        """The URL for an endpoint on THIS FIN server, or None for one anywhere else: the session's credentials are
+        sent with every request, so a request that would reach another host is refused. That is an absolute URL to another
+        server (scheme, host or port), one that cannot be read as a URL, and a path that does not start with "/" (after
+        the server's own address, "@host/..." would make the server's name a user name and "host" the real host)."""
+        if not isinstance(endpoint, str):
+            return None
+        absolute = endpoint.startswith(("http://", "https://"))
+        if not absolute and not endpoint.startswith("/"):
+            return None
+        url = endpoint if absolute else f"{self.base_url}{endpoint}"
+        try:
+            a, b = urlsplit(url), urlsplit(self.base_url)
+        except ValueError:
+            return None
+        return url if (a.scheme, a.netloc.lower()) == (b.scheme, b.netloc.lower()) else None
+
     async def fetch_api(self, endpoint: str, is_text: bool = False) -> Optional[Any]:
         """Fetch a FIN API endpoint. Returns parsed JSON or raw text."""
-        url = endpoint if endpoint.startswith("http") else f"{self.base_url}{endpoint}"
+        url = self._url(endpoint)
+        if url is None:
+            print("[FIN] refused a request to another host: FIN credentials stay with the FIN server")
+            return None
         try:
             resp = await self.client.get(url, headers=self.auth_headers)
             if resp.status_code == 200:
@@ -641,7 +662,10 @@ class FinScramClient:
         Unlike fetch_api it never ends the session, so a caller can tell "FIN says this
         record does not exist" from "the request failed".
         """
-        url = endpoint if endpoint.startswith("http") else f"{self.base_url}{endpoint}"
+        url = self._url(endpoint)
+        if url is None:
+            print("[FIN] refused a request to another host: FIN credentials stay with the FIN server")
+            return None, None
         try:
             resp = await self.client.get(url, headers=self.auth_headers)
             return resp.status_code, resp.text
@@ -651,8 +675,12 @@ class FinScramClient:
 
     async def get_probe(self, endpoint: str, params: dict[str, str]) -> tuple[Optional[int], Optional[str]]:
         """fetch_probe with query parameters, which httpx URL-encodes: (status, text), or
-        (None, None) if FIN is unreachable. The session's auth headers are reused."""
-        url = endpoint if endpoint.startswith("http") else f"{self.base_url}{endpoint}"
+        (None, None) if FIN is unreachable. The session's auth headers are reused, so, like every request that carries
+        them, it only ever goes to this FIN server (_url)."""
+        url = self._url(endpoint)
+        if url is None:
+            print("[FIN] refused a request to another host: FIN credentials stay with the FIN server")
+            return None, None
         try:
             resp = await self.client.get(url, params=params, headers=self.auth_headers)
             return resp.status_code, resp.text
