@@ -222,11 +222,8 @@ window.EKO_C = (function(){
   /* --------------------- summary panel (#ovp overlay) ----------------------
      Reference anatomy: absolute overlay on the viewer; ovglass blur mask,
      ovtint gradient, ovvs shade, title row, KPI rows. */
-  /* Locate in 3D on the register's strip opens with the Assets Overview folded, so it does not sit over the model. The fold
-     is that visit's own (locFocus.ovOpen, unfolded by its chevron); the user's saved fold (eko-ovp) is neither read nor changed. */
-  const ovFolded = E => (E.state.locFocus && E.state.pageId === 'assets-register') ? !E.state.locFocus.ovOpen : E.state.ovpMin;
   function summaryShell(E, title, inner, fit){   /* fit: the Energy summary, as tall as its cards (components.css, #ovp[data-fit]) */
-    const mn = ovFolded(E);
+    const mn = E.state.ovpMin;
     return `<div id="ovp" data-min="${mn?1:0}"${fit ? ' data-fit="1"' : ''}>
       <div class="ovglass" aria-hidden="true"></div>
       <div class="ovtint" aria-hidden="true"></div>
