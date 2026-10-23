@@ -1830,14 +1830,19 @@ async def get_building_info():
 
 @app.post("/api/fin/logout")
 async def logout():
-    """Disconnect from FIN server."""
+    """End the FIN session. The server process stays up so the operator can sign in again."""
     global client, PROJECT_CHECK, STANDARD_VERIFIED
     STANDARD_VERIFIED = None
     _cancel_polling()
-    if client:
-        await client.close()
-        client = None
+    # Drop the reference before the await so a second sign-out does not close the same client twice.
+    current = client
+    client = None
     PROJECT_CHECK = {"validated": None, "source": None}
+    if current:
+        try:
+            await current.close()
+        except Exception:
+            pass
     return {"status": "disconnected"}
 
 

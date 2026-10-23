@@ -852,6 +852,24 @@
     render();
   }
 
+  /* Sign out ends the FIN session only. The backend process stays up, so the
+     packaged Sign in button can open /login on the same server. */
+  let signingOut = false;
+  function packagedViewer(){
+    if(window.EKO_RUNTIME === 'studio') return false;
+    if(window.EKO_RUNTIME === 'packaged') return true;
+    /* Vite injects this. The exported viewer, served by the backend, does not. */
+    if(document.querySelector('script[src*="@vite/client"]')) return false;
+    return document.title === 'EKO Digital Twin Viewer';
+  }
+  function endFinSession(){
+    try { if(window.DashboardData && window.DashboardData.stop) window.DashboardData.stop(); } catch(e){}
+    try { window.dispatchEvent(new CustomEvent('dashboard-event', { detail:{ action:'finSignOut' } })); } catch(e){}
+    const post = (url) => fetch(url, { method:'POST', cache:'no-store' }).then(res => res.status === 404 ? null : res);
+    const done = post('/api/auth/logout').then(res => res || post('/api/fin/logout')).catch(() => {});
+    return Promise.race([done, new Promise(resolve => setTimeout(resolve, 4000))]);
+  }
+
   const ACTS = {
     goMod(el){ const m = E.nav.modules.find(x=>x.id===el.dataset.mod);
       if(!E.state.exp[m.id]) E.state.born = 'nsub:'+m.id;
@@ -1001,9 +1019,17 @@
     themeToggle(){ const dark = (window.DASHBOARD_ROOT||document.documentElement).getAttribute('data-theme') !== 'light'; E.state.themeMode = dark ? 'light' : 'dark'; ls.set('eko-theme-mode', E.state.themeMode); applyTheme(); render(); },
     settingsTab(el){ E.state.rlAsk = false; E.set({ settingsTab: el.dataset.v }); },
     signOut(){ E.set({ born:'dlg', dlg:'signout' }); },
-    signOut2(){ try{ if(window.EKO_CTL && window.EKO_CTL.ACTS.ctlLockNow) window.EKO_CTL.ACTS.ctlLockNow(); }catch(e){}   /* the control session ends with the user */
-      if(window.EKO_SURF) window.EKO_SURF.closeAll(); E.state.rolePreview = null; E.set({ dlg:null, assetSel:null, mobMore:false, signedOut:true }); },
-    signIn(){ location.reload(); },   /* prototype: production sends the user to the identity provider (production-readiness.md) */
+    signOut2(){
+      if(signingOut) return;
+      signingOut = true;
+      endFinSession().finally(() => {
+        signingOut = false;
+        try{ if(window.EKO_CTL && window.EKO_CTL.ACTS.ctlLockNow) window.EKO_CTL.ACTS.ctlLockNow(); }catch(e){}   /* the control session ends with the user */
+        if(window.EKO_SURF) window.EKO_SURF.closeAll(); E.state.rolePreview = null; E.set({ dlg:null, assetSel:null, mobMore:false, signedOut:true });
+      });
+    },
+    /* Packaged viewer: /login on the backend that is still running. Studio reloads; FIN is reconnected from the studio panel. */
+    signIn(){ if(packagedViewer()){ location.assign('/login'); return; } location.reload(); },
     wallOpen(){ const url = wallUrl(wallScope(), 'tab', E.state.wallCfgId); E.state.dlg = null; if(window.__wallOpenHook) window.__wallOpenHook(url); else window.open(url, '_blank', 'noopener'); render(); },   /* D107 */
     /* D109: the control room settings dialog, per display */
     wallCfg(el){ const id = E.state.wallCfgId || 'default', k = el.dataset.k, v = el.value, patch = {};
