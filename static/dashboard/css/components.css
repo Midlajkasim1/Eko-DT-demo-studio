@@ -886,6 +886,46 @@
   padding-inline-end:16px
 }
 
+/* Compact cards: the three figures (Assets Registered, Open Work Orders, Assets in Alarm) take about a quarter less height
+   in the register's strip. Only the strip: the same classes on every other page keep their size. The line heights are
+   set because 'normal' made the 28px figure a 34px row on its own; no heights are fixed, so nothing can clip. */
+.dashboard-native-container .regmodelwrap #ovp .ovhead {
+  padding-block:8px 2px
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovpad {
+  padding-block-start:4px
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovklist {
+  gap:6px
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovk {
+  padding:7px 12px
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovklbl {
+  font-size:calc(var(--txCapSz) - 1px);
+  line-height:1.25;
+  letter-spacing:.6px
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovkval {
+  margin-block-start:0
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovknum {
+  font-size:var(--txKpiSz);
+  line-height:1.15
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovkcap {
+  font-size:calc(var(--txCapSz) - 1px);
+  line-height:1.3;
+  margin-block-start:1px
+}
+
 /* The model strip is narrower than the full toolbar (about 465px): its buttons are a little smaller, and the bar wraps
    to a second row when the strip is narrower still, instead of running past the strip's edges. It sits above the
    strip's hint line */
