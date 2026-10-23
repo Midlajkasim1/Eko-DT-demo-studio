@@ -176,10 +176,12 @@ async function assertFocus(p, id, { stacked, saved = [null, null], opened }) {
   if (!stacked) {
     assert.ok(f.strip && f.stripBox, 'the desktop model strip remains: ' + ctx)
     assert.ok(f.panel && f.rail && f.topbar, 'Studio chrome and the asset panel remain visible: ' + ctx)
-    // the Assets Overview stays on the left, over the model strip: its three figures and its fold control, inside the strip
-    assert.ok(f.summary && f.summary.x >= f.stripBox.x - 1 && f.summary.x + f.summary.w <= f.stripBox.x + f.stripBox.w + 1, 'the Assets Overview is inside the model strip: ' + ctx)
-    for (const label of ['ASSETS OVERVIEW', 'ASSETS REGISTERED', 'OPEN WORK ORDERS', 'ASSETS IN ALARM']) assert.ok(f.overviewText.toUpperCase().includes(label), `the Assets Overview shows ${label}: ` + ctx)
-    await assertReachable(p, '#ovp [data-act="ovpMin"]', "the Assets Overview's fold control")
+    // the Assets Overview opens FOLDED: just its title and fold control at the model's top left, none of its cards over the model
+    const ov = await p.evaluate(() => ({ min: document.getElementById('ovp')?.getAttribute('data-min'), cards: [...document.querySelectorAll('#ovp .ovk')].filter(e => e.getClientRects().length).length }))
+    assert.deepStrictEqual([ov.min, ov.cards], ['1', 0], 'the Assets Overview is folded on Locate in 3D, no cards shown: ' + JSON.stringify(ov) + ctx)
+    assert.ok(f.summary && f.summary.x >= f.stripBox.x - 1 && f.summary.x + f.summary.w <= f.stripBox.x + f.stripBox.w + 1 && f.summary.h < 80, 'its folded title sits inside the model strip: ' + ctx)
+    assert.ok(f.overviewText.toUpperCase().includes('ASSETS OVERVIEW'), 'and says what it is: ' + ctx)
+    await assertReachable(p, '#ovp [data-act="ovpMin"]', "the Assets Overview's unfold control")
     assert.ok(f.panelAsset.includes(id), 'the panel still shows the selected asset: ' + ctx)
     // nothing but the table moved: the Studio sidebar, the top bar and the rail are exactly as before
     for (const k of ['side', 'topbar', 'rail']) assert.deepStrictEqual(f[k], opened[k], `${k} is unchanged: ` + ctx)
@@ -387,23 +389,35 @@ try {
     await ctx.close()
   })
 
-  // "its existing controls": the Assets Overview folds and unfolds by a real click, with Back and the right panel unaffected.
-  // The fold is the user's own, saved preference (eko-ovp), so the test puts it back.
-  await test('host: the Assets Overview folds and unfolds during Locate in 3D; Back to Assets and the asset panel stay', async () => {
+  // The Assets Overview opens folded on Locate in 3D; its own control unfolds it and folds it again, for that visit only: the
+  // user's saved fold (eko-ovp) is neither read nor written, and Back and the right panel are unaffected.
+  await test('host: the Assets Overview opens folded on Locate in 3D and unfolds and folds by a real click; nothing is saved', async () => {
     const { p, ctx, errors } = await openHost(1400)
     await register(p)
     const id = await pickRow(p, 0)
     await locate(p, id)
-    await p.locator('#ovp [data-act="ovpMin"]').click()
-    await p.waitForFunction(() => document.getElementById('ovp')?.getAttribute('data-min') === '1')
-    await settle(p)
+    const state = () => p.evaluate(() => ({ min: document.getElementById('ovp')?.getAttribute('data-min'), cards: [...document.querySelectorAll('#ovp .ovk')].filter(e => e.getClientRects().length).length, saved: localStorage.getItem('eko-ovp') }))
+    assert.deepStrictEqual(await state(), { min: '1', cards: 0, saved: null }, 'folded on arrival, nothing saved')
     await assertReachable(p, PANEL_BACK, 'Back to Assets (summary folded)')
-    await assertReachable(p, '#assetpanel [data-act="closeAsset"]', "the panel's close button (summary folded)")
-    assert.ok((await layout(p)).panelAsset.includes(id), 'the asset panel is still for the selected asset')
     await p.locator('#ovp [data-act="ovpMin"]').click()
     await p.waitForFunction(() => document.getElementById('ovp')?.getAttribute('data-min') === '0')
+    await settle(p)
+    const open = await layout(p)
+    for (const label of ['ASSETS REGISTERED', 'OPEN WORK ORDERS', 'ASSETS IN ALARM']) assert.ok(open.overviewText.toUpperCase().includes(label), `unfolded, the Overview shows ${label}`)
+    assert.deepStrictEqual((await state()).saved, null, 'unfolding is this visit only, nothing saved')
+    await assertPanelBackAndDock(p, open)                       // unfolded, its chevron is still next to the cards
+    await assertReachable(p, '#assetpanel [data-act="closeAsset"]', "the panel's close button (summary open)")
+    assert.ok(open.panelAsset.includes(id), 'the asset panel is still for the selected asset')
+    await p.locator('#ovp [data-act="ovpMin"]').click()
+    await p.waitForFunction(() => document.getElementById('ovp')?.getAttribute('data-min') === '1')
     await p.locator(PANEL_BACK).click()
     await p.locator(rows).first().waitFor()
+    await settle(p)
+    assert.deepStrictEqual(await p.evaluate(() => ({ overview: !!document.getElementById('ovp'), saved: localStorage.getItem('eko-ovp') })), { overview: false, saved: null }, 'back on the register: no overview, the saved fold untouched')
+    // and a fresh Locate folds it again, whatever the last visit did
+    await closePanel(p)                                          // Back reopens the asset's panel; close it to pick again
+    await locate(p, await pickRow(p, 0))
+    assert.strictEqual((await state()).min, '1', 'folded again on the next Locate in 3D')
     assert.deepStrictEqual(errors, [])
     await ctx.close()
   })

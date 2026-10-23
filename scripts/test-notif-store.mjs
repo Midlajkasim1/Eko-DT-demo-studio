@@ -153,31 +153,40 @@ test('an explicit siteId is kept, and stays inside the open project\'s storage',
    answer with it, refuses another project's header (409), and never lists dismissed rows */
 function fakeBackend(active) {
   const rows = {}, prefs = {}, calls = []
-  const b = { active, rows, prefs, calls, fail: null, stampAs: null }
+  const b = { active, rows, prefs, calls, fail: null, stampAs: null, session: true, sessionSite: null }   // session: this browser's
   b.add = (project, id, extra = {}) => { (rows[project] = rows[project] || []).push({ id, type: 'int.sync_failed', severity: 'warning',
     site_id: 'fin-' + project, asset_id: null, source: { kind: 'integration', id: 'fin-workorders' }, created_at: new Date().toISOString(),
     opened_at: null, dismissed_at: null, params: { system: 'FIN', reason: 'x' }, ...extra }) }
   b.fetch = async (url, opts = {}) => {
     const method = opts.method || 'GET', header = (opts.headers || {})['X-Eko-Project']
-    calls.push({ method, url, header })
+    calls.push({ method, url, header, body: opts.body })
     const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body,
       headers: { get: k => (k === 'X-Eko-Project' ? encodeURIComponent(b.stampAs || b.active) : null) } })
     if (b.fail === 'network') throw new TypeError('Failed to fetch')
+    if (url === '/api/auth/me') return b.session ? reply(200, { user_id: 'u1', site: 'fin-' + b.active, role: null, expires_at: 'x' })
+      : reply(401, { error: { code: 'session_required' } })
     if (b.fail) return reply(b.fail, { error: { code: 'storage_failed', message: 'notification storage failed', details: {} } })
+    if (!b.session) return reply(401, { error: { code: 'session_required' } })
     if (decodeURIComponent(header || '') !== b.active) return reply(409, { error: { code: 'project_mismatch' } })
+    if (b.sessionSite) return reply(409, { error: { code: 'session_project_mismatch' } })
     const mine = rows[b.active] = rows[b.active] || []
     const path = url.replace('/api/notifications/v1', '').split('?')[0]
     const one = id => mine.find(r => r.id === decodeURIComponent(id))
     let m
+    const mp = prefs[b.active] || { master_enabled: true, types: {} }
+    const hidden = r => r.type === 'alarm.critical' && (mp.master_enabled === false || (mp.types || {})['alarm.critical'] === false)
+    const listed = () => mine.filter(r => !r.dismissed_at && !hidden(r))
     if (method === 'GET' && path === '/notifications') {
-      const items = mine.filter(r => !r.dismissed_at)
-      return reply(200, { items, next_cursor: null, unread_count: items.filter(r => !r.opened_at).length, scope: 'project' })
+      const items = listed(), limit = Number(new URL('http://x' + url).searchParams.get('limit')) || 50
+      return reply(200, { items: items.slice(0, limit), next_cursor: items.length > limit ? 'next' : null,
+                          unread_count: items.filter(r => !r.opened_at).length, scope: 'user' })
     }
-    if (method === 'GET' && path === '/preferences') return reply(200, prefs[b.active] || { master_enabled: true, types: {} })
+    const site = () => (b.site === undefined ? {} : { site: b.site })   // the server's read-only facts about the site
+    if (method === 'GET' && path === '/preferences') return reply(200, { ...(prefs[b.active] || { master_enabled: true, types: {} }), ...site() })
     if (method === 'PUT' && path === '/preferences') { const p = prefs[b.active] = prefs[b.active] || { master_enabled: true, types: {} }
-      Object.assign(p.types, JSON.parse(opts.body).types || {}); return reply(200, p) }
-    if (method === 'POST' && path === '/notifications/opened-all') { mine.forEach(r => { if (!r.dismissed_at) r.opened_at = r.opened_at || 'now' }); return reply(200, { updated: 1 }) }
-    if (method === 'POST' && path === '/notifications/dismiss-opened') { mine.forEach(r => { if (r.opened_at) r.dismissed_at = 'now' }); return reply(200, { updated: 1 }) }
+      Object.assign(p.types, JSON.parse(opts.body).types || {}); return reply(200, { ...p, ...site() }) }
+    if (method === 'POST' && path === '/notifications/opened-all') { listed().forEach(r => { r.opened_at = r.opened_at || 'now' }); return reply(200, { updated: 1 }) }
+    if (method === 'POST' && path === '/notifications/dismiss-opened') { listed().forEach(r => { if (r.opened_at) r.dismissed_at = 'now' }); return reply(200, { updated: 1 }) }
     if ((m = path.match(/^\/notifications\/([^/]+)\/(opened|dismiss)$/))) {
       const r = one(m[1]); if (!r) return reply(404, { error: { code: 'not_found' } })
       if (m[2] === 'opened') r.opened_at = r.opened_at || 'now'
@@ -194,6 +203,11 @@ function dashboardWindow({ backend, build = { demo: true }, storage = memoryStor
   const ctx = vm.createContext({ console: { ...console, warn() {}, error() {} }, Date, JSON, Promise,
     setInterval: () => 1, clearInterval() {}, setTimeout: () => 1 })   // refresh is driven by the test
   ctx.window = ctx; ctx.localStorage = storage; ctx.EKO_BUILD = build
+  const on = {}   // the page's events: eko-auth-changed is how a sign-in or sign-out reaches the bell
+  ctx.addEventListener = (t, f) => (on[t] = on[t] || []).push(f)
+  ctx.removeEventListener = (t, f) => { on[t] = (on[t] || []).filter(g => g !== f) }
+  ctx.dispatchEvent = e => { (on[e.type] || []).slice().forEach(f => f(e)); return true }
+  ctx.Event = class { constructor(type) { this.type = type } }
   if (backend) ctx.fetch = backend.fetch
   return { ctx, load(injected) { ctx.INJECTED_PROJECT_CONFIG = injected; vm.runInContext(SRC, ctx); return ctx.EKO_NOTIF } }
 }
@@ -323,6 +337,174 @@ await atest('demo builds and direct mode never call the server', async () => {
   await direct.refresh()
   assert.deepStrictEqual(ids(direct), [])
   assert.strictEqual(be.calls.length, 0)
+})
+
+// ─── this browser's session: the bell reads nothing until the server confirms it ──────────────
+await atest('no session in this browser: /api/auth/me first, no notification request, "sign in" state', async () => {
+  const be = fakeBackend('proj-A'); be.add('proj-A', 'ntf_1'); be.session = false
+  const N = dashboardWindow({ backend: be }).load(project('proj-A'))
+  await N.confirmSession()
+  assert.deepStrictEqual(plain(be.calls.map(c => c.url)), ['/api/auth/me'], 'nothing else is asked')
+  assert.strictEqual(N.remoteState(), 'signin')
+  assert.deepStrictEqual(ids(N), [])
+})
+
+await atest('signed in: the session is confirmed, then the notifications load', async () => {
+  const be = fakeBackend('proj-A'); be.add('proj-A', 'ntf_1')
+  const N = dashboardWindow({ backend: be }).load(project('proj-A'))
+  await N.confirmSession()
+  assert.strictEqual(be.calls[0].url, '/api/auth/me')
+  assert(be.calls.slice(1).some(c => c.url.startsWith('/api/notifications/v1/notifications')))
+  assert.deepStrictEqual([N.remoteState(), ids(N)].map(plain), ['ok', ['ntf_1']])
+})
+
+await atest('a sign-in elsewhere in the page (eko-auth-changed) makes the bell ask again and load', async () => {
+  const be = fakeBackend('proj-A'); be.add('proj-A', 'ntf_1'); be.session = false
+  const win = dashboardWindow({ backend: be }), N = win.load(project('proj-A'))
+  await N.confirmSession()
+  be.session = true
+  win.ctx.dispatchEvent(new win.ctx.Event('eko-auth-changed')); await settle()
+  assert.deepStrictEqual([N.remoteState(), ids(N)].map(plain), ['ok', ['ntf_1']])
+})
+
+await atest("signing out (or a session that expires) clears the bell: server rows and this browser's own", async () => {
+  const be = fakeBackend('proj-A'); be.add('proj-A', 'ntf_1')
+  const storage = memoryStorage(), win = dashboardWindow({ backend: be, storage }), N = win.load(project('proj-A'))
+  await N.confirmSession()
+  report(N, 'mine')
+  assert.strictEqual(N.list().length, 2)
+  be.session = false
+  win.ctx.dispatchEvent(new win.ctx.Event('eko-auth-changed')); await settle()
+  assert.deepStrictEqual([N.remoteState(), N.list().length, N.badge()].map(plain), ['signin', 0, ''])
+  assert.deepStrictEqual(ids(win.load(project('proj-A'))), [], 'not back after a reload either')
+  be.session = true; const M = win.load(project('proj-A')); await M.confirmSession()
+  be.session = false; await M.refresh()                         // expired between two refreshes: a 401
+  assert.deepStrictEqual([M.remoteState(), ids(M)].map(plain), ['signin', []])
+})
+
+await atest('409s are told apart: signed in for another project, or the server shows another project', async () => {
+  const be = fakeBackend('proj-A'); be.add('proj-A', 'ntf_1')
+  const N = dashboardWindow({ backend: be }).load(project('proj-A'))
+  await N.confirmSession()
+  be.sessionSite = 'fin-other'; await N.refresh()
+  assert.deepStrictEqual([N.remoteState(), N.remoteCode(), ids(N)].map(plain), ['mismatch', 'session_project_mismatch', []])
+  be.sessionSite = null; be.active = 'proj-B'; await N.refresh()
+  assert.deepStrictEqual([N.remoteState(), N.remoteCode()].map(plain), ['mismatch', 'project_mismatch'])
+  be.active = 'proj-A'; await N.refresh()
+  assert.deepStrictEqual([N.remoteState(), ids(N)].map(plain), ['ok', ['ntf_1']], 'back when the server is')
+})
+
+await atest('a server or network error is retryable: the last rows stay, confirmSession recovers', async () => {
+  const be = fakeBackend('proj-A'); be.add('proj-A', 'ntf_1')
+  const N = dashboardWindow({ backend: be }).load(project('proj-A'))
+  await N.confirmSession()
+  be.fail = 'network'; await N.confirmSession()
+  assert.deepStrictEqual([N.remoteState(), ids(N)].map(plain), ['error', ['ntf_1']])
+  be.fail = 503; await N.refresh()
+  assert.strictEqual(N.remoteState(), 'error')
+  be.fail = null; await N.confirmSession()
+  assert.strictEqual(N.remoteState(), 'ok')
+})
+
+// ─── critical alarms: the SITE's setting is the server's word, the switch is the user's own ──────────
+const crit = (id, extra = {}) => ({ id, type: 'alarm.critical', severity: 'critical', site_id: 'fin-proj-A', asset_id: 'AHU-01',
+  source: { kind: 'alarm', id: '@a1' }, created_at: new Date().toISOString(), opened_at: null, dismissed_at: null,
+  params: { asset: 'AHU-01', message: 'Supply temp high', occurred: 'x', priority: 250 }, ...extra })
+
+await atest('site status: true / false from the server, null (unknown) when it is not given or the read failed', async () => {
+  const be = fakeBackend('proj-A')
+  const N = dashboardWindow({ backend: be }).load(project('proj-A'))
+  assert.strictEqual(N.siteCritical(), null, 'nothing read yet: not assumed on')
+  be.site = { critical_alarms: true }; await N.refresh()
+  assert.strictEqual(N.siteCritical(), true)
+  be.site = { critical_alarms: false }; await N.refresh()
+  assert.strictEqual(N.siteCritical(), false)
+  be.site = { critical_alarms: null }; await N.refresh()
+  assert.strictEqual(N.siteCritical(), null, 'the server could not read it')
+  be.site = undefined; await N.refresh()                          // an older backend sends no site part
+  assert.strictEqual(N.siteCritical(), null)
+  be.site = { critical_alarms: true }; await N.refresh()
+  be.session = false; await N.refresh()                           // the session ended: nothing of it stays
+  assert.strictEqual(N.siteCritical(), null)
+  const local = boot({ injected: project('proj-A'), storage: memoryStorage() })   // no backend at all
+  assert.strictEqual(local.siteCritical(), null)
+})
+
+await atest('the user\'s own critical-alarm switch decides what THEY see; the site status is untouched by it', async () => {
+  const be = fakeBackend('proj-A'); be.add('proj-A', 'ntf_c', crit('ntf_c')); be.add('proj-A', 'ntf_s')
+  be.site = { critical_alarms: false }
+  const N = dashboardWindow({ backend: be }).load(project('proj-A'))
+  await N.refresh()
+  assert.deepStrictEqual(ids(N), ['ntf_c', 'ntf_s'], 'no choice of their own: what the site created is shown')
+  N.setPref('alarm.critical', true); await settle()
+  assert.deepStrictEqual(ids(N), ['ntf_c', 'ntf_s'], 'opted in: shown')
+  assert.strictEqual(N.siteCritical(), false, 'the personal switch never changes what the site says')
+  assert.deepStrictEqual(plain(be.prefs['proj-A'].types), { 'alarm.critical': true })
+  assert(!('site' in JSON.parse(be.calls.filter(c => c.method === 'PUT').pop().body || '{}')), 'the request carries no site setting')
+  N.setPref('alarm.critical', false); await settle()
+  assert.deepStrictEqual(ids(N), ['ntf_s'], 'opted out: hidden for this user, other types untouched')
+})
+
+await atest('the preferences dialog tells the personal switch from the site setting, and never implies it is on when unknown', async () => {
+  const ctx = vm.createContext({ console, Date, JSON })
+  ctx.window = ctx
+  const E = lang => ({ state: { nf: { prefs: true } }, lang, t: k => ctx.EKO_I18N[lang][k] ?? k })
+  ctx.EKO_C = { esc: s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]), icon: () => '' }
+  const read = f => readFileSync(new URL(f, new URL('../static/dashboard/js/', import.meta.url)), 'utf8')
+  vm.runInContext(read('i18n/en.js') + '\n' + read('i18n/ar.js') + '\n' + read('notif/notif-types.js'), ctx)
+  const render = async (site, extra = {}) => {
+    const be = fakeBackend('proj-A'); be.site = site
+    const w = dashboardWindow({ backend: be, ...extra })
+    const N = w.load(project('proj-A'))
+    for (const k of ['EKO_C', 'EKO_I18N']) w.ctx[k] = ctx[k]
+    vm.runInContext(read('notif/notif-ui.js'), w.ctx)
+    await N.refresh()
+    return w.ctx.EKO_NF.overlays(E('en'))
+  }
+  const note = html => (html.match(/<div class="nfpsite"[^>]*>[\s\S]*?<\/div>/) || [''])[0]
+  const off = note(await render({ critical_alarms: false }))
+  assert(off.includes('data-state="off"') && /not enabled/.test(off) && /does not start any notifications/.test(off) && /Nothing is being generated/.test(off), off)
+  const on = note(await render({ critical_alarms: true }))
+  assert(on.includes('data-state="on"') && /are enabled/.test(on) && /only decides whether you see them/.test(on), on)
+  for (const unavailable of [{ critical_alarms: null }, undefined]) {
+    const u = note(await render(unavailable))
+    assert(u.includes('data-state="unknown"') && /could not be determined/.test(u) && /does not mean notifications are being generated/.test(u), u)
+    assert(!/notifications are enabled\./.test(u) && !/data-state="on"/.test(u), 'unknown is never shown as enabled')
+  }
+  const html = await render({ critical_alarms: false })
+  assert.strictEqual((html.match(/class="nfpsite"/g) || []).length, 1, 'one note, under the critical-alarm row only')
+  assert(html.indexOf('data-v="alarm.critical"') < html.indexOf('class="nfpsite"') && html.indexOf('class="nfpsite"') < html.indexOf('data-v="', html.indexOf('data-v="alarm.critical"') + 5), 'it sits right under that row')
+  for (const key of ['nfSiteLbl', 'nfSiteOn', 'nfSiteOff', 'nfSiteUnknown']) assert(ctx.EKO_I18N.ar[key] && ctx.EKO_I18N.en[key], key + ' in both languages')
+})
+
+await atest('server-side opt-out: the badge, pages and bulk actions describe the same rows (more than one page)', async () => {
+  const be = fakeBackend('proj-A')
+  for (let i = 0; i < 90; i++) be.add('proj-A', 'ntf_s' + i)                       // 90 unread the user keeps
+  for (let i = 0; i < 60; i++) be.add('proj-A', 'ntf_c' + i, crit('ntf_c' + i))    // 60 unread critical alarms
+  be.site = { critical_alarms: true }
+  const N = dashboardWindow({ backend: be }).load(project('proj-A'))
+  await N.refresh()
+  assert.strictEqual(N.list().length, 100, 'shown: the first page (opted in by default)')
+  assert.strictEqual(N.badge(), '99+', '150 unread, more pages: the server count')
+  N.setPref('alarm.critical', false); await settle()
+  assert.strictEqual(N.list().length, 90, 'the server left the critical alarms out, whatever page they were on')
+  assert(N.list().every(n => n.type !== 'alarm.critical'))
+  assert.strictEqual(N.badge(), '90', 'one page now: the badge is what is listed (it was 50 when the client filtered a full page)')
+  N.setPref('alarm.critical', true); await settle()
+  assert.strictEqual(N.badge(), '99+', 'opted back in: they are all back, unread')
+})
+
+await atest('only hidden critical alarms unread: nothing to mark read, and no request is made for them', async () => {
+  const be = fakeBackend('proj-A')
+  for (let i = 0; i < 5; i++) be.add('proj-A', 'ntf_c' + i, crit('ntf_c' + i))
+  be.site = { critical_alarms: true }; be.prefs['proj-A'] = { master_enabled: true, types: { 'alarm.critical': false } }
+  const N = dashboardWindow({ backend: be }).load(project('proj-A'))
+  await N.refresh()
+  assert.deepStrictEqual([N.list().length, N.badge()], [0, ''])
+  const before = be.calls.length
+  N.markAllRead(); await settle()
+  assert(!be.calls.slice(before).some(c => c.method === 'POST' && c.url.includes('opened-all')), 'no mark-all request')
+  assert(be.rows['proj-A'].every(r => !r.opened_at), 'the hidden rows were never opened')
 })
 
 console.log(`\n${passed} notification store tests passed`)

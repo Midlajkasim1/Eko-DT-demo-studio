@@ -7235,6 +7235,23 @@
   border-block-end:1px solid var(--bd1)
 }
 
+.dashboard-native-container .nfpsite {
+  font-size:var(--txCapSz);
+  color:var(--t2);
+  padding-block:6px 8px;
+  border-block-end:1px solid var(--bd1)
+}
+
+.dashboard-native-container .nfpsite b {
+  color:var(--t1)
+}
+
+.dashboard-native-container .nfpsite[data-state="unknown"] {
+  color:var(--t1);
+  border-inline-start:3px solid var(--bd1);
+  padding-inline-start:8px
+}
+
 .dashboard-native-container .nfpname {
   font-size:var(--txBodySz);
   color:var(--t1);

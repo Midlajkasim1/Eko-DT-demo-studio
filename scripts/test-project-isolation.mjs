@@ -505,7 +505,8 @@ try {
 
   // no FIN session (nothing verified on any server): a name match alone does not admit config.json's keys
   await open(M, false)
-  await fetch(API + '/api/fin/logout', { method: 'POST' })
+  // the signed-in user signs out from their own browser (a sign-out with no session never ends someone else's)
+  await page.evaluate(() => fetch('/api/fin/logout', { method: 'POST' }))
   await openData()
   await fillBoard(0, ['MCC 1 renamed', 'mcc1', '', ''])
   check(await saveExpectingError('accepted only once the backend has verified marsaAlArab') && (await disk('iso-M')).apiSettings.finPowerBoards[0].name === 'MCC 1',

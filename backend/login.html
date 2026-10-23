@@ -343,6 +343,9 @@
         // server that has not been restarted with the newer route names.
         var STATUS_URLS = ['/api/auth/status', '/api/fin/status'];
         var LOGIN_URLS = ['/api/auth/login', '/api/fin/login'];
+        // Who THIS browser is signed in as. The status says only that the backend is connected to
+        // FIN, which another browser's sign-in also makes true: it never skips this form.
+        var ME_URLS = ['/api/auth/me', '/api/fin/me'];
 
         // Walks the candidate URLs and returns the first response that is not a 404.
         async function request(urls, options) {
@@ -359,16 +362,19 @@
             return null; // every candidate answered 404
         }
 
-        // Skip the form entirely when a session is already active.
+        // Skip the form entirely when THIS browser already has a session.
         async function loadSession() {
             try {
                 var res = await request(STATUS_URLS, { cache: 'no-store' });
                 if (!res || !res.ok) { reveal(); return; }
 
                 var data = await res.json();
-                // The two routes name these differently; accept either.
-                var active = data.authenticated !== undefined ? data.authenticated : data.connected;
                 var project = data.project || data.project_name;
+                var me = await request(ME_URLS, { cache: 'no-store', credentials: 'same-origin' });
+                var active = !!(me && me.ok);
+                if (me && !me.ok && me.status !== 401) {
+                    showMessage('Your sign-in could not be checked (server error). Sign in again or reload.', false);
+                }
 
                 if (siteName && data.display_name) siteName.textContent = data.display_name;
                 if (serverInput && data.server_url) serverInput.value = data.server_url;

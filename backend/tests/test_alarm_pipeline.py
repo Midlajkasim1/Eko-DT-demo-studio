@@ -136,7 +136,7 @@ class CriticalAlarmTriggerTests(unittest.TestCase):
         main.BASE_CONFIG["critical_alarm_sites"] = list(sites)
 
     def toggle(self, site, on):
-        notifications._store.update_preferences(notifications.project_recipient(site), types={"alarm.critical": on})
+        notifications._store.update_project_preferences(site, types={"alarm.critical": on})
 
     def rows(self, site=SITE):
         return [r for r in notifications._store.events(site) if r["type"] == "alarm.critical"]
@@ -169,7 +169,7 @@ class CriticalAlarmTriggerTests(unittest.TestCase):
         self.assertEqual(sorted((r["state"], r["asset_id"], r["status"]) for r in rows),
                          [("@a1", "AHU-01", "active"), ("@a2", "AHU-02", "active")])
         self.assertEqual({r["severity"] for r in rows}, {"critical"})
-        self.assertEqual(notifications._store.unread_count(notifications.project_recipient(SITE), SITE), 2)
+        self.assertEqual(notifications._store.unread_count("alice", SITE), 2)
 
     def test_resolved_when_fin_stops_reporting_it_and_a_recurrence_is_new(self):
         self.allow(SITE)
@@ -421,8 +421,11 @@ class AlarmRoutesTests(unittest.TestCase):
         try:
             self.login()
             base, h = main.NOTIF_BASE, {"X-Eko-Project": "proj-site"}
+            site = main.BASE_CONFIG["project_name"]
+            # the site's own switch (no route sets it yet); a user's preference is not that switch
             r = self.http.put(base + "/preferences", headers=h, json={"types": {"alarm.critical": True}})
             self.assertEqual(r.status_code, 200, r.text)
+            self.http.portal.call(lambda: notifications.store().update_project_preferences(site, types={"alarm.critical": True}))
             GridFin.alarms_text = grid(row(1), row(2, priority=150))          # one critical, one warning
             self.login()                                                       # a new poll at once
             items = wait_for(lambda: [i for i in self.http.get(base + "/notifications", headers=h).json()["items"]
@@ -435,7 +438,6 @@ class AlarmRoutesTests(unittest.TestCase):
             self.assertEqual([i["id"] for i in again], [items[0]["id"]])
             GridFin.alarms_text = EMPTY                                       # FIN clears it
             self.login()
-            site = main.BASE_CONFIG["project_name"]
             wait_for(lambda: self.http.portal.call(lambda: [r["status"] for r in notifications.store().events(site)
                                                              if r["type"] == "alarm.critical"]) == ["resolved"])
         finally:

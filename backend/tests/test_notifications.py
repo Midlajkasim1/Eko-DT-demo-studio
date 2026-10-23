@@ -68,7 +68,7 @@ class StoreTests(unittest.TestCase):
         self.store.condition("siteA", "int.sync_failed", True, **SYNC)     # a repeat poll adds no second recipient
         rows = [tuple(r) for r in self.store.db.execute("SELECT event_id, user_id FROM notification_recipients")]
         self.assertEqual(rows, [(eid, notifications.project_recipient("siteA"))])
-        self.assertEqual(self.store.list_notifications("#project:siteA", "siteA")["items"][0]["id"], eid)
+        self.assertEqual(self.store.list_notifications("u1", "siteA")["items"][0]["id"], eid)   # for the whole project
 
     def test_repeated_polls_keep_one_active_row(self):
         ids = {self.store.condition("siteA", "int.sync_failed", True, now=T0 + timedelta(seconds=30 * i), **SYNC)
@@ -282,33 +282,33 @@ class RecipientStoreTests(unittest.TestCase):
     # ── preferences ─────────────────────────────────────────────────────────────────────
 
     def test_preferences_default_persist_and_merge(self):
-        self.assertEqual(self.store.get_preferences("u1"), {"master_enabled": True, "types": {}})
-        self.store.update_preferences("u1", types={"report.ready": False, "int.sync_failed": True})
-        self.store.update_preferences("u1", types={"report.ready": True})                       # others are kept
-        self.store.update_preferences("u2", master_enabled=False)
+        self.assertEqual(self.store.get_preferences("u1", "siteA"), {"master_enabled": True, "types": {}})
+        self.store.update_preferences("u1", "siteA", types={"report.ready": False, "int.sync_failed": True})
+        self.store.update_preferences("u1", "siteA", types={"report.ready": True})                       # others are kept
+        self.store.update_preferences("u2", "siteA", master_enabled=False)
         self.store.close()
         self.store = notifications.Store(self.store.path)                                     # survives a restart
-        self.assertEqual(self.store.get_preferences("u1"),
+        self.assertEqual(self.store.get_preferences("u1", "siteA"),
                          {"master_enabled": True, "types": {"report.ready": True, "int.sync_failed": True}})
-        self.assertEqual(self.store.get_preferences("u2"), {"master_enabled": False, "types": {}})
+        self.assertEqual(self.store.get_preferences("u2", "siteA"), {"master_enabled": False, "types": {}})
 
     def test_master_off_overrides_every_type(self):
-        self.store.update_preferences("u1", types={"report.ready": True, "int.sync_failed": False})
-        self.assertTrue(self.store.wants("u1", "report.ready", default=False))
-        self.assertFalse(self.store.wants("u1", "int.sync_failed", default=True))
-        self.assertTrue(self.store.wants("u1", "wo.assigned", default=True))      # unsaved: the registry default
-        self.assertFalse(self.store.wants("u1", "alarm.critical", default=False))
-        self.store.update_preferences("u1", master_enabled=False)
+        self.store.update_preferences("u1", "siteA", types={"report.ready": True, "int.sync_failed": False})
+        self.assertTrue(self.store.wants("u1", "siteA", "report.ready", default=False))
+        self.assertFalse(self.store.wants("u1", "siteA", "int.sync_failed", default=True))
+        self.assertTrue(self.store.wants("u1", "siteA", "wo.assigned", default=True))      # unsaved: the registry default
+        self.assertFalse(self.store.wants("u1", "siteA", "alarm.critical", default=False))
+        self.store.update_preferences("u1", "siteA", master_enabled=False)
         for type_, default in (("report.ready", True), ("wo.assigned", True)):
-            self.assertFalse(self.store.wants("u1", type_, default=default))
-        self.assertEqual(self.store.get_preferences("u1")["types"], {"report.ready": True, "int.sync_failed": False})
+            self.assertFalse(self.store.wants("u1", "siteA", type_, default=default))
+        self.assertEqual(self.store.get_preferences("u1", "siteA")["types"], {"report.ready": True, "int.sync_failed": False})
 
     def test_preference_input_is_validated(self):
         for kwargs in (dict(master_enabled=1), dict(types={"x": 1}), dict(types={"*": True}), dict(types={" ": True}),
                        dict(types=["x"])):
             with self.assertRaises(ValueError, msg=kwargs):
-                self.store.update_preferences("u1", **kwargs)
-        self.assertEqual(self.store.get_preferences("u1"), {"master_enabled": True, "types": {}})
+                self.store.update_preferences("u1", "siteA", **kwargs)
+        self.assertEqual(self.store.get_preferences("u1", "siteA"), {"master_enabled": True, "types": {}})
 
     # ── database failures ───────────────────────────────────────────────────────────────
 
@@ -316,8 +316,8 @@ class RecipientStoreTests(unittest.TestCase):
         self.store.db.execute("CREATE TEMP TRIGGER boom BEFORE INSERT ON notification_preferences"
                               " WHEN NEW.type = 'boom' BEGIN SELECT RAISE(ABORT, 'disk said no'); END")
         with self.assertRaises(notifications.StoreError):
-            self.store.update_preferences("u1", master_enabled=False, types={"report.ready": False, "boom": True})
-        self.assertEqual(self.store.get_preferences("u1"), {"master_enabled": True, "types": {}})
+            self.store.update_preferences("u1", "siteA", master_enabled=False, types={"report.ready": False, "boom": True})
+        self.assertEqual(self.store.get_preferences("u1", "siteA"), {"master_enabled": True, "types": {}})
 
     def test_a_failed_history_write_leaves_the_notification_unopened(self):
         eid = self.deliver(self.event())
@@ -334,8 +334,8 @@ class RecipientStoreTests(unittest.TestCase):
                      lambda: self.store.get_notification("u1", "siteA", eid),
                      lambda: self.store.mark_opened("u1", "siteA", eid),
                      lambda: self.store.dismiss("u1", "siteA", eid),
-                     lambda: self.store.get_preferences("u1"),
-                     lambda: self.store.update_preferences("u1", master_enabled=False)):
+                     lambda: self.store.get_preferences("u1", "siteA"),
+                     lambda: self.store.update_preferences("u1", "siteA", master_enabled=False)):
             with self.assertRaises(notifications.StoreError):
                 call()
 
@@ -348,16 +348,16 @@ class RecipientStoreTests(unittest.TestCase):
         for table in ("notification_preferences", "notification_delivery_history"):
             self.store.db.execute(f"CREATE TEMP TRIGGER boom_{table} BEFORE INSERT ON {table}"
                                   " BEGIN SELECT RAISE(ROLLBACK, 'disk said no'); END")
-        for call in (lambda: self.store.update_preferences("u1", master_enabled=False),
+        for call in (lambda: self.store.update_preferences("u1", "siteA", master_enabled=False),
                      lambda: self.store.mark_opened("u1", "siteA", eid)):
             with self.assertRaises(notifications.StoreError) as caught:
                 call()
             self.assertIsInstance(caught.exception.__cause__, sqlite3.IntegrityError)
             self.assertFalse(self.store.db.in_transaction)
-        self.assertEqual(self.store.get_preferences("u1"), {"master_enabled": True, "types": {}})
+        self.assertEqual(self.store.get_preferences("u1", "siteA"), {"master_enabled": True, "types": {}})
         self.assertIsNone(self.store.get_notification("u1", "siteA", eid)["opened_at"])
         self.store.db.execute("DROP TRIGGER boom_notification_preferences")
-        self.assertFalse(self.store.update_preferences("u1", master_enabled=False)["master_enabled"])   # still usable
+        self.assertFalse(self.store.update_preferences("u1", "siteA", master_enabled=False)["master_enabled"])   # still usable
 
     def test_a_failed_purge_deletes_nothing_and_never_stops_polling(self):
         eid = self.deliver(self.event())
@@ -385,12 +385,12 @@ class RecipientStoreTests(unittest.TestCase):
         self.store.db.execute("CREATE TEMP TRIGGER boom BEFORE INSERT ON notification_preferences"
                               " BEGIN SELECT RAISE(ABORT, 'secret table detail'); END")
         with self.assertRaises(notifications.StoreError) as caught:
-            self.store.update_preferences("u1", master_enabled=False)
+            self.store.update_preferences("u1", "siteA", master_enabled=False)
         self.assertEqual(str(caught.exception), notifications.STORE_FAILED)
         self.assertIn("secret table detail", str(caught.exception.__cause__))   # kept for the server log only
         self.store.db.execute("DROP TABLE notification_preferences")             # a read failure says the same
         with self.assertRaises(notifications.StoreError) as caught:
-            self.store.get_preferences("u1")
+            self.store.get_preferences("u1", "siteA")
         self.assertEqual(str(caught.exception), notifications.STORE_FAILED)
         self.assertIn("notification_preferences", str(caught.exception.__cause__))
 
@@ -570,7 +570,7 @@ class NotificationApiTests(unittest.TestCase):
     def test_marsa_notifications_are_listed_with_count_scope_and_stamp(self):
         self.login(self.MARSA, "proj-marsa")
         empty = self.page()
-        self.assertEqual((empty["items"], empty["next_cursor"], empty["unread_count"], empty["scope"]), ([], None, 0, "project"))
+        self.assertEqual((empty["items"], empty["next_cursor"], empty["unread_count"], empty["scope"]), ([], None, 0, "user"))
         eid = self.event(self.MARSA)
         r = self.call("GET", "/notifications")
         self.assertEqual(r.headers.get("X-Eko-Project"), "proj-marsa")
@@ -589,11 +589,9 @@ class NotificationApiTests(unittest.TestCase):
         self.call("POST", "/notifications/opened-all")
         self.call("POST", "/notifications/dismiss-opened")
         self.call("PUT", "/preferences", json={"master_enabled": False})
-        other = self.on_app(lambda: notifications.store().get_notification(
-            notifications.project_recipient(self.OTHER), self.OTHER, theirs))
+        other = self.on_app(lambda: notifications.store().get_notification("u", self.OTHER, theirs))
         self.assertEqual((other["opened_at"], other["dismissed_at"]), (None, None))
-        self.assertTrue(self.on_app(lambda: notifications.store().get_preferences(
-            notifications.project_recipient(self.OTHER)))["master_enabled"])
+        self.assertTrue(self.on_app(lambda: notifications.store().get_preferences("u", self.OTHER))["master_enabled"])
 
     def test_switching_project_serves_the_new_project_only(self):
         mine, theirs = self.event(self.MARSA), self.event(self.OTHER)
@@ -627,9 +625,10 @@ class NotificationApiTests(unittest.TestCase):
 
     def test_preferences_round_trip_for_the_project(self):
         self.login(self.MARSA, "proj-marsa")
-        self.assertEqual(self.call("GET", "/preferences").json(), {"master_enabled": True, "types": {}})
+        site = {"critical_alarms": False}                 # read-only facts about the site, beside the user's own
+        self.assertEqual(self.call("GET", "/preferences").json(), {"master_enabled": True, "types": {}, "site": site})
         r = self.call("PUT", "/preferences", json={"types": {"report.ready": False}, "master_enabled": False})
-        self.assertEqual(r.json(), {"master_enabled": False, "types": {"report.ready": False}})
+        self.assertEqual(r.json(), {"master_enabled": False, "types": {"report.ready": False}, "site": site})
         self.assertEqual(self.call("GET", "/preferences").json()["master_enabled"], False)
 
     def test_bad_input_is_a_400_in_the_contract_shape(self):

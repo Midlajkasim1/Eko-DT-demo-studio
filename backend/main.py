@@ -7,13 +7,16 @@ Also serves the compiled viewer app from the 'static/' directory.
 
 import asyncio
 import copy
+import hashlib
 import json
 import mimetypes
 import os
 import re
+import secrets
 import sqlite3
+import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote, unquote
 
@@ -842,12 +845,72 @@ def _display_name() -> str:
     return PROJECT_NAME
 
 
+# ─── User sessions ──────────────────────────────────────────────────────────
+# Who is at this browser: the FIN username FIN just accepted at /api/fin/login (SCRAM: FIN checked
+# the password), never a name a request states. The FIN *polling* session stays one, shared: the
+# last sign-in drives it, as before. A user session only says who this browser is and which FIN
+# project (site) that sign-in was for.
+# ponytail: sessions live in this process's memory, so a backend restart signs everyone out. The FIN
+# session they rely on does not survive a restart either; persist them only if that changes.
+SESSION_COOKIE = "eko_session"
+SESSIONS: dict[str, dict] = {}   # sha256(token) -> {"user_id", "site", "expires_at"}; the token itself is never kept
+POLL_OWNER: Optional[str] = None  # the user whose FIN credentials the shared polling session uses
+
+
+def _session_seconds() -> int:
+    hours = BASE_CONFIG.get("session_hours", 12)
+    return int(hours * 3600) if isinstance(hours, (int, float)) and not isinstance(hours, bool) and 0 < hours <= 24 * 30 else 12 * 3600
+
+
+def _token_key(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _drop_expired() -> None:
+    now = time.time()
+    for key in [k for k, v in SESSIONS.items() if v["expires_at"] <= now]:
+        del SESSIONS[key]
+
+
+def _open_session(request: Request, response: Response, user_id: str, site: str) -> None:
+    """A new sign-in at this browser replaces its previous session; other browsers' are untouched."""
+    _drop_expired()
+    old = request.cookies.get(SESSION_COOKIE)
+    if old:
+        SESSIONS.pop(_token_key(old), None)
+    token = secrets.token_urlsafe(32)
+    ttl = _session_seconds()
+    SESSIONS[_token_key(token)] = {"user_id": user_id, "site": site, "expires_at": time.time() + ttl}
+    https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https"
+    response.set_cookie(SESSION_COOKIE, token, max_age=ttl, httponly=True, samesite="strict", secure=https, path="/")
+
+
+def _session_of(request: Request) -> tuple[Optional[dict], Optional[str]]:
+    """(session, None), or (None, "session_required" | "session_expired"). Only the cookie counts."""
+    token = request.cookies.get(SESSION_COOKIE)
+    found = SESSIONS.get(_token_key(token)) if token else None
+    if found is None:
+        return None, "session_required"
+    if found["expires_at"] <= time.time():
+        SESSIONS.pop(_token_key(token), None)
+        return None, "session_expired"
+    return found, None
+
+
+def _close_session(request: Request, response: Response) -> None:
+    token = request.cookies.get(SESSION_COOKIE)
+    if token:
+        SESSIONS.pop(_token_key(token), None)
+    response.delete_cookie(SESSION_COOKIE, path="/")
+
+
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 @app.post("/api/fin/login")
-async def login(req: LoginRequest):
-    """Authenticate with FIN server using SCRAM-SHA-256."""
-    global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK, TYPED_NAME, STANDARD_VERIFIED
+async def login(req: LoginRequest, request: Request, response: Response):
+    """Authenticate with FIN server using SCRAM-SHA-256. Success also opens this browser's user
+    session (HttpOnly cookie) for the username FIN accepted."""
+    global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK, TYPED_NAME, STANDARD_VERIFIED, POLL_OWNER
     STANDARD_VERIFIED = None   # a new session proves the standard site again (below), or not at all
 
     # Settings sent with the login belong to the Studio project being opened, and only they
@@ -883,6 +946,7 @@ async def login(req: LoginRequest):
 
     if not success:
         raise HTTPException(status_code=401, detail="Authentication failed")
+    POLL_OWNER = req.username
 
     # Signed in is not the same as usable: the project name must resolve on this server too.
     # With no project name there is nothing to check or poll.
@@ -894,6 +958,7 @@ async def login(req: LoginRequest):
         _start_polling()
     else:
         PROJECT_CHECK = {"validated": None, "source": name_source}
+    _open_session(request, response, req.username, client.project_name or "")
 
     return {
         "status": "success",
@@ -905,7 +970,7 @@ async def login(req: LoginRequest):
 
 
 @app.post("/api/fin/project-settings")
-async def set_project_settings(req: ProjectSettingsRequest):
+async def set_project_settings(req: ProjectSettingsRequest, request: Request):
     """Switch the live session to another project's FIN configuration, without a new sign-in.
 
     Needs an authenticated session, since it changes what the shared session polls.
@@ -943,6 +1008,11 @@ async def set_project_settings(req: ProjectSettingsRequest):
     _reset_caches()
     if PROJECT_NAME:
         _start_polling()
+    # The switch was validated with the polling session's FIN credentials: only their owner's own
+    # user session moves to the new site. Anyone else's stays on the site they signed in for.
+    mine, _ = _session_of(request)
+    if mine and mine["user_id"] == POLL_OWNER:
+        mine["site"] = client.project_name or ""
 
     return {
         "status": "success",
@@ -1277,10 +1347,17 @@ def _attach_workorders():
 CRITICAL_ALARM = "alarm.critical"
 
 
+def _critical_alarms_enabled(store, site: str) -> bool:
+    """Whether this SITE creates critical-alarm notifications: config.json's critical_alarm_sites lists
+    its FIN project AND its own alarm.critical toggle is on. No user's preference enters into it."""
+    allowed = site in [s for s in (BASE_CONFIG.get("critical_alarm_sites") or []) if isinstance(s, str)]
+    return allowed and store.project_wants(site, CRITICAL_ALARM, default=False)
+
+
 def _note_critical_alarms(site: str, alarms: list, read_ok: bool) -> None:
     """Contract trigger "critical alarm": only when the site allows it (config.json
-    critical_alarm_sites lists its FIN project) AND the project's alarm.critical toggle is on; both
-    are off by default. One row per open critical FIN alarm, keyed by FIN's own id (an alarm with
+    critical_alarm_sites lists its FIN project) AND the project's alarm.critical toggle is on (the
+    site's baseline setting, not any user's preference); both are off by default. One row per open critical FIN alarm, keyed by FIN's own id (an alarm with
     no id is not notified), resolved once FIN stops reporting it. A failed or error read changes
     nothing: an answer FIN did not give is not "all clear"."""
     if not read_ok or not site:
@@ -1292,8 +1369,7 @@ def _note_critical_alarms(site: str, alarms: list, read_ok: bool) -> None:
         for asset, state in store.active_states(site, CRITICAL_ALARM):   # cleared since the last poll
             if state not in open_now:
                 store.condition(site, CRITICAL_ALARM, False, asset_id=asset, state=state, source_ref=state, **fields)
-        allowed = site in [s for s in (BASE_CONFIG.get("critical_alarm_sites") or []) if isinstance(s, str)]
-        if not allowed or not store.wants(notifications.project_recipient(site), CRITICAL_ALARM, default=False):
+        if not _critical_alarms_enabled(store, site):
             return
         for fin_id, a in open_now.items():
             store.condition(site, CRITICAL_ALARM, True, asset_id=a.get("source") or None, state=fin_id,
@@ -1342,8 +1418,9 @@ async def refresh_workorders():
 # cannot pick it. X-Eko-Project names the Eko-DT project the browser shows: it must equal the one
 # the backend serves, so a dashboard left on another project is refused rather than served this
 # one, and being a custom header it forces a CORS preflight that foreign origins fail.
-# ponytail: read/dismissed/preference state belongs to the PROJECT (one shared recipient), not to a
-# person: there is no per-user FIN identity yet. Upgrade to per-user recipients with sign-in identity.
+# Read, dismissed and preference state belongs to the signed-in USER on this site: the user id comes
+# from the server-side session (the username FIN accepted), never from the request. Events are still
+# created once per site from the one shared FIN polling session (see backend/README.md).
 
 NOTIF_BASE = "/api/notifications/v1"
 
@@ -1363,9 +1440,14 @@ async def _notification_error(request: Request, exc: NotificationApiError):
 
 
 def _notification_scope(request: Request) -> tuple[str, str]:
-    """(recipient, site) for this request, taken only from the backend's own session."""
+    """(user id, site) for this request, taken only from the backend's own sessions: the FIN
+    session it polls with, and this browser's user session (cookie), whose site must be the one
+    served. Nothing a request states (a user id, a role, a site) is read."""
     if not client or not client.is_authenticated:
         raise NotificationApiError(401, "unauthenticated", "The backend is not signed in to FIN.")
+    user, why = _session_of(request)
+    if user is None:
+        raise NotificationApiError(401, why, "Sign in to see notifications.")
     asked = request.headers.get(PROJECT_HEADER)
     if not asked:
         raise NotificationApiError(400, "project_required", f"The {PROJECT_HEADER} header is required.")
@@ -1374,7 +1456,10 @@ def _notification_scope(request: Request) -> tuple[str, str]:
     site = client.project_name or ""
     if not notifications.SITE_RE.match(site) or PROJECT_CHECK.get("validated") is not True:
         raise NotificationApiError(409, "project_not_validated", "The open project is not validated on FIN.")
-    return notifications.project_recipient(site), site
+    if user["site"] != site:
+        raise NotificationApiError(409, "session_project_mismatch",
+                                   "You signed in for another project. Sign in again for this one.")
+    return user["user_id"], site
 
 
 def _notif_call(op):
@@ -1404,7 +1489,7 @@ async def notifications_list(request: Request, response: Response, view: str = "
         who, site, view=view, type_=type_, severity=severity, asset_id=asset_id, q=q,
         limit=int(limit) if limit.lstrip("-").isdigit() else limit, cursor=cursor))
     page["unread_count"] = _notif_call(lambda s: s.unread_count(who, site))
-    page["scope"] = "project"   # state shared by everyone viewing this project
+    page["scope"] = "user"   # read and dismissed state of the signed-in user on this project
     return page
 
 
@@ -1450,11 +1535,24 @@ async def notifications_dismiss_opened(request: Request, response: Response):
     return {"updated": _notif_call(lambda s: s.dismiss_opened(who, site))}
 
 
+def _preferences_answer(who: str, site: str) -> dict:
+    """The signed-in user's own preferences, plus read-only facts about the SITE next to them so the
+    page can tell the two apart. site.critical_alarms is true/false, or null when it cannot be read
+    (never assumed on). Nothing in a request can change the site part."""
+    answer = _notif_call(lambda s: s.get_preferences(who, site))
+    try:
+        enabled = _critical_alarms_enabled(notifications.store(), site)
+    except (notifications.StoreError, sqlite3.Error, ValueError):
+        enabled = None
+    answer["site"] = {"critical_alarms": enabled}
+    return answer
+
+
 @app.get(NOTIF_BASE + "/preferences")
 async def notifications_preferences(request: Request, response: Response):
     who, site = _notification_scope(request)
     _stamp(response)
-    return _notif_call(lambda s: s.get_preferences(who))
+    return _preferences_answer(who, site)
 
 
 @app.put(NOTIF_BASE + "/preferences")
@@ -1467,8 +1565,8 @@ async def notifications_preferences_update(request: Request, response: Response)
         raise NotificationApiError(400, "invalid_input", "The body must be JSON.")
     if not isinstance(body, dict) or set(body) - {"master_enabled", "types"}:
         raise NotificationApiError(400, "invalid_input", "Only master_enabled and types can be set.")
-    return _notif_call(lambda s: s.update_preferences(
-        who, master_enabled=body.get("master_enabled"), types=body.get("types")))
+    _notif_call(lambda s: s.update_preferences(who, site, master_enabled=body.get("master_enabled"), types=body.get("types")))
+    return _preferences_answer(who, site)
 
 
 @app.get("/api/fin/workorders")
@@ -1627,61 +1725,6 @@ async def get_alarm_history(response: Response, days: int = 30):
     )
     if text is None:
         raise HTTPException(status_code=502, detail="FIN request failed")
-    # ── TEMP-DIAG alarm-history: remove after investigation ──
-    parsed_rows = parse_zinc_csv(text)
-    print(
-        "[TEMP-DIAG alarm-history]",
-        {
-            "raw_chars": len(text),
-            "parsed_rows": len(parsed_rows),
-            "columns": sorted(   # names only: parse_zinc_csv can take an error grid's text as its header
-                {key for row in parsed_rows for key in row.keys() if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)}
-            ),
-            "alarm_types": sorted(
-                {type(row.get("alarm")).__name__ for row in parsed_rows}
-            ),
-            "alarm_true_count": sum(
-                row.get("alarm") is True for row in parsed_rows
-            ),
-        },
-    )
-    # Response shape, names and flags only: quoted values are blanked and unquoted values dropped.
-    # HTTP status is 200 by construction (fetch_api returns text only for 200).
-    from fin_client import _split_zinc_csv, collapse_metadata_blocks
-    _lines = [l.strip() for l in collapse_metadata_blocks(text.lstrip("\ufeff")).splitlines() if l.strip()]
-    _first = _lines[0] if _lines else ""
-    _zinc = _first.startswith("ver:")
-    _bare = re.sub(r'"(?:\\.|[^"\\])*"', '""', _first) if _zinc else ""
-    _ident = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-    _meta = sorted({t.split(":", 1)[0] for t in _bare.split()[1:] if _ident.match(t.split(":", 1)[0])})
-    _cols = ([c for c in (x.strip().split(" ", 1)[0] for x in _split_zinc_csv(_lines[1])) if _ident.match(c)]
-             if _zinc and len(_lines) > 1 else [])
-    print(
-        "[TEMP-DIAG alarm-history shape]",
-        {
-            "lines": len(_lines),
-            "zinc_grid": _zinc,
-            "starts_as": ("blank" if not _first else "zinc" if _zinc else "html" if _first[0] == "<"
-                          else "json" if _first[0] in "{[" else "other"),
-            "error_grid": _zinc and "err" in _meta,
-            "grid_meta_names": _meta,
-            "column_names": _cols,
-            "data_lines": max(0, len(_lines) - 2) if _zinc else None,
-            # Numeric counts only; never print the pollHandle value.
-            "counts": {
-                n: float(m.group(1))
-                for n in ("resultCount", "totalRecordCount")
-                if (
-                    m := re.search(
-                        rf"(?:^|\s){n}:(-?\d+(?:\.\d+)?)(?=\s|$)",
-                        _bare,
-                    )
-                )
-            },
-            "poll_handle_present": "pollHandle" in _meta,
-        },
-    )
-    # ── end TEMP-DIAG alarm-history ──
 
     bands = CONFIG.get("severity_bands", {})
     by_day: dict[str, dict] = {}
@@ -1731,9 +1774,15 @@ async def get_building_info():
 
 
 @app.post("/api/fin/logout")
-async def logout():
-    """Disconnect from FIN server."""
-    global client, PROJECT_CHECK, STANDARD_VERIFIED
+async def logout(request: Request, response: Response):
+    """End this browser's user session. The shared FIN session closes only when no other user is
+    still signed in: one user's sign-out never cuts another user's session or live data."""
+    global client, PROJECT_CHECK, STANDARD_VERIFIED, POLL_OWNER
+    _close_session(request, response)
+    _drop_expired()
+    if SESSIONS:
+        return {"status": "signed_out", "fin": "connected for other users"}
+    POLL_OWNER = None
     STANDARD_VERIFIED = None
     _cancel_polling()
     if client:
@@ -1820,13 +1869,26 @@ async def auth_status():
 
 
 @app.post("/api/auth/login")
-async def auth_login(req: LoginRequest):
-    return await login(req)
+async def auth_login(req: LoginRequest, request: Request, response: Response):
+    return await login(req, request, response)
 
 
 @app.post("/api/auth/logout")
-async def auth_logout():
-    return await logout()
+async def auth_logout(request: Request, response: Response):
+    return await logout(request, response)
+
+
+@app.get("/api/auth/me")
+@app.get("/api/fin/me")
+async def me(request: Request):
+    """Who this browser is signed in as: from the session cookie only. The role is the site's own
+    mapping (eko_role_mapping), None when nobody has mapped one; never one the browser names."""
+    found, why = _session_of(request)
+    if found is None:
+        raise NotificationApiError(401, why, "Sign in to see who you are signed in as.")
+    role = _notif_call(lambda s: s.role_of(found["site"], found["user_id"])) if found["site"] else None
+    return {"user_id": found["user_id"], "site": found["site"], "role": role,
+            "expires_at": notifications.utc_iso(datetime.fromtimestamp(found["expires_at"], timezone.utc))}
 
 
 # ─── Static Viewer App ────────────────────────────────────────────────────────

@@ -26,22 +26,26 @@ export default function ViewerApp() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [standalone, setStandalone] = useState(false)
-  const [auth, setAuth] = useState<'checking' | 'required' | 'authed'>('checking')
+  const [auth, setAuth] = useState<'checking' | 'required' | 'error' | 'authed'>('checking')
   const [sessionInfo, setSessionInfo] = useState<{ displayName?: string; serverUrl?: string }>({})
   const progressActive = useLoadingProgressStore(s => s.sessionActive)
 
   // Session gate runs in parallel with model loading — models stream in behind
   // the sign-in overlay, so the scene is ready (or close to it) once the
   // operator is authenticated
+  // Signed in means THIS browser's session (checkSession reads /api/auth/me), never "the backend
+  // is connected to FIN": a second browser is asked to sign in even if another already connected.
+  // No backend at all (a static FIN-hosted copy) has nothing to sign in to, as before.
+  const [authTry, setAuthTry] = useState(0)
   useEffect(() => {
     let mounted = true
     checkSession().then(s => {
       if (!mounted) return
       setSessionInfo({ displayName: s.displayName, serverUrl: s.serverUrl })
-      setAuth(s.reachable && !s.authenticated ? 'required' : 'authed')
+      setAuth(!s.reachable || s.authenticated ? 'authed' : s.error ? 'error' : 'required')
     })
     return () => { mounted = false }
-  }, [])
+  }, [authTry])
 
   // Apply saved render settings from project.json
   const applyRenderSettings = useCallback((meta: ProjectMeta) => {
@@ -304,9 +308,11 @@ export default function ViewerApp() {
           {/* Sign-in gate — models keep streaming in behind it */}
           {auth !== 'authed' && (
             <SignInOverlay
-              ready={auth === 'required'}
+              ready={auth === 'required' || auth === 'error'}
               displayName={sessionInfo.displayName}
               serverUrl={sessionInfo.serverUrl}
+              notice={auth === 'error' ? 'Your sign-in could not be checked (server or network error). Retry, or sign in again.' : undefined}
+              onRetry={() => setAuthTry(n => n + 1)}
               onSuccess={() => setAuth('authed')}
             />
           )}

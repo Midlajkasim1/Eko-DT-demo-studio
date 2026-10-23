@@ -9,7 +9,6 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import re
 import secrets
 import time
@@ -499,52 +498,6 @@ def aggregate_and_restructure(data: list[dict]) -> dict:
 
 # ─── SCRAM-SHA-256 Client ────────────────────────────────────────────────────
 
-# ── TEMP-DIAG alarm header: remove this block and its one call in _build_realtime ──────────
-# Off unless EKO_ALARM_HEADER_DIAG=1. Reports the shape and column names of the alarm response
-# FIN already returned: no extra FIN request, no row values, error text or credentials.
-_ALARM_DIAG_REPORTS = 0
-_ALARM_DIAG_MAX = 3          # a failed or unreadable poll may be followed by a readable one
-_ZINC_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
-def _diag_alarm_header(alarms_text: Optional[str], row_count: int) -> None:
-    global _ALARM_DIAG_REPORTS
-    if os.environ.get("EKO_ALARM_HEADER_DIAG") != "1" or _ALARM_DIAG_REPORTS >= _ALARM_DIAG_MAX:
-        return
-    _ALARM_DIAG_REPORTS += 1
-    say = lambda msg: print(f"[TEMP-DIAG alarms] {msg}")   # noqa: E731
-    try:
-        if alarms_text is None:
-            return say("no response text (the FIN request failed or was refused)")
-        text = alarms_text.lstrip("\ufeff")
-        lines = [l.strip() for l in collapse_metadata_blocks(text).splitlines() if l.strip()]
-        if not lines:
-            return say("response is blank")
-        first = lines[0]
-        if not first.startswith("ver:"):
-            kind = ("HTML page (often a sign-in page: session not accepted)" if first.startswith("<")
-                    else "JSON" if first[:1] in "{[" else "not a Zinc grid")
-            return say(f"unrecognised format: {kind}; {len(lines)} non-blank lines; nothing printed from it")
-        if re.search(r"\berr\b", first):
-            _ALARM_DIAG_REPORTS = _ALARM_DIAG_MAX   # an answer, not a transient failure
-            return say("FIN returned an error grid (message not printed); no alarm columns to report")
-        if len(lines) < 2:
-            return say("Zinc grid with no column line")
-        cells = [c.strip().split(" ", 1)[0] for c in _split_zinc_csv(lines[1])]
-        columns = [c for c in cells if _ZINC_NAME_RE.match(c)]
-        odd = len(cells) - len(columns)   # not a column name: counted, never printed
-        _ALARM_DIAG_REPORTS = _ALARM_DIAG_MAX   # a readable header: report once
-        if columns == ["empty"]:
-            return say("empty grid: no alarm rows in this window, so no alarm columns to report")
-        ack_like = [c for c in columns if re.search(r"ack", c, re.I)]
-        say(f"Zinc grid, {len(lines) - 2} data lines, parser rows: {row_count}"
-            + (f", {odd} cell(s) in the header line were not column names" if odd else ""))
-        say(f"columns: {columns or 'none identifiable'}")
-        say(f"acknowledgement-like columns: {ack_like or 'none'}")
-    except Exception as exc:   # a diagnostic must never break polling
-        say(f"diagnostic failed: {type(exc).__name__}")
-# ── end TEMP-DIAG ───────────────────────────────────────────────────────────────────────────
-
 
 class FinScramClient:
     """Async FIN Framework client with SCRAM-SHA-256 authentication."""
@@ -787,7 +740,6 @@ class FinScramClient:
         points = parse_zinc_csv(points_text)
         equipment = parse_zinc_csv(equip_text)
         alarms = parse_zinc_csv(alarms_text)
-        _diag_alarm_header(alarms_text, len(alarms))   # TEMP-DIAG: remove with the block above
         attach_alarm_details(alarms_text or "", alarms)
         self.last_alarm_rows = alarms
         open_alarms = open_alarm_rows(alarms)   # one per logical alarm, as the alarm list counts them

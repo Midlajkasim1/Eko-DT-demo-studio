@@ -4,17 +4,23 @@ import type {
   FinPowerLiveResponse,
   FinStatusResponse,
   FinLoginRequest,
+  FinSession,
 } from '@/types/fin'
 import type { ProjectApiSettings } from '@/types'
 import { useProjectStore } from '@/store/useProjectStore'
 import { toBackendSettings } from '@/lib/finSettings'
 
 interface FinState {
-  // Connection
+  // Connection: this BROWSER is signed in (its own session, /api/auth/me) and the backend is
+  // connected to FIN. Another browser having connected FIN does not make this one connected.
   isConnected: boolean
   isAuthenticating: boolean
   connectionError: string | null
   status: FinStatusResponse | null
+  /** Who this browser is signed in as, from the server; null when not signed in here */
+  session: FinSession | null
+  /** The last /api/auth/me check: an 'error' (network, server) is retryable, never "signed in" */
+  sessionCheck: 'unknown' | 'signed_in' | 'signed_out' | 'error'
 
   // Data
   equipment: FinEquipment[]
@@ -33,6 +39,25 @@ interface FinState {
 }
 
 const FIN_API_BASE = '/api/fin'
+const ME_URL = '/api/auth/me'
+
+/** Tell the dashboard (bell) to ask the server again who this browser is. Carries no identity. */
+function announceAuthChange() {
+  window.dispatchEvent(new Event('eko-auth-changed'))
+}
+
+/** This browser's own session: a user, none (401), or an error to retry */
+async function readSession(): Promise<{ check: 'signed_in' | 'signed_out' | 'error'; session: FinSession | null }> {
+  try {
+    const res = await fetch(ME_URL, { cache: 'no-store', credentials: 'same-origin' })
+    if (res.status === 401) return { check: 'signed_out', session: null }
+    if (!res.ok) return { check: 'error', session: null }
+    const me = await res.json()
+    return typeof me?.user_id === 'string' ? { check: 'signed_in', session: me } : { check: 'error', session: null }
+  } catch {
+    return { check: 'error', session: null }
+  }
+}
 
 /** Which project's configuration the backend session is running, so it is only re-sent on change */
 let appliedConfigKey: string | null = null
@@ -67,6 +92,8 @@ export const useFinStore = create<FinState>((set, get) => ({
   isAuthenticating: false,
   connectionError: null,
   status: null,
+  session: null,
+  sessionCheck: 'unknown',
   equipment: [],
   powerData: null,
   lastUpdated: null,
@@ -88,7 +115,20 @@ export const useFinStore = create<FinState>((set, get) => ({
         return false
       }
       appliedConfigKey = config?.key ?? null
-      set({ isConnected: true, isAuthenticating: false, connectionError: null })
+      // FIN accepted the sign-in; this browser counts as signed in once the server confirms its session
+      const me = await readSession()
+      if (me.check !== 'signed_in') {
+        set({
+          isAuthenticating: false, session: null, sessionCheck: me.check,
+          connectionError: me.check === 'signed_out'
+            ? 'FIN accepted the sign-in, but this browser did not keep its session (are cookies blocked?).'
+            : 'Signed in, but your session could not be confirmed. Retry.',
+        })
+        announceAuthChange()
+        return false
+      }
+      set({ isConnected: true, isAuthenticating: false, connectionError: null, session: me.session, sessionCheck: 'signed_in' })
+      announceAuthChange()
       // Signed in is not the same as usable: status carries whether the project name validated
       await get().fetchStatus()
 
@@ -109,8 +149,9 @@ export const useFinStore = create<FinState>((set, get) => ({
   },
 
   logout: async () => {
+    // Ends THIS browser's session; the backend keeps FIN connected for anyone else still signed in
     try {
-      await fetch(`${FIN_API_BASE}/logout`, { method: 'POST' })
+      await fetch(`${FIN_API_BASE}/logout`, { method: 'POST', credentials: 'same-origin' })
     } catch {
       // ignore
     }
@@ -118,24 +159,30 @@ export const useFinStore = create<FinState>((set, get) => ({
     dataEpoch++
     set({
       isConnected: false,
+      session: null,
+      sessionCheck: 'signed_out',
       equipment: [],
       powerData: null,
       lastUpdated: null,
       status: null,
     })
+    announceAuthChange()
+    // What the backend serves now (FIN may still be connected for other users): shown, not inherited
+    void get().fetchStatus()
   },
 
   fetchStatus: async () => {
-    try {
-      const res = await fetch(`${FIN_API_BASE}/status`)
-      if (res.ok) {
-        const data: FinStatusResponse = await res.json()
-        set({ status: data, isConnected: data.connected })
-      }
-    } catch {
-      // Backend not running
-      set({ isConnected: false })
-    }
+    // Two questions: is the backend connected to FIN (shared), and is THIS browser signed in (its own)
+    const [statusRes, me] = await Promise.all([
+      fetch(`${FIN_API_BASE}/status`).then(r => (r.ok ? r.json() as Promise<FinStatusResponse> : null)).catch(() => null),
+      readSession(),
+    ])
+    set({
+      status: statusRes,
+      session: me.session,
+      sessionCheck: me.check,
+      isConnected: !!statusRes?.connected && me.check === 'signed_in',
+    })
   },
 
   fetchEquipment: async () => {

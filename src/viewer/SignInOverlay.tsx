@@ -3,6 +3,9 @@ import { useEffect, useState } from 'react'
 // Current routes first, legacy second — matches backend/login.html behavior
 const STATUS_URLS = ['/api/auth/status', '/api/fin/status']
 const LOGIN_URLS = ['/api/auth/login', '/api/fin/login']
+// Who THIS browser is signed in as (its session cookie). The status above says only whether the
+// backend is connected to FIN, which another browser's sign-in also makes true.
+const ME_URLS = ['/api/auth/me', '/api/fin/me']
 
 async function requestFirst(urls: string[], options?: RequestInit): Promise<Response | null> {
   let lastErr: unknown = null
@@ -20,9 +23,23 @@ async function requestFirst(urls: string[], options?: RequestInit): Promise<Resp
 
 export interface SessionStatus {
   reachable: boolean
+  /** This browser has a session (from /api/auth/me), not "the backend is connected to FIN" */
   authenticated: boolean
+  /** The session could not be checked (server or network error): retry, never assume */
+  error?: boolean
   displayName?: string
   serverUrl?: string
+}
+
+/** 'signed_in' | 'signed_out' (401, or a backend without /me) | 'error' */
+async function sessionHere(): Promise<'signed_in' | 'signed_out' | 'error'> {
+  try {
+    const res = await requestFirst(ME_URLS, { cache: 'no-store', credentials: 'same-origin' })
+    if (!res || res.status === 401) return 'signed_out'
+    return res.ok ? 'signed_in' : 'error'
+  } catch {
+    return 'error'
+  }
 }
 
 export async function checkSession(): Promise<SessionStatus> {
@@ -30,9 +47,11 @@ export async function checkSession(): Promise<SessionStatus> {
     const res = await requestFirst(STATUS_URLS, { cache: 'no-store' })
     if (!res || !res.ok) return { reachable: false, authenticated: false }
     const data = await res.json()
+    const here = await sessionHere()
     return {
       reachable: true,
-      authenticated: Boolean(data.authenticated ?? data.connected),
+      authenticated: here === 'signed_in',
+      error: here === 'error',
       displayName: data.display_name,
       serverUrl: data.server_url,
     }
@@ -45,15 +64,19 @@ interface SignInOverlayProps {
   ready: boolean
   displayName?: string
   serverUrl?: string
+  /** Shown before any sign-in attempt, e.g. when the session could not be checked */
+  notice?: string
+  onRetry?: () => void
   onSuccess: () => void
 }
 
-export function SignInOverlay({ ready, displayName, serverUrl, onSuccess }: SignInOverlayProps) {
+export function SignInOverlay({ ready, displayName, serverUrl, notice, onRetry, onSuccess }: SignInOverlayProps) {
   const [server, setServer] = useState(serverUrl || 'https://localhost')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const shown = message || notice || ''
 
   useEffect(() => {
     if (serverUrl) setServer(serverUrl)
@@ -80,7 +103,17 @@ export function SignInOverlay({ ready, displayName, serverUrl, onSuccess }: Sign
       }
       const data = await res.json().catch(() => ({}))
       if (res.ok && data.status === 'success') {
-        onSuccess()
+        // FIN accepted the sign-in; carry on once the server confirms this browser's session
+        const here = await sessionHere()
+        if (here === 'signed_in') {
+          window.dispatchEvent(new Event('eko-auth-changed'))   // the dashboard bell asks the server again
+          onSuccess()
+          return
+        }
+        setMessage(here === 'signed_out'
+          ? 'Signed in, but this browser did not keep the session. Allow cookies for this site and try again.'
+          : 'Signed in, but the session could not be confirmed. Try again.')
+        setBusy(false)
         return
       }
       setMessage(`Access Denied: ${data.detail || data.message || 'Invalid Credentials'}`)
@@ -169,7 +202,10 @@ export function SignInOverlay({ ready, displayName, serverUrl, onSuccess }: Sign
             </button>
           </form>
 
-          <div className="signin-message" style={{ opacity: message ? 1 : 0 }}>{message}</div>
+          <div className="signin-message" style={{ opacity: shown ? 1 : 0 }}>{shown}</div>
+          {notice && onRetry && !message && (
+            <button className="signin-btn" type="button" onClick={onRetry} style={{ marginTop: 8 }}>Retry</button>
+          )}
         </div>
       )}
     </div>
