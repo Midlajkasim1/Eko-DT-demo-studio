@@ -993,10 +993,7 @@
       ls.set('eko-nav', E.state.navMin?'min':'full'); render(); },
     sysExpTgl(el, ev){ ev.stopPropagation(); const g = el.dataset.v;
       E.state.sysExp[g] = E.state.sysExp[g] === false; render(); },
-    ovpMin(){
-      const lf = E.state.locFocus;
-      if(lf && E.state.pageId === 'assets-register'){ lf.ovOpen = !lf.ovOpen; render(); return; }   /* during Locate in 3D: this visit's own fold, nothing saved */
-      E.state.ovpMin = !E.state.ovpMin; ls.set('eko-ovp', E.state.ovpMin?'min':'full'); render(); },
+    ovpMin(){ E.state.ovpMin = !E.state.ovpMin; ls.set('eko-ovp', E.state.ovpMin?'min':'full'); render(); },
     panMin(){ E.state.panMin = !E.state.panMin; ls.set('eko-pan', E.state.panMin?'min':'full'); render(); },
     regMin(){ E.state.regMin = !E.state.regMin; ls.set('eko-reg', E.state.regMin?'min':'full'); render(); },
     mobMore(){ E.set({ born: E.state.mobMore?null:'dlg', mobMore: !E.state.mobMore }); },
