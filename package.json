@@ -19,7 +19,6 @@
     "test:eco": "node scripts/test-eco-points.mjs",
     "test:hvac": "node scripts/test-hvac-schematics.mjs",
     "test:alarms": "node scripts/test-alarm-dedup.mjs",
-    "dev:test": "vite --config scripts/vite.isolated.config.ts --host 127.0.0.1 --port 5175 --strictPort",
     "test:reports": "node scripts/test-reports.mjs",
     "test:isolation": "node scripts/test-project-isolation.mjs",
     "test:fin-switch": "node scripts/test-fin-project-switch.mjs",

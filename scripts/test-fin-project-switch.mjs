@@ -1,19 +1,20 @@
 // Browser test: Dashboard Settings > Data Mapping follows the FIN project selected in FIN Config.
 //
-//   1. FAKE_PORT=8010 npm run dev:test      (Vite on :5175, its /api proxied to the FAKE backend, never to :8000)
-//   2. APP_URL=http://127.0.0.1:5175 node scripts/test-fin-project-switch.mjs
-//   The fake backend is started here; it refuses an occupied port, and the test stops before any sign-in
-//   unless the app under test provably reaches it (scripts/fake-backend.mjs).
+//   1. npm run dev                       (Vite on :5173, proxying /api/fin to :8000)
+//   2. make sure nothing listens on :8000 (this script starts the backend with a FAKE FIN client)
+//   3. node scripts/test-fin-project-switch.mjs
 //
 // Needs Playwright (devDependency) and Microsoft Edge, or set PW_CHANNEL=chrome. PYTHON overrides the interpreter.
 import { chromium } from 'playwright'
-import { startFakeBackend, FAKE_APP_URL } from './fake-backend.mjs'
+import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import assert from 'node:assert'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const APP = process.env.APP_URL || FAKE_APP_URL
+const APP = process.env.APP_URL || 'http://localhost:5173'
+const API = 'http://127.0.0.1:8000'
+const python = process.env.PYTHON || path.join(ROOT, 'backend', 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python')
 
 let failures = 0
 const check = (cond, msg) => { console.log((cond ? 'PASS ' : 'FAIL ') + msg); if (!cond) failures++ }
@@ -32,9 +33,8 @@ const meta = {
   apiSettings: { finProjectName: SAVED, finLivePoints: { total_power: 'p:{project}:r:111' } },
 }
 
-const fake = await startFakeBackend({ root: ROOT, appUrl: APP })   // refuses an occupied port; proves the app reaches the fake
-const server = { kill: () => fake.stop() }
-const API = fake.api
+const server = spawn(python, ['tests/fake_fin_server.py', '--port', '8000'], { cwd: path.join(ROOT, 'backend'), stdio: 'ignore' })
+await until(async () => (await fetch(API + '/api/fin/status')).ok, 'fake backend on :8000', 20000)
 const browser = await chromium.launch({ channel: process.env.PW_CHANNEL || 'msedge', headless: true })
 const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } })
 page.on('pageerror', e => { console.log('PAGEERROR', e.message); failures++ })
