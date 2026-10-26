@@ -60,11 +60,11 @@
     const analog = analogParams.length ? `<dl class="dgxl">${analogParams.map(p => `<div class="aprow"><dt>${esc(pAr(E, p[0]))}</dt><dd>${esc(p[2])}</dd></div>`).join('')}</dl>` : '';
     const live = liveParams.length ? `<dl class="dgxl">${liveParams.map(p => `<div class="aprow"><dt>${esc(pAr(E, p[0]))}${p[1] ? `<span class="apsrc">${esc(pAr(E, p[1]))}</span>` : ''}</dt><dd>${esc(p[2])}</dd></div>`).join('')}</dl>` : `<p class="tCap">${esc(t('emptyDash'))}</p>`;
     const al = als.length ? als.map(a => `<div class="alref"><div class="alrefh"><span class="statchip" data-sev="${a.sev}">${esc(t('rib' + a.sev[0].toUpperCase() + a.sev.slice(1)).toLowerCase())}</span><span class="alrefage tMonoS msA">${esc(a.age)}</span></div>
-      <div class="alreft">${esc(E.alarmLines(a).main)}</div>${E.alarmLines(a).sub ? `<div class="alreftech">${esc(E.alarmLines(a).sub)}</div>` : ''}<div class="alrefack">${a.ack ? esc(t('ackShort', { time:a.ack.time, who:a.ack.who })) : esc(t('apUnack'))}</div></div>`).join('') : `<p class="tCap">${esc(t('apNoAlarms'))}</p>`;
+      <div class="alreft">${esc(E.alarmLines(a).main)}</div>${E.alarmLines(a).sub ? `<div class="alreftech">${esc(E.alarmLines(a).sub)}</div>` : ''}${a.ack ? `<div class="alrefack">${esc(t('ackShort', { time:a.ack.time, who:a.ack.who }))}</div>` : ''}</div>`).join('') : `<p class="tCap">${esc(t('apNoAlarms'))}</p>`;
     return `<div class="dgxg"><section><h4 class="tLbl">${esc(t('apAnalytics'))}</h4>${analog || `<p class="tCap">${esc(t('emptyDash'))}</p>`}</section><section><h4 class="tLbl">${esc(t('apAlarms'))}</h4>${live}${al}</section></div>`; };
 
   const assets = E => ({
-    id:'assets', titleKey:'regTitle', exportName:'asset-register', rowKey:'id', rowAct:{ act:'openAsset', attr:'asset', tab:'alarms' }, searchKeys:['id', 'zone', 'type'],
+    id:'assets', titleKey:'regTitle', exportName:'asset-register', rowKey:'id', rowAct:{ act:'openAsset', attr:'asset', tab:'alarms' }, searchKeys:['id', 'type'],
     isSelectedRow:(E2, r) => E2.state.assetSel === r.id,
     rows: E2 => E2.data.assets,
     groups:[{ id:'identity', labelKey:'dgg.identity' }, { id:'condition', labelKey:'dgg.condition' }, { id:'maintenance', labelKey:'dgg.maintenance' }, { id:'reference', labelKey:'dgg.reference' }],
@@ -89,8 +89,7 @@
       { key:'trend', labelKey:'dgc.trend', type:'text', width:132, def:true, grp:'condition', noFilter:true, get:(E2, r) => trendText(E2, r), text:(E2, r) => trendText(E2, r), cell:(E2, r) => trendCell(E2, r), sortVal:(E2, r) => { const d = trendDelta(r); return d == null ? null : -d; } },
       { key:'sev', labelKey:'dgc.sev', type:'enum', width:150, def:false, grp:'condition', get:(E2, r) => { const w = worst(E2, r); return w ? w.sev : ''; }, text:(E2, r) => { const w = worst(E2, r); return w ? E2.t('rpSev.' + w.sev) : E2.t('emptyDash'); },
         enumOpts:E2 => ['critical', 'high', 'medium'].map(v => ({ v, label:E2.t('rpSev.' + v) })), sortVal:(E2, r) => { const w = worst(E2, r); return w ? ({ critical:0, high:1, medium:2 }[w.sev]) : 9; } },
-      { key:'floor', labelKey:'dgc.floor', type:'enum', width:94, def:true, grp:'identity', get:(E2, r) => r.floor, text:(E2, r) => r.floor, enumOpts:E2 => [...new Set(E2.data.assets.map(r => r.floor))].map(v => ({ v, label:v })) },
-      { key:'zone', labelKey:'dgc.zone', type:'text', width:132, def:true, grp:'identity', mob:'line2', get:(E2, r) => ar(E2) ? (r.zoneAr || r.zone) : r.zone, text:(E2, r) => ar(E2) ? (r.zoneAr || r.zone) : r.zone },
+      { key:'floor', labelKey:'dgc.floor', type:'enum', width:94, def:true, grp:'identity', mob:'line2', get:(E2, r) => r.floor, text:(E2, r) => r.floor, enumOpts:E2 => [...new Set(E2.data.assets.map(r => r.floor))].map(v => ({ v, label:v })) },
       { key:'wos', labelKey:'dgc.wos', type:'num', width:158, def:true, grp:'maintenance', mono:true, act:'workorder', get:(E2, r) => r.wos || 0, text:(E2, r) => r.wos ? String(r.wos) : E2.t('emptyDash') },
       { key:'wost', labelKey:'dgc.wost', type:'enum', width:124, def:true, grp:'maintenance', act:'workorder', get:(E2, r) => r.wost || '', text:(E2, r) => r.wost ? E2.t('wo' + r.wost[0].toUpperCase() + r.wost.slice(1)) : E2.t('emptyDash'),
         cell:(E2, r) => r.wost ? `<span class="row gap6"><span class="wodot" data-st="${r.wost}"></span>${esc(E2.t('wo' + r.wost[0].toUpperCase() + r.wost.slice(1)))}</span>` : `<span class="tCap">${esc(E2.t('emptyDash'))}</span>`,
@@ -107,9 +106,9 @@
         cell:(E2, r) => tagsOf(E2, r).length ? tagsOf(E2, r).map(x => `<span class="chip dgtag">${esc(x)}</span>`).join(' ') : `<span class="tCap">${esc(E2.t('emptyDash'))}</span>` }
     ],
     views:[
-      { id:'all', nameKey:'dgv.all', cols:['id', 'st', 'trend', 'floor', 'zone', 'wos', 'wost'], sort:[{ key:'st', dir:'asc' }], filters:{}, density:'standard' },
-      { id:'alarm', nameKey:'dgv.alarm', cols:['id', 'st', 'sev', 'sys', 'zone', 'wost'], sort:[{ key:'sev', dir:'asc' }], filters:{ st:{ in:['alarm'] } }, density:'standard' },
-      { id:'wo', nameKey:'dgv.wo', cols:['id', 'wost', 'wos', 'st', 'zone', 'svc'], sort:[{ key:'wos', dir:'desc' }], filters:{ hasWo:{ is:true } }, group:'wost', density:'compact' }
+      { id:'all', nameKey:'dgv.all', cols:['id', 'st', 'trend', 'floor', 'wos', 'wost'], sort:[{ key:'st', dir:'asc' }], filters:{}, density:'standard' },
+      { id:'alarm', nameKey:'dgv.alarm', cols:['id', 'st', 'sev', 'sys', 'floor', 'wost'], sort:[{ key:'sev', dir:'asc' }], filters:{ st:{ in:['alarm'] } }, density:'standard' },
+      { id:'wo', nameKey:'dgv.wo', cols:['id', 'wost', 'wos', 'st', 'floor', 'svc'], sort:[{ key:'wos', dir:'desc' }], filters:{ hasWo:{ is:true } }, group:'wost', density:'compact' }
     ],
     bulk:[
       { id:'wo', labelKey:'dgBulkWo', icon:'wrench', doneKey:'dgBulkWoDone', run:(E2, rows) => { E2.state.woPhase = E2.state.woPhase || {}; let n = 0; rows.forEach(r => { if(E2.state.woRaised[r.id] || E2.state.woPhase[r.id]) return; E2.state.woPhase[r.id] = 'raising'; n++; if(window.EKO_CMMS) window.EKO_CMMS.createWorkOrder({ assetId:r.id }); }); return n; } },

@@ -1350,10 +1350,15 @@
     return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   }
 
+  /* The same equipment: equal ignoring punctuation, or one name inside the other as whole dash-separated parts
+     ("ILIANA ECO-ANC09-BF-02" holds "ECO-ANC09-BF-02"; "FCU-ANC09-FF-1" is not in "FCU-ANC09-FF-12" or "XFCU-ANC09-FF-1") */
   function namesMatch(a, b) {
     if (!a || !b) return false;
     var x = norm(a), y = norm(b);
-    return x === y || (x.length >= 3 && y.indexOf(x) !== -1) || (y.length >= 3 && x.indexOf(y) !== -1);
+    if (x === y) return true;
+    var px = '-' + String(a).toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '') + '-';
+    var py = '-' + String(b).toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '') + '-';
+    return (x.length >= 3 && py.indexOf(px) !== -1) || (y.length >= 3 && px.indexOf(py) !== -1);
   }
 
   var PMU_CANON = [
@@ -1425,6 +1430,17 @@
 
   var historyCache = {};
   var HIST_DAYS = 31;
+  var HIST_RETRY_MS = 60000;   // a failed history read is tried again after this long
+  /* none: no historized point to trend; loading; failed: FIN or the backend did not answer; empty: answered, no samples; ok */
+  function histStateOf(primary, cached) {
+    if (!primary || !primary.actHis) return "none";
+    if (cached && cached.compareV === 2) return (cached.compare.hist.length || cached.compare.days.length) ? "ok" : "empty";
+    if (cached && cached.failedAt) return "failed";
+    return "loading";
+  }
+  function histUsable(res) {
+    return !!(res && !res.unauthorized && !res.otherProject && res.history && typeof res.history === "object");
+  }
   var HIST_MONTHS = { january:0, february:1, march:2, april:3, may:4, june:5, july:6, august:7, september:8, october:9, november:10, december:11 };
   function foldPtName(n) {
     return String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -1450,7 +1466,7 @@
     var s = findPt(points, spTest);
     var av = ptNumVal(a);
     var sv = ptNumVal(s);
-    if (av == null && sv == null) return null;
+    if (av == null && sv == null && !(a && a.his && a.id)) return null;
     return {
       key: key,
       actual: av,
@@ -1575,10 +1591,10 @@
           var active = readingInAlarm(row[2], isFlag);
           fddGroups[g].rows.push({ row: row, isFlag: isFlag, active: active });
           if (isFlag && active) fddGroups[g].flagOn = true;
-        } else if (isAlarmPt) {
-          // FD&D rules also carry alarmPoint, so they are checked first
-          if (readingInAlarm(row[2], isFlag)) alarmPts.push(row);
         } else {
+          // FD&D rules also carry alarmPoint, so they are checked first. An alarm point in alarm is also listed under
+          // Alarms; at rest it is still one of the asset's live parameters (Analytics never waits for an alarm)
+          if (isAlarmPt && readingInAlarm(row[2], isFlag)) alarmPts.push(row);
           // The backend's point_control decision: the asset panel marks the row editable
           if (p.control) row[4] = p;
           analog.push(row);
@@ -1630,8 +1646,10 @@
 
       var pairs = comparePairs(eq);
       var cached = historyCache[eq.name];
+      var primary = pairs.filter(function (p) { return p.actHis; })[0] || pairs[0];
       assetData.compare = {
         pairs: pairs,
+        histState: histStateOf(primary, cached),
         days: (cached && cached.compareV === 2 && cached.compare && cached.compare.days) || [],
         hist: (cached && cached.compareV === 2 && cached.compare && cached.compare.hist) || [],
         unit: (cached && cached.compare && cached.compare.unit) || ((pairs[0] && pairs[0].unit) || ""),
@@ -1643,15 +1661,24 @@
         assetData.spark7 = cached.spark7;
       }
 
-      var primary = pairs.filter(function (p) { return p.actHis; })[0] || pairs[0];
-      if (primary && primary.actId && window.DashboardData && window.DashboardData.getPointHistory && !(cached && (cached.compareV === 2 || cached.fetching))) {
+      var retry = !!(cached && cached.failedAt && Date.now() - cached.failedAt >= HIST_RETRY_MS);
+      if (primary && primary.actHis && window.DashboardData && window.DashboardData.getPointHistory && (!cached || retry)) {
         historyCache[eq.name] = { fetching: true };
         var actP = window.DashboardData.getPointHistory(primary.actId, HIST_DAYS);
         var spP = (primary.spHis && primary.spId)
           ? window.DashboardData.getPointHistory(primary.spId, HIST_DAYS)
           : Promise.resolve(null);
+        var failed = function () {
+          historyCache[eq.name] = { failedAt: Date.now() };
+          var live = window.EKO_DATA && window.EKO_DATA.marsa;
+          if (live && Array.isArray(live.assets)) {
+            live.assets.forEach(function (a) { if (a.id === eq.name && a.compare) a.compare.histState = "failed"; });
+          }
+          paint();
+        };
         Promise.all([actP, spP]).then(function (both) {
           if (!current()) return;
+          if (!histUsable(both[0])) return failed();   // no answer is not "no history"
           var actAll = histDaily(both[0] && both[0].history);
           var spAll = histDaily(both[1] && both[1].history);
           var actDays = actAll.slice(-7);
@@ -1693,7 +1720,8 @@
                 hist: packed.compare.hist,
                 unit: packed.compare.unit,
                 actName: packed.compare.actName,
-                spName: packed.compare.spName
+                spName: packed.compare.spName,
+                histState: (packed.compare.hist.length || packed.compare.days.length) ? "ok" : "empty"
               };
               a.trend7 = packed.trend7;
               a.spark7 = packed.spark7;
@@ -1701,7 +1729,7 @@
           }
           paint();
         }).catch(function () {
-          historyCache[eq.name] = { compareV: 2, failed: true, compare: { days: [], hist: [], unit: primary.unit, actName: primary.actName, spName: primary.spName } };
+          if (current()) failed();
         });
       }
 
