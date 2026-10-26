@@ -17,7 +17,7 @@ import sqlite3
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import quote, unquote
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -31,13 +31,17 @@ from fin_client import (
     PROJECT_ID_RE,
     FinScramClient,
     aggregate_and_restructure,
+    bool_state,
+    bool_text,
     clip_decimals,
+    display_cur_val,
     open_alarm_rows,
     parse_custom_response,
     parse_fin_projects,
     parse_zinc_csv,
     safe_get,
 )
+from point_control import control_for, encode_value, equipment_class, number_of
 from workorders import error_payload, live_payload, norm_id, orders_by_equipment
 import notifications
 
@@ -516,9 +520,18 @@ def _flatten_equip(realtime: dict) -> list[dict]:
                     "alarms": alarms,
                     "bimId": eq.get("bimId", ""),
                     "equipId": eq.get("equipId") or "",
-                    "points": eq.get("points", []),
+                    "points": _with_control(eq_name, tags, eq.get("points", [])),
                 })
     return equip_list
+
+
+def _with_control(eq_name: str, tags: list, points: list) -> list:
+    """Stamp each point with what the dashboard may change on it (point_control in config.json)."""
+    policy = CONFIG.get("point_control") or {}
+    eq_class = equipment_class(eq_name, tags, policy)
+    for point in points:
+        point["control"] = control_for(point, eq_class, policy)
+    return points
 
 
 def _compute_sensor_averages(realtime: dict):
@@ -1706,6 +1719,91 @@ def _require_client():
         raise HTTPException(status_code=401, detail="Not authenticated")
 
 
+# ─── Point control ───────────────────────────────────────────────────────────
+# The only write path to FIN. What may be written is decided here from the live equipment data and
+# config.json point_control, never from the request: the dashboard only names a point and a value.
+
+class PointWriteRequest(BaseModel):
+    point_id: str
+    action: str = "set"   # "set" writes the value at the manual level; "auto" clears that level
+    value: Any = None
+
+
+def _controlled_point(point_id: str) -> tuple[dict, dict]:
+    for eq in (cached_equip_data or {}).get("equipment") or []:
+        for point in eq.get("points") or []:
+            if point.get("id") == point_id:
+                return eq, point
+    raise HTTPException(status_code=404, detail="This point is not in the live equipment data.")
+
+
+def _write_landed(record: dict, control: dict, literal: Optional[str], action: str) -> bool:
+    """Whether FIN's record shows the request: the value reported back, or the manual level cleared."""
+    held = number_of(record.get("writeLevel")) == control["level"]
+    if action == "auto":
+        return not held
+    if control["role"] == "status":
+        return held and bool_state(record.get("curVal")) == (literal == "T")
+    current, wanted = number_of(record.get("curVal")), number_of(literal)
+    return held and current is not None and wanted is not None and abs(current - wanted) < 1e-6
+
+
+async def _read_back(point_id: str, control: dict, literal: Optional[str], action: str) -> tuple[dict, bool]:
+    """FIN applies a write at once; the equipment reports it after its next poll, so re-read a few times."""
+    record: dict = {}
+    for attempt in range(6):
+        record = await client.read_point(point_id) or record
+        if record and _write_landed(record, control, literal, action):
+            return record, True
+        if attempt < 5:
+            await asyncio.sleep(1)
+    return record, False
+
+
+@app.post("/api/fin/point-write")
+async def write_point(req: PointWriteRequest):
+    """Change a setpoint or status the point_control policy allows, then read it back from FIN."""
+    _require_client()
+    point_id = req.point_id.lstrip("@")
+    if not POINT_ID_RE.match(point_id):
+        raise HTTPException(status_code=400, detail="Invalid point id")
+    if req.action not in ("set", "auto"):
+        raise HTTPException(status_code=400, detail="action is set or auto")
+    eq, point = _controlled_point(point_id)
+    control = point.get("control")
+    if not control:
+        raise HTTPException(status_code=403, detail=f"{point.get('navName')} on {eq.get('name')} cannot be changed from the dashboard.")
+    try:
+        literal = encode_value(control, req.value) if req.action == "set" else None
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    ok, error = await client.write_point(point_id, control["level"], literal, f"EKO Digital Twin ({client.username})")
+    print(f"[FIN] point write {eq.get('name')} {point.get('navName')} {req.action} {literal or ''}: {'sent' if ok else error}")
+    if not ok:
+        raise HTTPException(status_code=502, detail=error)
+
+    record, confirmed = await _read_back(point_id, control, literal, req.action)
+    cur = record.get("curVal")
+    shown, _ = display_cur_val(cur, str(point.get("navName") or "").lower(), str(point.get("unit") or "")) if cur is not None else ("—", "Null")
+    state = bool_state(cur)
+    point.update({
+        "currentValue": shown,
+        "bool": state,
+        "text": bool_text(point, state),
+        "writeLevel": record.get("writeLevel"),
+        "control": {**control, "manual": number_of(record.get("writeLevel")) == control["level"]},
+    })
+    return {
+        "pointId": point_id,
+        "confirmed": confirmed,
+        "currentValue": point["currentValue"],
+        "text": point["text"],
+        "bool": state,
+        "control": point["control"],
+    }
+
+
 async def _user_read(path: str) -> str:
     """A FIN read for one user's request (an expression or point they chose). FIN refusing it (401/403: not allowed for
     the shared account) answers that request with 403; unlike the polling reads it never marks the shared FIN session ended."""
@@ -1840,7 +1938,7 @@ async def get_building_info(request: Request):
 @app.post("/api/fin/logout")
 async def logout(request: Request, response: Response):
     """End this browser's user session. The shared FIN session closes only when no other user is
-    still signed in: one user's sign-out never cuts another user's session or live data."""
+    still signed in. The server process stays up so the operator can sign in again."""
     global client, PROJECT_CHECK, STANDARD_VERIFIED, POLL_OWNER
     _close_session(request, response)
     async with _fin_lock():   # not while a sign-in or a project switch is part way through changing the shared connection
@@ -1850,10 +1948,15 @@ async def logout(request: Request, response: Response):
         POLL_OWNER = None
         STANDARD_VERIFIED = None
         _cancel_polling()
-        if client:
-            await client.close()
-            client = None
+        # Drop the reference before the await so a second sign-out does not close the same client twice.
+        current = client
+        client = None
         PROJECT_CHECK = {"validated": None, "source": None}
+        if current:
+            try:
+                await current.close()
+            except Exception:
+                pass
         return {"status": "disconnected"}
 
 

@@ -17,6 +17,7 @@ import { DashboardOverlay } from '@/components/viewer/DashboardOverlay'
 import { MaterialPanel } from '@/components/viewer/MaterialPanel'
 import { FocusModeWidget } from '@/components/viewer/FocusModeWidget'
 import { ModelLoadingProgress } from '@/components/viewer/ModelLoadingProgress'
+import { EkoLoading } from '@/components/viewer/EkoLoading'
 import { OrientationCube } from '@/components/viewer/OrientationCube'
 import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import { unloadAllModels } from '@/lib/sceneTeardown'
@@ -877,15 +878,19 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
         </div>
       )}
 
-      {/* Loading progress — per-model status with live percentage */}
-      <ModelLoadingProgress />
+      {/* Loading progress — Studio keeps the model card; the packaged viewer is the EKO splash */}
+      <ModelLoadingProgress branded={!adminMode} />
       {isLoading && !progressSessionActive && (
-        <div className="viewer-overlay">
-          <div className="viewer-overlay-inner">
-            <div className="viewer-spinner" />
-            <p>Loading model into scene...</p>
+        adminMode ? (
+          <div className="viewer-overlay">
+            <div className="viewer-overlay-inner">
+              <div className="viewer-spinner" />
+              <p>Loading model into scene...</p>
+            </div>
           </div>
-        </div>
+        ) : (
+          <EkoLoading />
+        )
       )}
 
       {/* Error overlay */}

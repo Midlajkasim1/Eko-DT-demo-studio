@@ -16327,3 +16327,136 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   background:var(--chrome-ctl);
   border-color:var(--chrome-ctlBd)
 }
+
+/* Point control: an editable live value and its dialog (components/point-control.js) */
+/* Opened from the asset panel, which is a z-index 62 sheet on stacked widths: the dialog layer goes above it */
+.dashboard-native-container #overlays:has(.dlgpoint) {
+  z-index:64
+}
+
+.dashboard-native-container .apctlval {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  margin:-3px -7px;
+  padding:3px 7px;
+  border:1px dashed var(--bd2);
+  border-radius:6px;
+  color:var(--acc);
+  font:inherit;
+  cursor:pointer
+}
+
+.dashboard-native-container .apctlval:hover,.dashboard-native-container .apctlval:focus-visible {
+  background:var(--accT);
+  border-color:var(--acc);
+  border-style:solid
+}
+
+.dashboard-native-container .apctlval svg {
+  flex:none;
+  opacity:.85
+}
+
+.dashboard-native-container .apctlman {
+  padding:0 6px;
+  border:1px solid var(--warnB);
+  border-radius:999px;
+  background:var(--warnT);
+  color:var(--warnTx);
+  font-size:var(--txCapSz);
+  font-weight:600;
+  line-height:18px
+}
+
+.dashboard-native-container .dlgpoint {
+  width:min(400px,calc(100vw - 32px));
+  display:flex;
+  flex-direction:column;
+  gap:12px
+}
+
+.dashboard-native-container .dlgpoint .dlghead {
+  margin-bottom:0
+}
+
+.dashboard-native-container .pcwhat {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:baseline;
+  gap:8px
+}
+
+.dashboard-native-container .pcnow {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 10px;
+  border:1px solid var(--bd1);
+  border-radius:8px;
+  background:var(--s2)
+}
+
+.dashboard-native-container .pcnum {
+  display:flex;
+  align-items:center;
+  gap:8px
+}
+
+.dashboard-native-container .pcnum input {
+  width:120px;
+  padding:8px 10px;
+  border:1px solid var(--bd2);
+  border-radius:8px;
+  background:var(--s2);
+  color:var(--t1);
+  font-family:'JetBrains Mono',monospace;
+  font-size:var(--txLgSz);
+  text-align:center
+}
+
+.dashboard-native-container .pcnum .iconbtn {
+  width:36px;
+  height:36px;
+  border:1px solid var(--bd2);
+  border-radius:8px;
+  font-size:var(--txLgSz)
+}
+
+.dashboard-native-container .pcunit {
+  color:var(--t2);
+  font-family:'JetBrains Mono',monospace
+}
+
+.dashboard-native-container .pcchoice .seg {
+  flex:1;
+  min-height:36px
+}
+
+.dashboard-native-container .pcresult {
+  padding:8px 10px;
+  border-radius:8px;
+  font-size:var(--txCapSz);
+  border:1px solid var(--bd1)
+}
+
+.dashboard-native-container .pcresult[data-tone="ok"] {
+  color:var(--posTx);
+  border-color:var(--pos)
+}
+
+.dashboard-native-container .pcresult[data-tone="warn"] {
+  color:var(--warnTx);
+  border-color:var(--warnB);
+  background:var(--warnT)
+}
+
+.dashboard-native-container .pcresult[data-tone="bad"] {
+  color:var(--critTx);
+  border-color:var(--crit)
+}
+
+.dashboard-native-container .pcfoot {
+  align-items:center;
+  margin-top:4px
+}

@@ -80,6 +80,7 @@ window.EKO_C = (function(){
     reset:'<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
     tools:'<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
     maximize:'<path d="M4 9V5a1 1 0 0 1 1-1h4"/><path d="M15 4h4a1 1 0 0 1 1 1v4"/><path d="M20 15v4a1 1 0 0 1-1 1h-4"/><path d="M9 20H5a1 1 0 0 1-1-1v-4"/>',
+    pencil:'<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
     copy:'<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
     dots:'<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>',
     filter:'<path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z"/>',
@@ -1051,47 +1052,49 @@ window.EKO_C = (function(){
     const m = s.match(/(?:^|[^A-Z])(AHU|MAHU|FAHU|ECO)(?=[^A-Z]|$)/);
     return m ? m[1] : null;
   }
-  /* The first of these folded point names (matched on the end) that has a value */
-  function pointVal(points, ...names) {
+  /* The first of these folded point names (matched on the end) that has a value, and its point */
+  function pointMatch(points, ...names) {
     for (const n of names) {
       const p = fcuFind(points, k => k.endsWith(n));
       const v = fcuClean(p && (p.text || (p.currentValue != null ? p.currentValue : p[2])));
-      if (v != null) return v;
+      if (v != null) return { point: p, value: v };
     }
-    return null;
+    return { point: null, value: null };
+  }
+  function pointVal(points, ...names) {
+    return pointMatch(points, ...names).value;
+  }
+  /* A live parameter row. A point the backend's point control lets the dashboard change opens the point editor. */
+  function liveRow(E, name, shown, point) {
+    const ctl = point && point.control;
+    if (!ctl || !point.id) return `<div class="aprow"><dt>${esc(name)}</dt><dd>${esc(shown)}</dd></div>`;
+    const tip = E.t(ctl.role === 'status' ? 'pcEditStatusTip' : 'pcEditSetpointTip');
+    return `<div class="aprow apctlrow"><dt>${esc(name)}</dt><dd><button type="button" class="apctlval tipU" data-act="pointEditOpen" data-pt="${esc(point.id)}" data-tip="${esc(tip)}" aria-label="${esc(tip + ': ' + name)}">`
+      + `${ctl.manual ? `<span class="apctlman">${esc(E.t('pcManual'))}</span>` : ''}<span>${esc(shown)}</span>${icon('pencil', 13)}</button></dd></div>`;
   }
   function pointShown(raw) {
     return fcuShown(raw, '') || '—';
   }
   /* Same names as readMauPoints. Every row is shown, a missing point as "—",
      so the panel says which MAHU points FIN is not sending. */
-  function mauPointRows(asset) {
+  function mauPointRows(E, asset) {
     if (airKind(asset) !== 'MAHU') return '';
     const points = (asset && asset.points) || [];
     if (!points.length) return '';
-    const val = (...names) => pointVal(points, ...names);
     const rows = [
-      ['FA_DAMPER_STS', pointShown(val('fadampersts'))],
-      ['PRE_FILTER', pointShown(val('prefilter'))],
-      ['BAG_FILTER', pointShown(val('bagfilter'))],
-      ['TEMP_BEFORE_HEATPIPE', pointShown(val('tempbeforeheatpipe'))],
-      ['HUM_BEFORE_HEATPIPE', pointShown(val('humbeforeheatpipe'))],
-      ['TEMP_AFTER_HEATPIPE', pointShown(val('tempafterheatpipe'))],
-      ['HUM_AFTER_HEATPIPE', pointShown(val('humafterheatpipe'))],
-      ['COOLING_VALVE_POS', pointShown(val('coolingvalvepos'))],
-      ['COOLING_VALVE_CMD', pointShown(val('coolingvalvecmd'))],
-      ['CHW_SUP_TEMP', pointShown(val('chwsuptemp'))],
-      ['CHW_RET_TEMP', pointShown(val('chwrettemp'))],
-      ['SF_VFD_RUN_STS', pointShown(val('sfvfdrunsts'))],
-      ['SF_VFD_SPD_POS', pointShown(val('sfvfdspdpos'))],
-      ['SF_TRIP_ALARM', pointShown(val('sftripalarm'))],
-      ['SA_TEMP', pointShown(val('satemp'))],
-      ['SA_TEMP_SP', pointShown(val('satempsp'))],
-      ['SA_HUM', pointShown(val('sahum'))],
-      ['SA_PRESSURE', pointShown(val('sapressure'))],
-      ['SA_PRESSURE_SP', pointShown(val('sapressuresp'))],
+      ['FA_DAMPER_STS', 'fadampersts'], ['PRE_FILTER', 'prefilter'], ['BAG_FILTER', 'bagfilter'],
+      ['TEMP_BEFORE_HEATPIPE', 'tempbeforeheatpipe'], ['HUM_BEFORE_HEATPIPE', 'humbeforeheatpipe'],
+      ['TEMP_AFTER_HEATPIPE', 'tempafterheatpipe'], ['HUM_AFTER_HEATPIPE', 'humafterheatpipe'],
+      ['COOLING_VALVE_POS', 'coolingvalvepos'], ['COOLING_VALVE_CMD', 'coolingvalvecmd'],
+      ['CHW_SUP_TEMP', 'chwsuptemp'], ['CHW_RET_TEMP', 'chwrettemp'],
+      ['SF_VFD_RUN_STS', 'sfvfdrunsts'], ['SF_VFD_SPD_POS', 'sfvfdspdpos'], ['SF_TRIP_ALARM', 'sftripalarm'],
+      ['SA_TEMP', 'satemp'], ['SA_TEMP_SP', 'satempsp'], ['SA_HUM', 'sahum'],
+      ['SA_PRESSURE', 'sapressure'], ['SA_PRESSURE_SP', 'sapressuresp'],
     ];
-    return rows.map(row => `<div class="aprow"><dt>${esc(row[0])}</dt><dd>${esc(row[1])}</dd></div>`).join('');
+    return rows.map(([label, ...names]) => {
+      const m = pointMatch(points, ...names);
+      return liveRow(E, label, pointShown(m.value), m.point);
+    }).join('');
   }
   /* Same names as readEcoPoints, in the order of its FIN page. COMMAN_ALARM is FIN's spelling. */
   function ecoPointRows(asset) {
@@ -1115,18 +1118,18 @@ window.EKO_C = (function(){
     ];
     return rows.map(row => `<div class="aprow"><dt>${esc(row[0])}</dt><dd>${esc(row[1])}</dd></div>`).join('');
   }
-  function analogPointRows(asset) {
+  function analogPointRows(E, asset) {
     const listed = Array.isArray(asset && asset.analog) ? asset.analog : null;
     const rows = [];
-    const push = (name, raw, unit) => {
+    const push = (name, raw, unit, point) => {
       const shown = fcuShown(fcuClean(raw), analogUnit(unit));
-      if (shown) rows.push([name, shown]);
+      if (shown) rows.push([name, shown, point]);
     };
-    // data-map has already removed the alarm points
+    // data-map has already removed the alarm points; row[4] is the point when it can be changed
     if (listed && listed.length) {
       listed.forEach(p => {
         if (!p || !p[0] || isFddNav(p[0])) return;
-        push(p[0], p[2], p[3]);
+        push(p[0], p[2], p[3], p[4]);
       });
     } else {
       const fromPts = (asset && asset.points) || [];
@@ -1136,7 +1139,7 @@ window.EKO_C = (function(){
           if (isFddNav(p.navName) || p.alarmPoint === true) return;
           const folded = fcuFold(p.navName);
           if (folded.indexOf('warrant') !== -1) return;
-          push(p.navName, p.text || p.currentValue, p.unit);
+          push(p.navName, p.text || p.currentValue, p.unit, p);
         });
       } else {
         ((asset && asset.params) || []).forEach(p => {
@@ -1148,7 +1151,7 @@ window.EKO_C = (function(){
       }
     }
     if (!rows.length) return '';
-    return rows.map(row => `<div class="aprow"><dt>${esc(row[0])}</dt><dd>${esc(row[1])}</dd></div>`).join('');
+    return rows.map(row => liveRow(E, row[0], row[1], row[2])).join('');
   }
   function workOrderBody(E, r) {
     const t = E.t.bind(E);
@@ -1249,9 +1252,9 @@ window.EKO_C = (function(){
       return !alsText.some(t => t && (t.indexOf(msg.slice(0, 48)) !== -1 || msg.indexOf(t.slice(0, 48)) !== -1));
     });
     const alarmPtRows = (r.alarmPts || []).filter(p => fcuClean(p[2])).map(p => [p[0], fcuClean(p[2])]);
-    const analogRows = analogPointRows(r);
+    const analogRows = analogPointRows(E, r);
     /* MAHU and ECO list every FIN point they draw, a missing one as "—"; the rest use the generic analog rows */
-    const typeRows = mauPointRows(r) || ecoPointRows(r);
+    const typeRows = mauPointRows(E, r) || ecoPointRows(r);
     const cmp = r.compare || null;
     const reason = r.st === 'stale' ? 'dgNoTrend.stale' : (r.trendKind === 'state' ? 'dgNoTrend.state' : 'dgNoTrend.none');
     const graphBlock = (() => {

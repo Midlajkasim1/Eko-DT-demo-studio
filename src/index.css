@@ -2113,6 +2113,80 @@ Wait, if iframe has pointer-events: auto, it works. Let's fix this in iframe bod
   50% { opacity: 0.35; }
 }
 
+/* Packaged viewer: the EKO mark, Loading, a bar, and the percentage.
+   Fixed so the group is the center of the window, not of a short parent. */
+.eko-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(245, 246, 248, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  pointer-events: auto;
+}
+
+.eko-loading-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(280px, 72vw);
+}
+
+.eko-loading-logo {
+  display: block;
+  width: 180px;
+  height: auto;
+  overflow: visible;
+}
+
+.eko-loading-label {
+  margin: 14px 0 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.eko-loading-bar {
+  width: 100%;
+  height: 4px;
+  margin-top: 16px;
+  border-radius: 999px;
+  background: #e3e7ee;
+  overflow: hidden;
+}
+
+.eko-loading-bar-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1E3A9E 0%, #2E7D6B 50%, #5AA51F 100%);
+  transition: width 0.25s ease;
+}
+
+.eko-loading-bar-fill[data-wait] {
+  width: 36%;
+  animation: eko-loading-slide 1.15s ease-in-out infinite;
+}
+
+@keyframes eko-loading-slide {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+
+.eko-loading-pct {
+  margin: 12px 0 0;
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
 /* ── Sign-in Overlay (standalone viewer) ── */
 
 .signin-overlay {

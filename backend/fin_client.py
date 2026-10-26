@@ -509,6 +509,9 @@ class FinScramClient:
         # readAll(point...) on a full site returns a large grid; 15s was not enough
         self.client = httpx.AsyncClient(verify=False, timeout=60.0)
         self.auth_headers: dict[str, str] = {}
+        # Haystack authToken from sign-in: writes carry it as a bearer token (see write_point)
+        self.auth_token: Optional[str] = None
+        self.username = ""
         self.is_authenticated = False
         self.last_alarm_rows: list[dict] = []
         self.last_point_rows: list[dict] = []
@@ -530,6 +533,8 @@ class FinScramClient:
             return ''.join(secrets.choice(chars) for _ in range(length))
 
         auth_url = f"{self.base_url}/user/auth"
+        self.username = username
+        self.auth_token = None
 
         try:
             # Initialize session
@@ -612,6 +617,8 @@ class FinScramClient:
                     "Authorization": final_header,
                     "Accept": "text/zinc"
                 }
+                token = re.search(r'authToken=([^,\s]+)', resp.headers.get("Authentication-Info", ""))
+                self.auth_token = token.group(1) if token else None
                 self.is_authenticated = True
                 print(f"[FIN] ✓ Authenticated as '{username}'")
                 return True
@@ -825,7 +832,7 @@ class FinScramClient:
                     skip_patterns = ["metadata", "[metadata_block]"]
                     if any(pat in nav_lower for pat in skip_patterns):
                         continue
-                    if nav_lower in ["start/stop", "start_stop", "startstop"]:
+                    if nav_lower in ["start/stop", "start_stop", "startstop"] and p.get("writable") is not True:
                         continue
 
                 val = p.get("curVal")
@@ -868,6 +875,14 @@ class FinScramClient:
                     "bool": state,
                     "text": bool_text(p, state),
                     "alarmPoint": p.get("alarmPoint") is True,
+                    # What point control needs to decide whether the dashboard may write it
+                    "writable": p.get("writable") is True,
+                    "pointKind": p.get("kind") if isinstance(p.get("kind"), str) else None,
+                    "sp": p.get("sp") is True,
+                    "enum": p.get("enum") if isinstance(p.get("enum"), str) else None,
+                    "minVal": p.get("minVal"),
+                    "maxVal": p.get("maxVal"),
+                    "writeLevel": p.get("writeLevel"),
                 })
 
             floor = safe_get(equip.get("floorRef"), "dis", "Unknown Floor")
@@ -925,5 +940,49 @@ class FinScramClient:
         histories = await asyncio.gather(*(fetch_one(t) for t in usable.values()))
         return dict(zip(usable, histories))
 
+    async def write_point(self, point_id: str, level: int, value: Optional[str], who: str) -> tuple[bool, str]:
+        """Haystack pointWrite at one priority level; value is a Zinc literal, None releases the level.
+
+        FIN asks a cookie-session POST for a browser Attest-Key. With the sign-in authToken as a bearer
+        token and no session cookie the request is an API call and needs none; without a token the
+        session is used with the attest cookie FIN set, if any. Returns (ok, error message).
+        """
+        body = f'ver:"3.0"\nid,level,val,who\n@{point_id},{level},{value or "N"},{_zinc_str(who)}\n'
+        headers = {"Accept": "text/zinc", "Content-Type": "text/zinc; charset=utf-8"}
+        if self.auth_token:
+            headers["Authorization"] = f"BEARER authToken={self.auth_token}"
+        else:
+            headers["Authorization"] = self.auth_headers.get("Authorization", "")
+            attest = next((c.value for c in self.client.cookies.jar if "attest" in c.name.lower()), None)
+            if attest:
+                headers["Attest-Key"] = attest
+        try:
+            req = self.client.build_request("POST", f"{self.base_url}/api/{self.project_name}/pointWrite",
+                                            headers=headers, content=body.encode("utf-8"))
+            if self.auth_token:
+                req.headers.pop("Cookie", None)
+            resp = await self.client.send(req)
+        except Exception as e:
+            return False, f"FIN could not be reached: {e}"
+        text = resp.text or ""
+        if resp.status_code != 200:
+            plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", re.sub(r"(?is)<head.*?</head>", " ", text))).strip()
+            return False, f"FIN answered {resp.status_code}: {plain[:200]}"
+        first = text.lstrip().split("\n", 1)[0]
+        if re.search(r"\berr\b", first):
+            dis = re.search(r'dis:"((?:[^"\\]|\\.)*)"', first)
+            return False, f"FIN refused the write: {dis.group(1) if dis else 'unknown error'}"
+        return True, ""
+
+    async def read_point(self, point_id: str) -> Optional[dict]:
+        """One point record by id, parsed like the realtime rows; None when FIN does not answer."""
+        text = await self.fetch_api(f"/api/{self.project_name}/eval?expr=readById(@{point_id})", is_text=True)
+        rows = parse_zinc_csv(text or "")
+        return rows[0] if rows else None
+
     async def close(self):
         await self.client.aclose()
+
+
+def _zinc_str(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("\n", "\\n") + '"'

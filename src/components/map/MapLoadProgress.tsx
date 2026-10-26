@@ -1,7 +1,8 @@
 import { useLoadingProgressStore, sessionProgress } from '@/store/useLoadingProgressStore'
+import { EkoLoading } from '@/components/viewer/EkoLoading'
 
 /** The map sits above the shared loading veil, so while a pin opens it shows progress itself */
-export function MapLoadProgress() {
+export function MapLoadProgress({ branded = false }: { branded?: boolean }) {
   const sessionActive = useLoadingProgressStore(s => s.sessionActive)
   const order = useLoadingProgressStore(s => s.order)
   const entries = useLoadingProgressStore(s => s.entries)
@@ -18,6 +19,8 @@ export function MapLoadProgress() {
     models.find(e => e.phase === 'reading' || e.phase === 'parsing') ??
     models.find(e => e.phase === 'pending') ??
     models[models.length - 1]
+
+  if (branded) return <EkoLoading percent={percent} />
 
   return (
     <div className="map-progress" role="status" aria-live="polite">

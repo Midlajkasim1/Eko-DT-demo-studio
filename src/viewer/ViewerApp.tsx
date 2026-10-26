@@ -11,6 +11,7 @@ import { hasMap } from '@/lib/mapConfig'
 import { dashboardProjectInfo } from '@/lib/finSettings'
 import { MapLayer } from '@/components/map/MapLayer'
 import { SignInOverlay, checkSession } from '@/viewer/SignInOverlay'
+import { EkoLoading } from '@/components/viewer/EkoLoading'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import type { ProjectMeta } from '@/types'
 
@@ -295,15 +296,8 @@ export default function ViewerApp() {
             </div>
           )}
 
-          {/* Loading overlay — only until the per-model progress card takes over */}
-          {isLoading && !progressActive && (
-            <div className="viewer-overlay" style={{ background: 'rgba(245,246,248,0.92)' }}>
-              <div style={{ textAlign: 'center' }}>
-                <div className="conversion-spinner" style={{ width: 40, height: 40, borderWidth: 3, margin: '0 auto 16px' }} />
-                <p style={{ fontSize: 14, color: 'var(--text-secondary)' }}>Loading project…</p>
-              </div>
-            </div>
-          )}
+          {/* Before a percentage exists, the same EKO splash with no number */}
+          {isLoading && !progressActive && <EkoLoading />}
 
           {/* Sign-in gate — models keep streaming in behind it */}
           {auth !== 'authed' && (

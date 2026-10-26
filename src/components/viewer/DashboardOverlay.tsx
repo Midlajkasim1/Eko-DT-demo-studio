@@ -1238,6 +1238,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         (window as any).EKO_HOST_ENGINE?.highlightAsset?.(customEvent.detail.assetId)
       } else if (customEvent.detail?.action === 'clearHighlight') {
         (window as any).EKO_HOST_ENGINE?.clearHighlight?.()
+      } else if (customEvent.detail?.action === 'finSignOut') {
+        // Dashboard already asked the backend to drop the FIN session. Clear the
+        // studio panel too, so it shows the connect form. logout() is safe to repeat.
+        void useFinStore.getState().logout()
       }
     }
     window.addEventListener('dashboard-event', handler)
