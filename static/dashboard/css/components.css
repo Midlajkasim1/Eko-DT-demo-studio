@@ -3691,11 +3691,15 @@
   width:120px;
   height:8px;
   border-radius:4px;
-  background:linear-gradient(90deg, var(--info), var(--s3), var(--warn))
+  background:linear-gradient(90deg, #F8D0D0, #C81E1E)
 }
 
-.dashboard-native-container .hmgrad[data-mode="energy"] {
-  background:linear-gradient(90deg, var(--s3), var(--btnP))
+.dashboard-native-container .hmgrad[data-mode="hum"] {
+  background:linear-gradient(90deg, #D7F0EA, #0F6E6A)
+}
+
+.dashboard-native-container .hmgrad[data-mode="comfort"] {
+  background:linear-gradient(90deg, #D9E2F5, #1E3A8A)
 }
 
 .dashboard-native-container .hmrank {

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import { resetCameraToHome } from '@/lib/cameraUtils'
-import { useModelStore } from '@/store/useModelStore'
 import * as THREE from 'three'
 
 interface OrientationCubeProps {
@@ -27,6 +26,17 @@ const EDGE_VIEWS: Record<string, [number[], number[]]> = {
 }
 const CORNER_ISO: [number[], number[]] = [[D * 0.58, D * 0.58, D * 0.58], [0, 0, 0]]
 
+/* Rooms the heatmap paints. Same ids as docs/Models/MAA-RAM-AN09-ZZ-ME-M3-0001-space-ids.json. */
+const HEAT_SPACE_IDS = [
+  '1udQe6xPr0vPBzlkNZrBsM',
+  '1udQe6xPr0vPBzlkNZrBsH',
+  '1udQe6xPr0vPBzlkNZrBsG',
+  '1udQe6xPr0vPBzlkNZrBsJ',
+  '1udQe6xPr0vPBzlkNZrBsI',
+  '1udQe6xPr0vPBzlkNZrBsj',
+  '1udQe6xPr0vPBzlkNZrBsi',
+]
+
 const FACE_LABELS: { face: string; transform: string; accent?: boolean }[] = [
   { face: 'Front',  transform: 'rotateY(0deg)   translateZ(40px)' },
   { face: 'Back',   transform: 'rotateY(180deg) translateZ(40px)' },
@@ -39,6 +49,7 @@ const FACE_LABELS: { face: string; transform: string; accent?: boolean }[] = [
 export function OrientationCube({ engineRef, dashboardVisible }: OrientationCubeProps) {
   const cubeRef = useRef<HTMLDivElement>(null)
   const frameRef = useRef(0)
+  const lookSeq = useRef(0)
 
   // Aggressive RTL detection (FIN dashboard might set it on body or a child container)
   const [isRTL, setIsRTL] = useState(false)
@@ -63,70 +74,111 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
   const dragStartRef = useRef<{ x: number, y: number } | null>(null)
 
   /** Point the camera along a cube face and frame the loaded model, not the sky. */
-  const snapTo = useCallback((posOffset: number[], _tgt: number[], closer?: boolean) => {
+  const snapTo = useCallback((posOffset: number[], _tgt: number[], closer?: boolean, spaceIds?: string[]) => {
     const engine = engineRef.current
     if (!engine?.world?.camera?.controls) return
-    const box = new THREE.Box3()
-    const models = engine.fragments?.models?.list
-    if (closer) {
-      const spaceIds = useModelStore.getState().models
-        .filter(m => /space/i.test(m.originalFileName || ''))
-        .map(m => m.modelId)
-      for (const id of spaceIds) {
-        const frag = models?.get(id) as any
-        const obj = frag?.object
-        if (obj) box.expandByObject(obj)
+    const seq = ++lookSeq.current
+
+    const place = (box: THREE.Box3) => {
+      if (seq !== lookSeq.current || !engine.world?.camera?.controls) return
+      const size = box.isEmpty() ? new THREE.Vector3(20, 10, 20) : box.getSize(new THREE.Vector3())
+      const center = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3())
+      const dir = new THREE.Vector3(posOffset[0], posOffset[1], posOffset[2]).normalize()
+      const cam = engine.world.camera.three as THREE.PerspectiveCamera
+      const fov = THREE.MathUtils.degToRad(cam.fov || 50)
+      const aspect = Math.max(cam.aspect || 1, 0.25)
+      const ax = Math.abs(dir.x), ay = Math.abs(dir.y), az = Math.abs(dir.z)
+      let spanW: number, spanH: number
+      if (ay >= ax && ay >= az) {
+        spanW = size.x
+        spanH = size.z
+      } else if (ax >= az) {
+        spanW = size.z
+        spanH = size.y
+      } else {
+        spanW = size.x
+        spanH = size.y
       }
+      const distV = (spanH / 2) / Math.tan(fov / 2)
+      const distH = (spanW / 2) / (Math.tan(fov / 2) * aspect)
+      const topOrBottom = ay > 0.9
+      const dist = topOrBottom
+        ? Math.max(distV, distH, 8) * (closer ? 1.25 : 0.82)
+        : Math.max(size.x, size.y, size.z, 8) * 0.7
+      /* Keep world Y-up. A true vertical look locks orbit and mouse rotates the wrong way. */
+      if (topOrBottom) dir.set(dir.x, dir.y, dir.z + (dir.y >= 0 ? 0.14 : -0.14)).normalize()
+      cam.up.set(0, 1, 0)
+      const controls = engine.world.camera.controls as { setLookAt: Function; updateCameraUp?: Function }
+      controls.updateCameraUp?.()
+      controls.setLookAt(
+        center.x + dir.x * dist,
+        center.y + dir.y * dist,
+        center.z + dir.z * dist,
+        center.x, center.y, center.z,
+        true
+      )
     }
-    if (box.isEmpty() && models && models.size) {
-      for (const model of models.values()) {
-        const obj = (model as any).object || model
-        if (obj && typeof obj.updateWorldMatrix === 'function') box.expandByObject(obj)
-      }
-    }
-    if (box.isEmpty()) {
-      engine.world.scene.three.traverse((obj: any) => {
-        if (obj.isMesh && obj.name !== 'SkyDome' && obj.name !== 'CloudsDome') {
-          box.expandByObject(obj)
+
+    const wholeModelBox = () => {
+      const box = new THREE.Box3()
+      const models = engine.fragments?.models?.list
+      if (models && models.size) {
+        for (const model of models.values()) {
+          const obj = (model as any).object || model
+          if (obj && typeof obj.updateWorldMatrix === 'function') box.expandByObject(obj)
         }
-      })
+      }
+      if (box.isEmpty()) {
+        engine.world.scene.three.traverse((obj: any) => {
+          if (obj.isMesh && obj.name !== 'SkyDome' && obj.name !== 'CloudsDome') {
+            box.expandByObject(obj)
+          }
+        })
+      }
+      return box
     }
-    const size = box.isEmpty() ? new THREE.Vector3(20, 10, 20) : box.getSize(new THREE.Vector3())
-    const center = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3())
-    const dir = new THREE.Vector3(posOffset[0], posOffset[1], posOffset[2]).normalize()
-    const cam = engine.world.camera.three as THREE.PerspectiveCamera
-    const fov = THREE.MathUtils.degToRad(cam.fov || 50)
-    const aspect = Math.max(cam.aspect || 1, 0.25)
-    const ax = Math.abs(dir.x), ay = Math.abs(dir.y), az = Math.abs(dir.z)
-    let spanW: number, spanH: number
-    if (ay >= ax && ay >= az) {
-      spanW = size.x
-      spanH = size.z
-    } else if (ax >= az) {
-      spanW = size.z
-      spanH = size.y
-    } else {
-      spanW = size.x
-      spanH = size.y
+
+    /* The heatmap used to frame a file whose name contained "space". The rooms
+       now live inside the mechanical model, and that file is named "Including
+       Spaces", so the old test framed every pipe and sat the camera far above
+       the site. Frame the seven rooms instead. */
+    const roomBox = async (ids: string[]) => {
+      const box = new THREE.Box3()
+      const models = engine.fragments?.models?.list
+      if (!models) return box
+      for (const model of models.values()) {
+        const m = model as any
+        if (typeof m.getLocalIdsByGuids !== 'function' || typeof m.getMergedBox !== 'function') continue
+        try {
+          const localIds = ((await m.getLocalIdsByGuids(ids)) || []).filter((id: unknown) => id != null)
+          if (!localIds.length) continue
+          m.object?.updateMatrixWorld?.(true)
+          const worldBox = await m.getMergedBox(localIds) as THREE.Box3
+          if (worldBox && !worldBox.isEmpty()) box.union(worldBox)
+        } catch {
+          /* The fragment worker may still be registering this model. */
+        }
+      }
+      return box
     }
-    const distV = (spanH / 2) / Math.tan(fov / 2)
-    const distH = (spanW / 2) / (Math.tan(fov / 2) * aspect)
-    const topOrBottom = ay > 0.9
-    const dist = topOrBottom
-      ? Math.max(distV, distH, 8) * (closer ? 1.25 : 0.82)
-      : Math.max(size.x, size.y, size.z, 8) * 0.7
-    /* Keep world Y-up. A true vertical look locks orbit and mouse rotates the wrong way. */
-    if (topOrBottom) dir.set(dir.x, dir.y, dir.z + (dir.y >= 0 ? 0.14 : -0.14)).normalize()
-    cam.up.set(0, 1, 0)
-    const controls = engine.world.camera.controls as { setLookAt: Function; updateCameraUp?: Function }
-    controls.updateCameraUp?.()
-    controls.setLookAt(
-      center.x + dir.x * dist,
-      center.y + dir.y * dist,
-      center.z + dir.z * dist,
-      center.x, center.y, center.z,
-      true
-    )
+
+    const run = async (attempt: number) => {
+      if (seq !== lookSeq.current) return
+      if (!closer) {
+        place(wholeModelBox())
+        return
+      }
+      const ids = (spaceIds && spaceIds.length ? spaceIds : HEAT_SPACE_IDS)
+        .filter(id => typeof id === 'string' && /^[0-9A-Za-z_$]{22}$/.test(id))
+      const rooms = await roomBox(ids)
+      if (seq !== lookSeq.current) return
+      if (rooms.isEmpty() && attempt < 10) {
+        window.setTimeout(() => { void run(attempt + 1) }, 400)
+        return
+      }
+      place(rooms.isEmpty() ? wholeModelBox() : rooms)
+    }
+    void run(0)
   }, [engineRef])
 
   useEffect(() => {
@@ -134,7 +186,7 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
       const detail = (e as CustomEvent).detail || {}
       const face = detail.face as keyof typeof FACE_VIEWS
       const v = face && FACE_VIEWS[face]
-      if (v) snapTo(v[0], v[1], !!detail.closer)
+      if (v) snapTo(v[0], v[1], !!detail.closer, detail.spaceIds)
     }
     window.addEventListener('eko-look-face', onLook)
     return () => window.removeEventListener('eko-look-face', onLook)

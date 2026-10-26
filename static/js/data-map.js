@@ -1905,15 +1905,16 @@
     return '';
   }
 
-  /* IfcSpace GlobalIds from docs/Models/...Spaces_metadata.json.
+  /* IfcSpace GlobalIds from the Including Spaces mech model.
+     Old and new ids: docs/Models/MAA-RAM-AN09-ZZ-ME-M3-0001-space-ids.json.
      IS-01..07 → Space 22..28 one-to-one. IAQ-01..04 → two rooms each. */
-  var SPACE_22 = { bimId: '0xfWWQLhfFUfSseiBChrCj', space: 'Space 22' };
-  var SPACE_23 = { bimId: '0xfWWQLhfFUfSseiBChrCg', space: 'Space 23' };
-  var SPACE_24 = { bimId: '0xfWWQLhfFUfSseiBChrCh', space: 'Space 24' };
-  var SPACE_25 = { bimId: '0xfWWQLhfFUfSseiBChrCe', space: 'Space 25' };
-  var SPACE_26 = { bimId: '0xfWWQLhfFUfSseiBChrCf', space: 'Space 26' };
-  var SPACE_27 = { bimId: '0xfWWQLhfFUfSseiBChr3M', space: 'Space 27' };
-  var SPACE_28 = { bimId: '0xfWWQLhfFUfSseiBChr3N', space: 'Space 28' };
+  var SPACE_22 = { bimId: '1udQe6xPr0vPBzlkNZrBsM', space: 'Space 22' };
+  var SPACE_23 = { bimId: '1udQe6xPr0vPBzlkNZrBsH', space: 'Space 23' };
+  var SPACE_24 = { bimId: '1udQe6xPr0vPBzlkNZrBsG', space: 'Space 24' };
+  var SPACE_25 = { bimId: '1udQe6xPr0vPBzlkNZrBsJ', space: 'Space 25' };
+  var SPACE_26 = { bimId: '1udQe6xPr0vPBzlkNZrBsI', space: 'Space 26' };
+  var SPACE_27 = { bimId: '1udQe6xPr0vPBzlkNZrBsj', space: 'Space 27' };
+  var SPACE_28 = { bimId: '1udQe6xPr0vPBzlkNZrBsi', space: 'Space 28' };
   var SPACE_GUID = {
     IS01: [SPACE_22], IS02: [SPACE_23], IS03: [SPACE_24], IS04: [SPACE_25],
     IS05: [SPACE_26], IS06: [SPACE_27], IS07: [SPACE_28],

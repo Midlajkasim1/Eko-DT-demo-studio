@@ -838,16 +838,19 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
 
     const heatGeoms = new Map<string, THREE.BufferGeometry[]>()
     const heatByBim = new Map<string, { mat: THREE.MeshBasicMaterial; model: any; localId: number }>()
+    let heatSheets: THREE.Mesh[] = []
     let heatSig = ''
-    const heatColor = (mode: string, v: number | null) => {
-      if (v == null || !isFinite(v)) return new THREE.Color(0x94a3b8)
-      let t: number
-      if (mode === 'comfort') t = (v - 600) / 600
-      else if (mode === 'hum') t = (v - 40) / 40
-      else t = (v - 21) / 4
-      t = Math.max(0, Math.min(1, t))
-      if (t <= 0.5) return new THREE.Color(0x2E5B92).lerp(new THREE.Color(0xE3E8F0), t / 0.5)
-      return new THREE.Color(0xE3E8F0).lerp(new THREE.Color(0x8A661F), (t - 0.5) / 0.5)
+    /* One hue per category, pale at the low end and deep at the high end.
+       The same pairs are in analytics.js heatStops. */
+    const HEAT_STOPS: Record<string, [number, number]> = {
+      temp: [0xF8D0D0, 0xC81E1E],
+      hum: [0xD7F0EA, 0x0F6E6A],
+      comfort: [0xD9E2F5, 0x1E3A8A],
+    }
+    const heatT = (mode: string, v: number | null) => {
+      if (v == null || !isFinite(v)) return null
+      const t = mode === 'comfort' ? (v - 600) / 600 : mode === 'hum' ? (v - 40) / 40 : (v - 21) / 4
+      return Math.max(0, Math.min(1, t))
     }
     const round1 = (n: number | null | undefined) => (n == null || !isFinite(Number(n)) ? '' : (Math.round(Number(n) * 10) / 10).toFixed(1))
     const heatRootOf = (model: any) => {
@@ -887,8 +890,19 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       heatGeoms.set(bimId, geoms)
       return geoms
     }
+    const dropHeatSheets = () => {
+      heatSheets.forEach(mesh => {
+        mesh.removeFromParent()
+        mesh.geometry.dispose()
+        const mat = mesh.material as THREE.Material
+        unwatchClipping(mat)
+        mat.dispose()
+      })
+      heatSheets = []
+    }
     const clearSpaceHeat = async () => {
       heatSig = ''
+      dropHeatSheets()
       heatByBim.forEach(rec => {
         unwatchClipping(rec.mat)
         rec.mat.dispose()
@@ -904,6 +918,93 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       })
       heatRoots.clear()
     }
+    /* One floor sheet per model. Vertex colour is an inverse-distance blend of
+       the room readings, so neighbouring rooms fade into each other instead of
+       meeting on a hard edge. */
+    const buildHeatSheet = (samples: { x: number; z: number; y: number; t: number }[], mode: string) => {
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, floorY = Infinity
+      for (const s of samples) {
+        minX = Math.min(minX, s.x); maxX = Math.max(maxX, s.x)
+        minZ = Math.min(minZ, s.z); maxZ = Math.max(maxZ, s.z)
+        floorY = Math.min(floorY, s.y)
+      }
+      let near = 0, nearN = 0
+      for (let i = 0; i < samples.length; i++) {
+        let best = Infinity
+        for (let j = 0; j < samples.length; j++) {
+          if (i === j) continue
+          const dx = samples[i].x - samples[j].x
+          const dz = samples[i].z - samples[j].z
+          best = Math.min(best, Math.hypot(dx, dz))
+        }
+        if (isFinite(best) && best > 0) { near += best; nearN++ }
+      }
+      const span = Math.max(maxX - minX, maxZ - minZ, 1)
+      const sigma = Math.max(nearN ? (near / nearN) * 1.6 : span * 0.35, span * 0.12)
+      const pad = sigma * 2.4
+      const stops = HEAT_STOPS[mode] || HEAT_STOPS.temp
+      const low = new THREE.Color(stops[0])
+      const high = new THREE.Color(stops[1])
+      const geom = new THREE.PlaneGeometry((maxX - minX) + pad * 2, (maxZ - minZ) + pad * 2, 56, 56)
+      geom.rotateX(-Math.PI / 2)
+      geom.translate((minX + maxX) / 2, floorY + Math.max(span * 0.004, 0.05), (minZ + maxZ) / 2)
+      const pos = geom.attributes.position
+      const colors = new Float32Array(pos.count * 4)
+      const tmp = new THREE.Color()
+      const sigma2 = 2 * sigma * sigma
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i), z = pos.getZ(i)
+        let wsum = 0, tsum = 0, nearest = Infinity
+        for (const s of samples) {
+          const d2 = (x - s.x) ** 2 + (z - s.z) ** 2
+          nearest = Math.min(nearest, d2)
+          const w = Math.exp(-d2 / sigma2)
+          wsum += w
+          tsum += w * s.t
+        }
+        const t = wsum > 0 ? tsum / wsum : 0
+        tmp.copy(low).lerp(high, t)
+        const fade = Math.exp(-nearest / sigma2)
+        colors[i * 4] = tmp.r
+        colors[i * 4 + 1] = tmp.g
+        colors[i * 4 + 2] = tmp.b
+        colors[i * 4 + 3] = fade * 0.72
+      }
+      geom.setAttribute('color', new THREE.BufferAttribute(colors, 4))
+      const mat = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        depthTest: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+        clipping: true,
+        vertexShader: `
+          #include <clipping_planes_pars_vertex>
+          attribute vec4 color;
+          varying vec4 vColor;
+          void main() {
+            vColor = color;
+            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+            gl_Position = projectionMatrix * mvPosition;
+            #include <clipping_planes_vertex>
+          }
+        `,
+        fragmentShader: `
+          #include <clipping_planes_pars_fragment>
+          varying vec4 vColor;
+          void main() {
+            #include <clipping_planes_fragment>
+            if (vColor.a < 0.03) discard;
+            gl_FragColor = vColor;
+          }
+        `,
+      })
+      watchClipping(mat)
+      const mesh = new THREE.Mesh(geom, mat)
+      mesh.frustumCulled = false
+      mesh.renderOrder = 2
+      return mesh
+    }
     const applySpaceHeat = async (zones: { bimId?: string; bimIds?: string[]; tempC?: number | null; rh?: number | null; co2?: number | null }[], mode?: string) => {
       const md = mode === 'comfort' || mode === 'hum' ? mode : 'temp'
       const idsOf = (z: { bimId?: string; bimIds?: string[] }) =>
@@ -911,35 +1012,26 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const sig = md + '|' + (zones || []).map(z => `${idsOf(z).join(',')}:${round1(z.tempC)}:${round1(z.rh)}:${round1(z.co2)}`).join(';')
       if (sig === heatSig) return
       heatSig = sig
-      const keep = new Set<string>()
+      dropHeatSheets()
+      const grouped = new Map<any, { x: number; z: number; y: number; t: number }[]>()
       for (const z of zones || []) {
-        const v = md === 'comfort' ? z.co2 : md === 'hum' ? z.rh : z.tempC
-        const color = heatColor(md, v == null ? null : Number(v))
+        const raw = md === 'comfort' ? z.co2 : md === 'hum' ? z.rh : z.tempC
+        const t = heatT(md, raw == null ? null : Number(raw))
+        if (t == null) continue
         for (const bimId of idsOf(z)) {
-        const entry = await locate(bimId)
-        if (!entry) continue
-        keep.add(bimId)
-        const existing = heatByBim.get(bimId)
-        if (existing) {
-          existing.mat.color.copy(color)
-          continue
-        }
-        const geoms = await geomsFor(bimId, entry)
-        if (!geoms.length) continue
-        const mat = new THREE.MeshBasicMaterial({
-          color, transparent: true, opacity: 0.88,
-          depthTest: true, depthWrite: true, side: THREE.DoubleSide, toneMapped: false,
-        })
-        watchClipping(mat)
-        const root = heatRootOf(entry.model)
-        for (const geom of geoms) root.add(new THREE.Mesh(geom, mat))
-        heatByBim.set(bimId, { mat, model: entry.model, localId: entry.localId })
+          const entry = await locate(bimId)
+          if (!entry?.localBox || entry.localBox.isEmpty()) continue
+          const c = entry.localBox.getCenter(new THREE.Vector3())
+          const list = grouped.get(entry.model) || []
+          list.push({ x: c.x, z: c.z, y: entry.localBox.min.y, t })
+          grouped.set(entry.model, list)
         }
       }
-      heatByBim.forEach((rec, bimId) => {
-        if (keep.has(bimId)) return
-        rec.mat.dispose()
-        heatByBim.delete(bimId)
+      grouped.forEach((samples, model) => {
+        if (samples.length < 1) return
+        const mesh = buildHeatSheet(samples, md)
+        heatRootOf(model).add(mesh)
+        heatSheets.push(mesh)
       })
       syncGhost()
     }

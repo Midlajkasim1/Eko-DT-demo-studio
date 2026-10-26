@@ -713,12 +713,18 @@ window.EKO_A = (function(){
     if(mode === 'hum') return Math.max(0, Math.min(100, v));
     return Math.max(0, Math.min(100, (v - 18) / 10 * 100));
   }
+  /* Same pairs as HEAT_STOPS in DashboardOverlay: one hue, pale to deep. */
+  function heatStops(mode){
+    if(mode === 'comfort') return ['#D9E2F5', '#1E3A8A'];
+    if(mode === 'hum') return ['#D7F0EA', '#0F6E6A'];
+    return ['#F8D0D0', '#C81E1E'];
+  }
   function heatCell(mode, v){
     if(v == null || !isFinite(v)) return 'var(--s3)';
     const t = mode === 'comfort' ? (v - 600) / 600 : mode === 'hum' ? (v - 40) / 40 : (v - 21) / 4;
     const x = Math.max(0, Math.min(1, t));
-    if(x <= 0.5) return 'color-mix(in srgb, var(--s3) ' + (x / 0.5 * 100).toFixed(0) + '%, var(--info))';
-    return 'color-mix(in srgb, var(--warn) ' + ((x - 0.5) / 0.5 * 100).toFixed(0) + '%, var(--s3))';
+    const stops = heatStops(mode);
+    return 'color-mix(in srgb, ' + stops[1] + ' ' + (x * 100).toFixed(0) + '%, ' + stops[0] + ')';
   }
   function heatOver(z, mode){
     const v = heatValue(z, mode);
@@ -746,7 +752,7 @@ window.EKO_A = (function(){
     const rankRows = rank.length ? rank.map((z, i) =>
       `<button class="hmrank selrow" data-on="${s.hmSel===z.nameEn}" data-act="hmSel" data-v="${esc(z.nameEn)}">
         <span class="tMonoS cT3">${i+1}</span><span class="grow taS">${esc(zn(z))}</span>
-        <span class="hmrbar"><span style="width:${heatBar(z, mode).toFixed(0)}%"></span></span>
+        <span class="hmrbar"><span style="width:${heatBar(z, mode).toFixed(0)}%;background:${heatCell(mode, heatValue(z, mode))}"></span></span>
         <span class="tMonoS">${esc(heatText(z, mode))}</span></button>`).join('')
       : `<p class="alempty">${esc(E.t('hmNone'))}</p>`;
     const tglRow = (lbl, key, on) =>
@@ -828,7 +834,7 @@ window.EKO_A = (function(){
     return `<div class="hmlayer">${tiles}${dots}</div>
       <div class="heatbar mzglass">
         <span class="tMonoS cT3">${esc(legend)}</span>
-        <span class="hmgrad" data-mode="comfort"></span>
+        <span class="hmgrad" data-mode="${mode}"></span>
         <span class="tCap">${esc(E.t('hmLegendCap'))}</span>
         <span class="segbox row msA">${seg(E.t('rangeToday'),'today')}${seg(E.t('rangeWeekly'),'week')}${seg(E.t('rangeMonthly'),'month')}</span>
         <button class="chip" data-on="${s.hmPlay?'true':'false'}" data-act="hmPlay">${esc(s.hmPlay?E.t('pauseW'):E.t('playW'))}</button>

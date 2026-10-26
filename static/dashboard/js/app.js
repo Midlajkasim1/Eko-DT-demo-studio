@@ -30,6 +30,17 @@
     if(!_pluralRules[lang]){ try{ _pluralRules[lang] = new Intl.PluralRules(lang); }catch(e){ _pluralRules[lang] = { select: x => x === 1 ? 'one' : 'other' }; } }
     return _pluralRules[lang].select(n);
   }
+  /* GlobalIds of the heatmap rooms, once live data has filled them. */
+  function heatSpaceIds(app) {
+    const zones = (app.data && app.data.heat && app.data.heat.zones) || [];
+    const ids = [];
+    zones.forEach(z => {
+      const list = (z.bimIds && z.bimIds.length) ? z.bimIds : (z.bimId ? [z.bimId] : []);
+      list.forEach(id => { if (id && ids.indexOf(id) < 0) ids.push(id); });
+    });
+    return ids;
+  }
+
   const E = window.EKO = {
     data: window.EKO_DATA.marsa,
     nav: window.EKO_LAYOUTS.nav,
@@ -213,7 +224,7 @@
         if (this.engine && this.engine.isolateLayer) this.engine.isolateLayer(HEAT_LAYERS, true);
         if (enteringHeat || !this.state._heatViewed) {
           this.state._heatViewed = true;
-          window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true } }));
+          window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true, spaceIds: heatSpaceIds(this) } }));
         }
       } else if (leavingHeat) {
         if (this.state.dock) { this.state.dock.level = 'ALL'; this.state.dock.layer = 'all'; }
@@ -1152,7 +1163,7 @@
         if(E.state.pageId === 'heatmap'){
           if(E.engine.isolateLevel) E.engine.isolateLevel('Ground floor', true);
           if(E.engine.isolateLayer) E.engine.isolateLayer(['arch','elec','int','mech'], true);
-          window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true } }));
+          window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true, spaceIds: heatSpaceIds(E) } }));
         } else if(E.engine.resetView){
           E.engine.resetView();
           if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
