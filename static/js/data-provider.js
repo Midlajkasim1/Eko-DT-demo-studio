@@ -103,6 +103,19 @@
     getAlarms() { return this._json('/api/fin/alarms'); }
     getDocuments() { return this._json('/api/fin/documents'); }
     getWorkOrders() { return this._json('/api/fin/workorders'); }
+    async writePoint(pointId, action, value) {
+      try {
+        const res = await fetch('/api/fin/point-write', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ point_id: pointId, action, value }),
+        });
+        const body = await res.json().catch(() => ({}));
+        return res.ok ? { ok: true, data: body } : { ok: false, status: res.status, error: (body && body.detail) || `HTTP ${res.status}` };
+      } catch (e) {
+        return { ok: false, status: 0, error: e.message };
+      }
+    }
     getMeters() { return this._json('/api/fin/pmu-live'); }
     getHisPoints() { return this._json('/api/fin/his-points'); }
     getPointHistory(id, days) {
@@ -255,6 +268,11 @@
     getHisPoints() { return state.provider ? state.provider.getHisPoints() : Promise.resolve(null); },
     getPointHistory(id, days) { return state.provider ? state.provider.getPointHistory(id, days) : Promise.resolve(null); },
     getAlarmHistory(days) { return state.provider ? state.provider.getAlarmHistory(days) : Promise.resolve(null); },
+    writePoint(pointId, action, value) {
+      return state.provider && state.provider.writePoint
+        ? state.provider.writePoint(pointId, action, value)
+        : Promise.resolve({ ok: false, status: 0, error: 'Changing equipment needs the EKO backend.' });
+    },
     get config() { return state.config; },
     get connected() { return state.connected; },
     get power() { return state.power; },

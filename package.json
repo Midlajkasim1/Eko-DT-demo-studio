@@ -12,16 +12,6 @@
     "test": "node tests/run.mjs",
     "test:unit": "node tests/run.mjs --unit",
     "test:browser": "node tests/run.mjs --browser",
-    "test:logic": "node scripts/test-mapping-logic.mts",
-    "test:notif": "node scripts/test-notif-store.mjs",
-    "test:mau": "node scripts/test-mau-points.mjs",
-    "test:eco": "node scripts/test-eco-points.mjs",
-    "test:hvac": "node scripts/test-hvac-schematics.mjs",
-    "test:alarms": "node scripts/test-alarm-dedup.mjs",
-    "test:reports": "node scripts/test-reports.mjs",
-    "test:backend": "python -m unittest discover -s backend/tests -t backend -v",
-    "test:isolation": "node scripts/test-project-isolation.mjs",
-    "test:fin-switch": "node scripts/test-fin-project-switch.mjs",
     "build:renders": "node scripts/buildBuiltinRenders.mjs"
   },
   "dependencies": {

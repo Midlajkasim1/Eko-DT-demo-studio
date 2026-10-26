@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useLoadingProgressStore, sessionProgress } from '@/store/useLoadingProgressStore'
 import type { ModelLoadProgress } from '@/store/useLoadingProgressStore'
+import { EkoLoading } from '@/components/viewer/EkoLoading'
 
 function fmtMB(bytes: number) {
   return `${(bytes / 1048576).toFixed(1)} MB`
@@ -28,7 +29,7 @@ function statusLabel(e: ModelLoadProgress, source: 'disk' | 'server' | null) {
   }
 }
 
-export function ModelLoadingProgress() {
+export function ModelLoadingProgress({ branded = false }: { branded?: boolean }) {
   const sessionActive = useLoadingProgressStore(s => s.sessionActive)
   const source = useLoadingProgressStore(s => s.source)
   const startedAt = useLoadingProgressStore(s => s.startedAt)
@@ -49,7 +50,7 @@ export function ModelLoadingProgress() {
     loggedRef.current = true
 
     const totalMs = performance.now() - startedAt
-    console.groupCollapsed(`[ModelLoading] ${models.length} models in ${fmtMs(totalMs)} — timing breakdown`)
+    // console.groupCollapsed(`[ModelLoading] ${models.length} models in ${fmtMs(totalMs)} — timing breakdown`)
     console.table(models.map(e => ({
       model: e.name,
       size: fmtMB(e.sizeBytes || e.bytesRead),
@@ -64,6 +65,8 @@ export function ModelLoadingProgress() {
   }, [sessionActive, allDone])
 
   if (!sessionActive || models.length === 0) return null
+
+  if (branded) return <EkoLoading percent={percent} />
 
   const active =
     models.find(e => e.phase === 'reading' || e.phase === 'parsing') ??

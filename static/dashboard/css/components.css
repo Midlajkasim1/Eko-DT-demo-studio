@@ -846,14 +846,23 @@
   touch-action:none
 }
 
-/* Locate-in-3D focus (data-locfocus): no rail, its width given back to the viewer (--navw also
-   places #histframe). The register, summary and asset panel are simply not rendered. */
-.dashboard-native-container[data-locfocus="1"] {
-  --navw:0px
-}
-
-.dashboard-native-container[data-locfocus="1"] #ekonav {
-  display:none
+/* Locate-in-3D is deliberately narrow in scope: on the desktop Asset
+   Register, keep Studio chrome and the selected asset panel in place and give
+   only the central grid back to the model strip. The strip is not rendered below
+   1024px (the same breakpoint as E.stacked()), where the full-screen model owns this state. */
+@media (min-width:1024px) {
+  .dashboard-native-container[data-locfocus="1"] .dgwrap[data-grid="assets"] {
+    display:none
+  }
+  /* The grid's width goes to the model: the strip takes whatever the asset panel leaves, so the panel
+     stays flush right and no empty column is kept for the hidden table. Its fold chevron is inert here
+     (the strip is opened for this view in registerPage). */
+  .dashboard-native-container[data-locfocus="1"] .regmodelwrap {
+    flex:1 1 0
+  }
+  .dashboard-native-container[data-locfocus="1"] .regmodelwrap .regcollapse {
+    display:none
+  }
 }
 
 .dashboard-native-container .vpback {
@@ -862,6 +871,81 @@
   inset-inline-start:12px;
   z-index:58;
   min-height:34px
+}
+
+/* The Assets Overview shown over the register's model strip (Locate in 3D) sizes to the strip: 70% of it, between its
+   own 220px floor and its normal width, instead of a fixed width that overflows a 270-400px strip */
+.dashboard-native-container .regmodelwrap #ovp {
+  min-width:0;
+  width:clamp(220px, 70%, var(--ovw,352px))
+}
+
+/* Compact cards: the three figures (Assets Registered, Open Work Orders, Assets in Alarm) take about a quarter less height
+   in the register's strip. Only the strip: the same classes on every other page keep their size. The line heights are
+   set because 'normal' made the 28px figure a 34px row on its own; no heights are fixed, so nothing can clip. */
+.dashboard-native-container .regmodelwrap #ovp .ovhead {
+  padding-block:8px 2px
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovpad {
+  padding-block-start:4px
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovklist {
+  gap:6px
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovk {
+  padding:7px 12px
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovklbl {
+  font-size:calc(var(--txCapSz) - 1px);
+  line-height:1.25;
+  letter-spacing:.6px
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovkval {
+  margin-block-start:0
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovknum {
+  font-size:var(--txKpiSz);
+  line-height:1.15
+}
+
+.dashboard-native-container .regmodelwrap #ovp .ovkcap {
+  font-size:calc(var(--txCapSz) - 1px);
+  line-height:1.3;
+  margin-block-start:1px
+}
+
+/* The model strip is narrower than the full toolbar (about 465px): its buttons are a little smaller, and the bar wraps
+   to a second row when the strip is narrower still, instead of running past the strip's edges. It sits above the
+   strip's hint line */
+.dashboard-native-container .regmodelwrap #vbottom {
+  --vtBtn:34px;
+  bottom:40px;
+  inset-inline:8px;
+  transform:none
+}
+
+.dashboard-native-container .regmodelwrap #vbar {
+  flex-wrap:wrap;
+  justify-content:center;
+  height:auto;
+  min-height:var(--vtBar);
+  max-width:100%
+}
+
+.dashboard-native-container .regmodelwrap #vbar .vdiv {
+  display:none
+}
+
+/* Locate in 3D: Back to Assets is the first row of the asset panel, above its title and actions, which stay below it */
+.dashboard-native-container #assetpanel .apback {
+  flex:none;
+  padding:12px 14px 0
 }
 
 .dashboard-native-container #enginehost {
@@ -1986,6 +2070,18 @@
   background-clip:content-box
 }
 
+/* Desktop summary panel (#ovp: the Executive, Energy, Assets ... summaries): the cards run to the edge the fold chevron sits
+   on, and the panel is 52px narrower. The 76px kept free on that side (for the glass fade) and the 352px width left a gap of
+   about 70px between the cards and the chevron. Narrower layouts (up to 1023px) keep their own rules. */
+@media (min-width:1024px) {
+  .dashboard-native-container #ovp {
+    --ovw:var(--spOvp,300px)
+  }
+  .dashboard-native-container #ovp .ovpad {
+    padding-inline-end:16px
+  }
+}
+
 .dashboard-native-container .ovklist {
   display:flex;
   flex-direction:column;
@@ -2990,6 +3086,64 @@
   .dashboard-native-container #modpanel {
     width:var(--spPan,340px)
   }
+}
+
+/* STUDIO ONLY (.app-body:has(> .sidebar): the exported viewer has no sidebar, so it keeps the layout it always had).
+   The Studio's 340px sidebar sits beside the dashboard, which sizes itself to the whole window: a docked asset panel
+   must never extend past the Studio surface on laptop widths. The model strip yields first; below 1200px the rail
+   becomes icon-only before the three-column register runs out of room, and the table remains the flexible (and
+   scrollable) column. */
+.app-body:has(> .sidebar) .dashboard-native-container .regmodelwrap { flex-shrink:1 }
+@media (max-width:1200px) and (min-width:1024px) {
+  .app-body:has(> .sidebar) .dashboard-native-container { --navw:56px }
+  .app-body:has(> .sidebar) .dashboard-native-container #ekonav .nlbl,
+  .app-body:has(> .sidebar) .dashboard-native-container #ekonav .nchevb,
+  .app-body:has(> .sidebar) .dashboard-native-container #ekonav .nsubs { display:none }
+  .app-body:has(> .sidebar) .dashboard-native-container #assetpanel {
+    width:min(var(--spPan,320px), 320px);
+    max-width:320px
+  }
+  /* Five tabs (Alarms .. Work orders) need ~336px at their normal padding: inside 320px the last one ended
+     past the window edge. Tighter padding keeps all of them on the panel, so each can be reached. */
+  .app-body:has(> .sidebar) .dashboard-native-container #assetpanel .aptab { padding-inline:5px }
+}
+
+/* STUDIO ONLY, up to 1050px. Beside the 340px sidebar and the 36px of Render/Transform tabs the dashboard is under
+   ~680px wide, phone-sized, but its phone rules key on the WINDOW (max-width:767px), so at tablet window widths the top bar
+   overflowed: the breadcrumb drew over the alarm ribbon and the connection pill, and at 861-768px the account menu ended
+   outside the dashboard where no click reaches it. The top bar gets the phone rules from 1050px down (the same
+   declarations as the max-width:767px blocks): the breadcrumb truncates, the connection pill is a dot, and language and
+   theme stay one tap away in the account menu. */
+@media (min-width:768px) and (max-width:1050px) {
+  .app-body:has(> .sidebar) .dashboard-native-container .brandslot { width:56px }
+  .app-body:has(> .sidebar) .dashboard-native-container #alarmribbon,
+  .app-body:has(> .sidebar) .dashboard-native-container #estateribbon { flex:none }
+  .app-body:has(> .sidebar) .dashboard-native-container #crumb { min-width:60px }
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar #crumb { flex:1 1 auto; min-width:0; overflow:hidden }
+  .app-body:has(> .sidebar) .dashboard-native-container #crumb .flexnone,
+  .app-body:has(> .sidebar) .dashboard-native-container #crumb .crumbbtn.cT2,
+  .app-body:has(> .sidebar) .dashboard-native-container #crumb span.cT2 { display:none }
+  .app-body:has(> .sidebar) .dashboard-native-container #crumb .crumbbtn {
+    display:block;
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap
+  }
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar .tbstatus { flex:none; overflow:visible }
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar .langgrp,
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar .tbdisp,
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar .langbtn,
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar .themebtn { display:none }
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar .connpill {
+    display:inline-flex;
+    width:28px;
+    height:28px;
+    padding:0;
+    justify-content:center;
+    border-radius:50%
+  }
+  .app-body:has(> .sidebar) .dashboard-native-container #topbar .connpill .conntext { display:none }
 }
 
 @media (max-width:1024px) {
@@ -7081,6 +7235,23 @@
   border-block-end:1px solid var(--bd1)
 }
 
+.dashboard-native-container .nfpsite {
+  font-size:var(--txCapSz);
+  color:var(--t2);
+  padding-block:6px 8px;
+  border-block-end:1px solid var(--bd1)
+}
+
+.dashboard-native-container .nfpsite b {
+  color:var(--t1)
+}
+
+.dashboard-native-container .nfpsite[data-state="unknown"] {
+  color:var(--t1);
+  border-inline-start:3px solid var(--bd1);
+  padding-inline-start:8px
+}
+
 .dashboard-native-container .nfpname {
   font-size:var(--txBodySz);
   color:var(--t1);
@@ -8381,6 +8552,32 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 
 .dashboard-native-container #vpmain[data-tl="1"] > #ovp:not([data-min="1"]) .ovpad {
   padding-block-end:calc(var(--ovFade) - 36px)
+}
+
+/* ENERGY SUMMARY ONLY (#ovp[data-fit], set by widgets.js energySummary). Its panel is as tall as its cards with 16px under
+   the last, instead of the viewer's full height, and never reaches the timeline and the toolbar at the foot of the
+   viewer: max-height reserves that space (--ovFoot: one value per timeline caption height, more on a short window) and the
+   cards scroll inside the panel when they do not fit. Percentages and plain flex only, no intrinsic-size keywords, so
+   every browser lays it out the same. The two taller caption variants use :has() (Chrome 105, Safari 15.4, Firefox 121):
+   where it is missing the base reserve applies and a taller caption can sit up to 32px under the panel's foot. Every
+   other summary keeps its full-height panel exactly as before. Desktop only: the stacked shell lays the summary out in
+   the page. */
+@media (min-width:1024px) {
+  .dashboard-native-container #ovp[data-fit="1"]:not([data-min="1"]) {
+    --ovFoot:0px;
+    --ovFade:16px;
+    bottom:auto !important;   /* the full-height boxes (timeline, short window) set bottom; max-height does that job here */
+    max-height:calc(100% - var(--ovFoot))
+  }
+  .dashboard-native-container #ovp[data-fit="1"]:not([data-min="1"]) .ovpad {
+    padding-block-end:16px !important   /* the timeline variants reserve room for a taller fade */
+  }
+  .dashboard-native-container #vpmain[data-tl="1"] > #ovp[data-fit="1"]:not([data-min="1"]) { --ovFoot:84px }
+  .dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="1"]) > #ovp[data-fit="1"]:not([data-min="1"]) { --ovFoot:104px }
+  .dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="2"]) > #ovp[data-fit="1"]:not([data-min="1"]) { --ovFoot:116px }
+  .dashboard-native-container[data-short="1"] #vpmain[data-tl="1"] > #ovp[data-fit="1"]:not([data-min="1"]) { --ovFoot:calc(var(--vtBar) + 56px + 44px) }
+  .dashboard-native-container[data-short="1"] #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="1"]) > #ovp[data-fit="1"]:not([data-min="1"]) { --ovFoot:calc(var(--vtBar) + 76px + 44px) }
+  .dashboard-native-container[data-short="1"] #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="2"]) > #ovp[data-fit="1"]:not([data-min="1"]) { --ovFoot:calc(var(--vtBar) + 88px + 44px) }
 }
 
 .dashboard-native-container .minimap {
@@ -16129,4 +16326,137 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container #vpmain .scrubbar .tlsel {
   background:var(--chrome-ctl);
   border-color:var(--chrome-ctlBd)
+}
+
+/* Point control: an editable live value and its dialog (components/point-control.js) */
+/* Opened from the asset panel, which is a z-index 62 sheet on stacked widths: the dialog layer goes above it */
+.dashboard-native-container #overlays:has(.dlgpoint) {
+  z-index:64
+}
+
+.dashboard-native-container .apctlval {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  margin:-3px -7px;
+  padding:3px 7px;
+  border:1px dashed var(--bd2);
+  border-radius:6px;
+  color:var(--acc);
+  font:inherit;
+  cursor:pointer
+}
+
+.dashboard-native-container .apctlval:hover,.dashboard-native-container .apctlval:focus-visible {
+  background:var(--accT);
+  border-color:var(--acc);
+  border-style:solid
+}
+
+.dashboard-native-container .apctlval svg {
+  flex:none;
+  opacity:.85
+}
+
+.dashboard-native-container .apctlman {
+  padding:0 6px;
+  border:1px solid var(--warnB);
+  border-radius:999px;
+  background:var(--warnT);
+  color:var(--warnTx);
+  font-size:var(--txCapSz);
+  font-weight:600;
+  line-height:18px
+}
+
+.dashboard-native-container .dlgpoint {
+  width:min(400px,calc(100vw - 32px));
+  display:flex;
+  flex-direction:column;
+  gap:12px
+}
+
+.dashboard-native-container .dlgpoint .dlghead {
+  margin-bottom:0
+}
+
+.dashboard-native-container .pcwhat {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:baseline;
+  gap:8px
+}
+
+.dashboard-native-container .pcnow {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 10px;
+  border:1px solid var(--bd1);
+  border-radius:8px;
+  background:var(--s2)
+}
+
+.dashboard-native-container .pcnum {
+  display:flex;
+  align-items:center;
+  gap:8px
+}
+
+.dashboard-native-container .pcnum input {
+  width:120px;
+  padding:8px 10px;
+  border:1px solid var(--bd2);
+  border-radius:8px;
+  background:var(--s2);
+  color:var(--t1);
+  font-family:'JetBrains Mono',monospace;
+  font-size:var(--txLgSz);
+  text-align:center
+}
+
+.dashboard-native-container .pcnum .iconbtn {
+  width:36px;
+  height:36px;
+  border:1px solid var(--bd2);
+  border-radius:8px;
+  font-size:var(--txLgSz)
+}
+
+.dashboard-native-container .pcunit {
+  color:var(--t2);
+  font-family:'JetBrains Mono',monospace
+}
+
+.dashboard-native-container .pcchoice .seg {
+  flex:1;
+  min-height:36px
+}
+
+.dashboard-native-container .pcresult {
+  padding:8px 10px;
+  border-radius:8px;
+  font-size:var(--txCapSz);
+  border:1px solid var(--bd1)
+}
+
+.dashboard-native-container .pcresult[data-tone="ok"] {
+  color:var(--posTx);
+  border-color:var(--pos)
+}
+
+.dashboard-native-container .pcresult[data-tone="warn"] {
+  color:var(--warnTx);
+  border-color:var(--warnB);
+  background:var(--warnT)
+}
+
+.dashboard-native-container .pcresult[data-tone="bad"] {
+  color:var(--critTx);
+  border-color:var(--crit)
+}
+
+.dashboard-native-container .pcfoot {
+  align-items:center;
+  margin-top:4px
 }

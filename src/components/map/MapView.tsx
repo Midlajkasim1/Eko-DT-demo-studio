@@ -179,7 +179,7 @@ export function MapView({ meta, folderHandle, adminMode, onOpenLocation, onExit 
         </div>
       )}
 
-      <MapLoadProgress />
+      <MapLoadProgress branded={!adminMode} />
     </div>
   )
 }

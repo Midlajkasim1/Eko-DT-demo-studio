@@ -11,6 +11,7 @@ import { hasMap } from '@/lib/mapConfig'
 import { dashboardProjectInfo } from '@/lib/finSettings'
 import { MapLayer } from '@/components/map/MapLayer'
 import { SignInOverlay, checkSession } from '@/viewer/SignInOverlay'
+import { EkoLoading } from '@/components/viewer/EkoLoading'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import type { ProjectMeta } from '@/types'
 
@@ -26,22 +27,26 @@ export default function ViewerApp() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [standalone, setStandalone] = useState(false)
-  const [auth, setAuth] = useState<'checking' | 'required' | 'authed'>('checking')
+  const [auth, setAuth] = useState<'checking' | 'required' | 'error' | 'authed'>('checking')
   const [sessionInfo, setSessionInfo] = useState<{ displayName?: string; serverUrl?: string }>({})
   const progressActive = useLoadingProgressStore(s => s.sessionActive)
 
   // Session gate runs in parallel with model loading — models stream in behind
   // the sign-in overlay, so the scene is ready (or close to it) once the
   // operator is authenticated
+  // Signed in means THIS browser's session (checkSession reads /api/auth/me), never "the backend
+  // is connected to FIN": a second browser is asked to sign in even if another already connected.
+  // No backend at all (a static FIN-hosted copy) has nothing to sign in to, as before.
+  const [authTry, setAuthTry] = useState(0)
   useEffect(() => {
     let mounted = true
     checkSession().then(s => {
       if (!mounted) return
       setSessionInfo({ displayName: s.displayName, serverUrl: s.serverUrl })
-      setAuth(s.reachable && !s.authenticated ? 'required' : 'authed')
+      setAuth(!s.reachable || s.authenticated ? 'authed' : s.error ? 'error' : 'required')
     })
     return () => { mounted = false }
-  }, [])
+  }, [authTry])
 
   // Apply saved render settings from project.json
   const applyRenderSettings = useCallback((meta: ProjectMeta) => {
@@ -291,22 +296,17 @@ export default function ViewerApp() {
             </div>
           )}
 
-          {/* Loading overlay — only until the per-model progress card takes over */}
-          {isLoading && !progressActive && (
-            <div className="viewer-overlay" style={{ background: 'rgba(245,246,248,0.92)' }}>
-              <div style={{ textAlign: 'center' }}>
-                <div className="conversion-spinner" style={{ width: 40, height: 40, borderWidth: 3, margin: '0 auto 16px' }} />
-                <p style={{ fontSize: 14, color: 'var(--text-secondary)' }}>Loading project…</p>
-              </div>
-            </div>
-          )}
+          {/* Before a percentage exists, the same EKO splash with no number */}
+          {isLoading && !progressActive && <EkoLoading />}
 
           {/* Sign-in gate — models keep streaming in behind it */}
           {auth !== 'authed' && (
             <SignInOverlay
-              ready={auth === 'required'}
+              ready={auth === 'required' || auth === 'error'}
               displayName={sessionInfo.displayName}
               serverUrl={sessionInfo.serverUrl}
+              notice={auth === 'error' ? 'Your sign-in could not be checked (server or network error). Retry, or sign in again.' : undefined}
+              onRetry={() => setAuthTry(n => n + 1)}
               onSuccess={() => setAuth('authed')}
             />
           )}

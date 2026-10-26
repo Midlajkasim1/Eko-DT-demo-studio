@@ -37,12 +37,17 @@ window.EKO_NOTIF = (function(){
 
   /* ---- the project's server notifications (real mode with a backend) ----
      A real project reads the backend's project-scoped notifications: their read and dismissed
-     state is the PROJECT's, shared by everyone viewing it, not a person's (no per-user identity
-     yet). The browser's own report.ready rows stay in the local store (no event ingestion yet).
-     Direct mode (FIN-hosted, no Python service) and demo keep the local store only. */
+     state is the signed-in USER's own on this project (the server takes the user from this
+     browser's session cookie, never from a request); another user's actions do not change it.
+     They are read only once THIS browser's sign-in is confirmed (/api/auth/me):
+     another browser having connected FIN signs nobody in here. The browser's own report.ready
+     rows stay in the local store (no event ingestion yet). Direct mode (FIN-hosted, no Python
+     service) and demo keep the local store only. */
   const REMOTE = REAL && !!PROJECT_ID && !(INJ.fin && INJ.fin.directMode) && typeof fetch === 'function';
   const API = '/api/notifications/v1', REMOTE_LIMIT = 100, REFRESH_MS = 30000;
-  let remote = [], remoteUnread = 0, remotePrefs = null, remoteError = null, timer = null, self = null;
+  let remote = [], remoteUnread = 0, remoteMore = false, remotePrefs = null, remoteError = null, timer = null, self = null;
+  /* checking | ok | signin (401: no session here) | mismatch (409) | error (network/server: retryable) */
+  let remoteState = 'checking', remoteCode = null;
   const live = () => window.EKO_NOTIF === self;   /* a switched-away project's store stops talking */
   const changed = () => { if(hooks.onAdd) hooks.onAdd(null); };
   function api(method, path, body){
@@ -51,10 +56,40 @@ window.EKO_NOTIF = (function(){
       body: body ? JSON.stringify(body) : undefined })
       .then(res => {
         const stamp = res.headers.get('X-Eko-Project');   /* never another project's answer */
-        if(stamp !== null && decodeURIComponent(stamp) !== PROJECT_ID) throw new Error('answer for another project');
-        if(!res.ok) throw new Error('HTTP ' + res.status);
+        if(stamp !== null && decodeURIComponent(stamp) !== PROJECT_ID) throw failure(409, 'project_mismatch');
+        if(!res.ok) return res.json().catch(() => ({})).then(b => { throw failure(res.status, b && b.error && b.error.code); });
         return res.json();
       });
+  }
+  function failure(status, code){ const e = new Error('HTTP ' + status); e.status = status; e.code = code || null; return e; }
+  function clearRemote(){ remote = []; remoteUnread = 0; remoteMore = false; remotePrefs = null; }
+  /* 401: this browser is not signed in (or no longer). Nothing of the last session stays on
+     screen: the server rows, and this browser's own rows for the project, go. 409: kept polling,
+     the backend may switch back. Anything else: retryable, the last good rows stay. */
+  function failed(err){
+    if(!live()) return;
+    const status = err && err.status;
+    remoteError = String((err && err.message) || err);
+    remoteCode = (err && err.code) || null;
+    if(status === 401){
+      stop(); clearRemote(); remoteState = 'signin';
+      items = []; if(LS){ try{ localStorage.removeItem(LS); }catch(e){} }
+    } else if(status === 409){ clearRemote(); remoteState = 'mismatch'; }
+    else remoteState = 'error';
+    changed();
+  }
+  /* Who this browser is, from its own session cookie; only then are notifications read */
+  function confirmSession(){
+    if(!REMOTE) return Promise.resolve();
+    if(!live()){ stop(); return Promise.resolve(); }
+    if(remoteState !== 'ok'){ remoteState = 'checking'; changed(); }
+    return fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin' })
+      .then(res => {
+        if(!res.ok) return res.json().catch(() => ({})).then(b => { throw failure(res.status, b && b.error && b.error.code); });
+        if(!timer) timer = setInterval(refresh, REFRESH_MS);
+        return refresh();
+      })
+      .catch(failed);
   }
   /* a server row in the bell's own shape; a type the registry does not know is not shown */
   function fromServer(r){
@@ -71,12 +106,14 @@ window.EKO_NOTIF = (function(){
     return Promise.all([api('GET', '/notifications?limit=' + REMOTE_LIMIT), api('GET', '/preferences')])
       .then(([page, p]) => {
         if(!live()) return;
-        remote = (page.items || []).map(fromServer).filter(Boolean);
-        remoteUnread = typeof page.unread_count === 'number' ? page.unread_count : 0;
         remotePrefs = p && typeof p === 'object' ? p : null;
-        remoteError = null; changed();
+        /* the server already leaves out what this user switched off, so its rows, pages and count agree */
+        remote = (page.items || []).map(fromServer).filter(Boolean);
+        remoteMore = !!page.next_cursor;                 /* another page exists on the server */
+        remoteUnread = typeof page.unread_count === 'number' ? page.unread_count : 0;
+        remoteError = null; remoteCode = null; remoteState = 'ok'; changed();
       })
-      .catch(err => { if(!live()) return; remoteError = String((err && err.message) || err); changed(); });
+      .catch(failed);
   }
   function stop(){ if(timer){ clearInterval(timer); timer = null; } }
   /* optimistic: the cache changes now; a refused request puts it back, then the server's truth */
@@ -86,7 +123,7 @@ window.EKO_NOTIF = (function(){
   const remoteFind = id => remote.find(x => x.id === id);
   const enc = id => encodeURIComponent(id);
   /* the server's count when the cache holds only a page of them, else the cache's own */
-  const remoteUnreadNow = () => remote.length < REMOTE_LIMIT
+  const remoteUnreadNow = () => !remoteMore
     ? remote.filter(n => !n.readAt && !n.archivedAt).length : remoteUnread;
 
   /* -------- preferences (stage 4): per-type in-app delivery toggles ------- */
@@ -96,12 +133,18 @@ window.EKO_NOTIF = (function(){
     try{ prefs = JSON.parse(localStorage.getItem(LSP)||'{}'); }catch(e){ prefs = {}; }
   }
   function prefOn(type){
-    if(REMOTE && remotePrefs){   /* the project's preferences, master toggle first */
+    if(REMOTE && remotePrefs){   /* this user's preferences on the project, master toggle first */
       if(remotePrefs.master_enabled === false) return false;
       if(remotePrefs.types && type in remotePrefs.types) return !!remotePrefs.types[type];
     } else if(type in prefs) return !!prefs[type];
     const def = TT().byType[type];
     return def ? def.defaultOn : true;
+  }
+  /* whether the SITE creates critical-alarm notifications (the server's word, read only): true | false, or
+     null when it is not known (no backend, an older one, or the answer is missing): never assumed on */
+  function siteCritical(){
+    const s = REMOTE && remotePrefs && remotePrefs.site;
+    return s && typeof s.critical_alarms === 'boolean' ? s.critical_alarms : null;
   }
   function setPref(type, on){
     if(REMOTE){
@@ -351,10 +394,14 @@ window.EKO_NOTIF = (function(){
 
   self = { add, list, unread, badge, otherUnread, markRead, markAllRead, archive, unarchive,
            archiveRead, seed, startStream, stopStream, hooks, ME, SITE,
-           prefOn, setPref, REMOTE, refresh, remoteError: () => remoteError };
+           prefOn, setPref, siteCritical, REMOTE, refresh, confirmSession, remoteError: () => remoteError,
+           remoteState: () => remoteState, remoteCode: () => remoteCode };
   if(REMOTE){   /* after this file returns, so live() sees this store as window.EKO_NOTIF */
-    setTimeout(refresh, 0);
-    timer = setInterval(refresh, REFRESH_MS);
+    setTimeout(confirmSession, 0);
+    /* a sign-in or sign-out in this browser (Studio Connect/Disconnect, the viewer's sign-in, the
+       dashboard's Sign out): ask the server again. The event carries nothing to trust. */
+    const onAuth = () => { if(live()) confirmSession(); else window.removeEventListener('eko-auth-changed', onAuth); };
+    window.addEventListener('eko-auth-changed', onAuth);
   }
   return self;
 })();

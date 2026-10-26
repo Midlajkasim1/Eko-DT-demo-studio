@@ -195,6 +195,17 @@
       const enteringHeat = pageId === 'heatmap' && from !== 'heatmap';
       const leavingHeat = from === 'heatmap' && pageId !== 'heatmap';
       const HEAT_LAYERS = ['arch','elec','int','mech'];
+      /* HVAC & Mechanical and Electrical read best as the white model. Any other page returns to the style it had. */
+      const mep = pageId !== 'heatmap' && targetModule === 'systems' && (targetSub === 'hvac' || targetSub === 'mechanical' || targetSub === 'electrical');
+      if (this.state.dock) {
+        if (mep) {
+          if (this.state._styleBeforeMep == null) this.state._styleBeforeMep = this.state.dock.style;
+          this.state.dock.style = 'minimal';
+        } else if (this.state._styleBeforeMep != null) {
+          this.state.dock.style = this.state._styleBeforeMep;
+          this.state._styleBeforeMep = null;
+        }
+      }
 
       if (pageId === 'heatmap') {
         if (this.state.dock) { this.state.dock.level = 'Ground floor'; this.state.dock.layer = HEAT_LAYERS; }
@@ -397,7 +408,7 @@
     }
     if(E.state.signedOut) return `<div class="signedout" role="dialog" aria-modal="true" aria-label="${esc(E.t('signedOutT'))}"><div class="signedoutcard">${C.brandLogo(E)}<h2>${esc(E.t('signedOutT'))}</h2><p class="tCap">${esc(E.t('signedOutD'))}</p><button class="btnP" data-act="signIn">${esc(E.t('signIn'))}</button></div></div>`;   /* D129 */
     if(window.EKO_AI) out += window.EKO_AI.launcher(E) + window.EKO_AI.panel(E);   /* D132/D133: the launcher, the scrim and the conversation, with or without a dialog */
-    if(!d) return out + (window.EKO_CTL ? window.EKO_CTL.overlays(E) : '') + (window.EKO_NF ? window.EKO_NF.overlays(E) : '') + (window.EKO_PWA ? window.EKO_PWA.overlays(E) : '');
+    if(!d) return out + (window.EKO_POINT_CONTROL ? window.EKO_POINT_CONTROL.overlay(E) : '') + (window.EKO_CTL ? window.EKO_CTL.overlays(E) : '') + (window.EKO_NF ? window.EKO_NF.overlays(E) : '') + (window.EKO_PWA ? window.EKO_PWA.overlays(E) : '');
     if(d === 'display'){
       /* D107: the Display control — workstation or the control-room wall */
       const scope = wallScope();
@@ -624,7 +635,7 @@
             ${h.kind==='tool'?'':h.locked?`<span class="tCap">${esc(E.t('lockedTip'))}</span>`:h.sub?`<span class="tCap">${esc(h.sub)}</span>`:''}</button>`).join('')
           : `<p class="alempty">${esc(E.t('palEmpty'))}</p>`}</div></div>`;
     }
-    return out + (window.EKO_CTL ? window.EKO_CTL.overlays(E) : '') + (window.EKO_NF ? window.EKO_NF.overlays(E) : '') + (window.EKO_PWA ? window.EKO_PWA.overlays(E) : '');
+    return out + (window.EKO_POINT_CONTROL ? window.EKO_POINT_CONTROL.overlay(E) : '') + (window.EKO_CTL ? window.EKO_CTL.overlays(E) : '') + (window.EKO_NF ? window.EKO_NF.overlays(E) : '') + (window.EKO_PWA ? window.EKO_PWA.overlays(E) : '');
   }
 
   /* -------------------------------- render --------------------------------- */
@@ -674,6 +685,9 @@
   }
   function render(){
     if(!$('topbar') || !$('ekonav') || !$('mount') || !$('mobtabs') || !$('overlays')) return;
+    /* Locate in 3D on the register's strip lasts while the located asset's panel is open: its Back to Assets is in that
+       panel. Closing the panel, or Reset clearing the selection, brings the table back instead of leaving the view stuck. */
+    if(E.state.locFocus && !E.state.assetSel && !E.state.locFocus.back && !E.stacked()) E.state.locFocus = null;
     if(window.EKO_ADDONS) window.EKO_ADDONS.apply(E);   /* D125: entitlements stamp locked/hidden before anything reads the nav */
     if(E.state.wall && window.EKO_WALL){   /* D106: a display context — no rail, no ask bar, no overlays, no pointer */
       (document.querySelector('.dashboard-native-container') || window.DASHBOARD_ROOT || document.documentElement).setAttribute('data-wall', '1');
@@ -852,6 +866,26 @@
     render();
   }
 
+  /* Sign out ends the FIN session only. The backend process stays up, so the
+     packaged Sign in button can open /login on the same server. */
+  let signingOut = false;
+  function packagedViewer(){
+    if(window.EKO_RUNTIME === 'studio') return false;
+    if(window.EKO_RUNTIME === 'packaged') return true;
+    /* Vite injects this. The exported viewer, served by the backend, does not. */
+    if(document.querySelector('script[src*="@vite/client"]')) return false;
+    return document.title === 'EKO Digital Twin Viewer';
+  }
+  function endFinSession(){
+    try { if(window.DashboardData && window.DashboardData.stop) window.DashboardData.stop(); } catch(e){}
+    try { window.dispatchEvent(new CustomEvent('dashboard-event', { detail:{ action:'finSignOut' } })); } catch(e){}
+    const post = (url) => fetch(url, { method:'POST', cache:'no-store', credentials:'same-origin' }).then(res => res.status === 404 ? null : res);
+    const done = post('/api/auth/logout').then(res => res || post('/api/fin/logout')).catch(() => {});
+    return Promise.race([done, new Promise(resolve => setTimeout(resolve, 4000))]).finally(() => {
+      try { window.dispatchEvent(new Event('eko-auth-changed')); } catch(e){}
+    });
+  }
+
   const ACTS = {
     goMod(el){ const m = E.nav.modules.find(x=>x.id===el.dataset.mod);
       if(!E.state.exp[m.id]) E.state.born = 'nsub:'+m.id;
@@ -1001,9 +1035,17 @@
     themeToggle(){ const dark = (window.DASHBOARD_ROOT||document.documentElement).getAttribute('data-theme') !== 'light'; E.state.themeMode = dark ? 'light' : 'dark'; ls.set('eko-theme-mode', E.state.themeMode); applyTheme(); render(); },
     settingsTab(el){ E.state.rlAsk = false; E.set({ settingsTab: el.dataset.v }); },
     signOut(){ E.set({ born:'dlg', dlg:'signout' }); },
-    signOut2(){ try{ if(window.EKO_CTL && window.EKO_CTL.ACTS.ctlLockNow) window.EKO_CTL.ACTS.ctlLockNow(); }catch(e){}   /* the control session ends with the user */
-      if(window.EKO_SURF) window.EKO_SURF.closeAll(); E.state.rolePreview = null; E.set({ dlg:null, assetSel:null, mobMore:false, signedOut:true }); },
-    signIn(){ location.reload(); },   /* prototype: production sends the user to the identity provider (production-readiness.md) */
+    signOut2(){
+      if(signingOut) return;
+      signingOut = true;
+      endFinSession().finally(() => {
+        signingOut = false;
+        try{ if(window.EKO_CTL && window.EKO_CTL.ACTS.ctlLockNow) window.EKO_CTL.ACTS.ctlLockNow(); }catch(e){}   /* the control session ends with the user */
+        if(window.EKO_SURF) window.EKO_SURF.closeAll(); E.state.rolePreview = null; E.set({ dlg:null, assetSel:null, mobMore:false, signedOut:true });
+      });
+    },
+    /* Packaged viewer: /login on the backend that is still running. Studio reloads; FIN is reconnected from the studio panel. */
+    signIn(){ if(packagedViewer()){ location.assign('/login'); return; } location.reload(); },
     wallOpen(){ const url = wallUrl(wallScope(), 'tab', E.state.wallCfgId); E.state.dlg = null; if(window.__wallOpenHook) window.__wallOpenHook(url); else window.open(url, '_blank', 'noopener'); render(); },   /* D107 */
     /* D109: the control room settings dialog, per display */
     wallCfg(el){ const id = E.state.wallCfgId || 'default', k = el.dataset.k, v = el.value, patch = {};
@@ -1068,18 +1110,28 @@
     woOpen(el){ E.set({ assetSel: el.dataset.asset, apTab: 'alarms' }); },
     locate(el){ const id = el.dataset.asset;
       const a = E.data.alarms.find(x => x.asset === id);
-      /* Locate in 3D = focus mode (locFocus): the Overview's viewer alone, no rail, register, summary or
-         asset panel (go() closes it, R4). The asset is kept for Back to Assets; its highlight stays.
-         Nothing here is saved: the rail and summary preferences are untouched. */
-      if(E.state.pageId !== 'marsa-overview') E.go('marsa-overview', 'overview', null);
-      E.set({ locFocus: { assetSel: id }, assetSel: null, mkPop: null, modelFs: E.stacked(),
-              mkPulse: a ? a.id : null, paint: id });   /* located equipment is coloured like a marker tap */
+      /* Three cases, none saved. The desktop Asset Register has its own model strip: Locate in 3D is a view
+         state there (locFocus) that hides only the central grid, so the Studio chrome and the asset panel stay.
+         A stacked layout (no strip) opens the Overview's full-screen model, and Back returns to this page.
+         Any other page just moves the camera, as it always did. */
+      const strip = document.querySelector('.regmodelwrap');
+      const onStrip = !!strip && strip.getClientRects().length > 0;
+      const from = { pageId: E.state.pageId, module: E.state.module, sub: E.state.sub };
+      if(!onStrip && E.stacked()){
+        if(E.state.pageId !== 'marsa-overview') E.go('marsa-overview', 'overview', null);   /* go() ends any focus and resets the model */
+        E.state.locFocus = { assetSel: id, back: from.pageId === 'marsa-overview' ? null : from };
+        E.state.assetSel = id; E.state.modelFs = true; E.state.mkPop = null;
+      } else if(onStrip){
+        E.state.locFocus = { assetSel: id, back: null }; E.state.assetSel = id; E.state.mkPop = null;
+      }
+      E.state.mkPulse = a ? a.id : null; E.state.paint = id; render();   /* located equipment is coloured like a marker tap */
       E.engine.flyTo(id);
       setTimeout(() => { E.state.mkPulse = null; render(); }, 2200); },
-    /* Back to Assets (also Escape): the register as it was, the asset's panel open again. go() resets
-       the model for the new page (camera home, no highlight); the asset just located stays coloured */
-    locBack(){ const sel = E.state.locFocus && E.state.locFocus.assetSel;
-      E.go('assets-register', 'assets', 'reg'); if(sel) E.set({ assetSel: sel, paint: sel }); },
+    /* Back to Assets (also Escape): leaves the focus. On the strip that is only the flag (the panel and the
+       highlight stay); a stacked layout goes back to the page it came from, and go() resets the model for it. */
+    locBack(){ const lf = E.state.locFocus; if(!lf) return;
+      if(lf.back){ E.go(lf.back.pageId, lf.back.module, lf.back.sub); E.set({ assetSel: lf.assetSel, paint: lf.assetSel }); }
+      else E.set({ locFocus: null, modelFs: false, assetSel: lf.assetSel || E.state.assetSel, paint: lf.assetSel || E.state.paint }); },
 
     /* One handler for the bar, the sheet, the radial, and the shortcut keys.
        Select and Measure share the click. Slice stays on until it is clicked off or Reset. */
@@ -1091,8 +1143,12 @@
       E.state.radial = null;
       if(k === 'closeMore'){ d.bloom = null; render(); return; }
       /* Reset is everything back to how the viewer opens: camera, floor, style,
-         layers, and the selection too (popup, equipment colour, asset panel). */
+         layers, and the selection too (popup, equipment colour, asset panel).
+         HVAC & Mechanical and Electrical keep their own model and the minimal style. */
       if(k === 'reset'){
+        const mepLayer = E.state.module === 'systems' && E.state.pageId !== 'heatmap'
+          ? (E.state.sub === 'hvac' || E.state.sub === 'mechanical' ? 'mech' : E.state.sub === 'electrical' ? 'elec' : null)
+          : null;
         if(E.state.pageId === 'heatmap'){
           if(E.engine.isolateLevel) E.engine.isolateLevel('Ground floor', true);
           if(E.engine.isolateLayer) E.engine.isolateLayer(['arch','elec','int','mech'], true);
@@ -1100,10 +1156,10 @@
         } else if(E.engine.resetView){
           E.engine.resetView();
           if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
-          if(E.engine.setLayerVisibility) E.engine.setLayerVisibility('all');
+          if(E.engine.setLayerVisibility) E.engine.setLayerVisibility(mepLayer || 'all');
         } else {
           if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
-          if(E.engine.setLayerVisibility) E.engine.setLayerVisibility('all');
+          if(E.engine.setLayerVisibility) E.engine.setLayerVisibility(mepLayer || 'all');
         }
         if(E.engine.clearMeasure) E.engine.clearMeasure();
         if(E.engine.clearSection) E.engine.clearSection();
@@ -1111,7 +1167,7 @@
         E.set(Object.assign({
           dock: heat
             ? Object.assign({}, E.state.dock, { tool:null, slice:false, bloom:null, style:'default', tone:'blue', minimap:false, level:'Ground floor', layer:['arch','elec','int','mech'] })
-            : { tool:null, slice:false, bloom:null, style:'default', tone:'blue', level:'ALL', layer:'all', alerts:'all', minimap:false },
+            : { tool:null, slice:false, bloom:null, style: mepLayer ? 'minimal' : 'default', tone:'blue', level:'ALL', layer: mepLayer || 'all', alerts:'all', minimap:false },
           histAge:null, measureResult:null
         }, NO_SEL)); return; }
       if(!def) return;
@@ -1313,7 +1369,7 @@
     const el = ev.target.closest('[data-act]');
     if(!el) return;
     if(window.EKO_SURF) window.EKO_SURF.noteClick(el);           /* R5: remember the opener */
-    const fn = ACTS[el.dataset.act] || (window.EKO_AI && window.EKO_AI.ACTS[el.dataset.act]) || (window.EKO_CTL && window.EKO_CTL.ACTS[el.dataset.act]) || (window.EKO_NF && window.EKO_NF.ACTS[el.dataset.act]) || (window.EKO_PWA && window.EKO_PWA.ACTS[el.dataset.act]) || (window.EKO_FB && window.EKO_FB.ACTS[el.dataset.act]) || (window.EKO_DG && window.EKO_DG.ACTS[el.dataset.act]) || (window.EKO_PF && window.EKO_PF.ACTS[el.dataset.act]);
+    const fn = ACTS[el.dataset.act] || (window.EKO_AI && window.EKO_AI.ACTS[el.dataset.act]) || (window.EKO_CTL && window.EKO_CTL.ACTS[el.dataset.act]) || (window.EKO_NF && window.EKO_NF.ACTS[el.dataset.act]) || (window.EKO_PWA && window.EKO_PWA.ACTS[el.dataset.act]) || (window.EKO_FB && window.EKO_FB.ACTS[el.dataset.act]) || (window.EKO_DG && window.EKO_DG.ACTS[el.dataset.act]) || (window.EKO_PF && window.EKO_PF.ACTS[el.dataset.act]) || (window.EKO_POINT_CONTROL && window.EKO_POINT_CONTROL.ACTS[el.dataset.act]);
     if(fn) fn(el, ev);
   });
 

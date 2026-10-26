@@ -1578,7 +1578,11 @@
         } else if (isAlarmPt) {
           // FD&D rules also carry alarmPoint, so they are checked first
           if (readingInAlarm(row[2], isFlag)) alarmPts.push(row);
-        } else analog.push(row);
+        } else {
+          // The backend's point_control decision: the asset panel marks the row editable
+          if (p.control) row[4] = p;
+          analog.push(row);
+        }
       });
       fddOrder.forEach(function (g) {
         var fam = fddGroups[g];

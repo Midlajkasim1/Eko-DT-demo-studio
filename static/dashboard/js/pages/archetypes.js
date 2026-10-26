@@ -55,7 +55,7 @@ window.EKO_P = (function(){
            ${E.state.locFocus ? '' : `<button class="btnG btnSm mfsclose" data-act="modelFs">${C().icon('x',14)} ${C().esc(E.t('mCloseModel'))}</button>`}</div>`   /* in focus, Back to Assets closes it */
       : (peek ? `<div class="mpeek">${V().viewer(E, Object.assign({}, cfg, { dock:'none', pills:false, timeline:false }), '')}
            <button class="btnP btnSm mpeekopen" data-act="modelFs">${C().icon('maximize',14)} ${C().esc(E.t('mOpenModel'))}</button></div>` : '');
-    if(E.state.locFocus) return `<div class="mpage">${scene}</div>`;   /* Locate in 3D: the model alone */
+    if(E.state.locFocus) return `<div class="mpage">${scene}</div>`;   /* stacked Locate in 3D: model surface */
     return `<div class="mpage">${scene}${summary ? widget(E,summary) : ''}${E.state.assetSel ? C().assetPanel(E) : (panel ? widget(E,panel) : '')}</div>`;
   }
 
@@ -65,7 +65,6 @@ window.EKO_P = (function(){
     const model = byType(doc,'viewer3d');
     const alarms = byType(doc,'alarmPanel');
     if(E.stacked()) return stackedLanding(E, doc, summary, alarms, true);
-    if(E.state.locFocus) return V().viewer(E, (model&&model.config)||{}, '');   /* Locate in 3D: the viewer alone */
     return V().viewer(E, (model&&model.config)||{}, summary ? widget(E,summary) : '')
       + (E.state.assetSel ? C().assetPanel(E) : (alarms ? widget(E,alarms) : ''));
   }
@@ -90,9 +89,10 @@ window.EKO_P = (function(){
   function registerPage(E, doc){
     const model = byType(doc,'viewerStrip');
     const table = byType(doc,'registerTable');
-    const mn = !!E.state.regMin;   /* D128: the strip collapses like the side panels (chevron, Home/Enter on the splitter) */
+    /* Locate in 3D (locFocus) shows the model alone: no Assets Overview (not even its folded tab) over it */
+    const mn = !!E.state.regMin && !E.state.locFocus;   /* D128: the strip collapses like the side panels (chevron, Home/Enter on the splitter); Locate in 3D opens it */
     return (model ? `<div class="regmodelwrap deskwide" data-min="${mn ? 1 : 0}">${
-        V().viewer(E, (model&&model.config)||{ markers:true, dock:'none', pills:false }, '')}
+        V().viewer(E, (model&&model.config)||{ markers:true, pills:false }, '')}
         <button class="ovcollapse regcollapse tipU" data-act="regMin" data-tip="${C().esc(E.t(mn ? 'mpExpand' : 'mpCollapse'))}" aria-label="${C().esc(E.t(mn ? 'mpExpand' : 'mpCollapse'))}" aria-expanded="${!mn}">${C().icon(mn ? 'chevR' : 'chevL', 12)}</button>
         <span class="tCap regmodelhint">${C().esc(E.t('regModelHint'))}</span></div>` : '')
       + (table ? widget(E,table) : '')

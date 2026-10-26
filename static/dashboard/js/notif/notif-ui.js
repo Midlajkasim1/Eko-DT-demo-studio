@@ -163,6 +163,21 @@ window.EKO_NF = (function(){
     return { html: out, more: rows.length > limit };
   }
 
+  /* The server notifications' state for this browser (notif-store confirmSession): why the list is
+     empty or stale, said once above it. Sign-in happens where the app signs in (Studio FIN Connect,
+     the viewer's sign-in), so the notice says so rather than offering a form of its own. */
+  function remoteNotice(E){
+    const N2 = N();
+    if(!N2 || !N2.REMOTE || !N2.remoteState) return '';
+    const state = N2.remoteState();
+    if(state === 'ok' || state === 'checking') return '';
+    const key = state === 'signin' ? 'nfSignIn'
+      : state === 'mismatch' ? (N2.remoteCode() === 'session_project_mismatch' ? 'nfSessionOtherProject' : 'nfServerOtherProject')
+      : 'nfError';
+    return `<div class="nfempty nfauth" data-state="${esc(state)}" role="status"><span class="nfemoji">!</span>${esc(E.t(key))}
+      ${state === 'error' ? `<button class="btnG btnSm" data-act="nfRetryRemote">${esc(E.t('retryBtn'))}</button>` : ''}</div>`;
+  }
+
   /* ------------------------------- the panel ------------------------------- */
   function panel(E){
     const s = st(E);
@@ -176,8 +191,11 @@ window.EKO_NF = (function(){
         <button class="btnG btnSm" data-act="nfRetryLoad">${esc(E.t('retryBtn'))}</button></div>`;
     } else {
       const rows = ordered(filtered(E, threaded(activeRows(E))));
+      const notice = remoteNotice(E);
       if(!rows.length){
-        body = `<div class="nfempty">${esc(E.t(s.tab==='all'||s.tab==='unread' ? 'nfCaughtUp' : 'nfFilterEmpty'))}</div>`;
+        body = notice || `<div class="nfempty">${esc(E.t(s.tab==='all'||s.tab==='unread' ? 'nfCaughtUp' : 'nfFilterEmpty'))}</div>`;
+      } else if(notice){
+        body = notice + dayGrouped(E, rows, PAGE_N).html;
       } else {
         const g = dayGrouped(E, rows, PAGE_N);
         body = g.html;
@@ -231,12 +249,19 @@ window.EKO_NF = (function(){
         <label class="nfdate">${esc(E.t('nfFrom'))} <input type="date" data-chg="nfFrom" value="${esc(s.page.from)}"></label>
         <label class="nfdate">${esc(E.t('nfTo'))} <input type="date" data-chg="nfTo" value="${esc(s.page.to)}"></label>
       </div>
-      <div class="pwwidget nfpage">${g.html || `<div class="nfempty">${esc(E.t('nfFilterEmpty'))}</div>`}
+      <div class="pwwidget nfpage">${remoteNotice(E)}${g.html || (remoteNotice(E) ? '' : `<div class="nfempty">${esc(E.t('nfFilterEmpty'))}</div>`)}
         ${g.more ? `<button class="btnG" data-act="nfMore">${esc(E.t('nfShowMore'))}</button>` : ''}</div>
     </div>`;
   }
 
   /* -------------------- Settings: preference matrix ------------------------ */
+  /* the personal switch above is the user's own; whether the SITE creates critical-alarm notifications is the
+     server's word and not changeable here, so say which it is, and say "not known" when it is not known */
+  function siteNote(E){
+    const site = N().siteCritical(), state = site === true ? 'on' : site === false ? 'off' : 'unknown';
+    return `<div class="nfpsite" data-state="${state}" role="note">
+      <b>${esc(E.t('nfSiteLbl'))}</b> ${esc(E.t(state === 'on' ? 'nfSiteOn' : state === 'off' ? 'nfSiteOff' : 'nfSiteUnknown'))}</div>`;
+  }
   function prefsDlg(E){
     const s = st(E);
     if(!s.prefs) return '';
@@ -249,7 +274,7 @@ window.EKO_NF = (function(){
         <button class="nfptgl" data-on="${N().prefOn(t2.type)}" data-act="nfPrefTgl" data-v="${esc(t2.type)}" role="switch" aria-checked="${N().prefOn(t2.type)}"><span></span></button>
         <button class="nfpres tipU" disabled data-tip="${esc(E.t('nfChannelSoon'))}">${esc(E.t('nfEmail'))}</button>
         <button class="nfpres tipU" disabled data-tip="${esc(E.t('nfChannelSoon'))}">${esc(E.t('nfTeams'))}</button>
-      </div>`).join('')}`).join('');
+      </div>${t2.type === 'alarm.critical' ? siteNote(E) : ''}`).join('')}`).join('');
     return `<div class="scrim" data-act="nfPrefsClose"></div>
     <div class="dlg ctldlg nfprefs" role="dialog" aria-label="${esc(E.t('nfPrefsT'))}">
       <div class="dlghead"><h2>${esc(E.t('nfPrefsT'))}</h2>
@@ -333,6 +358,7 @@ window.EKO_NF = (function(){
       if(i){ i.focus(); i.setSelectionRange(i.value.length, i.value.length); } },
     nfFrom(el){ const E = window.EKO; st(E).page.from = el.value; E.set({}); },
     nfTo(el){ const E = window.EKO; st(E).page.to = el.value; E.set({}); },
+    nfRetryRemote(){ if(N() && N().confirmSession) N().confirmSession(); },
     nfRetryLoad(){ const E = window.EKO, s = st(E); s.error = false; s.loading = true;
       setTimeout(() => { st(E).loading = false; E.set({}); }, 400); E.set({}); }
   };

@@ -9,7 +9,7 @@ window.EKO_LAYOUTS["assets-register"] = {
   "askChips": ["chipFaults"],
   "widgets": [
     { "id": "model", "type": "viewerStrip", "grid": { "x": 0, "y": 0, "w": 6, "h": 12 },
-      "config": { "markers": true, "dock": "none", "pills": false } },
+      "config": { "markers": true, "pills": false } },
     { "id": "table", "type": "registerTable", "grid": { "x": 6, "y": 0, "w": 18, "h": 12 },
       "binding": { "columns": ["id", "st", "floor", "zone", "wos", "wost"],
                    "search": true, "statusFilter": true } }

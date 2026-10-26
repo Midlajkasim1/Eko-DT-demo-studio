@@ -9,12 +9,12 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import re
 import secrets
 import time
 from datetime import datetime
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -499,52 +499,6 @@ def aggregate_and_restructure(data: list[dict]) -> dict:
 
 # ─── SCRAM-SHA-256 Client ────────────────────────────────────────────────────
 
-# ── TEMP-DIAG alarm header: remove this block and its one call in _build_realtime ──────────
-# Off unless EKO_ALARM_HEADER_DIAG=1. Reports the shape and column names of the alarm response
-# FIN already returned: no extra FIN request, no row values, error text or credentials.
-_ALARM_DIAG_REPORTS = 0
-_ALARM_DIAG_MAX = 3          # a failed or unreadable poll may be followed by a readable one
-_ZINC_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
-def _diag_alarm_header(alarms_text: Optional[str], row_count: int) -> None:
-    global _ALARM_DIAG_REPORTS
-    if os.environ.get("EKO_ALARM_HEADER_DIAG") != "1" or _ALARM_DIAG_REPORTS >= _ALARM_DIAG_MAX:
-        return
-    _ALARM_DIAG_REPORTS += 1
-    say = lambda msg: print(f"[TEMP-DIAG alarms] {msg}")   # noqa: E731
-    try:
-        if alarms_text is None:
-            return say("no response text (the FIN request failed or was refused)")
-        text = alarms_text.lstrip("\ufeff")
-        lines = [l.strip() for l in collapse_metadata_blocks(text).splitlines() if l.strip()]
-        if not lines:
-            return say("response is blank")
-        first = lines[0]
-        if not first.startswith("ver:"):
-            kind = ("HTML page (often a sign-in page: session not accepted)" if first.startswith("<")
-                    else "JSON" if first[:1] in "{[" else "not a Zinc grid")
-            return say(f"unrecognised format: {kind}; {len(lines)} non-blank lines; nothing printed from it")
-        if re.search(r"\berr\b", first):
-            _ALARM_DIAG_REPORTS = _ALARM_DIAG_MAX   # an answer, not a transient failure
-            return say("FIN returned an error grid (message not printed); no alarm columns to report")
-        if len(lines) < 2:
-            return say("Zinc grid with no column line")
-        cells = [c.strip().split(" ", 1)[0] for c in _split_zinc_csv(lines[1])]
-        columns = [c for c in cells if _ZINC_NAME_RE.match(c)]
-        odd = len(cells) - len(columns)   # not a column name: counted, never printed
-        _ALARM_DIAG_REPORTS = _ALARM_DIAG_MAX   # a readable header: report once
-        if columns == ["empty"]:
-            return say("empty grid: no alarm rows in this window, so no alarm columns to report")
-        ack_like = [c for c in columns if re.search(r"ack", c, re.I)]
-        say(f"Zinc grid, {len(lines) - 2} data lines, parser rows: {row_count}"
-            + (f", {odd} cell(s) in the header line were not column names" if odd else ""))
-        say(f"columns: {columns or 'none identifiable'}")
-        say(f"acknowledgement-like columns: {ack_like or 'none'}")
-    except Exception as exc:   # a diagnostic must never break polling
-        say(f"diagnostic failed: {type(exc).__name__}")
-# ── end TEMP-DIAG ───────────────────────────────────────────────────────────────────────────
-
 
 class FinScramClient:
     """Async FIN Framework client with SCRAM-SHA-256 authentication."""
@@ -555,6 +509,9 @@ class FinScramClient:
         # readAll(point...) on a full site returns a large grid; 15s was not enough
         self.client = httpx.AsyncClient(verify=False, timeout=60.0)
         self.auth_headers: dict[str, str] = {}
+        # Haystack authToken from sign-in: writes carry it as a bearer token (see write_point)
+        self.auth_token: Optional[str] = None
+        self.username = ""
         self.is_authenticated = False
         self.last_alarm_rows: list[dict] = []
         self.last_point_rows: list[dict] = []
@@ -576,6 +533,8 @@ class FinScramClient:
             return ''.join(secrets.choice(chars) for _ in range(length))
 
         auth_url = f"{self.base_url}/user/auth"
+        self.username = username
+        self.auth_token = None
 
         try:
             # Initialize session
@@ -658,6 +617,8 @@ class FinScramClient:
                     "Authorization": final_header,
                     "Accept": "text/zinc"
                 }
+                token = re.search(r'authToken=([^,\s]+)', resp.headers.get("Authentication-Info", ""))
+                self.auth_token = token.group(1) if token else None
                 self.is_authenticated = True
                 print(f"[FIN] ✓ Authenticated as '{username}'")
                 return True
@@ -667,9 +628,29 @@ class FinScramClient:
             print(f"[FIN] ✗ Auth error: {e}")
             return False
 
+    def _url(self, endpoint: str) -> Optional[str]:
+        """The URL for an endpoint on THIS FIN server, or None for one anywhere else: the session's credentials are
+        sent with every request, so a request that would reach another host is refused. That is an absolute URL to another
+        server (scheme, host or port), one that cannot be read as a URL, and a path that does not start with "/" (after
+        the server's own address, "@host/..." would make the server's name a user name and "host" the real host)."""
+        if not isinstance(endpoint, str):
+            return None
+        absolute = endpoint.startswith(("http://", "https://"))
+        if not absolute and not endpoint.startswith("/"):
+            return None
+        url = endpoint if absolute else f"{self.base_url}{endpoint}"
+        try:
+            a, b = urlsplit(url), urlsplit(self.base_url)
+        except ValueError:
+            return None
+        return url if (a.scheme, a.netloc.lower()) == (b.scheme, b.netloc.lower()) else None
+
     async def fetch_api(self, endpoint: str, is_text: bool = False) -> Optional[Any]:
         """Fetch a FIN API endpoint. Returns parsed JSON or raw text."""
-        url = endpoint if endpoint.startswith("http") else f"{self.base_url}{endpoint}"
+        url = self._url(endpoint)
+        if url is None:
+            print("[FIN] refused a request to another host: FIN credentials stay with the FIN server")
+            return None
         try:
             resp = await self.client.get(url, headers=self.auth_headers)
             if resp.status_code == 200:
@@ -688,7 +669,10 @@ class FinScramClient:
         Unlike fetch_api it never ends the session, so a caller can tell "FIN says this
         record does not exist" from "the request failed".
         """
-        url = endpoint if endpoint.startswith("http") else f"{self.base_url}{endpoint}"
+        url = self._url(endpoint)
+        if url is None:
+            print("[FIN] refused a request to another host: FIN credentials stay with the FIN server")
+            return None, None
         try:
             resp = await self.client.get(url, headers=self.auth_headers)
             return resp.status_code, resp.text
@@ -698,8 +682,12 @@ class FinScramClient:
 
     async def get_probe(self, endpoint: str, params: dict[str, str]) -> tuple[Optional[int], Optional[str]]:
         """fetch_probe with query parameters, which httpx URL-encodes: (status, text), or
-        (None, None) if FIN is unreachable. The session's auth headers are reused."""
-        url = endpoint if endpoint.startswith("http") else f"{self.base_url}{endpoint}"
+        (None, None) if FIN is unreachable. The session's auth headers are reused, so, like every request that carries
+        them, it only ever goes to this FIN server (_url)."""
+        url = self._url(endpoint)
+        if url is None:
+            print("[FIN] refused a request to another host: FIN credentials stay with the FIN server")
+            return None, None
         try:
             resp = await self.client.get(url, params=params, headers=self.auth_headers)
             return resp.status_code, resp.text
@@ -787,7 +775,6 @@ class FinScramClient:
         points = parse_zinc_csv(points_text)
         equipment = parse_zinc_csv(equip_text)
         alarms = parse_zinc_csv(alarms_text)
-        _diag_alarm_header(alarms_text, len(alarms))   # TEMP-DIAG: remove with the block above
         attach_alarm_details(alarms_text or "", alarms)
         self.last_alarm_rows = alarms
         open_alarms = open_alarm_rows(alarms)   # one per logical alarm, as the alarm list counts them
@@ -845,7 +832,7 @@ class FinScramClient:
                     skip_patterns = ["metadata", "[metadata_block]"]
                     if any(pat in nav_lower for pat in skip_patterns):
                         continue
-                    if nav_lower in ["start/stop", "start_stop", "startstop"]:
+                    if nav_lower in ["start/stop", "start_stop", "startstop"] and p.get("writable") is not True:
                         continue
 
                 val = p.get("curVal")
@@ -888,6 +875,14 @@ class FinScramClient:
                     "bool": state,
                     "text": bool_text(p, state),
                     "alarmPoint": p.get("alarmPoint") is True,
+                    # What point control needs to decide whether the dashboard may write it
+                    "writable": p.get("writable") is True,
+                    "pointKind": p.get("kind") if isinstance(p.get("kind"), str) else None,
+                    "sp": p.get("sp") is True,
+                    "enum": p.get("enum") if isinstance(p.get("enum"), str) else None,
+                    "minVal": p.get("minVal"),
+                    "maxVal": p.get("maxVal"),
+                    "writeLevel": p.get("writeLevel"),
                 })
 
             floor = safe_get(equip.get("floorRef"), "dis", "Unknown Floor")
@@ -945,5 +940,49 @@ class FinScramClient:
         histories = await asyncio.gather(*(fetch_one(t) for t in usable.values()))
         return dict(zip(usable, histories))
 
+    async def write_point(self, point_id: str, level: int, value: Optional[str], who: str) -> tuple[bool, str]:
+        """Haystack pointWrite at one priority level; value is a Zinc literal, None releases the level.
+
+        FIN asks a cookie-session POST for a browser Attest-Key. With the sign-in authToken as a bearer
+        token and no session cookie the request is an API call and needs none; without a token the
+        session is used with the attest cookie FIN set, if any. Returns (ok, error message).
+        """
+        body = f'ver:"3.0"\nid,level,val,who\n@{point_id},{level},{value or "N"},{_zinc_str(who)}\n'
+        headers = {"Accept": "text/zinc", "Content-Type": "text/zinc; charset=utf-8"}
+        if self.auth_token:
+            headers["Authorization"] = f"BEARER authToken={self.auth_token}"
+        else:
+            headers["Authorization"] = self.auth_headers.get("Authorization", "")
+            attest = next((c.value for c in self.client.cookies.jar if "attest" in c.name.lower()), None)
+            if attest:
+                headers["Attest-Key"] = attest
+        try:
+            req = self.client.build_request("POST", f"{self.base_url}/api/{self.project_name}/pointWrite",
+                                            headers=headers, content=body.encode("utf-8"))
+            if self.auth_token:
+                req.headers.pop("Cookie", None)
+            resp = await self.client.send(req)
+        except Exception as e:
+            return False, f"FIN could not be reached: {e}"
+        text = resp.text or ""
+        if resp.status_code != 200:
+            plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", re.sub(r"(?is)<head.*?</head>", " ", text))).strip()
+            return False, f"FIN answered {resp.status_code}: {plain[:200]}"
+        first = text.lstrip().split("\n", 1)[0]
+        if re.search(r"\berr\b", first):
+            dis = re.search(r'dis:"((?:[^"\\]|\\.)*)"', first)
+            return False, f"FIN refused the write: {dis.group(1) if dis else 'unknown error'}"
+        return True, ""
+
+    async def read_point(self, point_id: str) -> Optional[dict]:
+        """One point record by id, parsed like the realtime rows; None when FIN does not answer."""
+        text = await self.fetch_api(f"/api/{self.project_name}/eval?expr=readById(@{point_id})", is_text=True)
+        rows = parse_zinc_csv(text or "")
+        return rows[0] if rows else None
+
     async def close(self):
         await self.client.aclose()
+
+
+def _zinc_str(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("\n", "\\n") + '"'

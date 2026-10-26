@@ -23,6 +23,7 @@ window.EKO_SURF = (function(){
     { id:'doc',      kind:'dialog',  isOpen:()=>!!document.getElementById('docov'),             close:()=>{ const o=document.getElementById('docov'); if(o) o.remove(); } },
     { id:'wmax',     kind:'dialog',  isOpen:()=>!!document.getElementById('wmaxov'),            close:()=>{ const o=document.getElementById('wmaxov'); if(o) o.remove(); } },
     { id:'big',      kind:'dialog',  isOpen:()=>!!(CTL()&&CTL().big&&CTL().big(E)),              close:()=>CTL().closeBig(E) },
+    { id:'pointEdit',kind:'dialog',  isOpen:()=>!!E.state.pointEdit,                            close:()=>{ if(!(E.state.pointEdit&&E.state.pointEdit.busy)) E.state.pointEdit=null; } },
     { id:'ctl',      kind:'dialog',  isOpen:()=>!!(CTL()&&CTL().dialog&&CTL().dialog(E)),        close:()=>CTL().closeDialog(E) },
     { id:'prefs',    kind:'dialog',  isOpen:()=>!!(NF()&&NF().st(E).prefs),                     close:()=>{ NF().st(E).prefs=false; } },
     { id:'help',     kind:'dialog',  isOpen:()=>E.state.dlg==='help',                           close:()=>{ E.state.dlg=null; } },
@@ -127,6 +128,9 @@ window.EKO_SURF = (function(){
   }
   function escape(){
     const top = topmost();
+    /* Locate in 3D keeps the asset panel open, so the panel is the topmost surface: Escape leaves the focus
+       first (the table comes back, the panel stays). Any surface opened since still closes before that. */
+    if(top === 'asset' && E.state.locFocus && E.locExit){ E.locExit(); return 'locate'; }
     if(top){
       if(top === 'pal' && E.state.palQ){ E.state.palQ = ''; E.state.palSel = 0; E.set({}); return 'cleared'; }
       byId[top].close(); E.set({}); return top;
