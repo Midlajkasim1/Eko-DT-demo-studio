@@ -195,12 +195,12 @@
       const enteringHeat = pageId === 'heatmap' && from !== 'heatmap';
       const leavingHeat = from === 'heatmap' && pageId !== 'heatmap';
       const HEAT_LAYERS = ['arch','elec','int','mech'];
-      /* HVAC & Mechanical and Electrical read best as the white model. Any other page returns to the style it had. */
+      /* HVAC & Mechanical share one model. Electrical is the other. Both open in Photoreal. Any other page returns to the style it had. */
       const mep = pageId !== 'heatmap' && targetModule === 'systems' && (targetSub === 'hvac' || targetSub === 'mechanical' || targetSub === 'electrical');
       if (this.state.dock) {
         if (mep) {
           if (this.state._styleBeforeMep == null) this.state._styleBeforeMep = this.state.dock.style;
-          this.state.dock.style = 'minimal';
+          this.state.dock.style = 'photo';
         } else if (this.state._styleBeforeMep != null) {
           this.state.dock.style = this.state._styleBeforeMep;
           this.state._styleBeforeMep = null;
@@ -1144,7 +1144,7 @@
       if(k === 'closeMore'){ d.bloom = null; render(); return; }
       /* Reset is everything back to how the viewer opens: camera, floor, style,
          layers, and the selection too (popup, equipment colour, asset panel).
-         HVAC & Mechanical and Electrical keep their own model and the minimal style. */
+         HVAC & Mechanical keep the mech model, Electrical keeps the elec model, and both keep Photoreal. */
       if(k === 'reset'){
         const mepLayer = E.state.module === 'systems' && E.state.pageId !== 'heatmap'
           ? (E.state.sub === 'hvac' || E.state.sub === 'mechanical' ? 'mech' : E.state.sub === 'electrical' ? 'elec' : null)
@@ -1167,7 +1167,7 @@
         E.set(Object.assign({
           dock: heat
             ? Object.assign({}, E.state.dock, { tool:null, slice:false, bloom:null, style:'default', tone:'blue', minimap:false, level:'Ground floor', layer:['arch','elec','int','mech'] })
-            : { tool:null, slice:false, bloom:null, style: mepLayer ? 'minimal' : 'default', tone:'blue', level:'ALL', layer: mepLayer || 'all', alerts:'all', minimap:false },
+            : { tool:null, slice:false, bloom:null, style: mepLayer ? 'photo' : 'default', tone:'blue', level:'ALL', layer: mepLayer || 'all', alerts:'all', minimap:false },
           histAge:null, measureResult:null
         }, NO_SEL)); return; }
       if(!def) return;
