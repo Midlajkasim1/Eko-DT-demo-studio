@@ -32,6 +32,8 @@ export type AhuReading = {
 
 export type AhuAnchor = {
   key:      'faDamperPos' | 'preFilter' | 'coolingValveCmd' | 'sfFanStatus' | 'bagFilter'
+  /** The FIN point the label would be for */
+  title:    string
   position: THREE.Vector3
   side:     'above' | 'below'
 }
@@ -171,11 +173,11 @@ export function createAhuSchematic(
   buildSensorProbe(ctx, group, saX, sensorY,  0,         hy, 0xf8fafc) // SA temp
 
   const anchors: AhuAnchor[] = [
-    { key: 'faDamperPos',     position: new THREE.Vector3(damperX,    -hy * 0.9, 0), side: 'below' },
-    { key: 'preFilter',       position: new THREE.Vector3(preFilterX,   hy * 0.9, 0), side: 'above' },
-    { key: 'bagFilter',       position: new THREE.Vector3(bagFilterX,    hy * 0.9, 0), side: 'above' },
-    { key: 'coolingValveCmd', position: new THREE.Vector3(coilX,       -hy * 0.9, 0), side: 'below' },
-    { key: 'sfFanStatus',     position: new THREE.Vector3(fanX,        -hy * 0.9, 0), side: 'below' },
+    { key: 'faDamperPos',     title: 'FA_DAMPER_POS',     position: new THREE.Vector3(damperX,    -hy * 0.9, 0), side: 'below' },
+    { key: 'preFilter',       title: 'PRE_FILTER',        position: new THREE.Vector3(preFilterX,   hy * 0.9, 0), side: 'above' },
+    { key: 'bagFilter',       title: 'BAG_FILTER',        position: new THREE.Vector3(bagFilterX,    hy * 0.9, 0), side: 'above' },
+    { key: 'coolingValveCmd', title: 'COOLING_VALVE_CMD', position: new THREE.Vector3(coilX,       -hy * 0.9, 0), side: 'below' },
+    { key: 'sfFanStatus',     title: 'SF_FAN_STS',        position: new THREE.Vector3(fanX,        -hy * 0.9, 0), side: 'below' },
   ]
 
   let rate = 0

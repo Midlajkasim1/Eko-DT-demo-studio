@@ -777,6 +777,8 @@ window.EKO_I18N.en = {
   "nfTeams": "Teams",
   "nfChannelSoon": "Channel not available yet",
   "nfPrefsFoot": "A type switched off is not delivered.",
+  "eqLabelsHideTip": "Hide the point labels on the 3D graphic",
+  "eqLabelsShowTip": "Show the point labels on the 3D graphic",
   "nfSiteLbl": "This site:",
   "nfSiteOn": "critical-alarm notifications are enabled. The switch above is your own preference: it only decides whether you see them.",
   "nfSiteOff": "critical-alarm notifications are not enabled. Turning your switch on saves your preference but does not start any notifications for the site. Nothing is being generated.",

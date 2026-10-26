@@ -55,7 +55,7 @@
       sysExp: {},   /* per-group expand state on the Systems landing */
       histAge: null,
       regQ: '', regStF: null, regSysF: null, regSevF: null, regSort: null, regSortDir: 'asc',
-      markersOn: ss.get('eko-mk') !== '0', showAcked: true, tlMetric: 'kwh', tlRange: 'day',   /* D70: per session */
+      markersOn: ss.get('eko-mk') !== '0', eqLabelsOn: ss.get('eko-eql') !== '0', showAcked: true, tlMetric: 'kwh', tlRange: 'day',   /* D70: per session */
       hmMode: 'temp', hmFloor: 'All', hmSel: null, hmRange: 'today', hmPlay: false, hmStep: null, hmStepLabel: '', hmOutline: false,
       hmLayers: { sensors: false, labels: true, values: true },
       woRaised: {}, dlg: null, palQ: '', palSel: 0,
@@ -1243,6 +1243,8 @@
     mkAsset(el){ const id = el.dataset.asset; if(!id) return;
       selectEquipment(id, { born:'pop', mkPop: 'asset:' + id, mkPopN: 0 }); },
     mkToggle(){ const on = !E.state.markersOn; ss.set('eko-mk', on ? '1' : '0'); E.set({ markersOn: on }); },
+    /* the point labels on the selected equipment's 3D graphic (hvacLabels.ts reads EKO.state.eqLabelsOn): labels only, never the model */
+    eqLabelsToggle(){ const on = E.state.eqLabelsOn === false; ss.set('eko-eql', on ? '1' : '0'); E.set({ eqLabelsOn: on }); },
     ackAlarm(el, ev){ ev.stopPropagation(); if(window.EKO_PWA) window.EKO_PWA.haptic('ack');
       const a = E.alarm(el.dataset.alarm);
       const d = new Date();

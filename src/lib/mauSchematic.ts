@@ -43,6 +43,8 @@ export type MauReading = {
 
 export type MauAnchor = {
   key:      'faDamper' | 'preFilter' | 'bagFilter' | 'coolingValveCmd' | 'tempAfterHp' | 'sfStatus' | 'saTemp'
+  /** The FIN point the label is for */
+  title:    string
   position: THREE.Vector3
   side:     'above' | 'below'
 }
@@ -194,14 +196,14 @@ export function createMauSchematic(
   buildSensorProbe(ctx, group, saX, sensorY,  0,         hy, TEMP)
 
   const anchors: MauAnchor[] = [
-    { key: 'faDamper',        position: new THREE.Vector3(xs.damper,    -hy * 0.9, 0), side: 'below' },
-    { key: 'preFilter',       position: new THREE.Vector3(xs.preFilter,  hy * 0.9, 0), side: 'above' },
-    { key: 'coolingValveCmd', position: new THREE.Vector3(xs.coil,      -hy * 0.9, 0), side: 'below' },
-    { key: 'sfStatus',        position: new THREE.Vector3(xs.fan,       -hy * 0.9, 0), side: 'below' },
-    { key: 'saTemp',          position: new THREE.Vector3(saX,           hy * 0.9, 0), side: 'above' },
+    { key: 'faDamper',        title: 'FA_DAMPER_STS',    position: new THREE.Vector3(xs.damper,    -hy * 0.9, 0), side: 'below' },
+    { key: 'preFilter',       title: 'PRE_FILTER',       position: new THREE.Vector3(xs.preFilter,  hy * 0.9, 0), side: 'above' },
+    { key: 'coolingValveCmd', title: 'COOLING_VALVE_CMD', position: new THREE.Vector3(xs.coil,      -hy * 0.9, 0), side: 'below' },
+    { key: 'sfStatus',        title: 'SF_VFD_RUN_STS',   position: new THREE.Vector3(xs.fan,       -hy * 0.9, 0), side: 'below' },
+    { key: 'saTemp',          title: 'SA_TEMP',          position: new THREE.Vector3(saX,           hy * 0.9, 0), side: 'above' },
   ]
-  if (bagFilter) anchors.push({ key: 'bagFilter',   position: new THREE.Vector3(xs.bagFilter, hy * 0.9, 0), side: 'above' })
-  if (heatPipe)  anchors.push({ key: 'tempAfterHp', position: new THREE.Vector3(xs.heatPipe,  hy * 0.9, 0), side: 'above' })
+  if (bagFilter) anchors.push({ key: 'bagFilter',   title: 'BAG_FILTER',           position: new THREE.Vector3(xs.bagFilter, hy * 0.9, 0), side: 'above' })
+  if (heatPipe)  anchors.push({ key: 'tempAfterHp', title: 'TEMP_AFTER_HEATPIPE',  position: new THREE.Vector3(xs.heatPipe,  hy * 0.9, 0), side: 'above' })
 
   const filterColour = (d: boolean | null) => d == null ? NO_DATA : d ? FILTER_DIRTY : FILTER_CLEAN
 

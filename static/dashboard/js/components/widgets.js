@@ -1394,6 +1394,7 @@ window.EKO_C = (function(){
       <div class="aphead">
         <span class="tMono grow fw6">${esc(id)}</span>
         ${sevChips ? `<span class="regsevs">${sevChips}</span>` : ''}
+        ${eqLabelsEye(E, r)}
         <button class="iconbtn icon26 aibtn tipU" data-act="aiOpen" data-ai-label="${esc(id)}" data-ai-topic="alarms" data-ai-cap="${esc(arL?(r.levelAr||r.level):r.level)}" data-tip="${esc(t('ai.about'))}" aria-label="${esc(t('ai.about'))}">${icon('spark',16)}</button>
         <button class="iconbtn icon26" data-act="apWide" data-on="${E.state.apWide?1:0}" aria-pressed="${E.state.apWide?'true':'false'}" aria-label="${esc(t('mpExpand'))}">${icon('maximize',14)}</button>
         <button class="iconbtn icon26" data-act="closeAsset" aria-label="${esc(t('close'))}">${icon('x',12)}</button>
@@ -1413,6 +1414,19 @@ window.EKO_C = (function(){
              <button class="btnG" data-act="locate" data-asset="${esc(id)}">${esc(t('locate3d'))}</button>`}
         <button class="btnG apcafm" data-act="none" data-tip="${esc(t('apCafm'))}" aria-label="${esc(t('apCafm'))}">⧉</button>
       </div></aside>`;
+  }
+
+  /* Equipment whose 3D graphic carries point labels: the types the viewer draws live internals for (the same words airKind
+     reads, plus FCU). The eye only shows for them: it would do nothing for anything else. */
+  function hasEqLabels(asset){
+    const s = (String(asset && asset.id || '') + ' ' + String(asset && asset.typeEn || '')).toUpperCase();
+    return /(?:^|[^A-Z])(MAHU|ECO|FCU)(?=[^A-Z]|$)/.test(s);
+  }
+  function eqLabelsEye(E, asset){
+    if(!hasEqLabels(asset)) return '';
+    const on = E.state.eqLabelsOn !== false, tp = E.t(on ? 'eqLabelsHideTip' : 'eqLabelsShowTip');
+    return `<button class="iconbtn icon26 mkeye tipU" data-act="eqLabelsToggle" data-on="${on}" aria-pressed="${on}"
+      data-tip="${esc(tp)}" aria-label="${esc(tp)}">${icon(on ? 'eye' : 'eyeOff', 14)}</button>`;
   }
 
   /* Marker visibility (D70): ONE eye control, used in the alarms panel

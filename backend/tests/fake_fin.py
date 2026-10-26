@@ -10,6 +10,7 @@ Its data is arranged so each Data Mapping block visibly changes the backend's AP
 * severity      - one open alarm of priority 200; its severity depends on the bands
 """
 import asyncio
+import json
 import os
 import tempfile
 
@@ -27,7 +28,15 @@ ALARM_ROW = {
 def _equipment():
     # EKO_FAKE_EQUIPMENT="FCU-ANC09-BF-01,FAHU-ANC09-BF-01": extra named air units, so a browser test can
     # link assets to a real model through the repo's own asset-to-model mapping (nothing else uses it)
-    extra = [{"name": n.strip(), "bimId": n.strip(), "alarms": [], "tags": ["ahu"], "points": []}
+    # EKO_FAKE_POINTS_FILE: a JSON file {"MAHU-ANC09-BF-01": {"SF_VFD_RUN_STS": "T", ...}}, read on every poll, so a browser
+    # test can give those units live points and change them while it runs (an absent or unreadable file means no points)
+    try:
+        with open(os.environ["EKO_FAKE_POINTS_FILE"], encoding="utf-8") as fh:
+            named = json.load(fh)
+    except (KeyError, OSError, ValueError):
+        named = {}
+    extra = [{"name": n.strip(), "bimId": n.strip(), "alarms": [], "tags": ["ahu"],
+              "points": [{"navName": k, "currentValue": str(v), "reporting": True} for k, v in (named.get(n.strip()) or {}).items()]}
              for n in os.environ.get("EKO_FAKE_EQUIPMENT", "").split(",") if n.strip()]
 
     def meter(name):
