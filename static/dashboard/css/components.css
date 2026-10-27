@@ -3632,24 +3632,43 @@
 
 .dashboard-native-container .hmsensor {
   position:absolute;
-  width:10px;
-  height:10px;
-  min-width:0;
-  min-height:0;
+  width:16px;
+  height:16px;
+  min-width:16px;
+  min-height:16px;
   padding:0;
   border-radius:50%;
   background:var(--acc);
   border:2px solid #fff;
-  box-shadow:0 1px 2px rgba(0,0,0,.35);
+  box-shadow:0 0 0 1px rgba(0,0,0,.28);
   transform:translate(-50%,-50%);
   pointer-events:auto;
   visibility:hidden
 }
+.dashboard-native-container #vpmain button.hmsensor {
+  width:16px;
+  height:16px;
+  min-width:16px;
+  min-height:16px;
+  padding:0;
+  border-radius:50%;
+  line-height:0;
+  background:var(--acc);
+  border:2px solid #fff
+}
 .dashboard-native-container .hmlayer[data-proj] .hmsensor {
   visibility:visible
 }
+/* The point stays on the room. The label sits just above it. */
+.dashboard-native-container .hmlayer[data-sensors="1"] .hmzone.hmzone3d {
+  transform:translate(-50%, calc(-100% - 14px))
+}
+.dashboard-native-container .hmsensor[data-on="true"] {
+  box-shadow:0 0 0 2px var(--acc), 0 0 0 1px rgba(0,0,0,.28)
+}
 .dashboard-native-container .hmsensor:hover {
-  border-color:var(--acc)
+  border-color:#fff;
+  box-shadow:0 0 0 2px var(--acc)
 }
 .dashboard-native-container .hmzone:hover {
   border-color:rgba(255,255,255,.6)
