@@ -813,7 +813,9 @@ window.EKO_A = (function(){
         const pin = bimId
           ? (pinFn ? pinFn(bimId, key) : `data-bimid="${esc(bimId)}" data-key="${esc(key)}"`)
           : `style="left:${z.rect[0]}%;top:${z.rect[1]}%;width:${Math.max(z.rect[2], 14)}%;height:auto;min-height:72px"`;
+        const tone = heatCell(mode, heatValue(z, mode));
         return `<button class="hmzone${bimId ? ' hmzone3d' : ''}" data-on="${s.hmSel===z.nameEn}" data-out="${out}" data-act="hmSel" data-v="${esc(z.nameEn)}" ${pin}>
+        <span class="hmdot" style="background:${tone}"></span>
         ${s.hmLayers.labels?`<span class="hmzn">${esc(E.lang==='ar'?(z.nameAr||z.nameEn):z.nameEn)}</span>`:''}
         ${s.hmLayers.values?`<span class="hmzv">${esc(label)}</span>`:''}</button>`;
       });
