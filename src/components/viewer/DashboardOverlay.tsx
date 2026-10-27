@@ -1031,10 +1031,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       return g
     }
     /* The space keeps its real height. Colour is one field shared by every
-       room. The shell sits just inside the room so a wall in front covers it. */
+       room, and the shell stays translucent so the model shows through it. */
     const heatPlateMat = () => {
       const mat = new THREE.ShaderMaterial({
-        transparent: false,
+        transparent: true,
         depthWrite: true,
         depthTest: true,
         side: THREE.DoubleSide,
@@ -1101,7 +1101,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         colors[o] = tmp.r
         colors[o + 1] = tmp.g
         colors[o + 2] = tmp.b
-        colors[o + 3] = 1
+        colors[o + 3] = 0.55
       }
       g.setAttribute('color', new THREE.BufferAttribute(colors, 4))
       g.computeBoundingSphere()
