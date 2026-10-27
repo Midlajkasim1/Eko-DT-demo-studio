@@ -191,6 +191,8 @@ window.EKO_NF = (function(){
     else if(s.critical_alarms === 'disabled_project') keys.push('nfSetupDisabledProject');
     else if(s.critical_alarms === 'disabled_site') keys.push('nfSetupDisabledSite');
     else if(s.critical_alarms === 'enabled' && s.severity_bands === false) keys.push('nfSetupNoBands');
+    /* set up, but FIN's last alarm read failed: an empty list is then unknown, not "caught up" (null/absent = no read yet) */
+    if(s.critical_alarms === 'enabled' && s.alarms_read === false) keys.push('nfSetupAlarmRead');
     if(!keys.length) return '';
     return `<div class="nfempty nfsetup" data-setup="${esc(s.critical_alarms)}" role="status"><span class="nfemoji">i</span>${keys.map(k => esc(E.t(k))).join(' ')}</div>`;
   }

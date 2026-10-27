@@ -234,11 +234,12 @@ window.EKO_DATA.marsa = {
   /* Signed-in user + site capability flags (D43). Marsa carries control as a
      DEMO capability (the demo switch); Khazna carries it live. canControl is
      the per-role permission; both must hold for the Control tab to exist. */
-  "user": { "name": "Arman Y.", "nameAr": "\u0623\u0631\u0645\u0627\u0646 \u064a.", "role": "technician", "canControl": true },
+  "user": { "name": "Arman Y.", "nameAr": "\u0623\u0631\u0645\u0627\u0646 \u064a.", "role": "superuser", "canControl": true },
   /* D105: the ROLE sets defaults (landing, wording, disclosure, layout controls) — never permissions.
      landing: site | portfolio | auto (portfolio when the user covers more than one site). Every disclosure
      is a per-user toggle the role only seeds; nothing here locks anything away. */
   "roles": {
+    "superuser":  { "landing": "auto",      "wording": "plain",     "disclose": { "tech": true,  "full": true,  "raw": true,  "edit": true  } },
     "technician": { "landing": "site",      "wording": "plain",     "disclose": { "tech": false, "full": false, "raw": false } },
     "engineer":   { "landing": "auto",      "wording": "technical", "disclose": { "tech": true,  "full": true,  "raw": true,  "edit": true  } },
     "executive":  { "landing": "portfolio", "wording": "plain",     "disclose": { "tech": false, "full": false, "raw": false } }

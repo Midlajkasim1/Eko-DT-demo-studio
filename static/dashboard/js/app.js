@@ -108,7 +108,7 @@
     pluralCat(n){ return pluralCat(this.lang, n); },
     alarm(id){ return this.data.alarms.find(a => a.id === id) },
     /* D105: the role model. Role = defaults; permissions stay in user.canControl / features. */
-    role(){ const roles = this.data.roles || {}; const r = this.state.rolePreview || (this.data.user || {}).role; return roles[r] ? r : (roles.technician ? 'technician' : Object.keys(roles)[0] || 'technician'); },
+    role(){ const roles = this.data.roles || {}; const r = this.state.rolePreview || (this.data.user || {}).role; return roles[r] ? r : (roles.superuser ? 'superuser' : roles.technician ? 'technician' : Object.keys(roles)[0] || 'technician'); },
     roleCfg(){ return (this.data.roles || {})[this.role()] || {}; },
     /* the signed-in user's initials, from data.user.name ("Arman Y." → "AY"); '' when no user is known */
     initials(){ return String((this.data.user || {}).name || '').trim().split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase(); },
@@ -465,7 +465,7 @@
       /* D85/D107: the account MENU — headed sections, a description under every setting. */
       const seg = (grp, v, lbl, on, tip) => `<button class="seg" data-on="${on}" data-act="${grp}" data-v="${v}" aria-pressed="${on}"${tip ? ` data-tip="${esc(tip)}"` : ''}>${esc(lbl)}</button>`;
       const u = E.data.user || {};
-      const roleKey = { technician:'roleTechnician', engineer:'roleEngineer', executive:'roleExecutive' }[E.role()] || 'roleTechnician';
+      const roleKey = { superuser:'roleSuperUser', technician:'roleTechnician', engineer:'roleEngineer', executive:'roleExecutive' }[E.role()] || 'roleTechnician';
       const previewing = !!E.state.rolePreview && E.state.rolePreview !== u.role;
       /* D129: the account menu is IDENTITY and ACCOUNT ACTIONS — name and role, Sign out — plus the demo
          section in demo builds. Theme is the top-bar toggle and Settings › Appearance; language is the
@@ -480,7 +480,7 @@
         <div class="draghandle"></div>
         <div class="accid"><span class="avatar accavatar" aria-hidden="true">${esc(E.initials() || '·')}</span><div class="col accwho"><b>${esc(E.lang==='ar' ? (u.nameAr||u.name||'') : (u.name||''))}</b><span class="accrole">${esc(E.t(roleKey))}${previewing ? ` <span class="accprev">${esc(E.t('rolePreviewTag'))}</span>` : ''}</span></div></div>
         ${demo ? `<div class="accdemobox" data-tip="${esc(E.t('demoRoleNote'))}"><span class="accdemolbl"><span class="accdemotag">${esc(E.t('menuDemo'))}</span>${esc(E.t('demoRole'))}</span>
-          <div class="segbox row accsegs">${['technician','engineer','executive'].map(r => seg('rolePreview', r, E.t({ technician:'roleTechnician', engineer:'roleEngineer', executive:'roleExecutive' }[r]), E.role() === r)).join('')}</div></div>` : ''}
+          <div class="segbox row accsegs">${['superuser','technician','engineer','executive'].map(r => seg('rolePreview', r, E.t({ superuser:'roleSuperUser', technician:'roleTechnician', engineer:'roleEngineer', executive:'roleExecutive' }[r]), E.role() === r)).join('')}</div></div>` : ''}
         <div class="accfoot"><button class="btnG accsignout" role="menuitem" data-act="signOut" data-tip="${esc(E.t('signOutD'))}">${esc(E.t('signOut'))}</button></div>
       </div>`;
     } else if(d === 'report'){

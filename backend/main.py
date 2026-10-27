@@ -1531,13 +1531,15 @@ def _severity_bands_configured() -> bool:
 
 def _notification_setup(site: str) -> dict:
     """What the notification panel needs to tell "not set up" from "off" from "nothing yet", and nothing
-    that is a secret: the critical-alarm state, whether alarms can be graded, whether work orders are read."""
+    that is a secret: the critical-alarm state, whether alarms can be graded, whether work orders are read, and
+    whether FIN's last alarm read worked (None before the first one), so a failed read is not shown as "no alarms"."""
     try:
         critical = _critical_alarms_state(notifications.store(), site)
     except (notifications.StoreError, sqlite3.Error, ValueError):
         critical = "unknown"
     return {"critical_alarms": critical, "severity_bands": _severity_bands_configured(),
-            "workorders": bool((CONFIG.get("workorder_expr") or "").strip())}
+            "workorders": bool((CONFIG.get("workorder_expr") or "").strip()),
+            "alarms_read": getattr(client, "last_alarm_read_ok", None)}
 
 
 def _note_critical_alarms(site: str, alarms: list, read_ok: bool) -> None:
