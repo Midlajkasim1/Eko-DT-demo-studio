@@ -222,6 +222,7 @@
         if (this.state.dock) { this.state.dock.level = 'Ground floor'; this.state.dock.layer = HEAT_LAYERS; }
         if (this.engine && this.engine.isolateLevel) this.engine.isolateLevel('Ground floor', true);
         if (this.engine && this.engine.isolateLayer) this.engine.isolateLayer(HEAT_LAYERS, true);
+        if (this.engine && this.engine.fadeArch) this.engine.fadeArch(true);
         if (enteringHeat || !this.state._heatViewed) {
           this.state._heatViewed = true;
           window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true, spaceIds: heatSpaceIds(this) } }));
@@ -230,6 +231,7 @@
         if (this.state.dock) { this.state.dock.level = 'ALL'; this.state.dock.layer = 'all'; }
         if (this.engine && this.engine.isolateLevel) this.engine.isolateLevel('ALL', true);
         if (this.engine && this.engine.setLayerVisibility) this.engine.setLayerVisibility('all');
+        if (this.engine && this.engine.fadeArch) this.engine.fadeArch(false);
         if (this.engine && typeof this.engine.resetView === 'function') this.engine.resetView();
         this.state._heatViewed = false;
       } else {

@@ -713,11 +713,11 @@ window.EKO_A = (function(){
     if(mode === 'hum') return Math.max(0, Math.min(100, v));
     return Math.max(0, Math.min(100, (v - 18) / 10 * 100));
   }
-  /* Same pairs as HEAT_STOPS in DashboardOverlay: one hue, pale to deep. */
+  /* Same pairs as HEAT_STOPS in DashboardOverlay: two colours per category. */
   function heatStops(mode){
-    if(mode === 'comfort') return ['#D9E2F5', '#1E3A8A'];
-    if(mode === 'hum') return ['#D7F0EA', '#0F6E6A'];
-    return ['#F8D0D0', '#C81E1E'];
+    if(mode === 'comfort') return ['#6BCB77', '#C45C26'];
+    if(mode === 'hum') return ['#E6C35C', '#0E7C74'];
+    return ['#5B8DEF', '#D61F1F'];
   }
   function heatCell(mode, v){
     if(v == null || !isFinite(v)) return 'var(--s3)';
