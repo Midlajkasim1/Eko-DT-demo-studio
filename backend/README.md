@@ -123,6 +123,16 @@ another project a 409 (`session_project_mismatch`); a notification or site that 
   own preferences plus a read-only `site` part, `{"critical_alarms": true | false | null}` (null: it
   could not be read, never assumed on), so the settings page can tell the two apart. A request cannot
   set it (extra fields are a 400).
+- **Per Studio project (gate 1).** A Studio project's own `apiSettings.notificationsCriticalAlarmsEnabled` (true / false) is the first
+  gate; the site's `alarm.critical` toggle above is the second, and both must allow it. Absent means *not configured*, never enabled:
+  `critical_alarm_sites` in `config.json` applies only to config.json's own site (Marsa) and the standalone backend, never to a Studio
+  project served its own mappings, and an explicit `false` is never overridden by it. `GET /notifications` carries
+  `setup: {critical_alarms: not_configured | disabled_project | disabled_site | enabled, severity_bands, workorders}` so the panel can
+  say why a list is empty. `apiSettings.finWorkorderExpr` is the project's own work-order query (read-only forms only); none means the
+  work-order sync is not configured (not a failure). Severity bands likewise come only from the project (`finSeverityBands`).
+- **Enabling the site toggle (operator, no HTTP route).** From `backend/`, with `EKO_NOTIFICATION_DB` set if the database is not at the
+  default path: `python -c "import notifications as n; s = n.Store(n.resolve_db_path(None)); s.update_project_preferences('<FIN project name>', types={'alarm.critical': True})"`
+  (False switches it off). It touches only that site's baseline row.
 - Migration 4 changes no row; it writes one `notifications.per_user_state` audit row per site with how
   many notifications and preferences were inherited as the baseline. The database is backed up first
   (see `notification_db_path`).

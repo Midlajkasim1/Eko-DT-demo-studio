@@ -443,6 +443,25 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 <p className="ds-hint">IANA name, e.g. Asia/Dubai. Sets where "today" starts in the dashboard and reports.</p>
               </div>
 
+              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Notifications</h3>
+              <div className="ds-field">
+                <label>Critical-alarm notifications</label>
+                <select
+                  value={settings.notificationsCriticalAlarmsEnabled === undefined ? '' : settings.notificationsCriticalAlarmsEnabled ? 'on' : 'off'}
+                  onChange={e => update('notificationsCriticalAlarmsEnabled', e.target.value === '' ? undefined : e.target.value === 'on')}
+                >
+                  <option value="">Not configured</option>
+                  <option value="on">Enabled for this project</option>
+                  <option value="off">Disabled for this project</option>
+                </select>
+                <p className="ds-hint">Both this setting and the site's alarm.critical switch on the notification database must allow it, and the project needs Severity Configuration so alarms can be graded critical. Nothing is inherited from another project.</p>
+              </div>
+              <div className="ds-field">
+                <label>Work-order query</label>
+                <input type="text" value={settings.finWorkorderExpr || ''} onChange={e => update('finWorkorderExpr', e.target.value || undefined)} placeholder='e.g. sqlQuery(read(sqlConn), "SELECT * FROM <your work-order table>")' />
+                <p className="ds-hint">Read-only queries only. Left empty, work orders and the work-order sync notification are not configured for this project.</p>
+              </div>
+
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Reporting Basis</h3>
               <p className="ds-hint">Costs and CO₂ are calculated only from the rates entered here, and every report states them. A rate left empty makes the figures that need it unavailable.</p>
               <div className="ds-field-row">

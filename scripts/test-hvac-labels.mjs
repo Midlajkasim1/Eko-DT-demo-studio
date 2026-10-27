@@ -7,11 +7,11 @@ import { fileURLToPath } from 'node:url'
 
 const src = fileURLToPath(new URL('../src', import.meta.url))
 const out = await build({
-  stdin: { contents: "export * from '@/lib/hvacLabels'\nexport * as THREE from 'three'\nexport { readMauPoints, createMauSchematic } from '@/lib/mauSchematic'", resolveDir: src, loader: 'ts' },
+  stdin: { contents: "export * from '@/lib/hvacLabels'\nexport * as THREE from 'three'\nexport { readMauPoints, createMauSchematic } from '@/lib/mauSchematic'\nexport { createEcoSchematic } from '@/lib/ecoSchematic'\nexport { createFcuSchematic } from '@/lib/fcuSchematic'", resolveDir: src, loader: 'ts' },
   bundle: true, format: 'esm', platform: 'node', write: false, alias: { '@': src }, logLevel: 'silent',
 })
 const L = await import('data:text/javascript;base64,' + Buffer.from(out.outputFiles[0].text).toString('base64'))
-const { THREE, textOf, toneOf, declutter, projectAnchor, createHvacLabels, readMauPoints } = L
+const { THREE, textOf, toneOf, declutter, projectAnchor, createHvacLabels, readMauPoints, createMauSchematic, createEcoSchematic, createFcuSchematic } = L
 
 let passed = 0
 const test = (name, fn) => { fn(); passed++; console.log('ok  ' + name) }
@@ -210,6 +210,80 @@ test('real MAHU readings: the label text comes from FIN\'s points, a missing poi
   assert.deepStrictEqual([r.sfStatus, r.saTemp, r.bagFilter, r.preFilter], ['On', '21.5 °C', 'Clean', 'Dirty'])
   const none = readMauPoints([])
   assert.deepStrictEqual([textOf(none, 'sfStatus'), textOf(none, 'saTemp'), textOf(none, 'faDamper')], ['—', '—', '—'])
+})
+
+// ── ECO (FIN: ECO-ANC09-BF-01) and the other types, on the real schematics with synthetic FIN points ──
+const ecoBox = () => new THREE.Box3(new THREE.Vector3(-2, 0, -0.9), new THREE.Vector3(2, 1.6, 0.9))
+const eco = () => createEcoSchematic(ecoBox(), new THREE.Matrix4())
+const P = (navName, currentValue) => ({ navName, currentValue, reporting: true })
+const ecoPts = (over = {}) => Object.entries({ PRE_FILTER: 'F', BAG_FILTER: 'F', BOX_FILTER: 'F', '1ST_STAGE_UV_ALARM': 'F', '2ND_STAGE_UV_ALARM': 'F', KEF_ON_STS: 'T', KEF_TRIP_STS: 'F', ...over }).map(([k, v]) => P(k, v))
+const bodyOf = h => Object.fromEntries(h.children.map(l => [l.children[0].textContent, { val: l.children[1].textContent, tone: l.children[1].getAttribute('data-tone') }]))
+
+test('ECO: a label for each filter, both UV stages and the fan, titled with its FIN point, anchored inside the unit in airflow order', () => {
+  const s = eco(), a = Object.fromEntries(s.anchors.map(x => [x.key, x]))
+  assert.deepStrictEqual(s.anchors.map(x => x.title).sort(), ['1ST_STAGE_UV_ALARM', '2ND_STAGE_UV_ALARM', 'BAG_FILTER', 'BOX_FILTER', 'KEF_ON_STS', 'PRE_FILTER'])
+  s.group.updateMatrixWorld(true)
+  for (const x of s.anchors) {
+    const w = x.position.clone().applyMatrix4(s.group.matrixWorld)
+    assert.ok(w.x >= -2 && w.x <= 2 && w.y >= -1.6 && w.y <= 1.6 && Math.abs(w.z) <= 0.9, x.key + ' is on the unit: ' + JSON.stringify(w))
+  }
+  assert.ok(a.preFilter.position.x < a.bagFilter.position.x && a.bagFilter.position.x < a.boxFilter.position.x, 'filters follow the airflow')
+  assert.ok(a.preFilter.side === 'above' && a.bagFilter.side === 'above' && a.boxFilter.side === 'above')
+  assert.ok(a.kefStatus.position.x > a.boxFilter.position.x, 'the fan is downstream of the filters')
+  assert.strictEqual(new Set(s.anchors.map(x => x.position.x.toFixed(3) + x.side)).size, s.anchors.length, 'no two labels share a spot')
+})
+
+test('ECO alarm transitions: normal -> alarm -> cleared, from the FIN points alone; an acknowledgement is not a FIN point and changes nothing', () => {
+  const s = eco(), h = host(), labels = createHvacLabels(() => h, '—', doc)
+  labels.show(s, s.apply(ecoPts()))
+  let b = bodyOf(h)
+  assert.deepStrictEqual([b.BAG_FILTER, b['1ST_STAGE_UV_ALARM'], b.KEF_ON_STS].map(x => x.val + '/' + x.tone), ['Clean/ok', 'Normal/ok', 'On/ok'])
+  const alarm = { BAG_FILTER: 'T', '1ST_STAGE_UV_ALARM': 'T', PRE_FILTER: 'T' }
+  labels.setReading(s.apply(ecoPts(alarm)))
+  b = bodyOf(h)
+  assert.deepStrictEqual([b.BAG_FILTER, b['1ST_STAGE_UV_ALARM'], b.PRE_FILTER, b.BOX_FILTER].map(x => x.val + '/' + x.tone), ['Dirty/warn', 'Alarm/warn', 'Dirty/warn', 'Clean/ok'], 'only the components in alarm turn red')
+  const before = h.children.map(l => l.children[1].writes)
+  labels.setReading(s.apply(ecoPts(alarm)))   // acknowledged: FIN still reports the same
+  assert.deepStrictEqual(h.children.map(l => l.children[1].writes), before, 'still active: nothing rewritten')
+  labels.setReading(s.apply(ecoPts()))
+  b = bodyOf(h)
+  assert.ok(Object.values(b).every(x => x.tone === 'ok') && h.children.length === 6, 'cleared: back to normal, still six labels')
+})
+
+test('ECO: a missing point reads "—" on its own label only; the rest keep their values', () => {
+  const s = eco(), h = host(), labels = createHvacLabels(() => h, '—', doc)
+  labels.show(s, s.apply(ecoPts().filter(p => p.navName !== 'BOX_FILTER')))
+  const b = bodyOf(h)
+  assert.deepStrictEqual([b.BOX_FILTER.val, b.BOX_FILTER.tone, b.BAG_FILTER.val], ['—', 'none', 'Clean'])
+  labels.show(s, s.apply([]))   // no live data at all
+  assert.ok(h.children.length === 6 && Object.values(bodyOf(h)).every(x => x.val === '—'), 'no data: six "—" labels, nothing invented, no throw')
+})
+
+test('other types keep their own labels: ECO\'s components are not applied to the MAHU or the FCU', () => {
+  const mau = createMauSchematic(ecoBox(), new THREE.Matrix4()), fcu = createFcuSchematic(new THREE.Box3(new THREE.Vector3(-0.6, 0, -0.3), new THREE.Vector3(0.6, 0.3, 0.3)), new THREE.Matrix4())
+  const only = ['BOX_FILTER', 'KEF_ON_STS', '1ST_STAGE_UV_ALARM', '2ND_STAGE_UV_ALARM']
+  for (const [name, s] of [['MAHU', mau], ['FCU', fcu]]) {
+    const titles = s.anchors.map(x => x.title)
+    assert.ok(titles.length > 0 && !titles.some(t => only.includes(t)), name + ': ' + titles.join(','))
+  }
+  assert.ok(fcu.anchors.map(x => x.title).includes('ZONE_TEMP') && mau.anchors.map(x => x.title).includes('SF_VFD_RUN_STS'))
+})
+
+test('two units at once: each has its own layer and labels; hiding or clearing one leaves the other', () => {
+  const s1 = eco(), s2 = createMauSchematic(ecoBox(), new THREE.Matrix4()), h1 = host(), h2 = host()
+  const l1 = createHvacLabels(() => h1, '—', doc), l2 = createHvacLabels(() => h2, '—', doc)
+  l1.show(s1, s1.apply(ecoPts())); l2.show(s2, s2.apply([]))
+  const n2 = h2.children.length
+  assert.ok(h1.children.length === 6 && n2 > 0 && h1.children.length !== n2)
+  l1.setVisible(false); assert.ok(h1.has('data-off') && !h2.has('data-off'))
+  l1.clear(); assert.ok(h1.children.length === 0 && h2.children.length === n2)
+})
+
+test('a schematic with fewer components than the type usually has gets only those labels', () => {
+  const s = createEcoSchematic(ecoBox(), new THREE.Matrix4(), undefined, { filters: ['PRE_FILTER'] }), h = host(), labels = createHvacLabels(() => h, '—', doc)
+  labels.show(s, s.apply(ecoPts()))
+  const t = h.children.map(l => l.children[0].textContent)
+  assert.ok(t.includes('PRE_FILTER') && !t.includes('BAG_FILTER') && !t.includes('BOX_FILTER'), t.join(','))
 })
 
 console.log(`\n${passed} hvac-label tests passed`)

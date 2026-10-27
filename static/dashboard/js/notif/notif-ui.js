@@ -178,6 +178,23 @@ window.EKO_NF = (function(){
       ${state === 'error' ? `<button class="btnG btnSm" data-act="nfRetryRemote">${esc(E.t('retryBtn'))}</button>` : ''}</div>`;
   }
 
+  /* Why a project's list is empty when it is not simply quiet: critical-alarm notifications not set up for the
+     project, switched off for it, or off for the site; or alarms that cannot be graded. Read from the backend's own
+     answer for THIS project (never inferred), and only once the list itself has loaded. */
+  function setupNotice(E){
+    const N2 = N();
+    if(!N2 || !N2.REMOTE || !N2.setup || N2.remoteState() !== 'ok') return '';
+    const s = N2.setup();
+    if(!s) return '';
+    const keys = [];
+    if(s.critical_alarms === 'not_configured') keys.push('nfSetupNotConfigured');
+    else if(s.critical_alarms === 'disabled_project') keys.push('nfSetupDisabledProject');
+    else if(s.critical_alarms === 'disabled_site') keys.push('nfSetupDisabledSite');
+    else if(s.critical_alarms === 'enabled' && s.severity_bands === false) keys.push('nfSetupNoBands');
+    if(!keys.length) return '';
+    return `<div class="nfempty nfsetup" data-setup="${esc(s.critical_alarms)}" role="status"><span class="nfemoji">i</span>${keys.map(k => esc(E.t(k))).join(' ')}</div>`;
+  }
+
   /* ------------------------------- the panel ------------------------------- */
   function panel(E){
     const s = st(E);
@@ -193,7 +210,7 @@ window.EKO_NF = (function(){
       const rows = ordered(filtered(E, threaded(activeRows(E))));
       const notice = remoteNotice(E);
       if(!rows.length){
-        body = notice || `<div class="nfempty">${esc(E.t(s.tab==='all'||s.tab==='unread' ? 'nfCaughtUp' : 'nfFilterEmpty'))}</div>`;
+        body = notice || ((s.tab==='all'||s.tab==='unread') && setupNotice(E)) || `<div class="nfempty">${esc(E.t(s.tab==='all'||s.tab==='unread' ? 'nfCaughtUp' : 'nfFilterEmpty'))}</div>`;
       } else if(notice){
         body = notice + dayGrouped(E, rows, PAGE_N).html;
       } else {
