@@ -661,15 +661,15 @@ window.EKO_A = (function(){
       + '</div>');
   }
   function assetsSummary(E){
-    const inAlarm = E.data.assets.filter(a => a.st === 'alarm');
-    const critAssets = inAlarm.filter(a => a.alarms.some(id => E.alarm(id).sev === 'critical' && !E.alarm(id).ack));
+    const counts = E.alarmCounts(), inAlarm = counts.assets;
+    const critAssets = inAlarm.filter(a => (a.alarms || []).some(id => { const al = E.alarm(id); return al && al.sev === 'critical' && !al.ack; }));
     const row = (lbl,v,cap,tone) => `<div class="ovk"><div class="ovkhead"><span class="ovklbl">${esc(lbl)}</span></div>
       <div class="ovkval"><span class="ovknum" ${tone?'style="color:var(--sevCrit)"':''}>${esc(v)}</span></div>
       <div class="ovkcap">${esc(cap)}</div></div>`;
     return C().summaryShell(E, E.t('assetsOverview'), '<div class="ovklist">'
       + row(E.t('asRegistered'), fmt(E.data.registerTotal, 0), E.t('asRegisteredCap'))
       + row(E.t('asWos'), '--', E.t('asWosCap'))
-      + row(E.t('asInAlarm'), String(inAlarm.length), E.t('asInAlarmCap',{n:critAssets.length,first:critAssets[0]?critAssets[0].id:'—'}), true)
+      + row(E.t('asInAlarm'), String(inAlarm.length), E.t('asInAlarmAlerts',{n:counts.active}) + ' · ' + E.t('asInAlarmCap',{n:critAssets.length,first:critAssets[0]?critAssets[0].id:'—'}), true)
       + '</div>');
   }
   /* Module-highlight rows panel (Utilities / Spaces / Assets landings). */
@@ -713,12 +713,18 @@ window.EKO_A = (function(){
     if(mode === 'hum') return Math.max(0, Math.min(100, v));
     return Math.max(0, Math.min(100, (v - 18) / 10 * 100));
   }
+  /* Same pairs as HEAT_STOPS in DashboardOverlay: two colours per category. */
+  function heatStops(mode){
+    if(mode === 'comfort') return ['#6BCB77', '#C45C26'];
+    if(mode === 'hum') return ['#E6C35C', '#0E7C74'];
+    return ['#5B8DEF', '#D61F1F'];
+  }
   function heatCell(mode, v){
     if(v == null || !isFinite(v)) return 'var(--s3)';
     const t = mode === 'comfort' ? (v - 600) / 600 : mode === 'hum' ? (v - 40) / 40 : (v - 21) / 4;
     const x = Math.max(0, Math.min(1, t));
-    if(x <= 0.5) return 'color-mix(in srgb, var(--s3) ' + (x / 0.5 * 100).toFixed(0) + '%, var(--info))';
-    return 'color-mix(in srgb, var(--warn) ' + ((x - 0.5) / 0.5 * 100).toFixed(0) + '%, var(--s3))';
+    const stops = heatStops(mode);
+    return 'color-mix(in srgb, ' + stops[1] + ' ' + (x * 100).toFixed(0) + '%, ' + stops[0] + ')';
   }
   function heatOver(z, mode){
     const v = heatValue(z, mode);
@@ -746,7 +752,7 @@ window.EKO_A = (function(){
     const rankRows = rank.length ? rank.map((z, i) =>
       `<button class="hmrank selrow" data-on="${s.hmSel===z.nameEn}" data-act="hmSel" data-v="${esc(z.nameEn)}">
         <span class="tMonoS cT3">${i+1}</span><span class="grow taS">${esc(zn(z))}</span>
-        <span class="hmrbar"><span style="width:${heatBar(z, mode).toFixed(0)}%"></span></span>
+        <span class="hmrbar"><span style="width:${heatBar(z, mode).toFixed(0)}%;background:${heatCell(mode, heatValue(z, mode))}"></span></span>
         <span class="tMonoS">${esc(heatText(z, mode))}</span></button>`).join('')
       : `<p class="alempty">${esc(E.t('hmNone'))}</p>`;
     const tglRow = (lbl, key, on) =>
@@ -802,33 +808,37 @@ window.EKO_A = (function(){
       const label = heatText(z, mode);
       const out = s.hmOutline && heatOver(z, mode);
       const ids = (z.bimIds && z.bimIds.length) ? z.bimIds : (z.bimId ? [z.bimId] : [null]);
+      const showDot = !!s.hmLayers.sensors;
+      const showLabel = !!s.hmLayers.labels;
+      const showValue = !!s.hmLayers.values;
+      /* The left speck is the sensor. It stays on the card when the name or
+         the value is hidden. With neither, the card is that dot alone. */
+      if (!showDot && !showLabel && !showValue) return '';
       return ids.map((bimId, i) => {
         const key = 'hm:' + z.nameEn + ':' + i;
         const pin = bimId
           ? (pinFn ? pinFn(bimId, key) : `data-bimid="${esc(bimId)}" data-key="${esc(key)}"`)
           : `style="left:${z.rect[0]}%;top:${z.rect[1]}%;width:${Math.max(z.rect[2], 14)}%;height:auto;min-height:72px"`;
-        return `<button class="hmzone${bimId ? ' hmzone3d' : ''}" data-on="${s.hmSel===z.nameEn}" data-out="${out}" data-act="hmSel" data-v="${esc(z.nameEn)}" ${pin}>
-        ${s.hmLayers.labels?`<span class="hmzn">${esc(E.lang==='ar'?(z.nameAr||z.nameEn):z.nameEn)}</span>`:''}
-        ${s.hmLayers.values?`<span class="hmzv">${esc(label)}</span>`:''}</button>`;
-      });
-    }).join('');
-    const dots = !s.hmLayers.sensors ? '' : heatZones(d, s, mode).flatMap(z => {
-      const ids = (z.bimIds && z.bimIds.length) ? z.bimIds : (z.bimId ? [z.bimId] : []);
-      return ids.map((bimId, i) => {
-        if (!bimId) return '';
-        const key = 'hms:' + z.nameEn + ':' + i;
-        const pin = pinFn ? pinFn(bimId, key) : `data-bimid="${esc(bimId)}" data-key="${esc(key)}"`;
-        return `<button class="hmsensor hmzone3d" data-act="hmSel" data-v="${esc(z.nameEn)}" ${pin} aria-label="${esc(z.nameEn)}"></button>`;
+        const tone = heatCell(mode, heatValue(z, mode));
+        const onlyDot = showDot && !showLabel && !showValue && !!bimId;
+        return `<button class="hmzone${bimId ? ' hmzone3d' : ''}${onlyDot ? ' hmdotonly' : ''}" data-on="${s.hmSel===z.nameEn}" data-out="${out}" data-act="hmSel" data-v="${esc(z.nameEn)}" ${pin}>
+        ${showDot?`<span class="hmdot" style="background:${tone}"></span>`:''}
+        ${showLabel?`<span class="hmzn">${esc(E.lang==='ar'?(z.nameAr||z.nameEn):z.nameEn)}</span>`:''}
+        ${showValue?`<span class="hmzv">${esc(label)}</span>`:''}</button>`;
       });
     }).join('');
     const legend = mode === 'comfort' ? E.t('hmLegend') : mode === 'hum' ? E.t('hmLegendHum') : E.t('hmLegendTemp');
     const range = s.hmRange === 'week' || s.hmRange === 'month' ? s.hmRange : 'today';
     const seg = (lbl, v) => `<button class="seg" data-on="${range===v}" data-act="hmRange" data-v="${v}">${esc(lbl)}</button>`;
     const rangeLabel = range === 'week' ? E.t('rangeWeekly') : range === 'month' ? E.t('rangeMonthly') : E.t('tlLive');
-    return `<div class="hmlayer">${tiles}${dots}</div>
+    /* A cached projection already placed these cards. Stamp data-proj now so
+       a dashboard refresh does not hide them for a frame (that blink reads
+       as flicker). The blur is left off: sampling the 3D canvas shimmers. */
+    const projected = tiles.indexOf('left:') !== -1;
+    return `<div class="hmlayer"${projected ? ' data-proj="1"' : ''}>${tiles}</div>
       <div class="heatbar mzglass">
         <span class="tMonoS cT3">${esc(legend)}</span>
-        <span class="hmgrad" data-mode="comfort"></span>
+        <span class="hmgrad" data-mode="${mode}"></span>
         <span class="tCap">${esc(E.t('hmLegendCap'))}</span>
         <span class="segbox row msA">${seg(E.t('rangeToday'),'today')}${seg(E.t('rangeWeekly'),'week')}${seg(E.t('rangeMonthly'),'month')}</span>
         <button class="chip" data-on="${s.hmPlay?'true':'false'}" data-act="hmPlay">${esc(s.hmPlay?E.t('pauseW'):E.t('playW'))}</button>

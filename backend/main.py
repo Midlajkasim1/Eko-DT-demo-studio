@@ -31,6 +31,7 @@ from fin_client import (
     PROJECT_ID_RE,
     FinScramClient,
     aggregate_and_restructure,
+    alarm_is_open,
     bool_state,
     bool_text,
     clip_decimals,
@@ -41,6 +42,7 @@ from fin_client import (
     parse_zinc_csv,
     safe_get,
 )
+from fdd_recommendations import recommend as fdd_recommend
 from point_control import control_for, encode_value, equipment_class, number_of
 from workorders import error_payload, live_payload, norm_id, orders_by_equipment
 import notifications
@@ -67,6 +69,11 @@ PROJECT_STR_SETTINGS = {
     "finBaseUrl": "fin_server_url",
     "finDisplayName": "display_name",
 }
+# project.json `apiSettings` booleans. notificationsCriticalAlarmsEnabled is the Studio project's own gate for creating
+# critical-alarm notifications (true / false); absent means "not configured", never "enabled".
+PROJECT_BOOL_SETTINGS = {
+    "notificationsCriticalAlarmsEnabled": "notifications_critical_alarms",
+}
 PROJECT_DICT_SETTINGS = {
     "finLivePoints": "live_point_ids",
     "finEndpoints": "power_endpoints",
@@ -74,6 +81,19 @@ PROJECT_DICT_SETTINGS = {
     "finMeterProfile": "meter_profile",
     "finSeverityBands": "severity_bands",
 }
+
+
+# The work-order query a project may bring: a read of FIN's own work-order table, or a read-only hisRead/readAll/readById.
+# It runs with the polling session's FIN credentials, so anything that could write or chain statements is refused.
+_WO_SQL_READ = re.compile(r'^\s*sqlQuery\s*\(\s*read\s*\(\s*sqlConn\s*\)\s*,\s*"\s*SELECT\s[^";]*"\s*\)\s*$', re.IGNORECASE)
+_WO_READ = re.compile(r"^\s*(readById|readAll|hisRead)\s*\(")
+_WO_BLOCKED = re.compile(r"pointWrite|pointOverride|pointEmergency|pointSetDef|pointAuto|ioWrite|invoke|commit|recNew|recEdit|recRemove|eval\s*\(", re.IGNORECASE)
+
+
+def safe_workorder_expr(expr: str) -> bool:
+    if not isinstance(expr, str) or not expr.strip() or len(expr) > 2000:
+        return False
+    return bool(_WO_SQL_READ.match(expr)) or (bool(_WO_READ.match(expr)) and not _WO_BLOCKED.search(expr))
 
 
 def project_overrides(settings: Optional[dict]) -> dict:
@@ -94,6 +114,12 @@ def project_overrides(settings: Optional[dict]) -> dict:
         value = settings.get(src)
         if isinstance(value, dict) and value:
             out[dst] = value
+    for src, dst in PROJECT_BOOL_SETTINGS.items():
+        if isinstance(settings.get(src), bool):
+            out[dst] = settings[src]
+    wo = settings.get("finWorkorderExpr")
+    if isinstance(wo, str) and safe_workorder_expr(wo):
+        out["workorder_expr"] = wo.strip()
     interval = settings.get("finInterval")
     if isinstance(interval, (int, float)) and not isinstance(interval, bool) and interval > 0:
         out["polling.live_ms"] = interval
@@ -298,6 +324,8 @@ async def realtime_loop():
     interval = CONFIG.get("polling", {}).get("realtime_ms", 30000) / 1000
 
     while client and client.is_authenticated:
+        if not _dashboard_open():
+            return
         try:
             realtime = await client.fetch_realtime_data(rt_endpoints)
             cached_equip_data = {
@@ -329,10 +357,12 @@ async def realtime_loop():
                     "facilityServices": cached_facility,
                 },
             }
-            await asyncio.sleep(interval)
+            if not await _sleep_while_watched(interval):
+                return
         except Exception as e:
             print(f"[FIN] realtime loop error: {e}")
-            await asyncio.sleep(10)
+            if not await _sleep_while_watched(10):
+                return
 
 
 async def live_loop():
@@ -347,6 +377,8 @@ async def live_loop():
     interval = CONFIG.get("polling", {}).get("live_ms", 5000) / 1000
 
     while client and client.is_authenticated:
+        if not _dashboard_open():
+            return
         try:
             values = await asyncio.gather(
                 *(client.fetch_live_point(pid) for pid in live_ids.values()),
@@ -369,10 +401,12 @@ async def live_loop():
                 "fdd": cached_fdd_summary,
                 "facilityServices": cached_facility,
             }
-            await asyncio.sleep(interval)
+            if not await _sleep_while_watched(interval):
+                return
         except Exception as e:
             print(f"[FIN] live loop error: {e}")
-            await asyncio.sleep(interval)
+            if not await _sleep_while_watched(interval):
+                return
 
 
 def _build_fdd_summary(realtime: dict) -> list[dict]:
@@ -455,9 +489,55 @@ def severity_for(priority, bands: dict) -> str:
     return "warning" if warn is not None and priority >= warn else "info"
 
 
+ALARM_HISTORY_LIMIT = 20
+
+
+def _alarm_source(row: dict) -> str:
+    return str(safe_get(row.get("sourceRef"), "val") or "").lstrip("@")
+
+
+def _alarm_history(by_source: dict, source: str, own_id, own_message: str, bands: dict) -> list[dict]:
+    """The other FIN alarm records on one source, newest first: what this FIN read returned, not an archive.
+
+    Records are grouped by source, not message, because a cleared record's message is "Return to
+    normal". An open record with a different message is another alarm, not this one's past, and is
+    left out. Without the alarm's own id there is no telling which record is the current one, so
+    the history is left empty rather than showing the alarm as its own history.
+    """
+    if not source or not own_id:
+        return []
+    own = " ".join(own_message.split()).lower()
+    events = []
+    for rec in by_source.get(source, ()):
+        rec_id = safe_get(rec.get("id"), "val") or None
+        if rec_id == own_id:
+            continue
+        if alarm_is_open(rec) and " ".join(str(rec.get("message") or "").split()).lower() != own:
+            continue
+        priority = rec.get("priority") if isinstance(rec.get("priority"), (int, float)) else None
+        message = clip_decimals(str(rec.get("message") or ""))
+        detail = clip_decimals(str(rec.get("detail") or "").strip())
+        events.append({
+            "id": rec_id,
+            "message": message,
+            "detail": "" if detail.lower() == message.strip().lower() else detail,
+            "priority": priority,
+            "severity": severity_for(priority, bands),
+            "open": alarm_is_open(rec),
+            "occurred": rec.get("occurred") or rec.get("created"),
+            "state": rec.get("state"),
+        })
+    events.sort(key=lambda e: str(e.get("occurred") or ""), reverse=True)
+    return events[:ALARM_HISTORY_LIMIT]
+
+
 def _flatten_alarms(rows: list, bands: dict) -> dict:
     alarms = []
     counts = {"critical": 0, "warning": 0, "info": 0}
+    by_source: dict = {}
+    for rec in rows or []:
+        if rec and rec.get("alarm") is True:
+            by_source.setdefault(_alarm_source(rec), []).append(rec)
 
     for row in open_alarm_rows(rows):   # one per logical alarm: a re-issued FIN record is not a second alarm
         priority = row.get("priority") if isinstance(row.get("priority"), (int, float)) else None
@@ -483,7 +563,10 @@ def _flatten_alarms(rows: list, bands: dict) -> dict:
             "diagnosed": dispatcher == "CONTROL",
             "occurred": row.get("occurred") or row.get("created"),
             "state": row.get("state"),
+            "history": _alarm_history(by_source, _alarm_source(row), safe_get(row.get("id"), "val") or None, str(row.get("message") or ""), bands),
         })
+        # optional: present only when a validated FD&D mapping matches, so other consumers see no change
+        alarms[-1].update(fdd_recommend(message, detail, alarms[-1]["diagnosed"]) or {})
 
     alarms.sort(key=lambda a: str(a.get("occurred") or ""), reverse=True)
     return {
@@ -713,6 +796,50 @@ def _start_polling():
     ]
 
 
+# A signed-in session used to poll FIN on its own. Work orders, equipment, alarms and live points
+# now run only while a dashboard is open. Each open dashboard holds an id and refreshes it; the
+# loops stop when the last one leaves, or when its refresh goes quiet (a closed tab).
+watchers: dict[str, float] = {}
+WATCH_STALE_S = 20
+
+
+def _prune_watchers() -> int:
+    now = time.monotonic()
+    for key, seen in list(watchers.items()):
+        if now - seen > WATCH_STALE_S:
+            del watchers[key]
+    return len(watchers)
+
+
+def _dashboard_open() -> bool:
+    return _prune_watchers() > 0
+
+
+def _polling_alive() -> bool:
+    return any(not task.done() for task in polling_tasks)
+
+
+def _ensure_polling():
+    """Start the FIN loops when a dashboard is open, and stop them when none is."""
+    if _dashboard_open() and client and client.is_authenticated and PROJECT_NAME:
+        if not _polling_alive():
+            _start_polling()
+    elif _polling_alive():
+        _cancel_polling()
+
+
+async def _sleep_while_watched(seconds: float) -> bool:
+    """Sleep in short steps so a closed dashboard stops the loop without waiting out the interval."""
+    left = seconds
+    while left > 0:
+        if not _dashboard_open():
+            return False
+        chunk = 1.0 if left > 1 else left
+        await asyncio.sleep(chunk)
+        left -= chunk
+    return _dashboard_open()
+
+
 def _reset_caches():
     """Drop data polled under the previous configuration so it is never served for the next."""
     global cached_equip_data, cached_power_data, cached_building_data, cached_sensor_avg
@@ -795,6 +922,10 @@ class LoginRequest(BaseModel):
 class ProjectSettingsRequest(BaseModel):
     settings: dict
     project_id: Optional[str] = None
+
+
+class WatchRequest(BaseModel):
+    id: Optional[str] = None
 
 
 class StatusResponse(BaseModel):
@@ -1011,7 +1142,7 @@ async def _install_login(req, request: Request, response: Response, candidate, m
         if managed and await _serves_standard_site(client):
             apply_studio_settings(req.settings, req.project_id, standard=True)
             FIN_SERVER_URL, PROJECT_NAME = server_url, project   # the session's, not config.json's
-        _start_polling()
+        _ensure_polling()   # a dashboard already open keeps its feed; sign-in alone does not start one
     else:
         PROJECT_CHECK = {"validated": None, "source": name_source}
     _open_session(request, response, req.username, candidate.project_name or "")   # this sign-in's own project
@@ -1042,7 +1173,7 @@ async def set_project_settings(req: ProjectSettingsRequest, request: Request):
             return await _switch_project(req, request)
         except BaseException:
             if client and client.is_authenticated and PROJECT_NAME:
-                _start_polling()   # a failed switch must not leave the backend without polling
+                _ensure_polling()   # resume only while a dashboard is still open
             raise
 
 
@@ -1077,7 +1208,7 @@ async def _switch_project(req: ProjectSettingsRequest, request: Request):
     _cancel_polling()
     _reset_caches()
     if PROJECT_NAME:
-        _start_polling()
+        _ensure_polling()
     # The switch was validated with the polling session's FIN credentials: only their owner's own
     # user session moves to the new site. Anyone else's stays on the site they signed in for.
     mine, _ = _session_of(request)
@@ -1417,11 +1548,52 @@ def _attach_workorders():
 CRITICAL_ALARM = "alarm.critical"
 
 
+def _critical_project_gate(site: str) -> str:
+    """Gate 1, the open Studio project's own setting: "enabled", "disabled" or "not_configured".
+    The project's explicit notificationsCriticalAlarmsEnabled (apiSettings) decides, and false is never overridden by
+    config.json. A project with none is not configured, and config.json's critical_alarm_sites never applies to a
+    Studio project that is served its own mappings (ACTIVE_ISOLATED): that list is for config.json's own site
+    (Marsa) and the standalone / exported backend."""
+    explicit = CONFIG.get("notifications_critical_alarms") if "notifications_critical_alarms" in ACTIVE_OVERRIDES else None
+    if isinstance(explicit, bool):
+        return "enabled" if explicit else "disabled"
+    if ACTIVE_ISOLATED:
+        return "not_configured"
+    listed = site in [s for s in (BASE_CONFIG.get("critical_alarm_sites") or []) if isinstance(s, str)]
+    return "enabled" if listed else "not_configured"
+
+
+def _critical_alarms_state(store, site: str) -> str:
+    """not_configured | disabled_project | disabled_site | enabled. Both gates must permit: the project's
+    setting, then the site's baseline alarm.critical toggle (off by default). No user's preference enters into it."""
+    gate = _critical_project_gate(site)
+    if gate == "not_configured":
+        return "not_configured"
+    if gate == "disabled":
+        return "disabled_project"
+    return "enabled" if store.project_wants(site, CRITICAL_ALARM, default=False) else "disabled_site"
+
+
 def _critical_alarms_enabled(store, site: str) -> bool:
-    """Whether this SITE creates critical-alarm notifications: config.json's critical_alarm_sites lists
-    its FIN project AND its own alarm.critical toggle is on. No user's preference enters into it."""
-    allowed = site in [s for s in (BASE_CONFIG.get("critical_alarm_sites") or []) if isinstance(s, str)]
-    return allowed and store.project_wants(site, CRITICAL_ALARM, default=False)
+    return _critical_alarms_state(store, site) == "enabled"
+
+
+def _severity_bands_configured() -> bool:
+    """Whether the open project has bands that can grade an alarm critical or high (never Marsa's as a stand-in)."""
+    bands = CONFIG.get("severity_bands")
+    return isinstance(bands, dict) and any(isinstance(bands.get(k), (int, float)) and not isinstance(bands.get(k), bool)
+                                           for k in ("critical", "warning"))
+
+
+def _notification_setup(site: str) -> dict:
+    """What the notification panel needs to tell "not set up" from "off" from "nothing yet", and nothing
+    that is a secret: the critical-alarm state, whether alarms can be graded, whether work orders are read."""
+    try:
+        critical = _critical_alarms_state(notifications.store(), site)
+    except (notifications.StoreError, sqlite3.Error, ValueError):
+        critical = "unknown"
+    return {"critical_alarms": critical, "severity_bands": _severity_bands_configured(),
+            "workorders": bool((CONFIG.get("workorder_expr") or "").strip())}
 
 
 def _note_critical_alarms(site: str, alarms: list, read_ok: bool) -> None:
@@ -1462,7 +1634,10 @@ async def refresh_workorders():
     """Eval workorder_expr from config, the same session as equipment and alarms."""
     global cached_workorders
     expr = (CONFIG.get("workorder_expr") or "").strip()
-    if not client or not client.is_authenticated or not expr:
+    if not client or not client.is_authenticated:
+        return
+    if not expr:
+        _note_workorder_sync("")   # not configured is not a failure: a sync-failed row left by an earlier query resolves
         return
     try:
         text = await client.fetch_api(
@@ -1560,6 +1735,7 @@ async def notifications_list(request: Request, response: Response, view: str = "
         limit=int(limit) if limit.lstrip("-").isdigit() else limit, cursor=cursor))
     page["unread_count"] = _notif_call(lambda s: s.unread_count(who, site))
     page["scope"] = "user"   # read and dismissed state of the signed-in user on this project
+    page["setup"] = _notification_setup(site)
     return page
 
 
@@ -1935,6 +2111,27 @@ async def get_building_info(request: Request):
     return cached_building_data or {}
 
 
+@app.post("/api/fin/watch")
+async def fin_watch(req: WatchRequest, request: Request):
+    """The dashboard is open. Refresh its hold so work orders and the other FIN reads keep running."""
+    _require_user(request)
+    wid = (req.id or "").strip() or secrets.token_hex(16)
+    watchers[wid] = time.monotonic()
+    _ensure_polling()
+    return {"id": wid, "polling": _polling_alive()}
+
+
+@app.post("/api/fin/unwatch")
+async def fin_unwatch(req: WatchRequest, request: Request):
+    """The dashboard closed. Stop the shared FIN reads once no dashboard is still open."""
+    _require_user(request)
+    wid = (req.id or "").strip()
+    if wid:
+        watchers.pop(wid, None)
+    _ensure_polling()
+    return {"polling": _polling_alive()}
+
+
 @app.post("/api/fin/logout")
 async def logout(request: Request, response: Response):
     """End this browser's user session. The shared FIN session closes only when no other user is
@@ -1947,6 +2144,7 @@ async def logout(request: Request, response: Response):
             return {"status": "signed_out", "fin": "connected for other users"}
         POLL_OWNER = None
         STANDARD_VERIFIED = None
+        watchers.clear()
         _cancel_polling()
         # Drop the reference before the await so a second sign-out does not close the same client twice.
         current = client

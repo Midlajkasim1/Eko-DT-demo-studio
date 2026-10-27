@@ -17,9 +17,20 @@ export const UV_ALARM     = new THREE.Color(0xef4444)
 
 export type HvacPoint = { navName?: string; currentValue?: string | null }
 
+/** Where one FIN point is labelled on a schematic: `position` is local to the schematic's group, `key` names the text field of
+ *  the reading apply() returns, `title` is the FIN point's name. */
+export interface HvacAnchor {
+  key:      string
+  title:    string
+  position: THREE.Vector3
+  side:     'above' | 'below'
+}
+
 /** What the viewer needs from any equipment schematic. */
 export interface HvacSchematic {
   group:   THREE.Group
+  /** The points worth a label on the graphic, if the schematic has any */
+  anchors?: HvacAnchor[]
   apply:   (points: HvacPoint[]) => unknown
   tick:    (dt: number) => void
   dispose: () => void

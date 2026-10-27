@@ -45,7 +45,7 @@ window.EKO_NOTIF = (function(){
      service) and demo keep the local store only. */
   const REMOTE = REAL && !!PROJECT_ID && !(INJ.fin && INJ.fin.directMode) && typeof fetch === 'function';
   const API = '/api/notifications/v1', REMOTE_LIMIT = 100, REFRESH_MS = 30000;
-  let remote = [], remoteUnread = 0, remoteMore = false, remotePrefs = null, remoteError = null, timer = null, self = null;
+  let remote = [], remoteUnread = 0, remoteMore = false, remotePrefs = null, remoteSetup = null, remoteError = null, timer = null, self = null;
   /* checking | ok | signin (401: no session here) | mismatch (409) | error (network/server: retryable) */
   let remoteState = 'checking', remoteCode = null;
   const live = () => window.EKO_NOTIF === self;   /* a switched-away project's store stops talking */
@@ -62,7 +62,7 @@ window.EKO_NOTIF = (function(){
       });
   }
   function failure(status, code){ const e = new Error('HTTP ' + status); e.status = status; e.code = code || null; return e; }
-  function clearRemote(){ remote = []; remoteUnread = 0; remoteMore = false; remotePrefs = null; }
+  function clearRemote(){ remote = []; remoteUnread = 0; remoteMore = false; remotePrefs = null; remoteSetup = null; }
   /* 401: this browser is not signed in (or no longer). Nothing of the last session stays on
      screen: the server rows, and this browser's own rows for the project, go. 409: kept polling,
      the backend may switch back. Anything else: retryable, the last good rows stay. */
@@ -110,6 +110,8 @@ window.EKO_NOTIF = (function(){
         /* the server already leaves out what this user switched off, so its rows, pages and count agree */
         remote = (page.items || []).map(fromServer).filter(Boolean);
         remoteMore = !!page.next_cursor;                 /* another page exists on the server */
+        /* how this project is set up (critical alarms: not_configured | disabled_project | disabled_site | enabled), so an empty list can say why */
+        remoteSetup = page.setup && typeof page.setup === 'object' ? page.setup : null;
         remoteUnread = typeof page.unread_count === 'number' ? page.unread_count : 0;
         remoteError = null; remoteCode = null; remoteState = 'ok'; changed();
       })
@@ -395,7 +397,7 @@ window.EKO_NOTIF = (function(){
   self = { add, list, unread, badge, otherUnread, markRead, markAllRead, archive, unarchive,
            archiveRead, seed, startStream, stopStream, hooks, ME, SITE,
            prefOn, setPref, siteCritical, REMOTE, refresh, confirmSession, remoteError: () => remoteError,
-           remoteState: () => remoteState, remoteCode: () => remoteCode };
+           remoteState: () => remoteState, remoteCode: () => remoteCode, setup: () => remoteSetup };
   if(REMOTE){   /* after this file returns, so live() sees this store as window.EKO_NOTIF */
     setTimeout(confirmSession, 0);
     /* a sign-in or sign-out in this browser (Studio Connect/Disconnect, the viewer's sign-in, the

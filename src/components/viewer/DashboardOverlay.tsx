@@ -17,6 +17,7 @@ import { createAhuSchematic } from '@/lib/ahuSchematic'
 import { createFahuSchematic } from '@/lib/fahuSchematic'
 import { createMauSchematic } from '@/lib/mauSchematic'
 import { createEcoSchematic } from '@/lib/ecoSchematic'
+import { createHvacLabels } from '@/lib/hvacLabels'
 import type { HvacSchematic } from '@/lib/hvacGeometry'
 import { useFinStore } from '@/store/useFinStore'
 import type { ProjectApiSettings } from '@/types'
@@ -71,6 +72,7 @@ function loadScripts(scripts: HTMLScriptElement[], signal: { mounted: boolean })
 
 export function DashboardOverlay({ visible, engineRef, engineReady = false }: DashboardOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const labelHostRef = useRef<HTMLDivElement>(null)
   const currentProject = useProjectStore(s => s.currentProject)
   const templateId = useAppStore(s => s.templateId)
   const xrayColor = useAppStore(s => s.xrayColor)
@@ -208,7 +210,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
        the viewer style has finished the picture, so no style (its lights,
        occlusion, ink, grade, tone mapping, x-ray) changes how it looks, and
        with the depth cleared first it shows through walls, pipes and slabs.
-       The model's own materials are left alone. */
+       The heatmap is the exception: it is drawn against the building's depth,
+       so a wall in front of a room covers the colour. The model's own
+       materials are left alone. */
     const heatRoots = new Map<any, THREE.Group>()
     const overlay = new THREE.Scene()
     // Standard-material parts need lights. The ghost shader ignores them.
@@ -222,6 +226,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     fcuKey.castShadow = false
     fcuFill.castShadow = false
     overlay.add(fcuHemi, fcuKey, fcuFill, fcuAim, fcuAim2)
+    /* The selected equipment's point labels (name + live text on each anchor of its schematic), in the layer under the
+       dashboard; the dashboard's own eye control (EKO.state.eqLabelsOn, per session) shows or hides them */
+    const labels = createHvacLabels(() => labelHostRef.current)
+    const labelsOn = () => (window as any).EKO?.state?.eqLabelsOn !== false
     const fcuAt = new THREE.Vector3()
     const fcuCam = new THREE.Vector3()
     const fcuRight = new THREE.Vector3()
@@ -241,6 +249,14 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       colorWrite: false, side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
     })
+    /* Depth stand-in for the building while the heatmap is drawn. The style's
+       last pass is a fullscreen quad on the near plane, so the canvas depth
+       cannot be used as-is: testing against it hides the rooms, and clearing
+       it lets the colour through the walls. */
+    const heatOccluder = new THREE.MeshBasicMaterial({
+      colorWrite: false, depthWrite: true, depthTest: true, side: THREE.DoubleSide,
+    })
+    watchClipping(heatOccluder)
     // Flat-shaded towards the camera (face normals from screen derivatives), so
     // the shape reads the same whatever lights the style has
     const ghostFill = new THREE.ShaderMaterial({
@@ -304,11 +320,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const pointsFor = (assetId: string, bimId: string) => {
       const want = fold(assetId)
       const lists: any[] = []
-      const fin = useFinStore.getState().equipment
-      if (Array.isArray(fin)) lists.push(fin)
+      // The dashboard's data layer re-reads equipment every 30 s; the FIN store only once after sign-in, so it is the fallback
       const dash = (window as any).DashboardData?.equipment
       if (Array.isArray(dash)) lists.push(dash)
       else if (Array.isArray(dash?.equipment)) lists.push(dash.equipment)
+      const fin = useFinStore.getState().equipment
+      if (Array.isArray(fin)) lists.push(fin)
       for (const list of lists) {
         const eq = list.find((e: any) => e && (e.bimId === bimId || fold(String(e.name || '')) === want))
         if (eq?.points?.length) return eq.points
@@ -321,6 +338,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ghostEdge.color.copy(c).multiplyScalar(0.45)   // a darker line of the same hue reads on light and dark styles
     }
     const removeGhost = () => {
+      labels.clear()
       if (active) {
         active.schematic.dispose()
         active = null
@@ -332,6 +350,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ghost = null
     }
     const drawGhost = () => {
+      labels.setVisible(!!(ghost && ghost.group.visible && active && labelsOn()))
       const hasHeat = heatRoots.size > 0 || alarmGlow.size > 0
       if ((!ghost || !ghost.group.visible) && !hasHeat) return
       // The selected equipment's internals, while its highlight is on screen
@@ -343,13 +362,14 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         shown.schematic.tick(dt)
         if (LIVE_SCHEMATICS.has(shown.type) && now - shown.synced > 400) {
           shown.synced = now
-          shown.schematic.apply(pointsFor(shown.assetId, shown.bimId))
+          labels.setReading(shown.schematic.apply(pointsFor(shown.assetId, shown.bimId)))
         }
       }
       const renderer = engine.world?.renderer?.three
       const camera = engine.world?.camera?.three
       if (!renderer || !camera) return
       if (shown) {
+        if (LIVE_SCHEMATICS.has(shown.type) && labelsOn()) labels.update(camera, renderer.domElement.getBoundingClientRect())
         shown.schematic.group.getWorldPosition(fcuAt)
         fcuCam.copy(camera.position).sub(fcuAt)
         if (fcuCam.lengthSq() < 1e-8) fcuCam.set(0, 0.4, 1)
@@ -367,11 +387,72 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const autoClear = renderer.autoClear
       renderer.autoClear = false
       renderer.setRenderTarget(null)
-      renderer.clearDepth()
-      renderer.render(overlay, camera)
-      renderer.autoClear = autoClear
+      const shadowAuto = renderer.shadowMap.autoUpdate
+      renderer.shadowMap.autoUpdate = false
+      const heatGroups: THREE.Object3D[] = []
+      heatRoots.forEach(root => { if (root.children.length) heatGroups.push(root) })
+      const seeThrough: THREE.Object3D[] = []
+      if (ghost?.group) seeThrough.push(ghost.group)
+      alarmGlow.forEach(rec => seeThrough.push(rec.group))
+      const heatDrawn = heatGroups.some(g => g.visible)
+      const ghostDrawn = seeThrough.some(g => g.visible)
+      try {
+        if (heatDrawn && engine.world?.scene?.three) {
+          const scene = engine.world.scene.three
+          const hidden: THREE.Object3D[] = []
+          const prevOverride = scene.overrideMaterial
+          const prevBackground = scene.background
+          const savedSee = seeThrough.map(g => g.visible)
+          seeThrough.forEach(g => { g.visible = false })
+          try {
+            scene.traverse((obj: any) => {
+              if (!obj.visible) return
+              if (obj.name === 'ShadowCatcherPlane' || obj.name === 'eko-slices') {
+                obj.visible = false
+                hidden.push(obj)
+                return
+              }
+              if (!obj.isMesh) return
+              const mats = Array.isArray(obj.material) ? obj.material : [obj.material]
+              const solid = mats.some((m: any) =>
+                m && m.visible !== false && m.colorWrite !== false
+                && !(typeof m.opacity === 'number' && m.opacity < 0.5)
+                && !(m.transparent && m.depthWrite === false)
+              )
+              if (!solid) {
+                obj.visible = false
+                hidden.push(obj)
+              }
+            })
+            scene.overrideMaterial = heatOccluder
+            scene.background = null
+            renderer.clearDepth()
+            renderer.render(scene, camera)
+            renderer.render(overlay, camera)
+          } finally {
+            scene.overrideMaterial = prevOverride
+            scene.background = prevBackground
+            for (const obj of hidden) obj.visible = true
+            seeThrough.forEach((g, i) => { g.visible = savedSee[i] })
+          }
+        }
+        if (ghostDrawn) {
+          const savedHeat = heatGroups.map(g => g.visible)
+          heatGroups.forEach(g => { g.visible = false })
+          try {
+            renderer.clearDepth()
+            renderer.render(overlay, camera)
+          } finally {
+            heatGroups.forEach((g, i) => { g.visible = savedHeat[i] })
+          }
+        }
+      } finally {
+        renderer.shadowMap.autoUpdate = shadowAuto
+        renderer.autoClear = autoClear
+      }
     }
     const syncGhost = () => {
+      if (archFadeOn) fadeArch(true)
       if (ghost) {
         ghost.group.matrix.copy(ghost.model.object.matrixWorld)
         ghost.group.matrixWorldNeedsUpdate = true
@@ -400,7 +481,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       })
       ghostFill.uniforms.uOpacity.value = 0.22
       active = { ...internals, schematic, bimId, last: performance.now(), synced: 0 }
-      if (LIVE_SCHEMATICS.has(internals.type)) schematic.apply(pointsFor(internals.assetId, bimId))
+      if (LIVE_SCHEMATICS.has(internals.type)) labels.show(schematic, schematic.apply(pointsFor(internals.assetId, bimId)))
     }
     const buildGhost = async (entry: Located, bimId: string, seq: number, internals: Internals | null) => {
       let meshes: any[][] = []
@@ -547,7 +628,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const internals = bimId ? internalsFor(assetIdOrBimId, bimId) : null
       if (colored && colored.bimId === bimId && ghost) {
         syncColour()
-        if (active && internals && LIVE_SCHEMATICS.has(internals.type)) active.schematic.apply(pointsFor(internals.assetId, bimId))
+        if (active && internals && LIVE_SCHEMATICS.has(internals.type)) labels.setReading(active.schematic.apply(pointsFor(internals.assetId, bimId)))
         return true
       }
       colored = null
@@ -838,16 +919,19 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
 
     const heatGeoms = new Map<string, THREE.BufferGeometry[]>()
     const heatByBim = new Map<string, { mat: THREE.MeshBasicMaterial; model: any; localId: number }>()
+    let heatSheets: THREE.Mesh[] = []
     let heatSig = ''
-    const heatColor = (mode: string, v: number | null) => {
-      if (v == null || !isFinite(v)) return new THREE.Color(0x94a3b8)
-      let t: number
-      if (mode === 'comfort') t = (v - 600) / 600
-      else if (mode === 'hum') t = (v - 40) / 40
-      else t = (v - 21) / 4
-      t = Math.max(0, Math.min(1, t))
-      if (t <= 0.5) return new THREE.Color(0x2E5B92).lerp(new THREE.Color(0xE3E8F0), t / 0.5)
-      return new THREE.Color(0xE3E8F0).lerp(new THREE.Color(0x8A661F), (t - 0.5) / 0.5)
+    /* Two colours per category so the low end and the high end stay distinct.
+       The same pairs are in analytics.js heatStops. */
+    const HEAT_STOPS: Record<string, [number, number]> = {
+      temp: [0x5B8DEF, 0xD61F1F],
+      hum: [0xE6C35C, 0x0E7C74],
+      comfort: [0x6BCB77, 0xC45C26],
+    }
+    const heatT = (mode: string, v: number | null) => {
+      if (v == null || !isFinite(v)) return null
+      const t = mode === 'comfort' ? (v - 600) / 600 : mode === 'hum' ? (v - 40) / 40 : (v - 21) / 4
+      return Math.max(0, Math.min(1, t))
     }
     const round1 = (n: number | null | undefined) => (n == null || !isFinite(Number(n)) ? '' : (Math.round(Number(n) * 10) / 10).toFixed(1))
     const heatRootOf = (model: any) => {
@@ -887,8 +971,19 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       heatGeoms.set(bimId, geoms)
       return geoms
     }
+    const dropHeatSheets = () => {
+      heatSheets.forEach(mesh => {
+        mesh.removeFromParent()
+        mesh.geometry.dispose()
+        const mat = mesh.material as THREE.Material
+        unwatchClipping(mat)
+        mat.dispose()
+      })
+      heatSheets = []
+    }
     const clearSpaceHeat = async () => {
       heatSig = ''
+      dropHeatSheets()
       heatByBim.forEach(rec => {
         unwatchClipping(rec.mat)
         rec.mat.dispose()
@@ -904,6 +999,127 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       })
       heatRoots.clear()
     }
+    /* Split long edges so a room face can change colour across itself, not
+       only at its corners. */
+    const subdivideHeat = (geom: THREE.BufferGeometry, maxEdge: number) => {
+      let g = geom.getIndex() ? geom.toNonIndexed() : geom.clone()
+      const limit2 = maxEdge * maxEdge
+      for (let pass = 0; pass < 2; pass++) {
+        const pos = g.getAttribute('position') as THREE.BufferAttribute
+        if (pos.count > 9000) break
+        const src = pos.array as ArrayLike<number>
+        const out: number[] = []
+        let grew = false
+        const at = (i: number) => [src[i], src[i + 1], src[i + 2]]
+        const d2 = (a: number[], b: number[]) => {
+          const dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2]
+          return dx * dx + dy * dy + dz * dz
+        }
+        const push = (a: number[], b: number[], c: number[]) => {
+          out.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2])
+        }
+        for (let i = 0; i + 8 < src.length; i += 9) {
+          const a = at(i), b = at(i + 3), c = at(i + 6)
+          if (d2(a, b) <= limit2 && d2(b, c) <= limit2 && d2(c, a) <= limit2) {
+            push(a, b, c)
+            continue
+          }
+          grew = true
+          const mid = (p: number[], q: number[]) => [(p[0] + q[0]) * 0.5, (p[1] + q[1]) * 0.5, (p[2] + q[2]) * 0.5]
+          const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a)
+          push(a, ab, ca)
+          push(ab, b, bc)
+          push(ca, bc, c)
+          push(ab, bc, ca)
+        }
+        if (!grew) break
+        const next = new THREE.BufferGeometry()
+        next.setAttribute('position', new THREE.Float32BufferAttribute(out, 3))
+        if (g !== geom) g.dispose()
+        g = next
+      }
+      return g
+    }
+    /* The space keeps its real height. Colour is one field shared by every
+       room, and the shell stays translucent so the model shows through it. */
+    const heatPlateMat = () => {
+      const mat = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: true,
+        depthTest: true,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+        clipping: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+        vertexShader: `
+          #include <clipping_planes_pars_vertex>
+          attribute vec4 color;
+          varying vec4 vColor;
+          void main() {
+            vColor = color;
+            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+            gl_Position = projectionMatrix * mvPosition;
+            #include <clipping_planes_vertex>
+          }
+        `,
+        fragmentShader: `
+          #include <clipping_planes_pars_fragment>
+          varying vec4 vColor;
+          void main() {
+            #include <clipping_planes_fragment>
+            gl_FragColor = vColor;
+          }
+        `,
+      })
+      watchClipping(mat)
+      return mat
+    }
+    const paintRoomPlate = (
+      geom: THREE.BufferGeometry,
+      own: { x: number; y: number; z: number; t: number; hx: number; hz: number },
+      samples: { x: number; z: number; t: number }[],
+      sigma: number,
+      low: THREE.Color,
+      high: THREE.Color,
+    ) => {
+      const g = subdivideHeat(geom, Math.max(sigma * 0.45, 0.4))
+      const pos = g.getAttribute('position') as THREE.BufferAttribute
+      const sx = own.hx > 0.08 ? Math.max((own.hx - 0.05) / own.hx, 0.85) : 1
+      const sz = own.hz > 0.08 ? Math.max((own.hz - 0.05) / own.hz, 0.85) : 1
+      for (let i = 0; i < pos.count; i++) {
+        pos.setX(i, own.x + (pos.getX(i) - own.x) * sx)
+        pos.setZ(i, own.z + (pos.getZ(i) - own.z) * sz)
+      }
+      pos.needsUpdate = true
+      const colors = new Float32Array(pos.count * 4)
+      const tmp = new THREE.Color()
+      const sigma2 = 2 * sigma * sigma
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i), z = pos.getZ(i)
+        let wsum = 0, tsum = 0
+        for (const s of samples) {
+          const d2 = (x - s.x) ** 2 + (z - s.z) ** 2
+          const w = Math.exp(-d2 / sigma2)
+          wsum += w
+          tsum += w * s.t
+        }
+        const t = wsum > 0 ? tsum / wsum : own.t
+        tmp.copy(low).lerp(high, t)
+        const o = i * 4
+        colors[o] = tmp.r
+        colors[o + 1] = tmp.g
+        colors[o + 2] = tmp.b
+        colors[o + 3] = 0.55
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(colors, 4))
+      g.computeBoundingSphere()
+      const mesh = new THREE.Mesh(g, heatPlateMat())
+      mesh.frustumCulled = false
+      mesh.renderOrder = 2
+      return mesh
+    }
     const applySpaceHeat = async (zones: { bimId?: string; bimIds?: string[]; tempC?: number | null; rh?: number | null; co2?: number | null }[], mode?: string) => {
       const md = mode === 'comfort' || mode === 'hum' ? mode : 'temp'
       const idsOf = (z: { bimId?: string; bimIds?: string[] }) =>
@@ -911,35 +1127,51 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const sig = md + '|' + (zones || []).map(z => `${idsOf(z).join(',')}:${round1(z.tempC)}:${round1(z.rh)}:${round1(z.co2)}`).join(';')
       if (sig === heatSig) return
       heatSig = sig
-      const keep = new Set<string>()
+      dropHeatSheets()
+      type Room = { model: any; geoms: THREE.BufferGeometry[]; x: number; y: number; z: number; hx: number; hz: number; t: number }
+      const rooms: Room[] = []
       for (const z of zones || []) {
-        const v = md === 'comfort' ? z.co2 : md === 'hum' ? z.rh : z.tempC
-        const color = heatColor(md, v == null ? null : Number(v))
+        const raw = md === 'comfort' ? z.co2 : md === 'hum' ? z.rh : z.tempC
+        const t = heatT(md, raw == null ? null : Number(raw))
+        if (t == null) continue
         for (const bimId of idsOf(z)) {
-        const entry = await locate(bimId)
-        if (!entry) continue
-        keep.add(bimId)
-        const existing = heatByBim.get(bimId)
-        if (existing) {
-          existing.mat.color.copy(color)
-          continue
-        }
-        const geoms = await geomsFor(bimId, entry)
-        if (!geoms.length) continue
-        const mat = new THREE.MeshBasicMaterial({
-          color, transparent: true, opacity: 0.88,
-          depthTest: true, depthWrite: true, side: THREE.DoubleSide, toneMapped: false,
-        })
-        watchClipping(mat)
-        const root = heatRootOf(entry.model)
-        for (const geom of geoms) root.add(new THREE.Mesh(geom, mat))
-        heatByBim.set(bimId, { mat, model: entry.model, localId: entry.localId })
+          const entry = await locate(bimId)
+          if (!entry?.localBox || entry.localBox.isEmpty()) continue
+          const geoms = await geomsFor(bimId, entry)
+          if (!geoms.length) continue
+          const c = entry.localBox.getCenter(new THREE.Vector3())
+          const size = entry.localBox.getSize(new THREE.Vector3())
+          rooms.push({ model: entry.model, geoms, x: c.x, y: c.y, z: c.z, hx: size.x / 2, hz: size.z / 2, t })
         }
       }
-      heatByBim.forEach((rec, bimId) => {
-        if (keep.has(bimId)) return
-        rec.mat.dispose()
-        heatByBim.delete(bimId)
+      const stops = HEAT_STOPS[md] || HEAT_STOPS.temp
+      const low = new THREE.Color(stops[0])
+      const high = new THREE.Color(stops[1])
+      const byModel = new Map<any, Room[]>()
+      for (const room of rooms) {
+        const list = byModel.get(room.model) || []
+        list.push(room)
+        byModel.set(room.model, list)
+      }
+      byModel.forEach((samples, model) => {
+        let near = 0, nearN = 0
+        for (let i = 0; i < samples.length; i++) {
+          let best = Infinity
+          for (let j = 0; j < samples.length; j++) {
+            if (i === j) continue
+            best = Math.min(best, Math.hypot(samples[i].x - samples[j].x, samples[i].z - samples[j].z))
+          }
+          if (isFinite(best) && best > 0) { near += best; nearN++ }
+        }
+        const sigma = Math.max(nearN ? (near / nearN) * 0.85 : 1, 0.5)
+        const root = heatRootOf(model)
+        for (const room of samples) {
+          for (const geom of room.geoms) {
+            const mesh = paintRoomPlate(geom, room, samples, sigma, low, high)
+            root.add(mesh)
+            heatSheets.push(mesh)
+          }
+        }
       })
       syncGhost()
     }
@@ -1002,6 +1234,67 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (s.templateId !== prev.templateId) void syncAlarmGlow()
     })
 
+    /* While the heatmap is up, the architecture model stays present but light,
+       so the room colour reads through the walls. Glass that is already fainter
+       is left as it is. Other disciplines stay solid. */
+    const ARCH_FADE = 0.35
+    let archFadeOn = false
+    const modelObject = (rec: { modelId: string; type?: string }) => {
+      const fragList = engine.fragments?.models?.list
+      if (rec.type === 'glb') {
+        return engine.world?.scene?.three?.children?.find((c: any) => c.userData?.modelId === rec.modelId) ?? null
+      }
+      const direct = fragList?.get(rec.modelId)?.object
+      if (direct) return direct
+      if (!fragList) return null
+      for (const [, mod] of fragList) {
+        if ((mod as any)?.object?.userData?.modelId === rec.modelId) return (mod as any).object
+      }
+      return null
+    }
+    const fadeArch = (on: boolean) => {
+      archFadeOn = on
+      for (const rec of useModelStore.getState().models) {
+        if (disciplineOf(rec.originalFileName || '') !== 'arch') continue
+        const root = modelObject(rec)
+        if (!root) continue
+        root.traverse((obj: any) => {
+          const mats = obj.material ? (Array.isArray(obj.material) ? obj.material : [obj.material]) : []
+          for (const mat of mats) {
+            if (!mat) continue
+            if (on) {
+              if (mat.userData?.ekoArchFade === ARCH_FADE && mat.opacity === ARCH_FADE && mat.depthWrite === false) continue
+              if (!mat.userData?.ekoArchSaved && mat.transparent && typeof mat.opacity === 'number' && mat.opacity < ARCH_FADE) continue
+              if (!mat.userData.ekoArchSaved) {
+                mat.userData.ekoArchSaved = { opacity: mat.opacity, transparent: mat.transparent, depthWrite: mat.depthWrite }
+              }
+              mat.userData.ekoArchFade = ARCH_FADE
+              mat.opacity = ARCH_FADE
+              mat.transparent = true
+              mat.depthWrite = false
+              mat.needsUpdate = true
+            } else if (mat.userData?.ekoArchSaved) {
+              const saved = mat.userData.ekoArchSaved
+              mat.opacity = saved.opacity
+              mat.transparent = saved.transparent
+              mat.depthWrite = saved.depthWrite
+              delete mat.userData.ekoArchSaved
+              delete mat.userData.ekoArchFade
+              mat.needsUpdate = true
+            }
+          }
+          if (!obj.isMesh) return
+          if (on) {
+            if (obj.userData.ekoArchCast == null) obj.userData.ekoArchCast = !!obj.castShadow
+            obj.castShadow = false
+          } else if (obj.userData.ekoArchCast != null) {
+            obj.castShadow = obj.userData.ekoArchCast
+            delete obj.userData.ekoArchCast
+          }
+        })
+      }
+    }
+
     /* Whole models, by the discipline in the file name. Item visibility
        (the floor filter) is left as it is. */
     let lastLayerKey = ''
@@ -1061,6 +1354,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         useModelStore.getState().models.map(m => disciplineOf(m.originalFileName || ''))
       ).map(id => ({ id, name: id })),
       isolateLayer,
+      fadeArch,
       applySpaceHeat,
       clearSpaceHeat,
       bindWallOrbit: () => {
@@ -1110,6 +1404,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     // The dashboard may have rendered before the bridge existed: redraw so the
     // equipment markers (which need bimIdFor) appear.
     try { (window as any).EKO?.set?.({}) } catch {}
+    if ((window as any).EKO?.state?.pageId === 'heatmap') fadeArch(true)
 
     /* Re-project in the same frame the camera moved, so markers stay glued to
        the model while orbiting instead of trailing behind by a couple frames. */
@@ -1174,6 +1469,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       engine.world?.renderer?.onAfterUpdate?.remove(afterFrame)
       miniMap.dispose()
       clearInterval(resolveTimer)
+      fadeArch(false)
       void clearHighlight()
       void clearSpaceHeat()
       removeGhost()
@@ -1184,6 +1480,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       unwatchClipping(alarmEdge)
       alarmFill.dispose()
       alarmEdge.dispose()
+      unwatchClipping(heatOccluder)
+      heatOccluder.dispose()
       unwatchClipping(ghostDepth)
       unwatchClipping(ghostFill)
       unwatchClipping(ghostEdge)
@@ -1326,6 +1624,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
 
   return (
     <div className="dashboard-overlay-container">
+      {/* under the dashboard's own panels, over the canvas; never takes a pointer */}
+      <div ref={labelHostRef} className="eko-hvac-labels" aria-hidden="true" />
       <div
         ref={containerRef}
         className="dashboard-native-container"

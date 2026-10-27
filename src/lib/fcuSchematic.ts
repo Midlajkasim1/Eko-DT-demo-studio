@@ -23,6 +23,8 @@ export type FcuReading = {
 
 export type FcuAnchor = {
   key:      'zoneTemp' | 'valvePos' | 'valveCmd' | 'fanSpeed' | 'fanRun'
+  /** The FIN point the label is for */
+  title:    string
   position: THREE.Vector3
   side:     'above' | 'below'
 }
@@ -114,11 +116,11 @@ export function createFcuSchematic(
   const { rotor, bladeMat, fanR: fanRadius } = fanR
 
   const anchors: FcuAnchor[] = [
-    { key: 'zoneTemp', position: new THREE.Vector3(probeX, hy * 0.92,          0),     side: 'above' },
-    { key: 'valvePos', position: new THREE.Vector3(coilX,  hy * 0.92,          0),     side: 'above' },
-    { key: 'valveCmd', position: new THREE.Vector3(valveX, actY - hy * 0.2, valveZ),   side: 'below' },
-    { key: 'fanSpeed', position: new THREE.Vector3(fanX,   fanRadius * 1.2 + hy * 0.08, 0), side: 'above' },
-    { key: 'fanRun',   position: new THREE.Vector3(fanX,  -fanRadius * 1.15,   0),     side: 'below' },
+    { key: 'zoneTemp', title: 'ZONE_TEMP',          position: new THREE.Vector3(probeX, hy * 0.92,          0),     side: 'above' },
+    { key: 'valvePos', title: 'COOLING_VALVE_POS',  position: new THREE.Vector3(coilX,  hy * 0.92,          0),     side: 'above' },
+    { key: 'valveCmd', title: 'COOLING_VALVE_CMD',  position: new THREE.Vector3(valveX, actY - hy * 0.2, valveZ),   side: 'below' },
+    { key: 'fanSpeed', title: 'FAN_SPEED',          position: new THREE.Vector3(fanX,   fanRadius * 1.2 + hy * 0.08, 0), side: 'above' },
+    { key: 'fanRun',   title: 'FAN_RUN_STS',        position: new THREE.Vector3(fanX,  -fanRadius * 1.15,   0),     side: 'below' },
   ]
 
   let rate = 0

@@ -47,7 +47,9 @@ window.EKO_DG = (function(){
   const allViews = (spec, s) => spec.views.concat(s.views);
   function applyView(E, spec, s, id){
     const v = allViews(spec, s).find(x => x.id === id) || spec.views[0];
-    s.view = v.id; s.cols = v.cols.slice(); s.order = v.cols.concat((s.order || spec.columns.map(c => c.key)).filter(k => !v.cols.includes(k))); s.sort = (v.sort || []).map(x => Object.assign({}, x));
+    /* a saved view may still name a column the table no longer has: it is dropped, not counted */
+    const known = new Set(spec.columns.map(c => c.key)), vcols = v.cols.filter(k => known.has(k));
+    s.view = v.id; s.cols = vcols; s.order = vcols.concat((s.order || spec.columns.map(c => c.key)).filter(k => known.has(k) && !vcols.includes(k))); s.sort = (v.sort || []).map(x => Object.assign({}, x));
     s.filters = JSON.parse(JSON.stringify(v.filters || {})); s.group = v.group || null; s.density = v.density || 'standard'; s.dirty = false;
   }
   function persist(E, spec, s){ try{ localStorage.setItem(LS(E, spec, 'prefs'), JSON.stringify({ views:s.views, defaultView:s.defaultView, widths:s.widths })); }catch(e){} }

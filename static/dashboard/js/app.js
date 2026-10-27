@@ -30,6 +30,17 @@
     if(!_pluralRules[lang]){ try{ _pluralRules[lang] = new Intl.PluralRules(lang); }catch(e){ _pluralRules[lang] = { select: x => x === 1 ? 'one' : 'other' }; } }
     return _pluralRules[lang].select(n);
   }
+  /* GlobalIds of the heatmap rooms, once live data has filled them. */
+  function heatSpaceIds(app) {
+    const zones = (app.data && app.data.heat && app.data.heat.zones) || [];
+    const ids = [];
+    zones.forEach(z => {
+      const list = (z.bimIds && z.bimIds.length) ? z.bimIds : (z.bimId ? [z.bimId] : []);
+      list.forEach(id => { if (id && ids.indexOf(id) < 0) ids.push(id); });
+    });
+    return ids;
+  }
+
   const E = window.EKO = {
     data: window.EKO_DATA.marsa,
     nav: window.EKO_LAYOUTS.nav,
@@ -42,7 +53,7 @@
       navMin: ls.get('eko-nav') === 'min',
       exp: {},   /* exclusive accordion (D28): at most one module open */
       alarmF: { sev: new Set(), sys: new Set() },
-      triageOpen: {},
+      triageOpen: {}, alHistOpen: {},   /* alarm id -> its history is expanded */
       assetSel: null, apTab: 'alarms',
       dock: { tool: null, slice: false, bloom: null, style: 'default', tone: 'blue',
               level: 'ALL', layer: 'all', alerts: 'all', minimap: false },
@@ -55,7 +66,7 @@
       sysExp: {},   /* per-group expand state on the Systems landing */
       histAge: null,
       regQ: '', regStF: null, regSysF: null, regSevF: null, regSort: null, regSortDir: 'asc',
-      markersOn: ss.get('eko-mk') !== '0', showAcked: true, tlMetric: 'kwh', tlRange: 'day',   /* D70: per session */
+      markersOn: ss.get('eko-mk') !== '0', eqLabelsOn: ss.get('eko-eql') !== '0', showAcked: true, tlMetric: 'kwh', tlRange: 'day',   /* D70: per session */
       hmMode: 'temp', hmFloor: 'All', hmSel: null, hmRange: 'today', hmPlay: false, hmStep: null, hmStepLabel: '', hmOutline: false,
       hmLayers: { sensors: false, labels: true, values: true },
       woRaised: {}, dlg: null, palQ: '', palSel: 0,
@@ -147,6 +158,20 @@
       return this.data.alarms.filter(a =>
         !hid.has(a.sev) && (this.state.showAcked || !a.ack));
     },
+    /* The one definition of the site's alarm counts (Alert Centre, Assets Overview, reports). An ACTIVE alert is a record in
+       data.alarms, which is FIN's open list: the backend has already dropped cleared and "Return to normal" records and merged
+       re-issued ones, and acknowledging an alert does not end it. An ASSET IN ALARM is an asset with at least one active alert,
+       counted once however many it has: linked by the alert's own source name, or flagged by FIN's equipment record (inAlarm,
+       matched there by FIN's id). Display filters never change either count. data defaults to the live site data. */
+    alarmCounts(data){
+      const d = data || this.data, alarms = d.alarms || [];
+      const live = new Set(alarms.map(a => a.id));
+      const byId = new Map();
+      (d.assets || []).forEach(a => {
+        if(!byId.has(a.id) && (a.inAlarm === true || (a.alarms || []).some(id => live.has(id)))) byId.set(a.id, a);
+      });
+      return { active: alarms.length, acknowledged: alarms.filter(a => a.ack).length, assets: [...byId.values()] };
+    },
     /* Water or gas utility alarm. Same split as the meter counter: a Utilities
        asset is gas only when its name says gas, otherwise water. Chilled-water
        plant stays out of this. */
@@ -195,12 +220,12 @@
       const enteringHeat = pageId === 'heatmap' && from !== 'heatmap';
       const leavingHeat = from === 'heatmap' && pageId !== 'heatmap';
       const HEAT_LAYERS = ['arch','elec','int','mech'];
-      /* HVAC & Mechanical and Electrical read best as the white model. Any other page returns to the style it had. */
+      /* HVAC & Mechanical share one model. Electrical is the other. Both open in Photoreal. Any other page returns to the style it had. */
       const mep = pageId !== 'heatmap' && targetModule === 'systems' && (targetSub === 'hvac' || targetSub === 'mechanical' || targetSub === 'electrical');
       if (this.state.dock) {
         if (mep) {
           if (this.state._styleBeforeMep == null) this.state._styleBeforeMep = this.state.dock.style;
-          this.state.dock.style = 'minimal';
+          this.state.dock.style = 'photo';
         } else if (this.state._styleBeforeMep != null) {
           this.state.dock.style = this.state._styleBeforeMep;
           this.state._styleBeforeMep = null;
@@ -211,14 +236,16 @@
         if (this.state.dock) { this.state.dock.level = 'Ground floor'; this.state.dock.layer = HEAT_LAYERS; }
         if (this.engine && this.engine.isolateLevel) this.engine.isolateLevel('Ground floor', true);
         if (this.engine && this.engine.isolateLayer) this.engine.isolateLayer(HEAT_LAYERS, true);
+        if (this.engine && this.engine.fadeArch) this.engine.fadeArch(true);
         if (enteringHeat || !this.state._heatViewed) {
           this.state._heatViewed = true;
-          window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true } }));
+          window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true, spaceIds: heatSpaceIds(this) } }));
         }
       } else if (leavingHeat) {
         if (this.state.dock) { this.state.dock.level = 'ALL'; this.state.dock.layer = 'all'; }
         if (this.engine && this.engine.isolateLevel) this.engine.isolateLevel('ALL', true);
         if (this.engine && this.engine.setLayerVisibility) this.engine.setLayerVisibility('all');
+        if (this.engine && this.engine.fadeArch) this.engine.fadeArch(false);
         if (this.engine && typeof this.engine.resetView === 'function') this.engine.resetView();
         this.state._heatViewed = false;
       } else {
@@ -578,7 +605,7 @@
       /* D81: head · filter bar · scrolling list · footer. Chips carry the
          SITE counts (the canonical-12 law: filters never change counts). */
       const hid = E.state.alarmF.sev, all = E.data.alarms;
-      const vis = E.visAlarms();
+      const vis = E.visAlarms(), counts = E.alarmCounts();
       const cnt = sev => all.filter(a => a.sev === sev).length;
       const chip = (sev, key) => `<button class="acchip" data-on="${!hid.has(sev)}" data-act="fltSev" data-v="${sev}" aria-pressed="${!hid.has(sev)}"
         data-tip="${esc(E.t(hid.has(sev) ? 'acChipShow' : 'acChipHide', { s: E.t(key) }))}">${C.sevGlyph(sev,false,12)}<span>${esc(E.t(key))}</span><span class="acn">${cnt(sev)}</span></button>`;
@@ -592,7 +619,7 @@
       out += `<div class="scrim scrimclear" data-born="${E.state.born==='dlg'?1:0}" data-act="closeDlg"></div>
       <div class="dlg dlgdrop dropMid dlgalerts" data-born="${E.state.born==='dlg'?1:0}" role="dialog" aria-label="${esc(E.t('alertCentre'))}">
         <div class="draghandle"></div>
-        <div class="dlghead achead"><h2>${esc(E.t('alertCentre'))}</h2><span class="acmeta" data-tip="${esc(E.t('alarmsMetaTip'))}">${esc(E.t('acActiveN',{n:vis.filter(a=>!a.ack).length}))}</span>
+        <div class="dlghead achead"><h2>${esc(E.t('alertCentre'))}</h2><span class="acmeta" data-tip="${esc(E.t('alarmsMetaTip'))}">${esc(E.t('acActiveN',{n:counts.active}) + (counts.acknowledged ? ' \u00b7 ' + E.t('acAckN',{n:counts.acknowledged}) : ''))}</span>
           <button class="iconbtn msA" data-act="closeDlg" aria-label="${esc(E.t('close'))}">${icon('x',14)}</button></div>
         <div class="acfilters" role="group" aria-label="${esc(E.t('acSevT'))}" data-model="${E.state.markersOn}">
           <button class="acchip acmaster" data-on="${E.state.markersOn}" data-act="mkToggle" aria-pressed="${E.state.markersOn}"
@@ -1083,6 +1110,9 @@
       s.has(v) ? s.delete(v) : s.add(v); render(); },
     tgTgl(el){ const g = el.dataset.g;
       E.state.triageOpen[g] = E.state.triageOpen[g] === false; render(); },
+    alHist(el){ const id = el.dataset.v;
+      E.state.alHistOpen[id] = !E.state.alHistOpen[id]; render();
+      const b = document.querySelector('[data-act="alHist"][data-v="' + CSS.escape(id) + '"]'); if(b) b.focus({ preventScroll: true }); },   /* render() rebuilds the button: keep the keyboard where it was */
 
     /* Asset journey: any entry point opens the ONE docked panel. */
     openAsset(el){
@@ -1144,7 +1174,7 @@
       if(k === 'closeMore'){ d.bloom = null; render(); return; }
       /* Reset is everything back to how the viewer opens: camera, floor, style,
          layers, and the selection too (popup, equipment colour, asset panel).
-         HVAC & Mechanical and Electrical keep their own model and the minimal style. */
+         HVAC & Mechanical keep the mech model, Electrical keeps the elec model, and both keep Photoreal. */
       if(k === 'reset'){
         const mepLayer = E.state.module === 'systems' && E.state.pageId !== 'heatmap'
           ? (E.state.sub === 'hvac' || E.state.sub === 'mechanical' ? 'mech' : E.state.sub === 'electrical' ? 'elec' : null)
@@ -1152,7 +1182,7 @@
         if(E.state.pageId === 'heatmap'){
           if(E.engine.isolateLevel) E.engine.isolateLevel('Ground floor', true);
           if(E.engine.isolateLayer) E.engine.isolateLayer(['arch','elec','int','mech'], true);
-          window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true } }));
+          window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true, spaceIds: heatSpaceIds(E) } }));
         } else if(E.engine.resetView){
           E.engine.resetView();
           if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
@@ -1167,7 +1197,7 @@
         E.set(Object.assign({
           dock: heat
             ? Object.assign({}, E.state.dock, { tool:null, slice:false, bloom:null, style:'default', tone:'blue', minimap:false, level:'Ground floor', layer:['arch','elec','int','mech'] })
-            : { tool:null, slice:false, bloom:null, style: mepLayer ? 'minimal' : 'default', tone:'blue', level:'ALL', layer: mepLayer || 'all', alerts:'all', minimap:false },
+            : { tool:null, slice:false, bloom:null, style: mepLayer ? 'photo' : 'default', tone:'blue', level:'ALL', layer: mepLayer || 'all', alerts:'all', minimap:false },
           histAge:null, measureResult:null
         }, NO_SEL)); return; }
       if(!def) return;
@@ -1282,6 +1312,8 @@
     mkAsset(el){ const id = el.dataset.asset; if(!id) return;
       selectEquipment(id, { born:'pop', mkPop: 'asset:' + id, mkPopN: 0 }); },
     mkToggle(){ const on = !E.state.markersOn; ss.set('eko-mk', on ? '1' : '0'); E.set({ markersOn: on }); },
+    /* the point labels on the selected equipment's 3D graphic (hvacLabels.ts reads EKO.state.eqLabelsOn): labels only, never the model */
+    eqLabelsToggle(){ const on = E.state.eqLabelsOn === false; ss.set('eko-eql', on ? '1' : '0'); E.set({ eqLabelsOn: on }); },
     ackAlarm(el, ev){ ev.stopPropagation(); if(window.EKO_PWA) window.EKO_PWA.haptic('ack');
       const a = E.alarm(el.dataset.alarm);
       const d = new Date();
