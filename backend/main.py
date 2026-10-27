@@ -41,6 +41,7 @@ from fin_client import (
     parse_zinc_csv,
     safe_get,
 )
+from fdd_recommendations import recommend as fdd_recommend
 from point_control import control_for, encode_value, equipment_class, number_of
 from workorders import error_payload, live_payload, norm_id, orders_by_equipment
 import notifications
@@ -508,6 +509,8 @@ def _flatten_alarms(rows: list, bands: dict) -> dict:
             "occurred": row.get("occurred") or row.get("created"),
             "state": row.get("state"),
         })
+        # optional: present only when a validated FD&D mapping matches, so other consumers see no change
+        alarms[-1].update(fdd_recommend(message, detail, alarms[-1]["diagnosed"]) or {})
 
     alarms.sort(key=lambda a: str(a.get("occurred") or ""), reverse=True)
     return {

@@ -6127,6 +6127,30 @@
   color:var(--t3)
 }
 
+.dashboard-native-container .alrec {
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  margin-block-start:4px;
+  padding-inline-start:8px;
+  border-inline-start:2px solid var(--bd1)
+}
+
+.dashboard-native-container .alrecl {
+  font-size:var(--txCapSz);
+  color:var(--t3)
+}
+
+.dashboard-native-container .alrect {
+  font-size:var(--txValueSz);
+  color:var(--t1)
+}
+
+.dashboard-native-container .alrecb {
+  font-size:var(--txCapSz);
+  color:var(--t2)
+}
+
 .dashboard-native-container .actref {
   display:flex;
   flex-direction:column;

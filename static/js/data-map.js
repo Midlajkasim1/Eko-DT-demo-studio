@@ -212,7 +212,7 @@
     var matchedAsset = (site && site.assets || []).find(function(as) {
       return namesMatch(as.id, asset) || namesMatch(as.id, src);
     });
-    return {
+    var alarm = {
       // FIN's record id, else what the alarm is: never its place in the list, which moves when FIN
       // adds or drops a record and made the same alarm look new (and lose its acknowledgement)
       id: 'fin-' + slugId(a.id || [src, msg, a.occurred].join(' ')),
@@ -235,6 +235,12 @@
       raisedAt: (function () { var d = parseWhen(a.occurred); return d ? d.getTime() : null; })(),   /* the one stored time; labels derive from it */
       lifecycle: []
     };
+    /* optional: the backend sends these only for a validated FD&D mapping (backend/fdd_recommendations.py) */
+    if (a.recommendation) {
+      alarm.recEn = alarm.recAr = a.recommendation;
+      alarm.basisEn = alarm.basisAr = a.basis || '';
+    }
+    return alarm;
   }
 
   function isOnVal(v) {

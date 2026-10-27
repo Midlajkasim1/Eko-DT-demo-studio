@@ -129,6 +129,8 @@ window.EKO_I18N.en = {
   "apWos": "Open work orders",
   "apLifecycle": "Alarm lifecycle",
   "apNoAlarms": "No active alerts on this asset.",
+  "apRecommended": "Recommended action",
+  "apRecBasis": "Basis:",
   "apNoLive": "FIN reports no live values for this asset.",
   "apNoHist": "No historical data available",
   "apHistLoading": "Loading historical data…",
