@@ -3659,9 +3659,16 @@
 .dashboard-native-container .hmlayer[data-proj] .hmsensor {
   visibility:visible
 }
-/* The point stays on the room. The label sits just above it. */
+/* One dot per room. The sensor point is that dot, so the card drops its speck
+   and the name sits clear of the point. */
 .dashboard-native-container .hmlayer[data-sensors="1"] .hmzone.hmzone3d {
-  transform:translate(-50%, calc(-100% - 14px))
+  transform:translate(-50%, calc(-100% - 18px))
+}
+.dashboard-native-container .hmlayer[data-sensors="1"] .hmdot {
+  display:none
+}
+.dashboard-native-container #vpmain .hmlayer[data-sensors="1"] button.hmzone.hmzone3d {
+  padding:3px 8px
 }
 .dashboard-native-container .hmsensor[data-on="true"] {
   box-shadow:0 0 0 2px var(--acc), 0 0 0 1px rgba(0,0,0,.28)
