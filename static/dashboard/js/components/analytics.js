@@ -833,7 +833,11 @@ window.EKO_A = (function(){
     const range = s.hmRange === 'week' || s.hmRange === 'month' ? s.hmRange : 'today';
     const seg = (lbl, v) => `<button class="seg" data-on="${range===v}" data-act="hmRange" data-v="${v}">${esc(lbl)}</button>`;
     const rangeLabel = range === 'week' ? E.t('rangeWeekly') : range === 'month' ? E.t('rangeMonthly') : E.t('tlLive');
-    return `<div class="hmlayer">${tiles}${dots}</div>
+    /* A cached projection already placed these cards. Stamp data-proj now so
+       a dashboard refresh does not hide them for a frame (that blink reads
+       as flicker). The blur is left off: sampling the 3D canvas shimmers. */
+    const projected = tiles.indexOf('left:') !== -1;
+    return `<div class="hmlayer"${projected ? ' data-proj="1"' : ''}>${tiles}${dots}</div>
       <div class="heatbar mzglass">
         <span class="tMonoS cT3">${esc(legend)}</span>
         <span class="hmgrad" data-mode="${mode}"></span>

@@ -3604,10 +3604,10 @@
   align-items:center;
   gap:6px;
   border-radius:999px;
-  background:color-mix(in srgb, var(--sc1) 78%, transparent);
-  border:1px solid color-mix(in srgb, var(--bd1) 80%, transparent);
+  background:var(--sc1);
+  border:1px solid var(--bd1);
   box-shadow:0 4px 14px rgba(0,0,0,.16);
-  backdrop-filter:blur(8px);
+  backdrop-filter:none;
   visibility:hidden
 }
 .dashboard-native-container .hmzone.hmzone3d[data-on="true"] {
@@ -10892,7 +10892,10 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   min-width:0;
   padding:3px 8px 3px 5px;
   line-height:1.2;
-  border-radius:999px
+  border-radius:999px;
+  background:var(--sc1);
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none
 }
 
 .dashboard-native-container .hmdot {
