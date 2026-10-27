@@ -298,6 +298,8 @@ async def realtime_loop():
     interval = CONFIG.get("polling", {}).get("realtime_ms", 30000) / 1000
 
     while client and client.is_authenticated:
+        if not _dashboard_open():
+            return
         try:
             realtime = await client.fetch_realtime_data(rt_endpoints)
             cached_equip_data = {
@@ -329,10 +331,12 @@ async def realtime_loop():
                     "facilityServices": cached_facility,
                 },
             }
-            await asyncio.sleep(interval)
+            if not await _sleep_while_watched(interval):
+                return
         except Exception as e:
             print(f"[FIN] realtime loop error: {e}")
-            await asyncio.sleep(10)
+            if not await _sleep_while_watched(10):
+                return
 
 
 async def live_loop():
@@ -347,6 +351,8 @@ async def live_loop():
     interval = CONFIG.get("polling", {}).get("live_ms", 5000) / 1000
 
     while client and client.is_authenticated:
+        if not _dashboard_open():
+            return
         try:
             values = await asyncio.gather(
                 *(client.fetch_live_point(pid) for pid in live_ids.values()),
@@ -369,10 +375,12 @@ async def live_loop():
                 "fdd": cached_fdd_summary,
                 "facilityServices": cached_facility,
             }
-            await asyncio.sleep(interval)
+            if not await _sleep_while_watched(interval):
+                return
         except Exception as e:
             print(f"[FIN] live loop error: {e}")
-            await asyncio.sleep(interval)
+            if not await _sleep_while_watched(interval):
+                return
 
 
 def _build_fdd_summary(realtime: dict) -> list[dict]:
@@ -713,6 +721,50 @@ def _start_polling():
     ]
 
 
+# A signed-in session used to poll FIN on its own. Work orders, equipment, alarms and live points
+# now run only while a dashboard is open. Each open dashboard holds an id and refreshes it; the
+# loops stop when the last one leaves, or when its refresh goes quiet (a closed tab).
+watchers: dict[str, float] = {}
+WATCH_STALE_S = 20
+
+
+def _prune_watchers() -> int:
+    now = time.monotonic()
+    for key, seen in list(watchers.items()):
+        if now - seen > WATCH_STALE_S:
+            del watchers[key]
+    return len(watchers)
+
+
+def _dashboard_open() -> bool:
+    return _prune_watchers() > 0
+
+
+def _polling_alive() -> bool:
+    return any(not task.done() for task in polling_tasks)
+
+
+def _ensure_polling():
+    """Start the FIN loops when a dashboard is open, and stop them when none is."""
+    if _dashboard_open() and client and client.is_authenticated and PROJECT_NAME:
+        if not _polling_alive():
+            _start_polling()
+    elif _polling_alive():
+        _cancel_polling()
+
+
+async def _sleep_while_watched(seconds: float) -> bool:
+    """Sleep in short steps so a closed dashboard stops the loop without waiting out the interval."""
+    left = seconds
+    while left > 0:
+        if not _dashboard_open():
+            return False
+        chunk = 1.0 if left > 1 else left
+        await asyncio.sleep(chunk)
+        left -= chunk
+    return _dashboard_open()
+
+
 def _reset_caches():
     """Drop data polled under the previous configuration so it is never served for the next."""
     global cached_equip_data, cached_power_data, cached_building_data, cached_sensor_avg
@@ -795,6 +847,10 @@ class LoginRequest(BaseModel):
 class ProjectSettingsRequest(BaseModel):
     settings: dict
     project_id: Optional[str] = None
+
+
+class WatchRequest(BaseModel):
+    id: Optional[str] = None
 
 
 class StatusResponse(BaseModel):
@@ -1011,7 +1067,7 @@ async def _install_login(req, request: Request, response: Response, candidate, m
         if managed and await _serves_standard_site(client):
             apply_studio_settings(req.settings, req.project_id, standard=True)
             FIN_SERVER_URL, PROJECT_NAME = server_url, project   # the session's, not config.json's
-        _start_polling()
+        _ensure_polling()   # a dashboard already open keeps its feed; sign-in alone does not start one
     else:
         PROJECT_CHECK = {"validated": None, "source": name_source}
     _open_session(request, response, req.username, candidate.project_name or "")   # this sign-in's own project
@@ -1042,7 +1098,7 @@ async def set_project_settings(req: ProjectSettingsRequest, request: Request):
             return await _switch_project(req, request)
         except BaseException:
             if client and client.is_authenticated and PROJECT_NAME:
-                _start_polling()   # a failed switch must not leave the backend without polling
+                _ensure_polling()   # resume only while a dashboard is still open
             raise
 
 
@@ -1077,7 +1133,7 @@ async def _switch_project(req: ProjectSettingsRequest, request: Request):
     _cancel_polling()
     _reset_caches()
     if PROJECT_NAME:
-        _start_polling()
+        _ensure_polling()
     # The switch was validated with the polling session's FIN credentials: only their owner's own
     # user session moves to the new site. Anyone else's stays on the site they signed in for.
     mine, _ = _session_of(request)
@@ -1935,6 +1991,27 @@ async def get_building_info(request: Request):
     return cached_building_data or {}
 
 
+@app.post("/api/fin/watch")
+async def fin_watch(req: WatchRequest, request: Request):
+    """The dashboard is open. Refresh its hold so work orders and the other FIN reads keep running."""
+    _require_user(request)
+    wid = (req.id or "").strip() or secrets.token_hex(16)
+    watchers[wid] = time.monotonic()
+    _ensure_polling()
+    return {"id": wid, "polling": _polling_alive()}
+
+
+@app.post("/api/fin/unwatch")
+async def fin_unwatch(req: WatchRequest, request: Request):
+    """The dashboard closed. Stop the shared FIN reads once no dashboard is still open."""
+    _require_user(request)
+    wid = (req.id or "").strip()
+    if wid:
+        watchers.pop(wid, None)
+    _ensure_polling()
+    return {"polling": _polling_alive()}
+
+
 @app.post("/api/fin/logout")
 async def logout(request: Request, response: Response):
     """End this browser's user session. The shared FIN session closes only when no other user is
@@ -1947,6 +2024,7 @@ async def logout(request: Request, response: Response):
             return {"status": "signed_out", "fin": "connected for other users"}
         POLL_OWNER = None
         STANDARD_VERIFIED = None
+        watchers.clear()
         _cancel_polling()
         # Drop the reference before the await so a second sign-out does not close the same client twice.
         current = client
