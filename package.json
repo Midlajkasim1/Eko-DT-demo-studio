@@ -17,6 +17,7 @@
     "test:alarmhist": "node scripts/test-alarm-history.mjs",
     "test:role": "node scripts/test-default-role.mjs",
     "test:notices": "node scripts/test-notification-notices.mjs",
+    "test:siteadmin": "node scripts/test-notification-admin.mjs",
     "build:renders": "node scripts/buildBuiltinRenders.mjs"
   },
   "dependencies": {

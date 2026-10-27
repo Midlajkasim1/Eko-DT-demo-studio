@@ -822,6 +822,8 @@ window.EKO_I18N.en = {
   "nfSiteLbl": "This site:",
   "nfSiteOn": "critical-alarm notifications are enabled. The switch above is your own preference: it only decides whether you see them.",
   "nfSiteOff": "critical-alarm notifications are not enabled. Turning your switch on saves your preference but does not start any notifications for the site. Nothing is being generated.",
+  "nfSiteTurnOn": "Turn on for everyone on this project",
+  "nfSiteTurnOff": "Turn off for everyone on this project",
   "nfSiteUnknown": "whether critical-alarm notifications are enabled could not be determined. Your switch is saved as your own preference only; it does not mean notifications are being generated.",
   "nfFlood.t": "High activity",
   "nfFlood.b.one": "{n} {cat} notification in the last minute",

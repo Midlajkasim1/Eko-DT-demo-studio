@@ -117,12 +117,13 @@ another project a 409 (`session_project_mismatch`); a notification or site that 
   out for a user whose effective preference (or master toggle) is off: from their list and its pages,
   the unread count, mark-all-read, archive-read and by-id reads, so all of them describe the same rows
   and no state or history is written for notifications that user cannot see. A user's own `alarm.critical`
-  preference only narrows what that user sees. No route writes the site setting:
-  `Store.update_project_preferences` is the seam for the later administration phase, and until then an
-  operator sets it in the database. `GET` and `PUT /api/notifications/v1/preferences` answer the user's
-  own preferences plus a read-only `site` part, `{"critical_alarms": true | false | null}` (null: it
-  could not be read, never assumed on), so the settings page can tell the two apart. A request cannot
-  set it (extra fields are a 400).
+  preference only narrows what that user sees. The user's `PUT /api/notifications/v1/preferences` can never write
+  the site setting (extra fields are a 400, and an owner starting `#project:` is refused). The site setting is changed
+  by a **superuser of that project** through `PUT /api/notifications/v1/site-settings` (below), or by an operator with
+  `Store.update_project_preferences`. `GET` and `PUT /api/notifications/v1/preferences` answer the user's own
+  preferences plus a read-only `site` part, `{"critical_alarms": true | false | null, "can_administer": true | false | null}`
+  (null: it could not be read, never assumed on), so the settings page can tell the two apart and offer the site switch
+  only to someone the server will accept it from.
 - **Per Studio project (gate 1).** A Studio project's own `apiSettings.notificationsCriticalAlarmsEnabled` (true / false) is the first
   gate; the site's `alarm.critical` toggle above is the second, and both must allow it. Absent means *not configured*, never enabled:
   `critical_alarm_sites` in `config.json` applies only to config.json's own site (Marsa) and the standalone backend, never to a Studio
@@ -130,9 +131,28 @@ another project a 409 (`session_project_mismatch`); a notification or site that 
   `setup: {critical_alarms: not_configured | disabled_project | disabled_site | enabled, severity_bands, workorders}` so the panel can
   say why a list is empty. `apiSettings.finWorkorderExpr` is the project's own work-order query (read-only forms only); none means the
   work-order sync is not configured (not a failure). Severity bands likewise come only from the project (`finSeverityBands`).
-- **Enabling the site toggle (operator, no HTTP route).** From `backend/`, with `EKO_NOTIFICATION_DB` set if the database is not at the
-  default path: `python -c "import notifications as n; s = n.Store(n.resolve_db_path(None)); s.update_project_preferences('<FIN project name>', types={'alarm.critical': True})"`
-  (False switches it off). It touches only that site's baseline row.
+- **Who may change the site setting (superuser, enforced on the server).** `PUT /api/notifications/v1/site-settings` with exactly
+  `{"critical_alarms": true | false}` is accepted only from a signed-in user whose server-side `eko_role_mapping` row for that
+  site and user is `superuser`. The role comes from that row, which is keyed by the site and the FIN-authenticated user of the
+  session cookie: no header, body field, query parameter or frontend role label is read. The site is the session's, never the
+  request's. It changes only that site's baseline `alarm.critical` row (never a user's own preference or another site), records
+  who did it in `notification_audit_log` (`notifications.site_critical_alarms.set`, with the previous value), deletes nothing, and
+  answers 403 to anyone else. Selecting a project or turning its Dashboard Settings switch on never writes it. There is no HTTP
+  route that grants the role: the operator maps the first superuser with the same care as the toggle, from `backend/`
+  and with the path the start-up line prints:
+  `python -c "import os, sys, notifications as n; p = sys.argv[1]; assert os.path.exists(p), p; n.Store(p).map_role(sys.argv[2], sys.argv[3], 'superuser', 'operator')" "<path from the start-up line>" "<site>" "<FIN user id>"`.
+  Both the site and the user id are exact and case-sensitive (`/api/auth/me` returns them; a user who signs in with different
+  capitalisation is a different user here, and fails closed).
+- **Enabling the site toggle without a superuser (operator, no HTTP route).** A project shows critical-alarm notifications only when three things hold:
+  its Dashboard Settings switch is on, the project has Severity Configuration (`finSeverityBands`; FIN's alarm priority has no fixed
+  direction, so Eko-DT cannot derive bands, and another project's are never used), and this site toggle is on. The panel names whichever
+  is missing. The backend prints `[notifications] database: <path> (from <why>)` at start-up: that is the database it uses, so write to
+  THAT path, never to one worked out on another account or machine (`config.json`'s `notification_db_path` and a service's own
+  `EKO_NOTIFICATION_DB` or profile all change it). The site is the exact, case-sensitive `site` that `/api/auth/me` returns. From `backend/`:
+  `python -c "import os, sys, notifications as n; p = sys.argv[1]; assert os.path.exists(p), p; n.Store(p).update_project_preferences(sys.argv[2], types={'alarm.critical': True})" "<path from the start-up line>" "<site>"`
+  (`False` switches it off). It refuses a path that does not exist instead of creating a new database, and touches only that site's
+  baseline row. To look first, read it with `sqlite3.connect(pathlib.Path(p).resolve().as_uri() + '?mode=ro', uri=True)` and
+  `SELECT user_id, site_id, type, enabled FROM notification_preferences WHERE site_id = '<site>'`. It takes effect on the next poll.
 - Migration 4 changes no row; it writes one `notifications.per_user_state` audit row per site with how
   many notifications and preferences were inherited as the baseline. The database is backed up first
   (see `notification_db_path`).

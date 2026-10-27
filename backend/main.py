@@ -738,6 +738,16 @@ def _compute_facility_services(realtime: dict) -> dict:
 
 # ─── FastAPI App ─────────────────────────────────────────────────────────────
 
+def _notification_db_line() -> str:
+    """Which notification database this backend will use and why: for the operator, and creates nothing."""
+    configured = BASE_CONFIG.get("notification_db_path")
+    why = "EKO_NOTIFICATION_DB" if os.environ.get("EKO_NOTIFICATION_DB") else "notification_db_path" if configured else "default for this account"
+    try:
+        return f"[notifications] database: {notifications.resolve_db_path(configured)} (from {why})"
+    except ValueError as exc:
+        return f"[notifications] database path refused: {exc}"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
@@ -746,6 +756,7 @@ async def lifespan(app: FastAPI):
     apply_project_settings(*_bundled_project())
     # a deployment setting, never a project's: projects cannot point the history elsewhere
     notifications.configure(BASE_CONFIG.get("notification_db_path"))
+    print(_notification_db_line())
     yield
     # Cleanup
     global polling_tasks, client
@@ -1140,6 +1151,7 @@ async def _switch_project(req: ProjectSettingsRequest, request: Request):
     # Rows read for the previous project feed /his-points and the alarm views until the next poll
     client.last_alarm_rows = []
     client.last_point_rows = []
+    client.last_alarm_read_ok = None   # the previous project's "FIN answered" says nothing about this one
     name_source = _name_source(bool(kept) and "project_name" not in ACTIVE_OVERRIDES)
     PROJECT_CHECK = {
         "validated": await _validate_project(client) if PROJECT_NAME else None,
@@ -1727,6 +1739,16 @@ async def notifications_dismiss_opened(request: Request, response: Response):
     return {"updated": _notif_call(lambda s: s.dismiss_opened(who, site))}
 
 
+def _notification_admin(request: Request) -> tuple[str, str]:
+    """(user id, site) for a request that changes a SITE setting. The same session and project checks as every notification
+    route, then the server's own role for this user on this site must be the administrator's. A frontend role label, a
+    header or a body field is never consulted."""
+    who, site = _notification_scope(request)
+    if _notif_call(lambda s: s.role_of(site, who)) != notifications.ADMIN_ROLE:
+        raise NotificationApiError(403, "forbidden", "Only a superuser of this project can change its notification settings.")
+    return who, site
+
+
 def _preferences_answer(who: str, site: str) -> dict:
     """The signed-in user's own preferences, plus read-only facts about the SITE next to them so the
     page can tell the two apart. site.critical_alarms is true/false, or null when it cannot be read
@@ -1736,7 +1758,11 @@ def _preferences_answer(who: str, site: str) -> dict:
         enabled = _critical_alarms_enabled(notifications.store(), site)
     except (notifications.StoreError, sqlite3.Error, ValueError):
         enabled = None
-    answer["site"] = {"critical_alarms": enabled}
+    try:   # lets the panel offer the site switch to the one role that may use it; the server still decides on every request
+        admin = notifications.store().role_of(site, who) == notifications.ADMIN_ROLE
+    except (notifications.StoreError, sqlite3.Error, ValueError):
+        admin = None
+    answer["site"] = {"critical_alarms": enabled, "can_administer": admin}
     return answer
 
 
@@ -1759,6 +1785,22 @@ async def notifications_preferences_update(request: Request, response: Response)
         raise NotificationApiError(400, "invalid_input", "Only master_enabled and types can be set.")
     _notif_call(lambda s: s.update_preferences(who, site, master_enabled=body.get("master_enabled"), types=body.get("types")))
     return _preferences_answer(who, site)
+
+
+@app.put(NOTIF_BASE + "/site-settings")
+async def notifications_site_settings(request: Request, response: Response):
+    """A superuser of this project switches its critical-alarm notifications on or off for everyone on it. The site comes from
+    the session, never the request; only the site's baseline alarm.critical row changes, and the change is audited."""
+    who, site = _notification_admin(request)
+    _stamp(response)
+    try:
+        body = await request.json()
+    except ValueError:
+        raise NotificationApiError(400, "invalid_input", "The body must be JSON.")
+    if not isinstance(body, dict) or set(body) != {"critical_alarms"} or not isinstance(body["critical_alarms"], bool):
+        raise NotificationApiError(400, "invalid_input", "The body must be exactly {\"critical_alarms\": true | false}.")
+    _notif_call(lambda s: s.set_site_critical(site, body["critical_alarms"], who))
+    return {"site": _preferences_answer(who, site)["site"], "setup": _notification_setup(site)}
 
 
 @app.get("/api/fin/workorders")

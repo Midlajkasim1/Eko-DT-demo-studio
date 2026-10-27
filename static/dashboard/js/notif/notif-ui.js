@@ -190,7 +190,8 @@ window.EKO_NF = (function(){
     if(s.critical_alarms === 'not_configured') keys.push('nfSetupNotConfigured');
     else if(s.critical_alarms === 'disabled_project') keys.push('nfSetupDisabledProject');
     else if(s.critical_alarms === 'disabled_site') keys.push('nfSetupDisabledSite');
-    else if(s.critical_alarms === 'enabled' && s.severity_bands === false) keys.push('nfSetupNoBands');
+    /* bands matter once the project allows it: name a missing one beside a site switch that is also off, so both are fixed in one visit */
+    if((s.critical_alarms === 'enabled' || s.critical_alarms === 'disabled_site') && s.severity_bands === false) keys.push('nfSetupNoBands');
     /* set up, but FIN's last alarm read failed: an empty list is then unknown, not "caught up" (null/absent = no read yet) */
     if(s.critical_alarms === 'enabled' && s.alarms_read === false) keys.push('nfSetupAlarmRead');
     if(!keys.length) return '';
@@ -279,7 +280,8 @@ window.EKO_NF = (function(){
   function siteNote(E){
     const site = N().siteCritical(), state = site === true ? 'on' : site === false ? 'off' : 'unknown';
     return `<div class="nfpsite" data-state="${state}" role="note">
-      <b>${esc(E.t('nfSiteLbl'))}</b> ${esc(E.t(state === 'on' ? 'nfSiteOn' : state === 'off' ? 'nfSiteOff' : 'nfSiteUnknown'))}</div>`;
+      <b>${esc(E.t('nfSiteLbl'))}</b> ${esc(E.t(state === 'on' ? 'nfSiteOn' : state === 'off' ? 'nfSiteOff' : 'nfSiteUnknown'))}
+      ${N().siteAdmin() ? `<button class="btnG btnSm nfsiteset" data-act="nfSiteSet" data-v="${state === 'on' ? 'off' : 'on'}">${esc(E.t(state === 'on' ? 'nfSiteTurnOff' : 'nfSiteTurnOn'))}</button>` : ''}</div>`;
   }
   function prefsDlg(E){
     const s = st(E);
@@ -335,6 +337,8 @@ window.EKO_NF = (function(){
     /* a dialog above its parent: the panel stays open and is returned to (D67) */
     nfPrefsOpen(){ const E = window.EKO, s = st(E); s.prefs = true; s.menu = false; E.set({}); },
     nfPrefsClose(){ const E = window.EKO; st(E).prefs = false; E.set({}); },
+    nfSiteSet(el){ const E = window.EKO;
+      N().setSiteCritical(el.dataset.v === 'on').then(() => E.set({})); },
     nfPrefTgl(el){ const E = window.EKO;
       N().setPref(el.dataset.v, !N().prefOn(el.dataset.v)); E.set({}); },
     nfRow(el, ev){ const E = window.EKO;
