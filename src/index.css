@@ -558,6 +558,72 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
   pointer-events: none; /* Let clicks pass through where there's no UI */
 }
 
+/* Point labels on the selected equipment's schematic (src/lib/hvacLabels.ts). The layer is first in the overlay, so the dashboard's
+   own panels cover it; it takes no pointer; the dashboard's eye control hides it ([data-off]). Same fonts as the dashboard. */
+.eko-hvac-labels {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.eko-hvac-labels[data-off] {
+  display: none;
+}
+
+.eko-hvac-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  max-width: 168px;
+  border-radius: 6px;
+  overflow: hidden;
+  font-family: var(--font-body);
+  line-height: 1.25;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 1px 3px rgba(2, 6, 23, 0.4);
+  will-change: transform;
+}
+
+/* not placed yet, or hidden by the declutter: not drawn */
+.eko-hvac-label:not([data-shown="1"]) {
+  visibility: hidden;
+}
+
+.eko-hvac-label__name {
+  padding: 2px 7px;
+  background: rgba(15, 23, 42, 0.88);
+  color: #e2e8f0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.eko-hvac-label__val {
+  padding: 2px 7px;
+  background: #2563eb;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.eko-hvac-label__val[data-tone="warn"] {
+  background: #dc2626;
+}
+
+.eko-hvac-label__val[data-tone="none"] {
+  background: #64748b;
+  font-weight: 500;
+}
+
 /* The Studio's Render / Transform tabs are a strip (--right-tab-w) over the right edge, above the dashboard.
    The dashboard stops where the strip starts, so the tabs sit beside the asset panel instead of on its close
    button and its last tab. Only while those tabs exist (the exported viewer has none). */

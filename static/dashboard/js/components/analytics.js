@@ -661,15 +661,15 @@ window.EKO_A = (function(){
       + '</div>');
   }
   function assetsSummary(E){
-    const inAlarm = E.data.assets.filter(a => a.st === 'alarm');
-    const critAssets = inAlarm.filter(a => a.alarms.some(id => E.alarm(id).sev === 'critical' && !E.alarm(id).ack));
+    const counts = E.alarmCounts(), inAlarm = counts.assets;
+    const critAssets = inAlarm.filter(a => (a.alarms || []).some(id => { const al = E.alarm(id); return al && al.sev === 'critical' && !al.ack; }));
     const row = (lbl,v,cap,tone) => `<div class="ovk"><div class="ovkhead"><span class="ovklbl">${esc(lbl)}</span></div>
       <div class="ovkval"><span class="ovknum" ${tone?'style="color:var(--sevCrit)"':''}>${esc(v)}</span></div>
       <div class="ovkcap">${esc(cap)}</div></div>`;
     return C().summaryShell(E, E.t('assetsOverview'), '<div class="ovklist">'
       + row(E.t('asRegistered'), fmt(E.data.registerTotal, 0), E.t('asRegisteredCap'))
       + row(E.t('asWos'), '--', E.t('asWosCap'))
-      + row(E.t('asInAlarm'), String(inAlarm.length), E.t('asInAlarmCap',{n:critAssets.length,first:critAssets[0]?critAssets[0].id:'—'}), true)
+      + row(E.t('asInAlarm'), String(inAlarm.length), E.t('asInAlarmAlerts',{n:counts.active}) + ' · ' + E.t('asInAlarmCap',{n:critAssets.length,first:critAssets[0]?critAssets[0].id:'—'}), true)
       + '</div>');
   }
   /* Module-highlight rows panel (Utilities / Spaces / Assets landings). */

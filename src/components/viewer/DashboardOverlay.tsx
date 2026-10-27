@@ -17,6 +17,7 @@ import { createAhuSchematic } from '@/lib/ahuSchematic'
 import { createFahuSchematic } from '@/lib/fahuSchematic'
 import { createMauSchematic } from '@/lib/mauSchematic'
 import { createEcoSchematic } from '@/lib/ecoSchematic'
+import { createHvacLabels } from '@/lib/hvacLabels'
 import type { HvacSchematic } from '@/lib/hvacGeometry'
 import { useFinStore } from '@/store/useFinStore'
 import type { ProjectApiSettings } from '@/types'
@@ -71,6 +72,7 @@ function loadScripts(scripts: HTMLScriptElement[], signal: { mounted: boolean })
 
 export function DashboardOverlay({ visible, engineRef, engineReady = false }: DashboardOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const labelHostRef = useRef<HTMLDivElement>(null)
   const currentProject = useProjectStore(s => s.currentProject)
   const templateId = useAppStore(s => s.templateId)
   const xrayColor = useAppStore(s => s.xrayColor)
@@ -222,6 +224,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     fcuKey.castShadow = false
     fcuFill.castShadow = false
     overlay.add(fcuHemi, fcuKey, fcuFill, fcuAim, fcuAim2)
+    /* The selected equipment's point labels (name + live text on each anchor of its schematic), in the layer under the
+       dashboard; the dashboard's own eye control (EKO.state.eqLabelsOn, per session) shows or hides them */
+    const labels = createHvacLabels(() => labelHostRef.current)
+    const labelsOn = () => (window as any).EKO?.state?.eqLabelsOn !== false
     const fcuAt = new THREE.Vector3()
     const fcuCam = new THREE.Vector3()
     const fcuRight = new THREE.Vector3()
@@ -304,11 +310,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const pointsFor = (assetId: string, bimId: string) => {
       const want = fold(assetId)
       const lists: any[] = []
-      const fin = useFinStore.getState().equipment
-      if (Array.isArray(fin)) lists.push(fin)
+      // The dashboard's data layer re-reads equipment every 30 s; the FIN store only once after sign-in, so it is the fallback
       const dash = (window as any).DashboardData?.equipment
       if (Array.isArray(dash)) lists.push(dash)
       else if (Array.isArray(dash?.equipment)) lists.push(dash.equipment)
+      const fin = useFinStore.getState().equipment
+      if (Array.isArray(fin)) lists.push(fin)
       for (const list of lists) {
         const eq = list.find((e: any) => e && (e.bimId === bimId || fold(String(e.name || '')) === want))
         if (eq?.points?.length) return eq.points
@@ -321,6 +328,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ghostEdge.color.copy(c).multiplyScalar(0.45)   // a darker line of the same hue reads on light and dark styles
     }
     const removeGhost = () => {
+      labels.clear()
       if (active) {
         active.schematic.dispose()
         active = null
@@ -332,6 +340,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ghost = null
     }
     const drawGhost = () => {
+      labels.setVisible(!!(ghost && ghost.group.visible && active && labelsOn()))
       const hasHeat = heatRoots.size > 0 || alarmGlow.size > 0
       if ((!ghost || !ghost.group.visible) && !hasHeat) return
       // The selected equipment's internals, while its highlight is on screen
@@ -343,13 +352,14 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         shown.schematic.tick(dt)
         if (LIVE_SCHEMATICS.has(shown.type) && now - shown.synced > 400) {
           shown.synced = now
-          shown.schematic.apply(pointsFor(shown.assetId, shown.bimId))
+          labels.setReading(shown.schematic.apply(pointsFor(shown.assetId, shown.bimId)))
         }
       }
       const renderer = engine.world?.renderer?.three
       const camera = engine.world?.camera?.three
       if (!renderer || !camera) return
       if (shown) {
+        if (LIVE_SCHEMATICS.has(shown.type) && labelsOn()) labels.update(camera, renderer.domElement.getBoundingClientRect())
         shown.schematic.group.getWorldPosition(fcuAt)
         fcuCam.copy(camera.position).sub(fcuAt)
         if (fcuCam.lengthSq() < 1e-8) fcuCam.set(0, 0.4, 1)
@@ -400,7 +410,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       })
       ghostFill.uniforms.uOpacity.value = 0.22
       active = { ...internals, schematic, bimId, last: performance.now(), synced: 0 }
-      if (LIVE_SCHEMATICS.has(internals.type)) schematic.apply(pointsFor(internals.assetId, bimId))
+      if (LIVE_SCHEMATICS.has(internals.type)) labels.show(schematic, schematic.apply(pointsFor(internals.assetId, bimId)))
     }
     const buildGhost = async (entry: Located, bimId: string, seq: number, internals: Internals | null) => {
       let meshes: any[][] = []
@@ -547,7 +557,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const internals = bimId ? internalsFor(assetIdOrBimId, bimId) : null
       if (colored && colored.bimId === bimId && ghost) {
         syncColour()
-        if (active && internals && LIVE_SCHEMATICS.has(internals.type)) active.schematic.apply(pointsFor(internals.assetId, bimId))
+        if (active && internals && LIVE_SCHEMATICS.has(internals.type)) labels.setReading(active.schematic.apply(pointsFor(internals.assetId, bimId)))
         return true
       }
       colored = null
@@ -1326,6 +1336,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
 
   return (
     <div className="dashboard-overlay-container">
+      {/* under the dashboard's own panels, over the canvas; never takes a pointer */}
+      <div ref={labelHostRef} className="eko-hvac-labels" aria-hidden="true" />
       <div
         ref={containerRef}
         className="dashboard-native-container"

@@ -264,6 +264,8 @@ export function toBackendSettings(settings: ProjectApiSettings | undefined): Pro
   if (s.finProjectName) out.finProjectName = s.finProjectName
   if (s.finDisplayName) out.finDisplayName = s.finDisplayName
   if (s.finInterval) out.finInterval = s.finInterval
+  if (typeof s.notificationsCriticalAlarmsEnabled === 'boolean') out.notificationsCriticalAlarmsEnabled = s.notificationsCriticalAlarmsEnabled
+  if (s.finWorkorderExpr?.trim()) out.finWorkorderExpr = s.finWorkorderExpr
   for (const field of MAPPING_FIELDS) {
     if (s[field]) Object.assign(out, { [field]: s[field] })
   }
