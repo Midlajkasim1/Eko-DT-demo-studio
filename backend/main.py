@@ -31,6 +31,7 @@ from fin_client import (
     PROJECT_ID_RE,
     FinScramClient,
     aggregate_and_restructure,
+    alarm_is_open,
     bool_state,
     bool_text,
     clip_decimals,
@@ -480,9 +481,55 @@ def severity_for(priority, bands: dict) -> str:
     return "warning" if warn is not None and priority >= warn else "info"
 
 
+ALARM_HISTORY_LIMIT = 20
+
+
+def _alarm_source(row: dict) -> str:
+    return str(safe_get(row.get("sourceRef"), "val") or "").lstrip("@")
+
+
+def _alarm_history(by_source: dict, source: str, own_id, own_message: str, bands: dict) -> list[dict]:
+    """The other FIN alarm records on one source, newest first: what this FIN read returned, not an archive.
+
+    Records are grouped by source, not message, because a cleared record's message is "Return to
+    normal". An open record with a different message is another alarm, not this one's past, and is
+    left out. Without the alarm's own id there is no telling which record is the current one, so
+    the history is left empty rather than showing the alarm as its own history.
+    """
+    if not source or not own_id:
+        return []
+    own = " ".join(own_message.split()).lower()
+    events = []
+    for rec in by_source.get(source, ()):
+        rec_id = safe_get(rec.get("id"), "val") or None
+        if rec_id == own_id:
+            continue
+        if alarm_is_open(rec) and " ".join(str(rec.get("message") or "").split()).lower() != own:
+            continue
+        priority = rec.get("priority") if isinstance(rec.get("priority"), (int, float)) else None
+        message = clip_decimals(str(rec.get("message") or ""))
+        detail = clip_decimals(str(rec.get("detail") or "").strip())
+        events.append({
+            "id": rec_id,
+            "message": message,
+            "detail": "" if detail.lower() == message.strip().lower() else detail,
+            "priority": priority,
+            "severity": severity_for(priority, bands),
+            "open": alarm_is_open(rec),
+            "occurred": rec.get("occurred") or rec.get("created"),
+            "state": rec.get("state"),
+        })
+    events.sort(key=lambda e: str(e.get("occurred") or ""), reverse=True)
+    return events[:ALARM_HISTORY_LIMIT]
+
+
 def _flatten_alarms(rows: list, bands: dict) -> dict:
     alarms = []
     counts = {"critical": 0, "warning": 0, "info": 0}
+    by_source: dict = {}
+    for rec in rows or []:
+        if rec and rec.get("alarm") is True:
+            by_source.setdefault(_alarm_source(rec), []).append(rec)
 
     for row in open_alarm_rows(rows):   # one per logical alarm: a re-issued FIN record is not a second alarm
         priority = row.get("priority") if isinstance(row.get("priority"), (int, float)) else None
@@ -508,6 +555,7 @@ def _flatten_alarms(rows: list, bands: dict) -> dict:
             "diagnosed": dispatcher == "CONTROL",
             "occurred": row.get("occurred") or row.get("created"),
             "state": row.get("state"),
+            "history": _alarm_history(by_source, _alarm_source(row), safe_get(row.get("id"), "val") or None, str(row.get("message") or ""), bands),
         })
         # optional: present only when a validated FD&D mapping matches, so other consumers see no change
         alarms[-1].update(fdd_recommend(message, detail, alarms[-1]["diagnosed"]) or {})

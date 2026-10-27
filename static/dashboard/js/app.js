@@ -42,7 +42,7 @@
       navMin: ls.get('eko-nav') === 'min',
       exp: {},   /* exclusive accordion (D28): at most one module open */
       alarmF: { sev: new Set(), sys: new Set() },
-      triageOpen: {},
+      triageOpen: {}, alHistOpen: {},   /* alarm id -> its history is expanded */
       assetSel: null, apTab: 'alarms',
       dock: { tool: null, slice: false, bloom: null, style: 'default', tone: 'blue',
               level: 'ALL', layer: 'all', alerts: 'all', minimap: false },
@@ -1097,6 +1097,9 @@
       s.has(v) ? s.delete(v) : s.add(v); render(); },
     tgTgl(el){ const g = el.dataset.g;
       E.state.triageOpen[g] = E.state.triageOpen[g] === false; render(); },
+    alHist(el){ const id = el.dataset.v;
+      E.state.alHistOpen[id] = !E.state.alHistOpen[id]; render();
+      const b = document.querySelector('[data-act="alHist"][data-v="' + CSS.escape(id) + '"]'); if(b) b.focus({ preventScroll: true }); },   /* render() rebuilds the button: keep the keyboard where it was */
 
     /* Asset journey: any entry point opens the ONE docked panel. */
     openAsset(el){

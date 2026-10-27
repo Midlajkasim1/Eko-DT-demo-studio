@@ -1341,6 +1341,22 @@ window.EKO_C = (function(){
     const wtyDates = (wtyStartVal ? `<div class="aprow"><dt>${esc(t('apWtyStart'))}</dt><dd>${esc(wtyStartVal)}</dd></div>` : '')
       + (wtyEndVal ? `<div class="aprow"><dt>${esc(t('apWtyEnd'))}</dt><dd>${esc(wtyEndVal)}</dd></div>` : '')
       + (wtyLeftTxt ? `<div class="aprow"><dt>${esc(t('apWtyRemain'))}</dt><dd>${esc(wtyLeftTxt)}</dd></div>` : '');
+    /* Alarm history: one toggle per alarm, keyed by the alarm's id (never its position); its events come with the alarm */
+    const histOpen = a => !!(E.state.alHistOpen && E.state.alHistOpen[a.id]);
+    const histBtn = a => {
+      if(!a.id) return '';
+      const on = histOpen(a), lbl = esc(t(on ? 'alHistCollapse' : 'alHistExpand'));
+      return `<button type="button" class="alhbtn" data-act="alHist" data-v="${esc(a.id)}" aria-expanded="${on}"${on ? ` aria-controls="alh-${esc(a.id)}"` : ''} aria-label="${lbl}" data-tip="${lbl}">${on ? '−' : '+'}</button>`;
+    };
+    const histWhen = ms => ms == null ? '' : new Date(ms).toLocaleString(arL ? 'ar-AE' : 'en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+    const histPanel = a => {
+      if(!a.id || !histOpen(a)) return '';
+      const list = Array.isArray(a.hist) ? a.hist : null;   /* no list = the backend sent none; an empty list = FIN holds no other record */
+      const inner = !list ? `<p class="alempty">${esc(t('alHistUnavail'))}</p>`
+        : !list.length ? `<p class="alempty">${esc(t('alHistNone'))}</p>`
+        : `<ul class="alhl">${list.map(h => `<li class="alhe"><div class="alhh"><span class="alhw tMonoS">${esc(histWhen(h.at))}</span><span class="statchip" data-sev="${h.sev}">${esc(t('rib'+h.sev[0].toUpperCase()+h.sev.slice(1)).toLowerCase())}</span><span class="alhs">${esc(t(h.open ? 'alHistOpen' : 'alHistCleared'))}</span></div><div class="alhm">${esc(h.msg)}</div>${h.tech ? `<div class="alreftech">${esc(h.tech)}</div>` : ''}</li>`).join('')}</ul>`;
+      return `<div class="alhist" id="alh-${esc(a.id)}" role="region" aria-label="${esc(t('alHistTitle'))}">${inner}${list ? `<div class="alhnote">${esc(t('alHistScope'))}</div>` : ''}</div>`;
+    };
     let body = '';
     if(tab === 'alarms'){
       const fddHtml = fddRows.length
@@ -1353,10 +1369,11 @@ window.EKO_C = (function(){
         + alarmPtHtml
         + (als.length ? als.map(a => `<div class="alref">
         <div class="alrefh"><span class="statchip" data-sev="${a.sev}">${esc(t('rib'+a.sev[0].toUpperCase()+a.sev.slice(1)).toLowerCase())}</span>
-          <span class="alrefage tMonoS msA">${esc(a.age)}</span></div>
+          <span class="alrefage tMonoS msA">${esc(a.age)}</span>${histBtn(a)}</div>
         <div class="alreft">${esc(E.alarmLines(a).main)}</div>${E.alarmLines(a).sub ? `<div class="alreftech">${esc(E.alarmLines(a).sub)}</div>` : ''}
         ${a.recEn ? `<div class="alrec"><span class="alrecl">${esc(t('apRecommended'))}</span><div class="alrect">${esc(E.lang === 'ar' ? (a.recAr || a.recEn) : a.recEn)}</div>${a.basisEn ? `<div class="alrecb"><span class="alrecl">${esc(t('apRecBasis'))}</span> ${esc(E.lang === 'ar' ? (a.basisAr || a.basisEn) : a.basisEn)}</div>` : ''}</div>` : ''}
         ${a.ack ? `<div class="alrefack">${esc(t('ackShort',{time:a.ack.time,who:a.ack.who}))}</div>` : ''}
+        ${histPanel(a)}
       </div>`).join('') : `<p class="alempty">${esc(t('apNoAlarms'))}</p>`);
     } else if(tab === 'analytics'){
       body = `<h4 class="tLbl">${esc(t('apLiveParams'))}</h4>`

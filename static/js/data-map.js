@@ -240,6 +240,14 @@
       alarm.recEn = alarm.recAr = a.recommendation;
       alarm.basisEn = alarm.basisAr = a.basis || '';
     }
+    /* optional: FIN's other records on this alarm's source (backend/main.py _alarm_history); no field = the backend sent none */
+    if (Array.isArray(a.history)) {
+      alarm.hist = a.history.map(function (h) {
+        var d = parseWhen(h.occurred);
+        return { id: h.id || null, msg: h.message || '', tech: String(h.detail || '').trim(), sev: sev(h.severity), open: h.open === true,
+          at: d ? d.getTime() : null, state: h.state == null ? null : String(h.state) };
+      });
+    }
     return alarm;
   }
 
