@@ -47,6 +47,8 @@ export const ECO_FILTERS: EcoFilterPoint[] = ['PRE_FILTER', 'BAG_FILTER', 'BOX_F
 
 export type EcoAnchor = {
   key:      'preFilter' | 'bagFilter' | 'boxFilter' | 'uv1' | 'uv2' | 'kefStatus'
+  /** The FIN point the label is for */
+  title:    string
   position: THREE.Vector3
   side:     'above' | 'below'
 }
@@ -161,10 +163,10 @@ export function createEcoSchematic(
 
   const ANCHOR_KEY = { PRE_FILTER: 'preFilter', BAG_FILTER: 'bagFilter', BOX_FILTER: 'boxFilter' } as const
   const anchors: EcoAnchor[] = [
-    ...filters.map((f, i) => ({ key: ANCHOR_KEY[f], position: new THREE.Vector3(xs[`filter${i}`], hy * 0.9, 0), side: 'above' as const })),
-    { key: 'uv1',       position: new THREE.Vector3(xs.uv1, -hy * 0.9, 0), side: 'below' },
-    { key: 'uv2',       position: new THREE.Vector3(xs.uv2, -hy * 0.9, 0), side: 'below' },
-    { key: 'kefStatus', position: new THREE.Vector3(xs.fan, -hy * 0.9, 0), side: 'below' },
+    ...filters.map((f, i) => ({ key: ANCHOR_KEY[f], title: f as string, position: new THREE.Vector3(xs[`filter${i}`], hy * 0.9, 0), side: 'above' as const })),
+    { key: 'uv1',       title: '1ST_STAGE_UV_ALARM', position: new THREE.Vector3(xs.uv1, -hy * 0.9, 0), side: 'below' },
+    { key: 'uv2',       title: '2ND_STAGE_UV_ALARM', position: new THREE.Vector3(xs.uv2, -hy * 0.9, 0), side: 'below' },
+    { key: 'kefStatus', title: 'KEF_ON_STS',         position: new THREE.Vector3(xs.fan, -hy * 0.9, 0), side: 'below' },
   ]
 
   const filterColour = (d: boolean | null) => d == null ? NO_DATA : d ? FILTER_DIRTY : FILTER_CLEAN

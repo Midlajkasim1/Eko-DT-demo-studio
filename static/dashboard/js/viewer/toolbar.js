@@ -28,7 +28,6 @@ window.EKO_VT = (function(){
   /* ------------------------------ view state ------------------------------ */
   /* Every non-default view setting, named for people (D71). */
   const LBL = { all:'layAll', arch:'layArch', elec:'layElec', int:'layInt', mech:'layMech', str:'layStr' };
-  const LAYSHORT = { arch:'AR', elec:'EL', int:'IN', mech:'ME', str:'ST' };
   const chosenLayers = d => Array.isArray(d.layer) ? d.layer : (d.layer && d.layer !== 'all' ? [d.layer] : []);
   const STY = { default:'styDefault', photo:'styPhoto', minimal:'styMinimal', xray:'styXray' };
   const levelName = (E, l) => /^L\d+$/.test(l) ? E.t('lvlName', { n: l.slice(1) }) : l;
@@ -55,7 +54,7 @@ window.EKO_VT = (function(){
       case 'select': case 'measure': on = d.tool === def.id; break;
       case 'slice': on = !!d.slice; break;
       case 'levels':  on = d.bloom === 'levels' || d.level !== 'ALL'; tag = d.level !== 'ALL' ? d.level : null; break;
-      case 'layers': { const sel = chosenLayers(d); on = sel.length > 0; tag = on ? sel.map(id => LAYSHORT[id] || id).join('+') : null; break; }
+      case 'layers': { const sel = chosenLayers(d); on = sel.length > 0; tag = on ? E.t('layDisciplines') : null; break; }
       case 'minimap': on = !!d.minimap; break;
       case 'style':   on = d.style !== 'default'; tag = on ? E.t(STY[d.style] || 'styDefault') : null; break;
       case 'more':    on = BLOOMS_MORE.includes(d.bloom); dot = viewState(E).length > 0; break;

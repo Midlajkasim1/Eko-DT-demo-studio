@@ -6153,6 +6153,108 @@
   color:var(--t3)
 }
 
+.dashboard-native-container .alhbtn {
+  margin-inline-start:auto;
+  flex:none;
+  min-width:20px;
+  height:20px;
+  padding:0 5px;
+  border:1px solid var(--bd1);
+  border-radius:4px;
+  background:transparent;
+  color:var(--t2);
+  font:inherit;
+  font-size:var(--txValueSz);
+  line-height:1;
+  cursor:pointer
+}
+
+.dashboard-native-container .alhbtn:hover {
+  color:var(--t1);
+  background:var(--s1)
+}
+
+.dashboard-native-container .alhbtn:focus-visible {
+  outline:2px solid var(--acc);
+  outline-offset:1px
+}
+
+.dashboard-native-container .alhist {
+  min-width:0;
+  margin-block-start:6px;
+  padding-block-start:6px;
+  border-block-start:1px dashed var(--bd1);
+  overflow-wrap:anywhere
+}
+
+.dashboard-native-container .alhl {
+  list-style:none;
+  margin:0;
+  padding:0;
+  max-height:220px;
+  overflow:auto
+}
+
+.dashboard-native-container .alhe {
+  padding-block:4px;
+  padding-inline-start:8px;
+  border-inline-start:2px solid var(--bd1)
+}
+
+.dashboard-native-container .alhe + .alhe {
+  margin-block-start:4px
+}
+
+.dashboard-native-container .alhh {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px
+}
+
+.dashboard-native-container .alhw,.dashboard-native-container .alhs,.dashboard-native-container .alhnote {
+  font-size:var(--txCapSz);
+  color:var(--t3)
+}
+
+.dashboard-native-container .alhm {
+  font-size:var(--txValueSz);
+  color:var(--t1)
+}
+
+.dashboard-native-container .alhnote {
+  margin-block-start:4px
+}
+
+.dashboard-native-container[data-density="compact"] .alhist {
+  margin-block-start:4px;
+  padding-block-start:4px
+}
+
+.dashboard-native-container .alrec {
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  margin-block-start:4px;
+  padding-inline-start:8px;
+  border-inline-start:2px solid var(--bd1)
+}
+
+.dashboard-native-container .alrecl {
+  font-size:var(--txCapSz);
+  color:var(--t3)
+}
+
+.dashboard-native-container .alrect {
+  font-size:var(--txValueSz);
+  color:var(--t1)
+}
+
+.dashboard-native-container .alrecb {
+  font-size:var(--txCapSz);
+  color:var(--t2)
+}
+
 .dashboard-native-container .actref {
   display:flex;
   flex-direction:column;

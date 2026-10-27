@@ -849,7 +849,7 @@ window.EKO_C = (function(){
     const s = E.state, t = E.t.bind(E);
     let rows = E.data.assets.slice();
     const q = (s.regQ||'').toLowerCase();
-    if(q) rows = rows.filter(r => r.id.toLowerCase().includes(q) || r.zone.toLowerCase().includes(q));
+    if(q) rows = rows.filter(r => r.id.toLowerCase().includes(q) || String(r.typeEn || '').toLowerCase().includes(q));
     if(s.regStF) rows = rows.filter(r => r.st === s.regStF);
     if(s.regSysF) rows = rows.filter(r => (r.alarms||[]).some(id => E.alarm(id).fam === s.regSysF));
     if(s.regSevF) rows = rows.filter(r => (r.alarms||[]).some(id => E.alarm(id).sev === s.regSevF));
@@ -886,10 +886,10 @@ window.EKO_C = (function(){
         <button class="btnG btnSm" data-act="none">${esc(t('viewsW'))} ${icon('chevD',11)}</button>
       </div>
       <div class="regscroll"><table class="reg">
-        <thead><tr>${th('id','colAssetId')}${th('st','colStatus',true)}${th('floor','colFloor',true)}${th('zone','colZone')}${th('wos','colWos')}<th>${esc(t('colWoStatus'))}</th><th></th></tr></thead>
+        <thead><tr>${th('id','colAssetId')}${th('st','colStatus',true)}${th('floor','colFloor',true)}${th('wos','colWos')}<th>${esc(t('colWoStatus'))}</th><th></th></tr></thead>
         <tbody>${rows.map(r => `<tr data-act="openAsset" data-asset="${esc(r.id)}" data-tab="alarms" data-on="${s.assetSel===r.id}" tabindex="0">
           <td class="mono">${esc(r.id)}</td><td>${chipFor(r)}</td>
-          <td>${esc(r.floor)}</td><td data-tip="${esc(E.lang==='ar'?(r.zoneAr||r.zone):r.zone)}" data-tipif="trunc">${esc(E.lang==='ar'?(r.zoneAr||r.zone):r.zone)}</td>
+          <td>${esc(r.floor)}</td>
           <td class="mono" data-act="openAsset" data-asset="${esc(r.id)}" data-tab="workorder">${r.wos||t('emptyDash')}</td><td data-act="openAsset" data-asset="${esc(r.id)}" data-tab="workorder">${woCell(r)}</td>
           <td><span class="cT3">${icon('dots',13)}</span></td></tr>`).join('')}
         </tbody></table></div></section>`;
@@ -1136,7 +1136,7 @@ window.EKO_C = (function(){
       if (fromPts.length) {
         fromPts.forEach(p => {
           if (!p || !p.reporting) return;
-          if (isFddNav(p.navName) || p.alarmPoint === true) return;
+          if (isFddNav(p.navName)) return;
           const folded = fcuFold(p.navName);
           if (folded.indexOf('warrant') !== -1) return;
           push(p.navName, p.text || p.currentValue, p.unit, p);
@@ -1235,6 +1235,8 @@ window.EKO_C = (function(){
     als.forEach(a => { if (sevN[a.sev] != null) sevN[a.sev]++; });
     const worst = ['critical','high','medium'].map(s => als.find(a => a.sev === s)).find(Boolean) || als[0];
     const sevChips = ['critical','high','medium'].filter(s => sevN[s]).map(s => `<span class="statchip" data-sev="${s}">${sevN[s]} ${esc(t('rib'+s[0].toUpperCase()+s.slice(1)))}</span>`).join('');
+    /* The floor and the type; whichever is missing leaves no stray separator */
+    const ctx = [arL ? (r.levelAr || r.level) : r.level, arL ? (r.typeAr || r.typeEn) : r.typeEn].filter(Boolean).join(' \u00b7 ');
     const ctl = window.EKO_CTL && window.EKO_CTL.showsControl(E, r);
     let tab = E.state.apTab;
     if (tab === 'activity') tab = 'analytics';
@@ -1263,7 +1265,11 @@ window.EKO_C = (function(){
       const pairGroups = cmp && Array.isArray(cmp.pairs) ? cmp.pairs.filter(p => p.actual != null || p.sp != null).map(p => ({ label: t(p.key), a: p.actual, b: p.sp, unit: p.unit })) : [];
       const groups = dayGroups.length >= 2 ? dayGroups : pairGroups;
       if (!groups.length || typeof window.ekoCompareBars !== 'function') {
-        return `<p class="tCap">${esc(t('emptyDash'))} · ${esc(t(reason))}</p>`;
+        const hs = cmp && cmp.histState;
+        const what = hs === 'loading' ? t('apHistLoading') : hs === 'failed' ? t('apHistFailed')
+          : (r.st === 'stale' || r.trendKind === 'state') ? t(reason) : t('apNoHist');
+        const pt = cmp && cmp.actName && hs !== 'none' ? `${trP(cmp.actName)} · ` : '';
+        return `<p class="tCap">${esc(pt + what)}</p>`;
       }
       const days = dayGroups.length >= 2;
       const cap = days
@@ -1335,6 +1341,22 @@ window.EKO_C = (function(){
     const wtyDates = (wtyStartVal ? `<div class="aprow"><dt>${esc(t('apWtyStart'))}</dt><dd>${esc(wtyStartVal)}</dd></div>` : '')
       + (wtyEndVal ? `<div class="aprow"><dt>${esc(t('apWtyEnd'))}</dt><dd>${esc(wtyEndVal)}</dd></div>` : '')
       + (wtyLeftTxt ? `<div class="aprow"><dt>${esc(t('apWtyRemain'))}</dt><dd>${esc(wtyLeftTxt)}</dd></div>` : '');
+    /* Alarm history: one toggle per alarm, keyed by the alarm's id (never its position); its events come with the alarm */
+    const histOpen = a => !!(E.state.alHistOpen && E.state.alHistOpen[a.id]);
+    const histBtn = a => {
+      if(!a.id) return '';
+      const on = histOpen(a), lbl = esc(t(on ? 'alHistCollapse' : 'alHistExpand'));
+      return `<button type="button" class="alhbtn" data-act="alHist" data-v="${esc(a.id)}" aria-expanded="${on}"${on ? ` aria-controls="alh-${esc(a.id)}"` : ''} aria-label="${lbl}" data-tip="${lbl}">${on ? '−' : '+'}</button>`;
+    };
+    const histWhen = ms => ms == null ? '' : new Date(ms).toLocaleString(arL ? 'ar-AE' : 'en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+    const histPanel = a => {
+      if(!a.id || !histOpen(a)) return '';
+      const list = Array.isArray(a.hist) ? a.hist : null;   /* no list = the backend sent none; an empty list = FIN holds no other record */
+      const inner = !list ? `<p class="alempty">${esc(t('alHistUnavail'))}</p>`
+        : !list.length ? `<p class="alempty">${esc(t('alHistNone'))}</p>`
+        : `<ul class="alhl">${list.map(h => `<li class="alhe"><div class="alhh"><span class="alhw tMonoS">${esc(histWhen(h.at))}</span><span class="statchip" data-sev="${h.sev}">${esc(t('rib'+h.sev[0].toUpperCase()+h.sev.slice(1)).toLowerCase())}</span><span class="alhs">${esc(t(h.open ? 'alHistOpen' : 'alHistCleared'))}</span></div><div class="alhm">${esc(h.msg)}</div>${h.tech ? `<div class="alreftech">${esc(h.tech)}</div>` : ''}</li>`).join('')}</ul>`;
+      return `<div class="alhist" id="alh-${esc(a.id)}" role="region" aria-label="${esc(t('alHistTitle'))}">${inner}${list ? `<div class="alhnote">${esc(t('alHistScope'))}</div>` : ''}</div>`;
+    };
     let body = '';
     if(tab === 'alarms'){
       const fddHtml = fddRows.length
@@ -1347,14 +1369,15 @@ window.EKO_C = (function(){
         + alarmPtHtml
         + (als.length ? als.map(a => `<div class="alref">
         <div class="alrefh"><span class="statchip" data-sev="${a.sev}">${esc(t('rib'+a.sev[0].toUpperCase()+a.sev.slice(1)).toLowerCase())}</span>
-          <span class="alrefage tMonoS msA">${esc(a.age)}</span></div>
+          <span class="alrefage tMonoS msA">${esc(a.age)}</span>${histBtn(a)}</div>
         <div class="alreft">${esc(E.alarmLines(a).main)}</div>${E.alarmLines(a).sub ? `<div class="alreftech">${esc(E.alarmLines(a).sub)}</div>` : ''}
-        <div class="alrefack">${a.ack ? esc(t('ackShort',{time:a.ack.time,who:a.ack.who})) : esc(t('apUnack'))}</div>
-      </div>`).join('') : `<p class="alempty">${esc(t('apNoAlarms'))}</p>`)
-      + `<p class="apnote">${esc(t('finNote'))}</p>`;
+        ${a.recEn ? `<div class="alrec"><span class="alrecl">${esc(t('apRecommended'))}</span><div class="alrect">${esc(E.lang === 'ar' ? (a.recAr || a.recEn) : a.recEn)}</div>${a.basisEn ? `<div class="alrecb"><span class="alrecl">${esc(t('apRecBasis'))}</span> ${esc(E.lang === 'ar' ? (a.basisAr || a.basisEn) : a.basisEn)}</div>` : ''}</div>` : ''}
+        ${a.ack ? `<div class="alrefack">${esc(t('ackShort',{time:a.ack.time,who:a.ack.who}))}</div>` : ''}
+        ${histPanel(a)}
+      </div>`).join('') : `<p class="alempty">${esc(t('apNoAlarms'))}</p>`);
     } else if(tab === 'analytics'){
       body = `<h4 class="tLbl">${esc(t('apLiveParams'))}</h4>`
-        + (typeRows || analogRows || `<p class="alempty">${esc(t('emptyDash'))}</p>`)
+        + (typeRows || analogRows || `<p class="alempty">${esc(t('apNoLive'))}</p>`)
         + `<h4 class="tLbl seclbl">${esc(t('apFullT'))}</h4>${graphBlock}`;
     } else if(tab === 'om'){
       body = `<h4 class="tLbl seclbl">${esc(t('omLib'))}</h4>`
@@ -1397,11 +1420,12 @@ window.EKO_C = (function(){
       <div class="aphead">
         <span class="tMono grow fw6">${esc(id)}</span>
         ${sevChips ? `<span class="regsevs">${sevChips}</span>` : ''}
+        ${eqLabelsEye(E, r)}
         <button class="iconbtn icon26 aibtn tipU" data-act="aiOpen" data-ai-label="${esc(id)}" data-ai-topic="alarms" data-ai-cap="${esc(arL?(r.levelAr||r.level):r.level)}" data-tip="${esc(t('ai.about'))}" aria-label="${esc(t('ai.about'))}">${icon('spark',16)}</button>
         <button class="iconbtn icon26" data-act="apWide" data-on="${E.state.apWide?1:0}" aria-pressed="${E.state.apWide?'true':'false'}" aria-label="${esc(t('mpExpand'))}">${icon('maximize',14)}</button>
         <button class="iconbtn icon26" data-act="closeAsset" aria-label="${esc(t('close'))}">${icon('x',12)}</button>
       </div>
-      <div class="apctx" data-tip="${esc(arL?(r.levelAr||r.level):r.level)} \u00b7 ${esc(arL?(r.zoneAr||r.zone):r.zone)}" data-tipif="trunc">${esc(arL?(r.levelAr||r.level):r.level)} · ${esc(arL?(r.zoneAr||r.zone):r.zone)} · ${esc(arL?(r.typeAr||r.typeEn||''):(r.typeEn||''))}</div>
+      <div class="apctx" data-tip="${esc(ctx)}" data-tipif="trunc">${esc(ctx)}</div>
       <div class="appills">
         <button class="btnP btnSm" data-act="locate" data-asset="${esc(id)}">${esc(t('locate3d'))}</button>
         ${woBtn(E, id)}
@@ -1416,6 +1440,19 @@ window.EKO_C = (function(){
              <button class="btnG" data-act="locate" data-asset="${esc(id)}">${esc(t('locate3d'))}</button>`}
         <button class="btnG apcafm" data-act="none" data-tip="${esc(t('apCafm'))}" aria-label="${esc(t('apCafm'))}">⧉</button>
       </div></aside>`;
+  }
+
+  /* Equipment whose 3D graphic carries point labels: the types the viewer draws live internals for (the same words airKind
+     reads, plus FCU). The eye only shows for them: it would do nothing for anything else. */
+  function hasEqLabels(asset){
+    const s = (String(asset && asset.id || '') + ' ' + String(asset && asset.typeEn || '')).toUpperCase();
+    return /(?:^|[^A-Z])(MAHU|ECO|FCU)(?=[^A-Z]|$)/.test(s);
+  }
+  function eqLabelsEye(E, asset){
+    if(!hasEqLabels(asset)) return '';
+    const on = E.state.eqLabelsOn !== false, tp = E.t(on ? 'eqLabelsHideTip' : 'eqLabelsShowTip');
+    return `<button class="iconbtn icon26 mkeye tipU" data-act="eqLabelsToggle" data-on="${on}" aria-pressed="${on}"
+      data-tip="${esc(tp)}" aria-label="${esc(tp)}">${icon(on ? 'eye' : 'eyeOff', 14)}</button>`;
   }
 
   /* Marker visibility (D70): ONE eye control, used in the alarms panel
