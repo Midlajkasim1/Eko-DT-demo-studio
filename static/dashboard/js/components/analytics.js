@@ -808,30 +808,23 @@ window.EKO_A = (function(){
       const label = heatText(z, mode);
       const out = s.hmOutline && heatOver(z, mode);
       const ids = (z.bimIds && z.bimIds.length) ? z.bimIds : (z.bimId ? [z.bimId] : [null]);
-      if (!s.hmLayers.labels && !s.hmLayers.values) return '';
+      const showDot = !!s.hmLayers.sensors;
+      const showLabel = !!s.hmLayers.labels;
+      const showValue = !!s.hmLayers.values;
+      /* The left speck is the sensor. It stays on the card when the name or
+         the value is hidden. With neither, the card is that dot alone. */
+      if (!showDot && !showLabel && !showValue) return '';
       return ids.map((bimId, i) => {
         const key = 'hm:' + z.nameEn + ':' + i;
         const pin = bimId
           ? (pinFn ? pinFn(bimId, key) : `data-bimid="${esc(bimId)}" data-key="${esc(key)}"`)
           : `style="left:${z.rect[0]}%;top:${z.rect[1]}%;width:${Math.max(z.rect[2], 14)}%;height:auto;min-height:72px"`;
         const tone = heatCell(mode, heatValue(z, mode));
-        return `<button class="hmzone${bimId ? ' hmzone3d' : ''}" data-on="${s.hmSel===z.nameEn}" data-out="${out}" data-act="hmSel" data-v="${esc(z.nameEn)}" ${pin}>
-        <span class="hmdot" style="background:${tone}"></span>
-        ${s.hmLayers.labels?`<span class="hmzn">${esc(E.lang==='ar'?(z.nameAr||z.nameEn):z.nameEn)}</span>`:''}
-        ${s.hmLayers.values?`<span class="hmzv">${esc(label)}</span>`:''}</button>`;
-      });
-    }).join('');
-    const dots = !s.hmLayers.sensors ? '' : heatZones(d, s, mode).flatMap(z => {
-      const ids = (z.bimIds && z.bimIds.length) ? z.bimIds : (z.bimId ? [z.bimId] : []);
-      const tone = heatCell(mode, heatValue(z, mode));
-      return ids.map((bimId, i) => {
-        if (!bimId) return '';
-        const key = 'hms:' + z.nameEn + ':' + i;
-        let pin = pinFn ? pinFn(bimId, key) : `data-bimid="${esc(bimId)}" data-key="${esc(key)}"`;
-        pin = pin.indexOf('style="') === -1
-          ? pin + ` style="background:${tone}"`
-          : pin.replace('style="', `style="background:${tone};`);
-        return `<button class="hmsensor hmzone3d" data-on="${s.hmSel===z.nameEn}" data-act="hmSel" data-v="${esc(z.nameEn)}" ${pin} aria-label="${esc(z.nameEn)}"></button>`;
+        const onlyDot = showDot && !showLabel && !showValue && !!bimId;
+        return `<button class="hmzone${bimId ? ' hmzone3d' : ''}${onlyDot ? ' hmdotonly' : ''}" data-on="${s.hmSel===z.nameEn}" data-out="${out}" data-act="hmSel" data-v="${esc(z.nameEn)}" ${pin}>
+        ${showDot?`<span class="hmdot" style="background:${tone}"></span>`:''}
+        ${showLabel?`<span class="hmzn">${esc(E.lang==='ar'?(z.nameAr||z.nameEn):z.nameEn)}</span>`:''}
+        ${showValue?`<span class="hmzv">${esc(label)}</span>`:''}</button>`;
       });
     }).join('');
     const legend = mode === 'comfort' ? E.t('hmLegend') : mode === 'hum' ? E.t('hmLegendHum') : E.t('hmLegendTemp');
@@ -841,8 +834,8 @@ window.EKO_A = (function(){
     /* A cached projection already placed these cards. Stamp data-proj now so
        a dashboard refresh does not hide them for a frame (that blink reads
        as flicker). The blur is left off: sampling the 3D canvas shimmers. */
-    const projected = (tiles + dots).indexOf('left:') !== -1;
-    return `<div class="hmlayer"${projected ? ' data-proj="1"' : ''}${s.hmLayers.sensors ? ' data-sensors="1"' : ''}>${tiles}${dots}</div>
+    const projected = tiles.indexOf('left:') !== -1;
+    return `<div class="hmlayer"${projected ? ' data-proj="1"' : ''}>${tiles}</div>
       <div class="heatbar mzglass">
         <span class="tMonoS cT3">${esc(legend)}</span>
         <span class="hmgrad" data-mode="${mode}"></span>
