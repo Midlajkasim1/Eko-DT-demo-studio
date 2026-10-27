@@ -2127,68 +2127,8 @@
     return n + 'F';
   }
 
-  /* Windows test: open the viewer with ?hmMock=1. No FIN feed required.
-     IS-01..07 step from cool to warm and dry to humid. IAQ-01..04 step
-     from low CO₂ to high, so each category shows a blend across the rooms. */
-  function heatMockOn() {
-    try { if (localStorage.getItem('eko-hm-mock') === '1') return true; } catch (e) {}
-    return /(?:^|[?&])hmMock=1(?:&|$)/.test(String(location.search || ''));
-  }
-
-  var MOCK_IS = [
-    { t: 20.8, rh: 41 }, { t: 21.6, rh: 48 }, { t: 22.4, rh: 55 }, { t: 23.1, rh: 62 },
-    { t: 23.9, rh: 69 }, { t: 24.6, rh: 75 }, { t: 25.4, rh: 82 }
-  ];
-  var MOCK_CO2 = [640, 820, 1040, 1260];
-
-  function seedMockHistory(id, base, swing) {
-    if (heatHist[id] && heatHist[id].days) return;
-    var days = {};
-    var today = new Date();
-    today.setHours(0, 0, 0, 0);
-    for (var i = 0; i < 31; i++) {
-      var day = new Date(today);
-      day.setDate(today.getDate() - i);
-      var wave = Math.sin(i / 3) * swing;
-      var slots = [];
-      for (var b = 0; b < 8; b++) slots.push(Math.round((base + wave + Math.sin((b + i) / 2) * swing * 0.6) * 10) / 10);
-      var avg = slots.reduce(function (n, x) { return n + x; }, 0) / 8;
-      days[ymd(day)] = { v: avg, slots: slots };
-    }
-    heatHist[id] = { pending: false, days: days };
-  }
-
-  function mockHeatEquipment() {
-    var list = [];
-    for (var i = 0; i < MOCK_IS.length; i++) {
-      var n = String(i + 1).padStart(2, '0');
-      var tempId = 'mock:IS' + n + ':temp';
-      var rhId = 'mock:IS' + n + ':rh';
-      seedMockHistory(tempId, MOCK_IS[i].t, 0.6);
-      seedMockHistory(rhId, MOCK_IS[i].rh, 3);
-      list.push({
-        name: 'IS-' + n, floor: 'GROUND FLR',
-        points: [
-          { id: tempId, navName: 'Zone Temp', currentValue: String(MOCK_IS[i].t) },
-          { id: rhId, navName: 'Zone Humidity', currentValue: String(MOCK_IS[i].rh) }
-        ]
-      });
-    }
-    for (var j = 0; j < MOCK_CO2.length; j++) {
-      var k = String(j + 1).padStart(2, '0');
-      var co2Id = 'mock:IAQ' + k + ':co2';
-      seedMockHistory(co2Id, MOCK_CO2[j], 40);
-      list.push({
-        name: 'IAQ-' + k, floor: 'GROUND FLR',
-        points: [{ id: co2Id, navName: 'CO2', currentValue: String(MOCK_CO2[j]) }]
-      });
-    }
-    return list;
-  }
-
   function applyHeat(list) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
-    if (heatMockOn()) list = mockHeatEquipment();
     if (!site || !site.heat || !Array.isArray(list)) return;
     var zones = [];
     for (var i = 1; i <= 4; i++) zones.push(blankZone('IAQ' + String(i).padStart(2, '0')));
@@ -2243,15 +2183,6 @@
       heatStep = i == null ? null : i;
       applyShown();
       return playLabel();
-    },
-    mock: function (on) {
-      try {
-        if (on === false) localStorage.removeItem('eko-hm-mock');
-        else localStorage.setItem('eko-hm-mock', '1');
-      } catch (e) {}
-      heatHist = {};
-      applyHeat([]);
-      paint();
     }
   };
 
@@ -2295,5 +2226,4 @@ window.addEventListener('dashboard-data', function onData(e) {
   if (window.DashboardData && window.DashboardData.documents) applyDocuments(window.DashboardData.documents);
   if (window.DashboardData && window.DashboardData.workorders) applyWorkOrders(window.DashboardData.workorders);
   if (window.DashboardData && window.DashboardData.alarmHistory) applyAlarmHistory(window.DashboardData.alarmHistory);
-  if (heatMockOn()) { applyHeat([]); paint(); }
 })();
