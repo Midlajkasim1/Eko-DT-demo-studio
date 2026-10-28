@@ -18,6 +18,7 @@
     "test:role": "node scripts/test-default-role.mjs",
     "test:notices": "node scripts/test-notification-notices.mjs",
     "test:siteadmin": "node scripts/test-notification-admin.mjs",
+    "test:askinput": "node scripts/test-ask-input.mjs",
     "build:renders": "node scripts/buildBuiltinRenders.mjs"
   },
   "dependencies": {

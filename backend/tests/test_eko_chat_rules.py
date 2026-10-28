@@ -156,6 +156,193 @@ class AlarmTests(RulesBase):
             self.assertEqual(body["card"]["total"], 1, q)
 
 
+def eq(name, floor="L1", kind="ahu", tags=None, **extra):
+    return dict({"name": name, "floor": floor, "type": kind, "category": "hvac", "tags": tags if tags is not None else [kind],
+                 "inAlarm": False, "alarms": [], "points": []}, **extra)
+
+
+class LookupTests(RulesBase):
+    """Equipment by name and by class (AHU, FCU, EF), from the open project's own equipment read; close matches are offered, never chosen."""
+    def fleet(self, items):
+        return mock.patch.object(main, "cached_equip_data", {"timestamp": datetime.now().isoformat(), "equipment": items})
+
+    def test_equipment_named_an_exact_name_is_that_item(self):
+        self.start()
+        with self.fleet([eq("AHU-1"), eq("AHU-10"), eq("FCU-1", kind="fcu")]):
+            for q in ("Show equipment named AHU-1", "show equipment AHU-1", "find the asset called AHU-1"):
+                body = self.ok(q)
+                self.assertEqual(body["tool_calls"][0]["name"], "get_equipment_status", q)
+                self.assertTrue(body["answer"].startswith("AHU-1: open alarms 0"), (q, body["answer"]))
+
+    def test_a_name_that_is_only_close_is_offered_not_chosen(self):
+        self.start()
+        with self.fleet([eq("AHU-01"), eq("AHU-10"), eq("FCU-1", kind="fcu")]):
+            body = self.ok("Show equipment named AHU-1")
+        self.assertIn("No equipment named AHU-1 was found.", body["answer"])
+        self.assertIn("AHU-01", body["answer"])
+        self.assertIn("AHU-10", body["answer"])
+        self.assertNotIn("open alarms", body["answer"])          # neither one was picked
+        self.assertEqual(sorted(r[0] for r in body["card"]["rows"]), ["AHU-01", "AHU-10"])
+
+    def test_two_items_with_the_same_name_are_ambiguous(self):
+        self.start()
+        with self.fleet([eq("AHU-1", floor="L1"), eq("AHU_1", floor="L2")]):
+            body = self.ok("Show equipment named AHU-1")
+        self.assertIn("More than one equipment item matches AHU-1.", body["answer"])
+        self.assertNotIn("open alarms", body["answer"])
+        self.assertEqual(len(body["card"]["rows"]), 2)
+
+    def test_no_such_equipment_invents_nothing(self):
+        self.start()
+        with self.fleet([eq("AHU-1")]):
+            body = self.ok("Show equipment named PMP-77")
+        self.assertIn("No equipment named PMP-77 was found.", body["answer"])
+        self.assertEqual(body["card"]["rows"], [])
+
+    def test_a_class_by_its_abbreviation(self):
+        self.start()
+        fleet = [eq("AHU-1"), eq("AHU-2"), eq("FCU-1", kind="fcu"), eq("EF-01", kind="fan", tags=["fan"]), eq("EF-02", kind="fan", tags=["fan"]),
+                 eq("EFFLUENT-PUMP", kind="pump", tags=["pump"])]
+        with self.fleet(fleet):
+            for q, names in (("What AHUs do we have?", ["AHU-1", "AHU-2"]), ("List all FCUs", ["FCU-1"]), ("show ahu", ["AHU-1", "AHU-2"]),
+                             ("How many EF are there?", ["EF-01", "EF-02"]), ("Which fcus are available in this project?", ["FCU-1"])):
+                body = self.ok(q)
+                self.assertEqual(body["tool_calls"][0]["name"], "find_equipment", q)
+                self.assertEqual(sorted(r[0] for r in body["card"]["rows"]), names, q)
+                kind = body["card"]["filters"][0]["value"]
+                self.assertTrue(body["answer"].startswith(f"Equipment of type {kind}: {len(names)}."), (q, body["answer"]))
+
+    def test_a_class_the_project_does_not_have_says_so(self):
+        self.start()
+        with self.fleet([eq("AHU-1")]):
+            body = self.ok("What chillers do we have?")
+        self.assertIn("No equipment of type chiller was found", body["answer"])
+        self.assertEqual(body["card"]["total"], 0)
+
+    def test_words_that_are_not_a_class_do_not_become_one(self):
+        self.start()
+        for q in ("what alarms do we have", "show help", "list notifications please"):
+            body = self.ok(q)
+            self.assertNotIn("Equipment of type", body["answer"], q)
+            self.assertNotIn("No equipment of type", body["answer"], q)
+
+    def test_the_selected_project_phrasings_list_the_equipment(self):
+        self.start()
+        for q in ("List all equipment in the currently selected project.", "Show the equipment in this project.", "show equipment from the current project"):
+            body = self.ok(q)
+            self.assertEqual((body["route"], body["card"]["total"]), ("direct", 3), q)
+
+    def test_the_lookup_reads_only_the_open_projects_equipment(self):
+        self.start()
+        self.assertEqual(sorted(r[0] for r in self.ok("What AHUs do we have?")["card"]["rows"]), ["EQ-1"])
+        self.assertEqual(self.ok("Show equipment named EQ-1")["project"]["name"], "projA")
+        self.http.cookies.clear()
+        r = self.ask("What AHUs do we have?")
+        self.assertEqual(r.status_code, 401)
+        self.assertNotIn("EQ-1", r.text)
+
+    def test_an_empty_or_unread_equipment_cache_is_reported(self):
+        self.start()
+        with self.fleet([]):
+            self.assertIn("No equipment of type ahu was found", self.ok("What AHUs do we have?")["answer"])
+            self.assertIn("No equipment named AHU-1 was found.", self.ok("Show equipment named AHU-1")["answer"])
+        with mock.patch.object(main, "cached_equip_data", {}):
+            for q in ("What AHUs do we have?", "Show equipment named AHU-1"):
+                self.assertIn("has not read this data from FIN yet", self.ok(q)["answer"], q)
+
+
+class LatestAlarmTests(RulesBase):
+    """'Latest alarms' are the newest alarm records of FIN's last alarm read, open or cleared; 'latest open alarms' is the open list."""
+    ROWS = [
+        {"alarm": True, "active": True, "message": "High temperature", "priority": 300, "sourceRef": {"val": "@e1", "dis": "AHU-1"}, "occurred": "2026-01-02T08:00:00"},
+        {"alarm": True, "active": None, "message": "Return to normal", "priority": 300, "sourceRef": {"val": "@e2", "dis": "FCU-9"}, "occurred": "2026-01-03T09:00:00"},
+        {"alarm": True, "active": None, "message": "Low flow", "priority": 160, "sourceRef": {"val": "@e3", "dis": "PMP-2"}, "occurred": "2026-01-01T07:00:00"},
+    ]
+
+    def frozen(self, rows=None, cfg=RULES):
+        self.start(cfg=cfg)
+        main._cancel_polling()
+        main.client.last_alarm_rows = list(self.ROWS if rows is None else rows)
+
+    def test_latest_alarms_include_cleared_records_and_say_so(self):
+        self.frozen()
+        body = self.ok("Show the latest alarms")
+        rows = body["card"]["rows"]
+        self.assertEqual([(r[0], r[1], r[5]) for r in rows], [("FCU-9", "critical", False), ("AHU-1", "critical", True), ("PMP-2", "warning", False)])
+        self.assertEqual(body["card"]["columns"][-1], "open")
+        self.assertEqual(body["card"]["headline"]["key"], "alarmRecords")
+        self.assertIn("open or cleared", body["answer"])
+        self.assertIn("not a full alarm archive", body["answer"])
+
+    def test_latest_open_alarms_is_the_open_list_only(self):
+        self.frozen()
+        body = self.ok("Show the latest open alarms")
+        self.assertEqual(body["card"]["headline"]["key"], "alarms")
+        self.assertEqual([r[0] for r in body["card"]["rows"]], ["EQ-1"])        # the cache's open alarms, none of the cleared ones
+
+    def test_severity_filter_and_limit_use_the_configured_bands(self):
+        self.frozen()
+        crit = self.ok("show latest critical alerts")
+        self.assertEqual({r[1] for r in crit["card"]["rows"]}, {"critical"})
+        self.assertEqual(len(crit["card"]["rows"]), 2)
+        one = self.ok("Show the most recent alarm")
+        self.assertEqual([r[0] for r in one["card"]["rows"]], ["FCU-9"])
+        self.assertEqual(one["card"]["total"], 3)
+
+    def test_no_records_is_said_plainly(self):
+        self.frozen(rows=[])
+        self.assertIn("holds no alarm records", self.ok("Show the latest alarms")["answer"])
+
+    def test_without_a_history_source_it_is_unavailable_not_the_open_list(self):
+        self.start()
+        view = main._chat_view()
+        no_history = eko_chat.run_tool("get_alarms", {"history": True}, eko_chat.DataView(**{**view.__dict__, "alarm_records": None}))
+        self.assertEqual((no_history["available"], no_history["reason"]), (False, "alarm_history_unavailable"))
+
+    def test_existing_open_alarm_questions_are_unchanged(self):
+        self.frozen()
+        for q, rule in (("Show critical alerts", "alarms.list"), ("What are the current open alarms?", "alarms.list"),
+                        ("how many alerts are open", "alarms.count"), ("show warning alarms", "alarms.list")):
+            body = self.ok(q)
+            self.assertFalse(body["card"]["headline"]["key"] == "alarmRecords", q)
+
+
+class NotificationLimitTests(RulesBase):
+    def seed(self, n=3):
+        self.start()
+        return [self.store.condition(SITE, "alarm.critical", True, severity="critical", source_kind="alarm", source_ref=f"@a{i}",
+                                     asset_id=f"AHU-{i}", state=f"@a{i}") for i in range(1, n + 1)]
+
+    def test_every_phrasing_of_one_recent_notification_is_answered_with_one(self):
+        self.seed()
+        for q in ("recent one notification", "Show me one recent notification", "Show the latest notification",
+                  "Get the most recent notification", "show a recent notification", "give me the newest notification"):
+            body = self.ok(q)
+            self.assertEqual(body["tool_calls"][0]["name"], "get_notifications", q)
+            self.assertEqual(body["card"]["total"], 1, q)
+            self.assertEqual(body["route"], "direct", q)
+
+    def test_a_requested_number_is_respected_and_the_plural_is_not_limited_to_one(self):
+        self.seed(4)
+        self.assertEqual(self.ok("show 2 recent notifications")["card"]["total"], 2)
+        self.assertEqual(self.ok("last 3 notifications")["card"]["total"], 3)
+        self.assertEqual(self.ok("Show recent notifications")["card"]["total"], 4)
+
+    def test_unread_with_a_limit_and_the_acknowledgement_rule_still_hold(self):
+        ids = self.seed()
+        self.store.mark_opened("u", SITE, ids[0])
+        unread = self.ok("Show unread notifications")
+        self.assertEqual((unread["card"]["total"], {r[4] for r in unread["card"]["rows"]}), (2, {False}))
+        self.assertEqual(self.ok("show one unread notification")["card"]["total"], 1)
+        self.assertIn("does not record acknowledgements", self.ok("Show unacknowledged notifications")["answer"])
+
+    def test_the_records_are_this_projects_for_this_user_and_none_are_made_up(self):
+        self.start()
+        self.assertIn("You have no notifications", self.ok("Show the latest notification")["answer"])
+        self.store.condition("otherProject", "alarm.critical", True, severity="critical", source_kind="alarm", source_ref="@z", asset_id="ZZZ-9", state="@z")
+        self.assertNotIn("ZZZ-9", str(self.ok("recent one notification")))
+
+
 class NotificationTests(RulesBase):
     def seed(self):
         self.start()
@@ -217,7 +404,7 @@ class FailureTests(RulesBase):
         fresh = {"timestamp": datetime.now().isoformat(), "equipment": [], "alarms": [], "counts": {}}
         with mock.patch.object(main, "cached_equip_data", fresh), mock.patch.object(main, "cached_alarm_data", fresh):
             self.assertIn("Equipment items: 0.", self.ok("list all assets")["answer"])
-            self.assertIn("There are no open alarms.", self.ok("Show the latest alarms")["answer"])
+            self.assertIn("There are no open alarms.", self.ok("Show the latest open alarms")["answer"])
 
     def test_stale_data_is_not_served_as_current(self):
         self.start()

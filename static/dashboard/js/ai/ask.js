@@ -26,7 +26,11 @@ window.EKO_AI = (function(){
   const uid = () => 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
   /* --------------------------------- state --------------------------------- */
-  const S = { open:false, ctx:null, ctxFresh:false, hist:false, menu:false, streaming:null, fbOpen:null, lastCopy:null, lastExport:null, log:[], unread:false, route:null };
+  const S = { open:false, ctx:null, ctxFresh:false, hist:false, menu:false, streaming:null, fbOpen:null, lastCopy:null, lastExport:null, log:[], unread:false, route:null,
+    draft:'',          /* the question being typed: the panel is rebuilt by every render, so the input's text lives here */
+    caret:null,        /* the input's selection when a render found it focused, put back by after() */
+    stick:true, top:0  /* the message list: following the newest turn, or the position the reader left it at */ };
+  const nearBottom = box => box.scrollHeight - box.scrollTop - box.clientHeight <= 24;
   let store = null;
   function load(){ if(store) return store; try{ store = JSON.parse(localStorage.getItem(LS) || 'null'); }catch(e){ store = null; } if(!store || !Array.isArray(store.convs)) store = { convs:[], cur:null }; return store; }
   function save(){ try{ localStorage.setItem(LS, JSON.stringify(store)); }catch(e){} }
@@ -199,6 +203,7 @@ window.EKO_AI = (function(){
   async function ask(question, opts){
     opts = opts || {};
     const q = String(question || '').trim(); if(!q) return;
+    S.stick = true;   /* sending is the reader asking to see the answer */
     if(opts.regenerateOf == null && S.route && S.route(q)) return;   /* D133: a report ask is the report engine's */
     S.ctxFresh = false;
     if(S.streaming) stop();
@@ -219,7 +224,7 @@ window.EKO_AI = (function(){
   function open(ctx){
     if(ctx !== undefined){ S.ctx = ctx; S.ctxFresh = !!ctx; }
     S.unread = false;
-    if(!S.open){ S.open = true; S.opening = true; }   /* D132c: a floating pop-up over the page — the page and its panels stay as they are */
+    if(!S.open){ S.open = true; S.opening = true; S.stick = true; }   /* D132c: a floating pop-up over the page — the page and its panels stay as they are */
     S.hist = false; S.menu = false;
   }
   function close(){ if(!S.open) return; S.open = false; S.hist = false; S.menu = false; S.fbOpen = null; if(S.streaming) stop(); }
@@ -366,7 +371,13 @@ window.EKO_AI = (function(){
     if(!c || !c.turns.length) return `<div class="aiempty"><span class="aiglyph">${icon('spark', 20)}</span><p>${esc(t('ai.empty'))}</p><p class="tCap">${esc(t('ai.onprem'))}</p></div>`;
     return c.turns.map(turnHtml).join('');
   }
-  function patchMsgs(){ const box = document.querySelector('#aipanel .aimsgs'); if(!box) return; box.innerHTML = msgsHtml(); box.scrollTop = box.scrollHeight; }
+  /* an answer streaming in follows the newest turn only while the reader is at the bottom; scrolled up, they stay where they are */
+  function patchMsgs(){
+    const box = document.querySelector('#aipanel .aimsgs'); if(!box) return;
+    const top = box.scrollTop, stick = nearBottom(box);
+    box.innerHTML = msgsHtml();
+    S.stick = stick; box.scrollTop = stick ? box.scrollHeight : top;
+  }
   function histHtml(){
     const list = convs();
     return `<div class="aihist"><div class="aihisth"><b>${esc(t('ai.history'))}</b><span class="grow"></span>${list.length ? `<button class="btnG btnSm" data-act="aiClear">${esc(t('ai.clearAll'))}</button>` : ''}<button class="iconbtn icon26" data-act="aiHist" aria-label="${esc(t('close'))}">${icon('x', 12)}</button></div>
@@ -376,6 +387,8 @@ window.EKO_AI = (function(){
     E = E || app;
     (window.DASHBOARD_ROOT||document.documentElement).toggleAttribute('data-ai-open', S.open);
     if(!S.open) return '';
+    const live = document.activeElement;   /* still the old input: the render below replaces it */
+    if(live && live.id === 'aiin'){ S.draft = live.value; S.caret = [live.selectionStart, live.selectionEnd]; } else S.caret = null;
     const c = cur(), chips = suggestions();
     return `<div class="aiscrim" aria-hidden="true"></div><aside id="aipanel" class="aipanel" role="dialog" aria-label="${esc(t('ai.title'))}" data-stale="${E.state.stale ? 1 : 0}" data-born="${E.state.born === 'ai' ? 1 : 0}">
       <div class="draghandle"></div>
@@ -389,7 +402,7 @@ window.EKO_AI = (function(){
       ${S.menu ? `<div class="aimenu" role="menu"><button role="menuitem" data-act="aiExport" data-v="md" ${c && c.turns.length ? '' : 'disabled'}>${icon('download', 13)} ${esc(t('ai.exportMd'))}</button><button role="menuitem" data-act="aiExport" data-v="pdf" ${c && c.turns.length ? '' : 'disabled'}>${icon('doc', 13)} ${esc(t('ai.exportPdf'))}</button><button role="menuitem" data-act="aiCopyConv" ${c && c.turns.length ? '' : 'disabled'}>${icon('copy', 13)} ${esc(t('ai.copyConv'))}</button></div>` : ''}
       ${S.hist ? histHtml() : ''}
       <div class="aimsgs" aria-live="polite">${msgsHtml()}</div>
-      <div class="aiinput" data-hint="${esc(E.state.askHint || '')}"><input id="aiin" autocomplete="off" placeholder="${esc(t(E.state.askHint === 'report' ? 'rpAskPh' : 'askPh'))}" aria-label="${esc(t('ai.title'))}">${S.streaming ? `<button class="btnG btnSm aistop" data-act="aiStop">${icon('x', 12)} ${esc(t('ai.stop'))}</button>` : `<button class="aisend" data-act="aiSend" aria-label="${esc(t('ai.send'))}">${icon('chevR', 16)}</button>`}</div>
+      <div class="aiinput" data-hint="${esc(E.state.askHint || '')}"><input id="aiin" autocomplete="off" value="${esc(S.draft)}" placeholder="${esc(t(E.state.askHint === 'report' ? 'rpAskPh' : 'askPh'))}" aria-label="${esc(t('ai.title'))}">${S.streaming ? `<button class="btnG btnSm aistop" data-act="aiStop">${icon('x', 12)} ${esc(t('ai.stop'))}</button>` : `<button class="aisend" data-act="aiSend" aria-label="${esc(t('ai.send'))}">${icon('chevR', 16)}</button>`}</div>
       ${(!(c && c.turns.length) || S.ctxFresh) ? `<div class="aichips">${chips.map(k => `<button class="chip" data-act="aiChip" data-k="${esc(k)}">${esc(t(k))}</button>`).join('')}</div>` : ''}
     </aside>`;
   }
@@ -407,17 +420,21 @@ window.EKO_AI = (function(){
     if(sm){ const r = sm.getBoundingClientRect(); p.style.setProperty('--aiTop', Math.round(r.top) + 'px'); }
     const foot = [document.getElementById('mobtabs')].find(x => x && x.getBoundingClientRect().height > 0);   /* the phone tabs when stacked */
     p.style.setProperty('--aiBottom', (foot ? Math.round(Math.max(0, window.innerHeight - foot.getBoundingClientRect().top)) : 0) + 'px');
-    const box = p.querySelector('.aimsgs'); if(box) box.scrollTop = box.scrollHeight;
-    if(S.opening){ S.opening = false; const inp = p.querySelector('#aiin');
+    const box = p.querySelector('.aimsgs'); if(box) box.scrollTop = S.stick ? box.scrollHeight : S.top;
+    const inp = p.querySelector('#aiin');
+    if(S.opening){ S.opening = false;
       if(window.innerWidth < 768){ if(inp && document.activeElement === inp) inp.blur(); }   /* the phone sheet opens at half, keyboard down */
       else if(inp) inp.focus({ preventScroll:true }); }
+    else if(S.caret && inp){   /* the render replaced the input the reader was typing in: same text, same caret */
+      inp.focus({ preventScroll:true }); try{ inp.setSelectionRange(S.caret[0], S.caret[1]); }catch(e){} }
+    S.caret = null;
   }
 
   /* -------------------------------- actions -------------------------------- */
   const ACTS = {
     aiOpen(el){ const ctx = el && el.dataset.aiLabel ? contextFrom(el) : null; open(ctx || (el && el.dataset.ai === 'bar' ? S.ctx : null)); if(window.EKO_SURF) window.EKO_SURF.noteOpener({ act:'aiOpen', v:'' }); E.set({ born:'ai' }); },
     aiClose(){ close(); E.set({}); },
-    aiSend(){ const inp = document.getElementById('aiin'); if(!inp || !inp.value.trim()) return; const q = inp.value.trim(); inp.value = ''; ask(q); },
+    aiSend(){ const inp = document.getElementById('aiin'); if(!inp || !inp.value.trim()) return; const q = inp.value.trim(); inp.value = ''; S.draft = ''; ask(q); },
     aiChip(el){ ask(t(el.dataset.k)); },
     aiStop(){ stop(); },
     aiRetry(el){ const c = cur(); const tr = c && c.turns[+el.dataset.i]; if(tr) ask(tr.q.text, { regenerateOf:+el.dataset.i }); },
@@ -426,9 +443,9 @@ window.EKO_AI = (function(){
     aiFb(el){ const c = cur(); const i = +el.dataset.i; const tr = c && c.turns[i]; if(!tr) return; tr.a.feedback = Object.assign({}, tr.a.feedback || {}, { v:el.dataset.v, at:new Date().toISOString() }); S.fbOpen = i; save(); persistFeedback(c, i); E.set({}); },
     aiFbNote(el){ const c = cur(); const tr = c && c.turns[+el.dataset.i]; if(tr){ tr.a.feedback = Object.assign({}, tr.a.feedback || {}, { note:el.value }); } },
     aiFbSave(el){ const c = cur(); const i = +el.dataset.i; if(c && c.turns[i]){ save(); persistFeedback(c, i); } S.fbOpen = null; if(window.EKO_FB) window.EKO_FB.toast({ text:t('ai.fbSaved'), tone:'ok' }); E.set({}); },
-    aiNew(){ if(S.streaming) stop(); const c = cur(); if(c && !c.turns.length){ E.set({}); return; } load().cur = null; S.ctx = null; S.hist = false; ensureConv(); E.set({}); },
+    aiNew(){ S.stick = true; if(S.streaming) stop(); const c = cur(); if(c && !c.turns.length){ E.set({}); return; } load().cur = null; S.ctx = null; S.hist = false; ensureConv(); E.set({}); },
     aiHist(){ S.hist = !S.hist; S.menu = false; E.set({}); },
-    aiHistOpen(el){ load().cur = el.dataset.id; S.hist = false; save(); E.set({}); },
+    aiHistOpen(el){ S.stick = true; load().cur = el.dataset.id; S.hist = false; save(); E.set({}); },
     aiClear(){ const s = load(); s.convs = []; s.cur = null; save(); S.hist = false; E.set({}); },
     aiMenu(){ S.menu = !S.menu; S.hist = false; E.set({}); },
     aiExport(el){ const c = cur(); S.menu = false; if(!c || !c.turns.length){ E.set({}); return; } if(el.dataset.v === 'pdf') exportPdf(c); else exportMd(c); E.set({}); },
@@ -443,9 +460,13 @@ window.EKO_AI = (function(){
   /* keyboard in the input, press-and-hold on a turn (touch) */
   function wire(app){
     E = app;
+    if(S.wired) return; S.wired = true;   /* one set of listeners, however often this is called */
     document.addEventListener('keydown', ev => {
-      if(ev.key === 'Enter' && ev.target && ev.target.id === 'aiin' && ev.target.value.trim()){ ev.preventDefault(); ACTS.aiSend(); }
+      if(ev.key === 'Enter' && !ev.isComposing && ev.target && ev.target.id === 'aiin' && ev.target.value.trim()){ ev.preventDefault(); ACTS.aiSend(); }
     });
+    document.addEventListener('input', ev => { if(ev.target && ev.target.id === 'aiin') S.draft = ev.target.value; });
+    /* scroll does not bubble: the capture phase hears the message list, wherever it is rebuilt */
+    document.addEventListener('scroll', ev => { const b = ev.target; if(b && b.classList && b.classList.contains('aimsgs')){ S.top = b.scrollTop; S.stick = nearBottom(b); } }, { capture:true, passive:true });
     /* the phone sheet: full while typing (the input sits above the keyboard), back to half when the user leaves the input —
        not when a re-render replaced it (the answer arriving must not shrink the sheet under the reader) */
     document.addEventListener('focusin', ev => { if(S.opening) return; if(ev.target && ev.target.id === 'aiin' && window.innerWidth < 768 && window.EKO_SHEET){ window.EKO_SHEET.heights.ai = 92; window.EKO_SHEET.sync(); } });

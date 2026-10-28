@@ -56,13 +56,22 @@ NOW = r"(?: (?:right now|now|currently|at the moment|at present))?"
 SEV = r"(?:(?P<sev>critical|warnings?|info) )?"
 SHOW = r"(?:what are |what is |what's |which are |show(?: me)? |list |get |give me |display |check )?"
 ALARMS = r"(?:alarms|alerts)"                       # "alerts" is the everyday word for FIN alarms
-OPEN = r"(?:(?:current|currently|active|open|live|ongoing|latest|recent) )*"
+# "latest alarms" are the newest alarm RECORDS (open or cleared); only "latest open/active alarms" is the open list
+OPEN = r"(?:(?:current|currently|active|open|live|ongoing|(?:latest|recent|newest)(?= (?:open|active)\b)) )*"
+LATEST = r"(?:latest|recent|newest) "
+N = r"(?:(?P<n>\d{1,2}|a|an|one|two|three|four|five|ten|single) )?"   # "one recent notification", "latest 5 alarms"
+NUMBER_WORDS = {"a": 1, "an": 1, "one": 1, "single": 1, "two": 2, "three": 3, "four": 4, "five": 5, "ten": 10}
+# words that follow "what ... do we have" / "show ..." but are not an equipment type
+NOT_A_TYPE = {"alarm", "alert", "notification", "equipment", "asset", "item", "system", "unit", "thing", "point", "all",
+              "one", "other", "help", "reading", "value", "metric", "fault", "problem", "status", "option"}
 ASSETS = r"(?:equipment|assets?|equipment assets?)"
-HERE = r"(?: (?:in|of|for) (?:this|the) (?:project|building|site))?"
+HERE = r"(?: (?:in|of|for|from) (?:this|the|our|your)(?: (?:currently selected|selected|current|open|active))? (?:project|building|site))?"
 
 # (rule id, intent, anchored pattern). <eq> stands for the one explicit equipment id in the question.
 RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat + "$")) for rid, intent, pat in [
     # current open alarms (optionally one severity)
+    ("alarms.latest", "get_alarms",
+     SHOW + r"(?:the )?" + LATEST + N + SEV + r"(?P<noun>alarms?|alerts?)" + NOW),
     ("alarms.list", "get_alarms",
      SHOW + r"(?:all )?(?:the )?" + OPEN + SEV + ALARMS + r"(?: (?:that are |which are )?(?:open|active))?" + NOW),
     ("alarms.any", "get_alarms",
@@ -108,9 +117,9 @@ RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat +
     ("notifications.ack.which", "get_notifications",
      r"(?:what|which) notifications (?:have been|are|were|have not been|are not|were not) (?:un)?acknowledged"),
     ("notifications.unread", "get_notifications",
-     r"(?:" + SHOW + r"(?:the )?|(?:do i have |are there )(?:any )?|how many )(?:unread|new) notifications"),
+     r"(?:" + SHOW + r"(?:the )?|(?:do i have |are there )(?:any )?|how many )" + N + r"(?:unread|new) (?P<noun>notifications?)"),
     ("notifications.list", "get_notifications",
-     SHOW + r"(?:the |all |my )*(?:(?:recent|latest|current) )*notifications"),
+     SHOW + r"(?:the |all |my )*(?:(?:recent|latest|newest|current) )*" + N + r"(?:(?:recent|latest|newest) )*(?P<noun>notifications?)"),
     # status / information of one explicit equipment item
     ("equipment.status_of", "get_equipment_status",
      SHOW + r"(?:the )?(?:(?:current|live|latest) )*(?:status|state|condition|details|information|info|readings|points) (?:of|for|on) <eq>" + NOW),
@@ -120,8 +129,17 @@ RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat +
      r"how(?: is|'s) <eq>(?: (?:doing|running|performing|working))?" + NOW),
     ("equipment.is", "get_equipment_status",
      r"is <eq> (?:ok|okay|fine|running|working|online|healthy|in alarm|alarming)" + NOW),
+    ("equipment.named", "get_equipment_status",
+     r"(?:show(?: me)? |find |get |look up |lookup |display |check )?(?:the )?(?:equipment|asset|unit|item) (?:named|called|with (?:the )?name|with id|id) <eq>" + NOW),
     ("equipment.about", "get_equipment_status",
-     r"(?:tell me about |show(?: me)? |check |look up |lookup |find )?<eq>"),
+     r"(?:tell me about |show(?: me)? |check |look up |lookup |find )?(?:(?:the )?(?:equipment|asset) )?<eq>"),
+    # a whole class by its abbreviation: "what AHUs do we have", "list all FCUs", "how many EF are there"
+    ("equipment.type", "find_equipment",
+     r"(?:what|which) (?P<kind>[a-z]{2,8}?)s? (?:do we have|are there|is there|are available|are installed|exist)" + HERE),
+    ("equipment.type.list", "find_equipment",
+     r"(?:show(?: me)? |list |display |get |give me )(?:all )?(?:the )?(?:(?:available|installed) )?(?P<kind>[a-z]{2,8}?)s?" + HERE),
+    ("equipment.type.count", "find_equipment",
+     r"how many (?P<kind>[a-z]{2,8}?)s?(?: (?:are there|do we have|are available|are installed|exist))?" + HERE),
 ]]
 
 
@@ -133,6 +151,8 @@ def _normalize(text: str) -> str:
     t = text.strip().lower()
     t = re.sub(r"[?!.]+$", "", t).strip()
     t = re.sub(r"\s+", " ", t)
+    t = re.sub(r"\bmost recent\b", "latest", t)
+    t = re.sub(r"\blast (?=(?:\d+|one|two|three|four|five|ten) )", "latest ", t)
     t = POLITE_PREFIX.sub("", t)
     t = POLITE_SUFFIX.sub("", t)
     return t.strip(" ,")
@@ -158,12 +178,24 @@ def route(question: Any) -> dict:
         m = pattern.match(text)
         if not m:
             continue
+        gd = m.groupdict()
+        kind = (gd.get("kind") or "").lower()
+        if kind in NOT_A_TYPE:
+            continue
         params: dict = {}
         if "<eq>" in pattern.pattern:
             params["equipment"] = equipment
-        sev = m.groupdict().get("sev")
+        if kind:
+            params["type"] = kind
+        sev = gd.get("sev")
         if sev:
             params["severity"] = SEVERITY_WORDS[sev]
+        if gd.get("n"):
+            params["limit"] = NUMBER_WORDS.get(gd["n"]) or int(gd["n"])
+        elif gd.get("noun") in ("notification", "alarm", "alert"):
+            params["limit"] = 1                      # "the latest notification" is one
+        if rid.startswith("alarms.latest"):
+            params["history"] = True
         if rid.startswith("equipment.in_alarm"):
             params["in_alarm"] = True
         if rid == "notifications.unread":
@@ -228,6 +260,15 @@ def direct_text(out: dict, rule: str = "") -> str:
     intent, params, r = out.get("intent"), out.get("parameters") or {}, out.get("result") or {}
     if not r.get("available"):
         return _UNAVAILABLE.get(r.get("reason"), "This data could not be read right now.")
+    if intent == "get_alarms" and params.get("history"):
+        sev = f" {params['severity']}" if params.get("severity") else ""
+        where = f" on {params['equipment']}" if params.get("equipment") else ""
+        if not r.get("total"):
+            return (f"FIN's latest alarm read holds no{sev} alarm records{where}. "
+                    "This is only what that read returned, not a full alarm archive.")
+        shown = [f"{a.get('source')} ({a.get('severity')}, {'open' if a.get('open') else 'cleared'}): {a.get('message')}" for a in (r.get("alarms") or [])[:3]]
+        return (f"Latest{sev} alarm records{where}, open or cleared, from FIN's latest read: {r.get('total', 0)}. "
+                + "; ".join(shown) + f".{_shown(r)} This is not a full alarm archive.")
     if intent == "get_alarms":
         sev = f" {params['severity']}" if params.get("severity") else ""
         where = f" on {params['equipment']}" if params.get("equipment") else ""
@@ -243,7 +284,11 @@ def direct_text(out: dict, rule: str = "") -> str:
         total, names = r.get("total", 0), [i.get("name") for i in r.get("items") or []]
         if params.get("in_alarm"):
             return f"Equipment currently in alarm ({total}): {_names(names)}.{_shown(r)}" if total else "No equipment is currently in alarm."
-        return f"Equipment items: {total}." + (f" Including {_names(names)}." if names else "") + _shown(r)
+        kind = params.get("type")
+        if kind and not total:
+            return f"No equipment of type {kind} was found in this project's data."
+        lead = f"Equipment of type {kind}: {total}." if kind else f"Equipment items: {total}."
+        return lead + (f" Including {_names(names)}." if names else "") + _shown(r)
     if intent == "get_equipment_status":
         if not r.get("found"):
             cands = r.get("candidates") or []
@@ -265,7 +310,8 @@ def direct_text(out: dict, rule: str = "") -> str:
                     f"Of the {total} notifications listed{more}, {read} have been opened and {unread} are unread.")
         if not total:
             return "You have no unread notifications on this project." if params.get("view") == "unread" else "You have no notifications on this project."
-        shown = [f"{n.get('severity')} {n.get('type')}" + (f" on {n['asset']}" if n.get("asset") else "") for n in (r.get("items") or [])[:3]]
+        shown = [f"{n.get('severity')} {n.get('type')}" + (f" on {n['asset']}" if n.get("asset") else "")
+                 + (f" ({n['created_at']})" if n.get("created_at") else "") for n in (r.get("items") or [])[:3]]
         return f"Notifications listed: {total}{more}, {unread} unread. Latest: " + "; ".join(shown) + "."
     # get_building_snapshot
     if rule == "equipment.online":

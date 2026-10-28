@@ -2387,7 +2387,26 @@ def _chat_view() -> eko_chat.DataView:
         fdd=cached_fdd_summary,
         sensor_avg=cached_sensor_avg,
         notifications=_chat_notifications,
+        alarm_records=_chat_alarm_records,
     )
+
+
+def _chat_alarm_records() -> list:
+    """The newest alarm records, open or cleared, of the last FIN alarm read, graded by the configured bands. It is what that
+    read returned (the same grid the open-alarm list is made from), not an archive."""
+    bands = CONFIG.get("severity_bands", {})
+    out = []
+    for row in (client.last_alarm_rows if client else None) or []:
+        if not row or row.get("alarm") is not True:
+            continue
+        source = row.get("sourceRef")
+        priority = row.get("priority") if isinstance(row.get("priority"), (int, float)) else None
+        out.append({"source": safe_get(source, "dis") or safe_get(source, "val") or "",
+                    "message": clip_decimals(str(row.get("message") or "")), "priority": priority,
+                    "severity": severity_for(priority, bands), "occurred": row.get("occurred") or row.get("created"),
+                    "state": row.get("state"), "open": alarm_is_open(row)})
+    out.sort(key=lambda a: str(a.get("occurred") or ""), reverse=True)
+    return out[:200]
 
 
 def _chat_notifications(user: str, site: str, **filters) -> dict:

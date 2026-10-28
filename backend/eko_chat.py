@@ -69,6 +69,7 @@ class DataView:
     now: Optional[datetime] = None
     scope: Optional[tuple] = None          # (user id, site) of the signed-in user: set by the router from the session guard
     notifications: Optional[Callable[..., dict]] = None   # main.py's reader over the notification store
+    alarm_records: Optional[Callable[[], list]] = None    # newest alarm records (open or cleared) of the last FIN alarm read
 
 
 def _unavailable(reason: str, message: str, view: Optional[DataView] = None) -> dict:
@@ -123,6 +124,18 @@ def _cache_problem(problem: str, as_of: Optional[str], view: DataView) -> dict:
 def _fold(text: Any) -> str:
     """Name key that ignores case, spaces, dashes and underscores ("FCU ANC09 GF 02" == "FCU-ANC09-GF-02")."""
     return re.sub(r"[^A-Z0-9]", "", str(text or "").upper())
+
+
+def _loose(folded: str) -> str:
+    """A folded name without the zero padding after letters ("AHU01" == "AHU1"): for close matches only, never for picking one."""
+    return re.sub(r"(?<=[A-Z])0+(?=[0-9])", "", folded)
+
+
+def _kind_match(eq: dict, kind: str) -> bool:
+    """A type, category or tag, or a name that begins with it ("EF-01" for ef; "EFFLUENT" is not)."""
+    return (kind in {str(eq.get("type") or "").lower(), str(eq.get("category") or "").lower()}
+            or kind in [str(t).lower() for t in eq.get("tags") or []]
+            or bool(re.match(re.escape(kind) + r"(?![A-Za-z])", str(eq.get("name") or ""), re.I)))
 
 
 def _clip(text: Any, n: int = MAX_TEXT) -> str:
@@ -264,8 +277,7 @@ def find_equipment(args: dict, view: DataView) -> dict:
     for eq in _equipment_list(view):
         if name and name not in _fold(eq.get("name")):
             continue
-        if kind and kind not in {str(eq.get("type") or "").lower(), str(eq.get("category") or "").lower()} \
-                and kind not in [str(t).lower() for t in eq.get("tags") or []]:
+        if kind and not _kind_match(eq, kind):
             continue
         if floor and floor not in str(eq.get("floor") or "").lower():
             continue
@@ -291,10 +303,14 @@ def get_equipment_status(args: dict, view: DataView) -> dict:
     equipment = _equipment_list(view)
     exact = [e for e in equipment if _fold(e.get("name")) == wanted]
     if len(exact) != 1:
-        partial = sorted({str(e.get("name")) for e in equipment if wanted and wanted in _fold(e.get("name"))})
+        # close matches are offered, never chosen: "AHU-1" is not silently AHU-10 or AHU-01
+        loose = _loose(wanted)
+        partial = sorted({str(e.get("name")) for e in equipment if wanted and (wanted in _fold(e.get("name"))
+                                                                              or loose in _loose(_fold(e.get("name"))))})
+        same = sorted(f"{e.get('name')} ({e.get('floor')})" if e.get("floor") else str(e.get("name")) for e in exact)
         return {"available": True, "project": _project(view), "as_of": as_of, "found": False,
                 "reason": "ambiguous" if len(exact) > 1 else "not_found",
-                "candidates": (sorted(str(e.get("name")) for e in exact) if exact else partial)[:10]}
+                "candidates": (same if exact else partial)[:10]}
     eq = exact[0]
     points = [p for p in eq.get("points") or [] if isinstance(p, dict)]
     reporting = [p for p in points if p.get("reporting")]
@@ -341,7 +357,16 @@ def get_alarms(args: dict, view: DataView) -> dict:
     if not ok:
         return _cache_problem(why, as_of, view)
     limit = args.get("limit", DEFAULT_LIMIT)
-    rows = [a for a in (view.alarms.get("alarms") or []) if isinstance(a, dict)]
+    history = bool(args.get("history"))
+    if history:
+        if view.alarm_records is None:
+            return _unavailable("alarm_history_unavailable", "Alarm history is not available for this session.", view)
+        source = view.alarm_records()
+        scope = "newest alarm records, open or cleared, in the backend's latest FIN alarm read; not a full archive"
+    else:
+        source = view.alarms.get("alarms") or []
+        scope = "open alarms from the backend's latest poll"
+    rows = [a for a in source if isinstance(a, dict)]
     if args.get("equipment"):
         key = _fold(args["equipment"])
         rows = [a for a in rows if key and (key == _fold(a.get("source")) or key in _fold(a.get("source")))]
@@ -356,9 +381,9 @@ def get_alarms(args: dict, view: DataView) -> dict:
             counts[a["severity"]] += 1
     return {
         "available": True, "project": _project(view), "as_of": as_of,
-        "scope": "open alarms from the backend's latest poll",
+        "scope": scope, "history": history,
         "total": len(rows), "counts": counts, "returned": min(len(rows), limit), "truncated": len(rows) > limit,
-        "alarms": [_alarm_view(a) for a in rows[:limit]],
+        "alarms": [dict(_alarm_view(a), **({"open": a["open"]} if "open" in a else {})) for a in rows[:limit]],
     }
 
 
@@ -404,7 +429,7 @@ TOOLS: dict[str, dict] = {
         "description": "List equipment matching optional filters. Returns compact records (no points).",
         "parameters": {"type": "object", "additionalProperties": False, "properties": {
             "name": dict(_NAME, description="Text contained in the equipment name (case, spaces and dashes ignored)."),
-            "type": dict(_NAME, description="Equipment type, category or tag, e.g. fcu, ahu, meter."),
+            "type": dict(_NAME, description="Equipment type, category, tag or name prefix, e.g. fcu, ahu, ef, meter."),
             "floor": dict(_NAME, description="Text contained in the floor name."),
             "in_alarm": {"type": "boolean"},
             "limit": _LIMIT,
@@ -424,6 +449,7 @@ TOOLS: dict[str, dict] = {
             "equipment": dict(_NAME, description="Equipment name the alarm source refers to."),
             "severity": {"type": "string", "enum": SEVERITIES},
             "state": dict(_NAME, description="Alarm state as reported by FIN."),
+            "history": {"type": "boolean", "description": "true: the newest alarm records, open or cleared, from FIN's latest alarm read."},
             "limit": _LIMIT,
         }},
     },
@@ -531,12 +557,18 @@ def build_card(tool: str, args: Optional[dict], result: dict) -> Optional[dict]:
         filters = _filters(args, ["equipment", "severity", "state"])
         rows = [[a.get("source"), a.get("severity"), a.get("message"), a.get("state"), a.get("occurred")]
                 for a in (result.get("alarms") or [])[:MAX_CARD_ROWS]]
+        history = bool(result.get("history"))
+        if history:
+            rows = [r + [a.get("open")] for r, a in zip(rows, (result.get("alarms") or [])[:MAX_CARD_ROWS])]
+        key, what = ("alarmRecords", "Latest alarm records") if history else ("alarms", "Open alarms")
         card.update(
-            headline=_text("alarms", "Open alarms: {total} ({critical} critical, {warning} warning, {info} info)",
+            headline=_text(key, what + ": {total} ({critical} critical, {warning} warning, {info} info)",
                            total=result.get("total", 0), critical=counts.get("critical", 0),
                            warning=counts.get("warning", 0), info=counts.get("info", 0)),
-            interpreted_as=_text("alarms", "Open alarms from the latest poll{f}", f=_filters_text(filters)),
-            columns=["source", "severity", "message", "state", "occurred"], rows=rows, total=result.get("total", 0))
+            interpreted_as=_text(key, ("Newest alarm records, open or cleared, from FIN's latest read{f}" if history
+                                       else "Open alarms from the latest poll{f}"), f=_filters_text(filters)),
+            columns=["source", "severity", "message", "state", "occurred"] + (["open"] if history else []),
+            rows=rows, total=result.get("total", 0))
     elif tool == "find_equipment":
         filters = _filters(args, ["name", "type", "floor", "in_alarm"])
         rows = [[i.get("name"), i.get("floor"), i.get("type"), i.get("in_alarm"), i.get("open_alarm_count")]
