@@ -22,16 +22,18 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+import math
 import os
 import re
 import time
 from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Callable, Optional, Protocol
 
 import httpx
+from fin_client import AM_PM_LOOKUP, MONTHS_ORDER
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
@@ -70,6 +72,10 @@ class DataView:
     scope: Optional[tuple] = None          # (user id, site) of the signed-in user: set by the router from the session guard
     notifications: Optional[Callable[..., dict]] = None   # main.py's reader over the notification store
     alarm_records: Optional[Callable[[], list]] = None    # newest alarm records (open or cleared) of the last FIN alarm read
+    power_history: dict = field(default_factory=dict)     # FIN hourly series by Data Mapping key: year > month > "month d" > "1 pm"
+    power_history_at: Optional[str] = None                # when power_history was last read from FIN
+    power_boards: list = field(default_factory=list)      # [{"name", "live", "history"}] distribution boards the project maps
+    site_now: Optional[datetime] = None                   # the site's wall clock (naive); None: Asia/Dubai, as main.py reads it
 
 
 def _unavailable(reason: str, message: str, view: Optional[DataView] = None) -> dict:
@@ -412,6 +418,246 @@ def get_notifications(args: dict, view: DataView) -> dict:
     }
 
 
+# ─── Environment, energy and HVAC status ─────────────────────────────────────
+# Only what the project's FIN mapping provides. A live point arrives as a bare number: FIN returns no unit and no time with it,
+# so the unit is the project's convention (the same one the snapshot above and the dashboard use) and the time is the backend's
+# last poll. Nothing is estimated, classified or filled in: a metric the mapping lacks, or FIN did not answer, is named as such.
+
+# metric -> (Data Mapping live key, label, unit, plausible range). The ranges are the dashboard's own sanity limits.
+ENV_LIVE = {
+    "iaq": [("iaq_index", "IAQ index", "", None)],
+    "co2": [("ra_co2", "Return-air CO2", "ppm", (100, 5000))],
+    "temperature": [("avg_zone_temp", "Average zone temperature", "°C", (10, 50)),
+                    ("avg_zone_temp_sp", "Average zone temperature setpoint", "°C", (10, 50))],
+    "comfort": [("comfort_compliance", "Comfort compliance", "%", (0, 100))],
+}
+# metric -> (text in a point's name, label, unit, plausible range): averaged over the equipment points that report it
+ENV_POINTS = {"co2": ("co2", "CO2", "ppm", (100, 5000)), "humidity": ("humid", "Humidity", "%", (5, 100))}
+ENV_METRICS = ["iaq", "co2", "temperature", "humidity", "comfort"]
+ENERGY_UNIT = "kWh"      # the hourly series carry no unit; "each sample is that hour's kWh" (static/js/data-map.js)
+ENERGY_SERIES = ("Hourly_Energy_Consumption_his", "Total_Power_Consumption_his")   # main.py aliases the second to the first
+PERIODS = ["today", "yesterday", "month"]
+
+
+def _finite(value: Any) -> Optional[float]:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
+
+
+def _site_now(view: DataView) -> datetime:
+    if view.site_now:
+        return view.site_now
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Dubai")).replace(tzinfo=None)
+    except Exception:   # no tz database: Dubai is UTC+4 all year
+        return datetime.utcnow().replace(microsecond=0) + timedelta(hours=4)
+
+
+def _live_reading(key: str, label: str, unit: str, bounds: Optional[tuple], view: DataView) -> tuple[Optional[dict], Optional[dict]]:
+    """(reading, miss) for one configured live point; exactly one of them is set."""
+    miss = lambda reason, why: (None, {"name": label, "reason": reason, "message": f"{label}: {why}"})   # noqa: E731
+    if key not in view.power:
+        return miss("not_configured", f"this project has no live point mapped for it ({key})")
+    raw = view.power.get(key)
+    value = _finite(raw)
+    if value is None:
+        return miss("no_value", "FIN returned no value for it")
+    if bounds and not bounds[0] <= value <= bounds[1]:
+        return miss("out_of_range", f"FIN returned {value:g}, outside the plausible range {bounds[0]}–{bounds[1]}, so it is not used")
+    return {"name": label, "value": round(value, 1), "unit": unit, "source": f"FIN live point {key}", "as_of": view.power.get("timestamp")}, None
+
+
+def _point_average(metric: str, view: DataView) -> tuple[Optional[dict], Optional[dict]]:
+    needle, label, unit, (lo, hi) = ENV_POINTS[metric]
+    values, units, rejected = [], set(), 0
+    for eq in _equipment_list(view):
+        for pt in eq.get("points") or []:
+            if not isinstance(pt, dict) or not pt.get("reporting") or needle not in str(pt.get("navName") or "").lower():
+                continue
+            try:
+                num = float(re.sub(r"[^0-9.\-]", "", str(pt.get("currentValue", ""))))
+            except ValueError:
+                rejected += 1
+                continue
+            if lo <= num <= hi:
+                values.append(num)
+                if pt.get("unit"):
+                    units.add(str(pt["unit"]))
+            else:
+                rejected += 1
+    name = f"Average {label} of equipment points"
+    if not values:
+        why = f"no reporting equipment point named *{needle}* has a plausible value" if rejected else f"no equipment point named *{needle}* is reporting"
+        return None, {"name": name, "reason": "no_sensors", "message": f"{label}: {why}"}
+    return {"name": name, "value": round(sum(values) / len(values), 1), "unit": units.pop() if len(units) == 1 else unit,
+            "points": len(values), "min": round(min(values), 1), "max": round(max(values), 1), "ignored_points": rejected,
+            "source": f"{len(values)} equipment points whose name contains '{needle}'", "as_of": view.equipment.get("timestamp")}, None
+
+
+def get_environment(args: dict, view: DataView) -> dict:
+    problem = _session_problem(view)
+    if problem:
+        return problem
+    metric = args["metric"]
+    readings, misses = [], []
+    for key, label, unit, bounds in ENV_LIVE.get(metric, []):
+        ok, as_of, why = _freshness(view.power, view)
+        if not ok:
+            misses.append({"name": label, "reason": why, "message": f"{label}: {_PROBLEM_TEXT[why]}"})
+            continue
+        got, miss = _live_reading(key, label, unit, bounds, view)
+        readings.append(got) if got else misses.append(miss)
+    if metric in ENV_POINTS:
+        ok, as_of, why = _freshness(view.equipment, view)
+        if not ok:
+            misses.append({"name": ENV_POINTS[metric][1], "reason": why, "message": f"{ENV_POINTS[metric][1]}: {_PROBLEM_TEXT[why]}"})
+        else:
+            got, miss = _point_average(metric, view)
+            readings.append(got) if got else misses.append(miss)
+    if not readings:
+        out = _unavailable("metric_unavailable", "; ".join(m["message"] for m in misses) or "No source is mapped for this metric.", view)
+        out["metric"], out["unavailable"] = metric, misses
+        return out
+    return {"available": True, "project": _project(view), "metric": metric, "as_of": readings[0].get("as_of"), "readings": readings,
+            "unavailable": misses,
+            "status": None, "status_note": "No classification is configured for this project, so no air-quality label is given."}
+
+
+def _hourly(series: Any) -> dict:
+    """{(year, month, day, hour): float | None} from a FIN hourly series; text that is not a number is None."""
+    out: dict = {}
+    for year, months in (series or {}).items():
+        for month, days in (months or {}).items():
+            if str(month).lower() not in MONTHS_ORDER:
+                continue
+            for day, hours in (days or {}).items():
+                try:
+                    d = int(str(day).split()[-1])
+                except ValueError:
+                    continue
+                for label, raw in (hours or {}).items():
+                    h = next((k for k, v in AM_PM_LOOKUP.items() if v == str(label).lower()), None)
+                    if h is None or not str(year).isdigit():
+                        continue
+                    try:
+                        out[(int(year), MONTHS_ORDER.index(str(month).lower()) + 1, d, h)] = _finite(float(raw))
+                    except (TypeError, ValueError):
+                        out[(int(year), MONTHS_ORDER.index(str(month).lower()) + 1, d, h)] = None
+    return out
+
+
+def _day_total(points: dict, day: datetime, last_hour: int, include_open_hour: bool) -> dict:
+    """One day's energy: the sum of the hourly samples, hours 0..last_hour. A missing hour or a negative sample (a counter reset
+    reads as one) is never counted and is named; `last_hour` is the last COMPLETE hour, and the hour after it is added when it has a sample."""
+    expected = last_hour + 1
+    got, missing, invalid = [], [], []
+    for h in range(expected + (1 if include_open_hour else 0)):
+        v = points.get((day.year, day.month, day.day, h))
+        label = f"{h:02d}:00"
+        if v is None:
+            if h < expected:
+                missing.append(label)
+        elif v < 0:
+            invalid.append(label)
+        else:
+            got.append((h, v))
+    return {"value": round(sum(v for _, v in got), 1) if got else None, "hours_expected": expected,
+            "hours_reported": sum(1 for h, _ in got if h < expected),   # complete hours only; the open hour is flagged below
+            "missing_hours": missing, "invalid_hours": invalid, "complete": not missing and not invalid,
+            "latest_hour": f"{max(h for h, _ in got):02d}:00" if got else None,
+            "includes_open_hour": any(h == expected for h, _ in got)}
+
+
+def _series(view: DataView, keys: tuple) -> tuple[Optional[str], dict]:
+    for k in keys:
+        if view.power_history.get(k):
+            return k, _hourly(view.power_history[k])
+    return None, {}
+
+
+def get_energy(args: dict, view: DataView) -> dict:
+    problem = _session_problem(view)
+    if problem:
+        return problem
+    period, by = args.get("period", "today"), args.get("by", "building")
+    now = _site_now(view)
+    if by == "building" and period == "month":
+        ok, as_of, why = _freshness(view.power, view)
+        if not ok:
+            return _cache_problem(why, as_of, view)
+        got, miss = _live_reading("current_month", "Energy consumption this month", ENERGY_UNIT, (0, float("inf")), view)
+        if miss:
+            return _unavailable("metric_unavailable", miss["message"], view)
+        return {"available": True, "project": _project(view), "by": "building", "period": "month", "month": f"{now.year}-{now.month:02d}",
+                "metric": got["name"], "value": got["value"], "unit": ENERGY_UNIT, "as_of": got["as_of"],
+                "method": "FIN's own month-to-date point (current_month); not recalculated here"}
+    if period == "month":
+        return _unavailable("period_not_supported", "Energy by distribution board is available for today and yesterday only.", view)
+    ok, as_of, why = _freshness({"timestamp": view.power_history_at}, view)
+    if not ok:
+        return _cache_problem(why, as_of, view)
+    day = now if period == "today" else now.replace(hour=0) - timedelta(days=1)
+    last, open_hour = (now.hour - 1, True) if period == "today" else (23, False)
+    base = {"available": True, "project": _project(view), "by": by, "period": period, "date": day.strftime("%Y-%m-%d"), "unit": ENERGY_UNIT,
+            "as_of": view.power_history_at, "site_time": now.strftime("%Y-%m-%d %H:%M"),
+            "method": "sum of the hourly samples from 00:00 (site time); a missing hour or a negative sample is not counted"}
+    if by == "building":
+        key, points = _series(view, ENERGY_SERIES)
+        if key is None:
+            return _unavailable("metric_unavailable", "Energy consumption: FIN returned no hourly energy series for this project.", view)
+        total = _day_total(points, day, last, open_hour)
+        if total["value"] is None:
+            return _unavailable("metric_unavailable", f"Energy consumption {period}: the hourly series has no usable sample for {base['date']}.", view)
+        return {**base, "metric": "Energy consumption", "source": key, **total}
+    boards, absent = [], []
+    for b in view.power_boards or []:
+        if not isinstance(b, dict) or not b.get("name"):
+            continue
+        got = _day_total(_hourly(view.power_history.get(b.get("history"))), day, last, open_hour)
+        if got["value"] is None:
+            absent.append(b["name"])
+        else:
+            boards.append({"name": b["name"], **got})
+    if not boards:
+        why = ("no distribution board is mapped for this project" if not view.power_boards else
+               "none of the mapped boards has an hourly sample for " + base["date"])
+        return _unavailable("metric_unavailable", f"Energy by equipment: energy is measured per distribution board only, and {why}. "
+                                                    "Individual equipment (AHU, FCU) energy is not measured.", view)
+    boards.sort(key=lambda b: -b["value"])
+    return {**base, "metric": "Energy by distribution board", "boards": boards, "boards_without_data": absent,
+            "note": "Boards are distribution boards, not individual equipment: per-equipment energy is not measured."}
+
+
+def get_hvac_status(args: dict, view: DataView) -> dict:
+    problem = _session_problem(view)
+    if problem:
+        return problem
+    ok, as_of, why = _freshness(view.equipment, view)
+    if not ok:
+        return _cache_problem(why, as_of, view)
+    fac = view.facility if isinstance(view.facility, dict) else {}
+    names = fac.get("onlineNames")
+    if not isinstance(names, list):
+        return _unavailable("online_state_unavailable", "Which systems are online is not available from the latest FIN read.", view)
+    online = set(names)
+    kind = str(args.get("type", "")).strip().lower() or None
+    systems = [e for e in _equipment_list(view) if e.get("isSystem", True) and (not kind or _kind_match(e, kind))]
+    up = sorted(str(e.get("name")) for e in systems if e.get("name") in online)
+    down = sorted(str(e.get("name")) for e in systems if e.get("name") not in online)
+    by_type: dict = {}
+    for e in systems:
+        row = by_type.setdefault(str(e.get("type") or "other"), {"online": 0, "total": 0})
+        row["total"] += 1
+        row["online"] += 1 if e.get("name") in online else 0
+    alarms = view.alarms.get("counts") if isinstance(view.alarms, dict) else None
+    return {"available": True, "project": _project(view), "as_of": as_of, "type": kind, "total": len(systems), "online_count": len(up),
+            "online": up[:MAX_LIMIT], "offline": down[:MAX_LIMIT], "truncated": max(len(up), len(down)) > MAX_LIMIT,
+            "in_alarm": sum(1 for e in systems if e.get("inAlarm")), "by_type": by_type,
+            "open_alarms": (alarms or {}).get("total") if kind is None else None,
+            "definition": "Online: at least one point is reporting and no point reports a fault. Run/stop state is not read.",
+            "note": "Systems are the plant equipment the project counts (AHU, FCU, pumps)."}
+
+
 # ─── Registry and schemas ────────────────────────────────────────────────────
 
 _NAME = {"type": "string", "minLength": 1, "maxLength": 80}
@@ -452,6 +698,23 @@ TOOLS: dict[str, dict] = {
             "history": {"type": "boolean", "description": "true: the newest alarm records, open or cleared, from FIN's latest alarm read."},
             "limit": _LIMIT,
         }},
+    },
+    "get_environment": {
+        "fn": get_environment,
+        "description": "A current indoor-environment metric (IAQ index, CO2, temperature, humidity, comfort) from the project's mapped FIN points.",
+        "parameters": {"type": "object", "additionalProperties": False, "required": ["metric"],
+                       "properties": {"metric": {"type": "string", "enum": ENV_METRICS}}},
+    },
+    "get_energy": {
+        "fn": get_energy,
+        "description": "Energy consumed (kWh) today, yesterday or this month, or ranked by distribution board. Never instantaneous power.",
+        "parameters": {"type": "object", "additionalProperties": False, "properties": {
+            "period": {"type": "string", "enum": PERIODS}, "by": {"type": "string", "enum": ["building", "board"]}}},
+    },
+    "get_hvac_status": {
+        "fn": get_hvac_status,
+        "description": "Which HVAC systems are online (optionally one type, e.g. ahu), with counts and the definition of online.",
+        "parameters": {"type": "object", "additionalProperties": False, "properties": {"type": dict(_NAME)}},
     },
     "get_notifications": {
         "fn": get_notifications,
@@ -598,6 +861,38 @@ def build_card(tool: str, args: Optional[dict], result: dict) -> Optional[dict]:
                 columns=["candidate"], rows=[[c] for c in (result.get("candidates") or [])[:MAX_CARD_ROWS]],
                 total=len(result.get("candidates") or []))
         card["interpreted_as"] = _text("equipStatus", "Status of one equipment item{f}", f=_filters_text(filters))
+    elif tool == "get_environment":
+        filters = _filters(args, ["metric"])
+        rows = [[r.get("name"), r.get("value"), r.get("unit")] for r in result.get("readings") or []]
+        first = (result.get("readings") or [{}])[0]
+        card.update(
+            headline=_text("environment", "{name}: {value} {unit}", name=first.get("name"), value=first.get("value"), unit=first.get("unit") or ""),
+            interpreted_as=_text("environment", "Current reading from the mapped FIN points{f}", f=_filters_text(filters)),
+            columns=["metric", "value", "unit"], rows=rows, total=len(rows))
+    elif tool == "get_energy":
+        filters = _filters(args, ["period", "by"])
+        if result.get("boards") is not None:
+            rows = [[b["name"], b["value"], result.get("unit"), f"{b['hours_reported']} of {b['hours_expected']}"] for b in result["boards"]]
+            card.update(
+                headline=_text("energyBoards", "Highest energy {period}: {name} ({value} {unit})", period=result.get("period"),
+                               name=result["boards"][0]["name"], value=result["boards"][0]["value"], unit=result.get("unit")),
+                columns=["name", "value", "unit", "hours"], rows=rows, total=len(rows))
+        else:
+            rows = [[result.get("metric"), result.get("value"), result.get("unit"), ""]]
+            if result.get("hours_expected") is not None:
+                rows[0][3] = f"{result.get('hours_reported')} of {result.get('hours_expected')}"
+            card.update(
+                headline=_text("energy", "Energy consumption {period}: {value} {unit}", period=result.get("period"),
+                               value=result.get("value"), unit=result.get("unit")),
+                columns=["metric", "value", "unit", "hours"], rows=rows, total=1)
+        card["interpreted_as"] = _text("energy", "Energy over the period, from FIN readings{f}", f=_filters_text(filters))
+    elif tool == "get_hvac_status":
+        filters = _filters(args, ["type"])
+        rows = [[n, "online"] for n in result.get("online") or []] + [[n, "offline"] for n in result.get("offline") or []]
+        card.update(
+            headline=_text("hvac", "HVAC systems online: {online} of {total}", online=result.get("online_count", 0), total=result.get("total", 0)),
+            interpreted_as=_text("hvac", "Online state of the plant equipment{f}", f=_filters_text(filters)),
+            columns=["name", "status"], rows=rows[:MAX_CARD_ROWS], total=len(rows))
     elif tool == "get_notifications":
         filters = _filters(args, ["view", "severity"])
         rows = [[i.get("severity"), i.get("type"), i.get("asset"), i.get("created_at"), i.get("read")]
@@ -1173,7 +1468,7 @@ def try_direct(message: str, view_fn: Callable[[], DataView], info: Optional[dic
             result = out["result"]
             text = direct_text(out, decision.get("rule", ""))
             # the same grounding rule as model answers: every number must come from the tool result
-            if _ungrounded(text, [json.dumps(result, default=str), message]):
+            if _ungrounded(text, [json.dumps(result, default=str, ensure_ascii=False), message]):   # escaped non-ASCII would fuse digits beside a dash or a degree sign
                 decision = {"route": "llm_fallback", "reason": "direct_ungrounded"}
             else:
                 record(decision)

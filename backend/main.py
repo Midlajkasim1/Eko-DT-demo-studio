@@ -306,6 +306,7 @@ cached_power_data: dict = {}
 cached_building_data: dict = {}
 cached_sensor_avg: dict = {"temp": None, "humidity": None, "co2": None}
 cached_power_history: dict = {}
+cached_power_history_at: Optional[str] = None   # when cached_power_history was last read from FIN: the cache itself carries no time
 cached_fdd_summary: list = []
 cached_meter_data: dict = {}
 cached_alarm_data: dict = {}
@@ -317,7 +318,7 @@ cached_workorders: dict = {}
 
 async def realtime_loop():
     """Fetch equipment, alarms, histories, and derived summaries."""
-    global cached_equip_data, cached_building_data, cached_power_history
+    global cached_equip_data, cached_building_data, cached_power_history, cached_power_history_at
     global cached_fdd_summary, cached_meter_data, cached_alarm_data, cached_facility
 
     rt_endpoints = CONFIG.get("realtime_endpoints", {})
@@ -340,6 +341,7 @@ async def realtime_loop():
                                   getattr(client, "last_alarm_read_ok", False))
             cached_facility = _compute_facility_services(realtime)
             cached_power_history = await client.fetch_power_histories(pw_endpoints)
+            cached_power_history_at = datetime.now().isoformat()
             if (
                 "Hourly_Energy_Consumption_his" in cached_power_history
                 and "Total_Power_Consumption_his" not in cached_power_history
@@ -663,6 +665,7 @@ def _compute_facility_services(realtime: dict) -> dict:
     total_maintenance = 0
     total_equipment = 0
     online_equipment = 0
+    online_names: list[str] = []
     all_equipment = 0
     by_type: dict[str, int] = {}
 
@@ -719,6 +722,7 @@ def _compute_facility_services(realtime: dict) -> dict:
             
             if is_system and has_connectivity and not is_faulty:
                 online_equipment += 1
+                online_names.append(str(equipment.get('name') or ''))
 
     uptime = 99.8
     if total_equipment > 0:
@@ -732,6 +736,7 @@ def _compute_facility_services(realtime: dict) -> dict:
         'avgUptime': round(uptime, 1),
         'totalEquipment': total_equipment,      # systems only (AHU/FCU/pumps)
         'onlineEquipment': online_equipment,
+        'onlineNames': online_names,            # which systems that count is made of (Eko-Chat names them)
         'allEquipment': all_equipment,          # every equip record in the project
         'byType': by_type,
     }
@@ -803,13 +808,14 @@ def _start_polling():
 def _reset_caches():
     """Drop data polled under the previous configuration so it is never served for the next."""
     global cached_equip_data, cached_power_data, cached_building_data, cached_sensor_avg
-    global cached_power_history, cached_fdd_summary, cached_meter_data, cached_alarm_data
+    global cached_power_history, cached_power_history_at, cached_fdd_summary, cached_meter_data, cached_alarm_data
     global cached_facility, cached_workorders
     cached_equip_data = {}
     cached_power_data = {}
     cached_building_data = {}
     cached_sensor_avg = {"temp": None, "humidity": None, "co2": None}
     cached_power_history = {}
+    cached_power_history_at = None
     cached_fdd_summary = []
     cached_meter_data = {}
     cached_alarm_data = {}
@@ -2388,6 +2394,9 @@ def _chat_view() -> eko_chat.DataView:
         sensor_avg=cached_sensor_avg,
         notifications=_chat_notifications,
         alarm_records=_chat_alarm_records,
+        power_history=cached_power_history,
+        power_history_at=cached_power_history_at,
+        power_boards=CONFIG.get("power_boards") or [],
     )
 
 

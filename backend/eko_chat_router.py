@@ -143,6 +143,75 @@ RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat +
 ]]
 
 
+# Metric questions (indoor environment, energy over a period, HVAC online state). Whole-question templates like RULES, but tried
+# before the "complex question" test: they name a period ("today", "this month") or a ranking ("the most") that test would refuse.
+# (rule id, intent, fixed parameters, anchored pattern). <p> is the period, <kind> an equipment class.
+LEAD = r"(?:(?:what is|what's|what are|what was|show(?: me)?|get|give me|tell me|check|display|how is) )?(?:the )?"
+CUR = r"(?:(?:current|latest|live|present|actual) )?"
+EN = r"(?:energy|electricity|electrical energy|power)"
+USE = r"(?:consumption|usage|use|consumed|used)"
+AFTER = r"(?:for |so far )?(?P<p>today|yesterday|this month|the month so far|month to date|month-to-date)(?: so far)?"
+POSS = r"(?P<p>today's|yesterday's|this month's)"
+CONSUMING = r"(?:equipment|system|systems|asset|assets|board|boards|load|loads|unit|units|panel|panels)"
+ONLINE = r"(?:running|online|on|operating|working|active)"
+PERIOD = {"today": "today", "today's": "today", "yesterday": "yesterday", "yesterday's": "yesterday", "this month": "month",
+          "this month's": "month", "the month so far": "month", "month to date": "month", "month-to-date": "month"}
+METRIC_RULES: list[tuple[str, str, dict, re.Pattern]] = [(rid, intent, fixed, re.compile("^" + pat + "$")) for rid, intent, fixed, pat in [
+    ("env.iaq", "get_environment", {"metric": "iaq"},
+     LEAD + CUR + r"(?:iaq(?: index| level| score| value| reading)?|indoor air quality(?: index| level| score)?|air quality(?: index)?)" + NOW),
+    ("env.co2", "get_environment", {"metric": "co2"},
+     LEAD + CUR + r"(?:indoor |average |building |room )?(?:co2|co₂|carbon dioxide)(?: level| levels| reading| concentration| value)?" + NOW),
+    ("env.temperature", "get_environment", {"metric": "temperature"},
+     LEAD + CUR + r"(?:indoor|average|zone|building|room) temperature(?: level| reading| value)?" + NOW),   # a bare "temperature" could be outdoor or supply air
+    ("env.humidity", "get_environment", {"metric": "humidity"},
+     LEAD + CUR + r"(?:indoor |average |building |room |relative )?humidity(?: level| reading| value)?" + NOW),
+    ("env.comfort", "get_environment", {"metric": "comfort"},
+     LEAD + CUR + r"comfort(?: index| compliance| level| score)" + NOW),
+    ("energy.period", "get_energy", {}, LEAD + r"(?:total )?" + EN + " " + USE + " " + AFTER),
+    ("energy.period.poss", "get_energy", {}, LEAD + POSS + r" (?:total )?" + EN + " " + USE),
+    ("energy.period.howmuch", "get_energy", {},
+     r"how much " + EN + r" (?:have we|did we|has the building|did the building|has the site|have we all|has been|was|is) "
+     r"(?:used|use|consumed|consume)(?: so far)? " + AFTER),
+    ("energy.top", "get_energy", {"by": "board", "period": "today"},
+     r"(?:which|what)(?: " + CONSUMING + r")? (?:is|are) (?:consuming|using) the most (?:energy|power|electricity)(?: today)?"),
+    ("energy.top.uses", "get_energy", {"by": "board", "period": "today"},
+     r"(?:which|what)(?: " + CONSUMING + r")? (?:uses|consumes|has) the most (?:energy|power|electricity)(?: today)?"),
+    ("energy.top.consumer", "get_energy", {"by": "board", "period": "today"},
+     r"(?:what is|what's) the (?:biggest|largest|highest|top|main) (?:energy |power |electricity )?(?:consumer|user)(?: today)?"),
+    ("hvac.count", "get_hvac_status", {},
+     r"how many (?:hvac )?(?:systems|units|equipment) (?:are|is) (?:currently )?" + ONLINE + NOW),
+    ("hvac.count.kind", "get_hvac_status", {},
+     r"how many (?P<kind>[a-z]{2,8}?)s? (?:are|is) (?:currently )?" + ONLINE + NOW),
+    ("hvac.which", "get_hvac_status", {},
+     r"(?:which|what) (?:(?P<kind>[a-z]{2,8}?)s?|hvac (?:systems|units)) (?:are|is) (?:currently )?" + ONLINE + NOW),
+    ("hvac.status", "get_hvac_status", {},
+     LEAD + CUR + r"(?:status|state|condition|health) of the (?:hvac|air conditioning|mechanical)(?: system| systems)?" + NOW),
+    ("hvac.status.short", "get_hvac_status", {}, r"(?:current )?hvac (?:status|state|summary|overview)" + NOW),
+]]
+NOT_HVAC_KIND = NOT_A_TYPE | {"hvac", "system", "unit"}
+
+
+def _metric(text: str) -> Optional[dict]:
+    """The decision for a metric question, or None."""
+    for rid, intent, fixed, pattern in METRIC_RULES:
+        m = pattern.match(text)
+        if not m:
+            continue
+        gd = m.groupdict()
+        params = dict(fixed)
+        if gd.get("p"):
+            params["period"] = PERIOD[gd["p"]]
+        kind = (gd.get("kind") or "").lower()
+        if kind in NOT_HVAC_KIND:
+            kind = ""
+        if kind:
+            params["type"] = kind
+        if _validate(params, TOOLS[intent]["parameters"]):
+            return _fallback("invalid_parameters")
+        return {"route": "direct", "intent": intent, "parameters": params, "confidence": "high", "rule": rid}
+    return None
+
+
 def _fallback(reason: str) -> dict:
     return {"route": "llm_fallback", "reason": reason}
 
@@ -172,9 +241,8 @@ def route(question: Any) -> dict:
     equipment = ids[0] if ids else None
     text = question if equipment is None else question.replace(equipment, "<eq>")
     text = _normalize(text)
-    if text.count("?") or text.count(",") or COMPLEX.search(text):
-        return _fallback("complex_question")
-    for rid, intent, pattern in RULES:
+    complex_q = bool(text.count("?") or text.count(",") or COMPLEX.search(text))
+    for rid, intent, pattern in ([] if complex_q else RULES):
         m = pattern.match(text)
         if not m:
             continue
@@ -203,7 +271,10 @@ def route(question: Any) -> dict:
         if _validate(params, TOOLS[intent]["parameters"]):
             return _fallback("invalid_parameters")
         return {"route": "direct", "intent": intent, "parameters": params, "confidence": "high", "rule": rid}
-    return _fallback("unsupported_or_ambiguous")
+    metric = _metric(text)
+    if metric:
+        return metric
+    return _fallback("complex_question" if complex_q else "unsupported_or_ambiguous")
 
 
 def execute(decision: dict, view: DataView) -> dict:
@@ -244,10 +315,15 @@ _UNAVAILABLE = {
 }
 
 
-def _names(items: list) -> str:
+def _names(items: list, limit: int = MAX_NAMES) -> str:
     # no count of the rest: a number worked out here is in no tool result, and the grounding check would reject the answer
-    names = [str(n) for n in items[:MAX_NAMES]]
+    names = [str(n) for n in items[:limit]]
     return ", ".join(names) + (" and others" if len(items) > len(names) else "")
+
+
+def _g(value: float) -> str:
+    """A reading as FIN gave it, rounded to one decimal, without an exponent or trailing zeros."""
+    return f"{value:.1f}".rstrip("0").rstrip(".")
 
 
 def _shown(r: dict) -> str:
@@ -259,7 +335,7 @@ def direct_text(out: dict, rule: str = "") -> str:
     """The answer sentence for an execute() result."""
     intent, params, r = out.get("intent"), out.get("parameters") or {}, out.get("result") or {}
     if not r.get("available"):
-        return _UNAVAILABLE.get(r.get("reason"), "This data could not be read right now.")
+        return _UNAVAILABLE.get(r.get("reason")) or r.get("message") or "This data could not be read right now."
     if intent == "get_alarms" and params.get("history"):
         sev = f" {params['severity']}" if params.get("severity") else ""
         where = f" on {params['equipment']}" if params.get("equipment") else ""
@@ -302,6 +378,44 @@ def direct_text(out: dict, rule: str = "") -> str:
         if own:
             text += " " + "; ".join(str(a.get("message")) for a in own[:3]) + "."
         return text
+    if intent == "get_environment":
+        parts = [f"{x['name']}: {_g(x['value'])}" + (f" {x['unit']}" if x.get("unit") else "")
+                 + (f" (average of {x['points']} points, {_g(x['min'])} to {_g(x['max'])})" if x.get("points") else "") for x in r.get("readings") or []]
+        text = "; ".join(parts) + f". Updated {r.get('as_of')}."
+        if r.get("unavailable"):
+            text += " Not available: " + "; ".join(m["message"] for m in r["unavailable"]) + "."
+        if r.get("metric") == "iaq":
+            text += " " + r["status_note"]
+        return text
+    if intent == "get_energy":
+        when = {"today": "today", "yesterday": "yesterday", "month": "this month"}[r.get("period")]
+        if r.get("boards") is not None:
+            top = r["boards"][0]
+            ranked = "; ".join(f"{b['name']} {_g(b['value'])} {r['unit']}" for b in r["boards"][:3])
+            gap = f" No data: {', '.join(r['boards_without_data'])}." if r.get("boards_without_data") else ""
+            return (f"Highest energy {when} by distribution board: {top['name']} ({_g(top['value'])} {r['unit']}). Top boards: {ranked}.{gap} "
+                    f"{r['note']} Updated {r.get('as_of')}.")
+        if r.get("period") == "month":
+            return f"Energy consumption {when} ({r['month']}): {_g(r['value'])} {r['unit']}, FIN's month-to-date reading. Updated {r.get('as_of')}."
+        text = f"Energy consumption {when} ({r['date']}): {_g(r['value'])} {r['unit']}, {r['hours_reported']} of {r['hours_expected']} hours reported"
+        if r.get("period") == "today":
+            text += f", through {r['latest_hour']}" + (" including the current hour" if r.get("includes_open_hour") else "")
+        text += f". Site time {r['site_time']}. Updated {r.get('as_of')}."
+        if r.get("missing_hours"):
+            text += f" Not counted, no reading: {', '.join(r['missing_hours'])}."
+        if r.get("invalid_hours"):
+            text += f" Not counted, negative sample: {', '.join(r['invalid_hours'])}."
+        return text
+    if intent == "get_hvac_status":
+        kind = f" {params['type']}" if params.get("type") else ""
+        if not r.get("total"):
+            return f"No{kind} systems are recorded in this project's data."
+        if rule == "hvac.which" or kind:
+            return (f"Online{kind}: {r['online_count']} of {r['total']}. " + (f"Online: {_names(r['online'], 15)}. " if r["online"] else "")
+                    + (f"Offline: {_names(r['offline'], 15)}. " if r["offline"] else "") + r["definition"] + f" Updated {r.get('as_of')}.")
+        alarms = f" Open alarms: {r['open_alarms']}." if r.get("open_alarms") is not None else ""
+        return (f"HVAC systems online: {r['online_count']} of {r['total']}; {r['in_alarm']} in alarm.{alarms} "
+                + (f"Offline: {_names(r['offline'], 15)}. " if r["offline"] else "") + r["definition"] + f" Updated {r.get('as_of')}.")
     if intent == "get_notifications":
         total, read, unread = r.get("total", 0), r.get("read", 0), r.get("unread", 0)
         more = " (more are available)" if r.get("more") else ""
