@@ -602,6 +602,7 @@ def _flatten_equip(realtime: dict) -> list[dict]:
                     "inAlarm": len(alarms) > 0,
                     "alarms": alarms,
                     "bimId": eq.get("bimId", ""),
+                    "finId": eq.get("finId") or "",
                     "equipId": eq.get("equipId") or "",
                     "points": _with_control(eq_name, tags, eq.get("points", [])),
                 })
