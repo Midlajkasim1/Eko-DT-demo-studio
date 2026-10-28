@@ -51,7 +51,7 @@
   const CODES = {
     chat_disabled:'chat_disabled', llm_not_configured:'llm_not_configured',
     fin_not_connected:'session', unauthorized:'session', session_required:'session', session_expired:'session',
-    project_required:'project', project_mismatch:'project', session_project_mismatch:'project', project_not_validated:'project',
+    project_required:'project', project_not_supported:'project', project_mismatch:'project', session_project_mismatch:'project', project_not_validated:'project',
     llm_unavailable:'llm_unavailable', llm_http_error:'llm_unavailable',
     llm_timeout:'timeout',
     llm_invalid_response:'invalid_response', llm_empty_response:'invalid_response',

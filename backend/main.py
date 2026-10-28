@@ -2386,19 +2386,32 @@ def _chat_view() -> eko_chat.DataView:
         facility=cached_facility,
         fdd=cached_fdd_summary,
         sensor_avg=cached_sensor_avg,
+        notifications=_chat_notifications,
     )
 
 
-def _chat_guard(request: Request) -> None:
+def _chat_notifications(user: str, site: str, **filters) -> dict:
+    """The signed-in user's notifications on their project for the chat tool; read-only, same store as the bell."""
+    s = notifications.store()
+    page = s.list_notifications(user, site, **{k: v for k, v in filters.items() if v is not None})
+    return {"items": page["items"], "more": page["next_cursor"] is not None, "unread": s.unread_count(user, site)}
+
+
+def _chat_guard(request: Request) -> tuple[str, str]:
     """Who may use Eko-Chat: the signed-in user of the open project, nobody else. The same checks as every notification
     route (the FIN connection, this browser's own session cookie, the X-Eko-Project header against the project the backend
     serves, and the project the session signed in for), re-raised in the {"error", "message"} shape the chat client reads.
-    Nothing a request says about who it is or which site it wants is trusted: the user and site come from the session."""
+    Nothing a request says about who it is or which site it wants is trusted: the user and site come from the session.
+    Chat is limited to chat.allowed_projects, which is config.json's own project_name until more are listed."""
     try:
-        _notification_scope(request)
+        user, site = _notification_scope(request)
     except NotificationApiError as exc:
         code = "fin_not_connected" if exc.code == "unauthenticated" else exc.code
         raise HTTPException(status_code=exc.status, detail={"error": code, "message": exc.message})
+    if site not in ((CONFIG.get("chat") or {}).get("allowed_projects") or [BASE_CONFIG["project_name"]]):
+        raise HTTPException(status_code=403, detail={"error": "project_not_supported",
+                                                     "message": "Eko-Chat is not available for this project yet."})
+    return user, site
 
 
 app.include_router(eko_chat.build_router(_chat_view, lambda: CONFIG.get("chat") or {}, _chat_guard))

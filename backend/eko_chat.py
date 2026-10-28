@@ -27,7 +27,7 @@ import re
 import time
 from collections import deque
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Callable, Optional, Protocol
 
@@ -67,6 +67,8 @@ class DataView:
     fdd: list = field(default_factory=list)
     sensor_avg: dict = field(default_factory=dict)
     now: Optional[datetime] = None
+    scope: Optional[tuple] = None          # (user id, site) of the signed-in user: set by the router from the session guard
+    notifications: Optional[Callable[..., dict]] = None   # main.py's reader over the notification store
 
 
 def _unavailable(reason: str, message: str, view: Optional[DataView] = None) -> dict:
@@ -360,6 +362,31 @@ def get_alarms(args: dict, view: DataView) -> dict:
     }
 
 
+def get_notifications(args: dict, view: DataView) -> dict:
+    """The signed-in user's own notifications on this project, with their read state. Eko-DT records no acknowledgement
+    for a notification, so none is ever reported: only opened (read) and unread."""
+    problem = _session_problem(view)
+    if problem:
+        return problem
+    if view.notifications is None or not view.scope:
+        return _unavailable("notifications_unavailable", "Notifications are not available for this session.", view)
+    limit = args.get("limit", DEFAULT_LIMIT)
+    try:
+        page = view.notifications(*view.scope, view=args.get("view", "all"), severity=args.get("severity"), limit=limit)
+    except Exception:   # the store's own message is not for the browser
+        return _unavailable("notifications_failed", "Notifications could not be read.", view)
+    items = [{"severity": n.get("severity"), "type": n.get("type"), "asset": n.get("asset_id"),
+              "created_at": n.get("created_at"), "read": n.get("opened_at") is not None} for n in page.get("items") or []]
+    return {
+        "available": True, "project": _project(view), "as_of": None,
+        "scope": "this user's notifications on this project; dismissed ones are not listed",
+        "total": len(items), "more": bool(page.get("more")), "unread_total": page.get("unread"),
+        "read": sum(1 for i in items if i["read"]), "unread": sum(1 for i in items if not i["read"]),
+        "acknowledgements": {"tracked": False, "note": "Eko-DT does not record acknowledgements of notifications."},
+        "items": items,
+    }
+
+
 # ─── Registry and schemas ────────────────────────────────────────────────────
 
 _NAME = {"type": "string", "minLength": 1, "maxLength": 80}
@@ -397,6 +424,15 @@ TOOLS: dict[str, dict] = {
             "equipment": dict(_NAME, description="Equipment name the alarm source refers to."),
             "severity": {"type": "string", "enum": SEVERITIES},
             "state": dict(_NAME, description="Alarm state as reported by FIN."),
+            "limit": _LIMIT,
+        }},
+    },
+    "get_notifications": {
+        "fn": get_notifications,
+        "description": "The signed-in user's notifications on this project with their read state. Acknowledgements are not recorded.",
+        "parameters": {"type": "object", "additionalProperties": False, "properties": {
+            "view": {"type": "string", "enum": ["all", "unread", "read"]},
+            "severity": {"type": "string", "enum": SEVERITIES},
             "limit": _LIMIT,
         }},
     },
@@ -530,6 +566,15 @@ def build_card(tool: str, args: Optional[dict], result: dict) -> Optional[dict]:
                 columns=["candidate"], rows=[[c] for c in (result.get("candidates") or [])[:MAX_CARD_ROWS]],
                 total=len(result.get("candidates") or []))
         card["interpreted_as"] = _text("equipStatus", "Status of one equipment item{f}", f=_filters_text(filters))
+    elif tool == "get_notifications":
+        filters = _filters(args, ["view", "severity"])
+        rows = [[i.get("severity"), i.get("type"), i.get("asset"), i.get("created_at"), i.get("read")]
+                for i in (result.get("items") or [])[:MAX_CARD_ROWS]]
+        card.update(
+            headline=_text("notifications", "Notifications: {total} ({unread} unread)", total=result.get("total", 0),
+                           unread=result.get("unread", 0)),
+            interpreted_as=_text("notifications", "Your notifications on this project{f}", f=_filters_text(filters)),
+            columns=["severity", "type", "asset", "created", "read"], rows=rows, total=result.get("total", 0))
     else:  # get_building_snapshot
         filters = []
         rows = []
@@ -1113,14 +1158,29 @@ def try_direct(message: str, view_fn: Callable[[], DataView], info: Optional[dic
     return None
 
 
+RULES_PROVIDER = "rules"   # chat.provider: answer from the rules and the backend's data only; no language model is ever called
+HELP_TEXT = ("I can answer these questions from this project's live FIN data: "
+             "equipment (list it, count it, the status of one item by name, how many systems are online), "
+             "alarms and alerts (open, critical or warning, latest, on one item by name), and "
+             "notifications (recent, unread, acknowledgements). "
+             "Ask one thing at a time and name the equipment, for example \"status of <equipment name>\".")
+
+
+def unsupported() -> dict:
+    """The reply to a question no rule answers when no language model is configured: what can be asked, nothing invented."""
+    return {"answer": HELP_TEXT, "answer_source": "code", "route": "unsupported", "grounded": True,
+            "tool_calls": [], "card": None, "model": None}
+
+
 async def stream_direct(resp: dict, project: dict):
     """A direct answer as the usual events, finished at once: start, the tool, done. No token events:
     the answer is complete and arrives whole in done, as the frontend already reads it."""
-    yield sse("start", {"model": None, "project": project, "route": "direct"})
+    route = resp.get("route", "direct")
+    yield sse("start", {"model": None, "project": project, "route": route})
     for t in _browser_trace(resp["tool_calls"]):
         yield sse("tool", {"tool": t["tool"], "status": "running"})
         yield sse("tool", t)
-    yield sse("done", {"answer": resp["answer"], "answer_source": "code", "route": "direct", "grounded": True,
+    yield sse("done", {"answer": resp["answer"], "answer_source": "code", "route": route, "grounded": True,
                        "tool_calls": _browser_trace(resp["tool_calls"]), "card": resp["card"], "model": None,
                        "project": project, "timestamp": datetime.now().astimezone().isoformat(timespec="seconds")})
 
@@ -1141,15 +1201,19 @@ def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
         cfg = config_fn() or {}
         if cfg.get("enabled") is not True:
             raise _error(503, "chat_disabled", "Eko-Chat is disabled in config.json.")
-        if guard_fn is not None:
-            guard_fn(request)
-        view = view_fn()
+        scope = guard_fn(request) if guard_fn is not None else None
+        # the signed-in user's scope rides on every view this request builds, for the tools that read per-user data
+        vf = view_fn if scope is None else (lambda: replace(view_fn(), scope=scope))
+        view = vf()
         if not view.authenticated:
             raise _error(401, "fin_not_connected", "Sign in to FIN first.")
         _debug("question", req.message)
         fallback: dict = {}
-        if cfg.get("fast_router", True) is not False:
-            direct = try_direct(req.message, view_fn, fallback)
+        rules_only = cfg.get("provider") == RULES_PROVIDER
+        if rules_only or cfg.get("fast_router", True) is not False:
+            direct = try_direct(req.message, vf, fallback)
+            if direct is None and rules_only:
+                direct = unsupported()
             if direct is not None:
                 if req.stream:
                     return StreamingResponse(stream_direct(direct, _project(view)), media_type="text/event-stream",
@@ -1168,11 +1232,11 @@ def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
         LLM_GATE.configure(_limit_from(cfg))
         run = LLMRun(fallback.get("reason"), bool(req.stream), t0)
         if req.stream:
-            return StreamingResponse(stream_chat(adapter, req.message, view_fn, _project(view), run),
+            return StreamingResponse(stream_chat(adapter, req.message, vf, _project(view), run),
                                      media_type="text/event-stream",
                                      headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
         try:
-            result = await converse(adapter, req.message, view_fn, run)
+            result = await converse(adapter, req.message, vf, run)
         except ChatFailure as exc:
             run.finish(_outcome(exc.code), exc.code)
             raise _error(exc.status, exc.code, exc.message, tool_calls=exc.trace)

@@ -55,23 +55,27 @@ POLITE_SUFFIX = re.compile(r"(?: please| thanks| thank you)+$")
 NOW = r"(?: (?:right now|now|currently|at the moment|at present))?"
 SEV = r"(?:(?P<sev>critical|warnings?|info) )?"
 SHOW = r"(?:what are |what is |what's |which are |show(?: me)? |list |get |give me |display |check )?"
+ALARMS = r"(?:alarms|alerts)"                       # "alerts" is the everyday word for FIN alarms
+OPEN = r"(?:(?:current|currently|active|open|live|ongoing|latest|recent) )*"
+ASSETS = r"(?:equipment|assets?|equipment assets?)"
+HERE = r"(?: (?:in|of|for) (?:this|the) (?:project|building|site))?"
 
 # (rule id, intent, anchored pattern). <eq> stands for the one explicit equipment id in the question.
 RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat + "$")) for rid, intent, pat in [
     # current open alarms (optionally one severity)
     ("alarms.list", "get_alarms",
-     SHOW + r"(?:all )?(?:the )?(?:(?:current|currently|active|open|live|ongoing) )*" + SEV + r"alarms(?: (?:that are |which are )?(?:open|active))?" + NOW),
+     SHOW + r"(?:all )?(?:the )?" + OPEN + SEV + ALARMS + r"(?: (?:that are |which are )?(?:open|active))?" + NOW),
     ("alarms.any", "get_alarms",
-     r"(?:are there |is there |do we have |do i have )?any (?:(?:current|active|open|live) )*" + SEV + r"alarms(?: (?:open|active))?" + NOW),
+     r"(?:are there |is there |do we have |do i have )?any " + OPEN + SEV + ALARMS + r"(?: (?:open|active))?" + NOW),
     ("alarms.which", "get_alarms",
-     r"(?:what|which) (?:" + SEV + r")?alarms (?:are|is) (?:open|active|on|raised)" + NOW),
+     r"(?:what|which) " + SEV + ALARMS + r" (?:are|is) (?:open|active|on|raised)" + NOW),
     ("alarms.count", "get_alarms",
-     r"how many (?:(?:current|active|open|live) )*" + SEV + r"alarms(?: (?:are there|are open|are active|do we have|are raised))?" + NOW),
+     r"how many " + OPEN + SEV + ALARMS + r"(?: (?:are there|are open|are active|do we have|are raised))?" + NOW),
     # alarms on one explicit equipment item
     ("alarms.equipment", "get_alarms",
-     SHOW + r"(?:any |the )?(?:(?:current|active|open) )*alarms (?:on|for|of) <eq>" + NOW),
+     SHOW + r"(?:any |the )?" + OPEN + ALARMS + r" (?:on|for|of) <eq>" + NOW),
     ("alarms.equipment.has", "get_alarms",
-     r"(?:does|has) <eq> (?:have |got )?(?:any )?(?:(?:current|active|open) )*alarms" + NOW),
+     r"(?:does|has) <eq> (?:have |got )?(?:any )?" + OPEN + ALARMS + NOW),
     # building snapshot / status
     ("snapshot.status", "get_building_snapshot",
      SHOW + r"(?:the )?(?:(?:current|overall|live) )*(?:building|site) (?:status|overview|snapshot|summary|state)" + NOW),
@@ -87,8 +91,26 @@ RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat +
      r"(?:what|which) equipment (?:is|are) (?:currently )?in alarm" + NOW),
     ("equipment.in_alarm.list", "find_equipment",
      SHOW + r"(?:all )?(?:the )?equipment (?:that is |that are |which is |which are )?(?:currently )?in alarm" + NOW),
+    ("equipment.in_alarm.has", "find_equipment",
+     r"(?:what|which) " + ASSETS + r" (?:has|have) (?:any )?" + OPEN + ALARMS + NOW),
     ("equipment.list", "find_equipment",
-     r"(?:show(?: me)? |list )(?:all )?(?:the )?equipment"),
+     r"(?:show(?: me)? |list |display |get |give me )(?:all )?(?:the )?" + ASSETS + HERE),
+    ("equipment.available", "find_equipment",
+     r"(?:what|which) " + ASSETS + r"(?: is| are| do we have)(?: available)?" + HERE),
+    ("equipment.count", "find_equipment",
+     r"how many " + ASSETS + r"(?: items)?(?: (?:are |is )?(?:there|available|do we have))*" + HERE + r"(?: (?:are |is )?(?:there|available))*"),
+    # no per-item online flag is published: the backend's own online count of systems answers this
+    ("equipment.online", "get_building_snapshot",
+     r"(?:(?:what|which) " + ASSETS + r"|how many " + ASSETS + r"|how many systems) (?:is|are) (?:currently )?(?:online|running|connected)" + NOW),
+    # the signed-in user's notifications; Eko-DT records no acknowledgement, so those questions get the read state
+    ("notifications.ack", "get_notifications",
+     SHOW + r"(?:the )?(?:un)?acknowledged notifications"),
+    ("notifications.ack.which", "get_notifications",
+     r"(?:what|which) notifications (?:have been|are|were|have not been|are not|were not) (?:un)?acknowledged"),
+    ("notifications.unread", "get_notifications",
+     r"(?:" + SHOW + r"(?:the )?|(?:do i have |are there )(?:any )?|how many )(?:unread|new) notifications"),
+    ("notifications.list", "get_notifications",
+     SHOW + r"(?:the |all |my )*(?:(?:recent|latest|current) )*notifications"),
     # status / information of one explicit equipment item
     ("equipment.status_of", "get_equipment_status",
      SHOW + r"(?:the )?(?:(?:current|live|latest) )*(?:status|state|condition|details|information|info|readings|points) (?:of|for|on) <eq>" + NOW),
@@ -144,6 +166,8 @@ def route(question: Any) -> dict:
             params["severity"] = SEVERITY_WORDS[sev]
         if rid.startswith("equipment.in_alarm"):
             params["in_alarm"] = True
+        if rid == "notifications.unread":
+            params["view"] = "unread"
         if _validate(params, TOOLS[intent]["parameters"]):
             return _fallback("invalid_parameters")
         return {"route": "direct", "intent": intent, "parameters": params, "confidence": "high", "rule": rid}
@@ -179,6 +203,8 @@ def answer(question: str, view: DataView) -> Optional[dict]:
 
 MAX_NAMES = 5
 _UNAVAILABLE = {
+    "notifications_unavailable": "Notifications are not available for this session.",
+    "notifications_failed": "Notifications could not be read right now.",
     "fin_not_connected": "There is no authenticated FIN session, so live building data is not available.",
     "no_active_project": "No FIN project is active, so live building data is not available.",
     "no_data_yet": "The backend has not read this data from FIN yet. Please try again shortly.",
@@ -226,7 +252,23 @@ def direct_text(out: dict, rule: str = "") -> str:
         if own:
             text += " " + "; ".join(str(a.get("message")) for a in own[:3]) + "."
         return text
+    if intent == "get_notifications":
+        total, read, unread = r.get("total", 0), r.get("read", 0), r.get("unread", 0)
+        more = " (more are available)" if r.get("more") else ""
+        if rule.startswith("notifications.ack"):
+            return ("Eko-DT does not record acknowledgements of notifications, so none can be reported as acknowledged or unacknowledged. "
+                    f"Of the {total} notifications listed{more}, {read} have been opened and {unread} are unread.")
+        if not total:
+            return "You have no unread notifications on this project." if params.get("view") == "unread" else "You have no notifications on this project."
+        shown = [f"{n.get('severity')} {n.get('type')}" + (f" on {n['asset']}" if n.get("asset") else "") for n in (r.get("items") or [])[:3]]
+        return f"Notifications listed: {total}{more}, {unread} unread. Latest: " + "; ".join(shown) + "."
     # get_building_snapshot
+    if rule == "equipment.online":
+        fac = r.get("facility_services") or {}
+        if fac.get("systems_online") is None or fac.get("systems_total") is None:
+            return "The number of systems online is not available right now."
+        return (f"Systems online: {fac['systems_online']} of {fac['systems_total']}, as counted by the backend. "
+                "The backend publishes no per-item online flag, so a list of the online items is not available.")
     live = ((r.get("power") or {}).get("live_points")) or {}
     unit = (r.get("power") or {}).get("unit_hint") or ""
     readings = "; ".join(f"{k} {v}{(' ' + unit) if unit else ''}" for k, v in live.items() if v is not None)

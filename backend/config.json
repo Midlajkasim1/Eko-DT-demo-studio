@@ -7,7 +7,7 @@
     "enabled": false,
     "fast_router": true,
     "max_concurrent_llm": 2,
-    "provider": "openai_compatible",
+    "provider": "rules",
     "base_url": "http://localhost:11434/v1",
     "model": "qwen3:4b",
     "api_key_env": "EKO_CHAT_API_KEY",
