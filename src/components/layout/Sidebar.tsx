@@ -9,6 +9,7 @@ import { ModelInfoPanel } from '@/components/model/ModelInfoPanel'
 import { DownloadButton } from '@/components/download/DownloadButton'
 import { FinLoginPanel } from '@/components/fin/FinLoginPanel'
 import { ProjectSettingsModal } from '@/components/project/ProjectSettingsModal'
+import { AssetLinksModal } from '@/components/project/AssetLinksModal'
 import { unloadAllModels } from '@/lib/sceneTeardown'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 
@@ -37,6 +38,7 @@ export function Sidebar({ onFiles, engineRef }: SidebarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isExporting, setIsExporting] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showLinks, setShowLinks] = useState(false)
 
   const handleExport = async (target: 'standalone' | 'backend') => {
     // Zipping runs on the main thread, so a scene still rendering every frame
@@ -174,6 +176,13 @@ export function Sidebar({ onFiles, engineRef }: SidebarProps) {
                 </button>
                 <button
                   className="download-btn"
+                  style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)', marginBottom: '8px' }}
+                  onClick={() => setShowLinks(true)}>
+                  <i className="bx bx-link" style={{ marginRight: '8px', fontSize: '16px' }}></i>
+                  Asset Links
+                </button>
+                <button
+                  className="download-btn"
                   style={{ background: 'var(--text-primary)', marginBottom: '8px' }}
                   onClick={() => handleExport('standalone')}
                   disabled={isExporting}
@@ -258,6 +267,7 @@ export function Sidebar({ onFiles, engineRef }: SidebarProps) {
       )}
 
       <ProjectSettingsModal visible={showSettings} onClose={() => setShowSettings(false)} />
+      <AssetLinksModal visible={showLinks} onClose={() => setShowLinks(false)} engineRef={engineRef} />
     </aside>
   )
 }

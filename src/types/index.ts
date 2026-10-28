@@ -193,8 +193,24 @@ export interface ProjectMeta {
   materialOverrides?: Record<string, MaterialOverride>
   mapConfig?: MapConfig
   mapAssets?: Record<string, MapAsset>
+  /** FIN equipment ↔ model element links, edited in Asset Links */
+  assetLinks?: AssetLink[]
   /** Attached from thumbnail.webp on open, and persisted back by saveProjectMeta */
   thumbnail?: string
+}
+
+/** One FIN equipment and the model element it is drawn as. Keyed on the IFC GlobalId, which a revised model keeps. */
+export interface AssetLink {
+  /** FIN equipment name, as the dashboard names its assets */
+  equip: string
+  /** FIN equipment record id, so a rename in FIN can be followed */
+  finId?: string
+  /** IFC GlobalId */
+  guid: string
+  /** Equipment type (FCU, AHU…): picks the schematic drawn inside it */
+  type: string
+  /** The element's name when it was linked */
+  element?: string
 }
 
 /** Everything the project list renders, so opening it never parses project.json */

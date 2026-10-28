@@ -899,6 +899,7 @@ class FinScramClient:
             equip_data = {
                 "name": nav_name,
                 "bimId": equip.get("bimId") or equip_id or nav_name,
+                "finId": str(equip_id or "").lstrip("@"),
                 "equipId": _cmms_id(equip.get("equipId")),
                 "alarms": equip_alarms,
                 "points": formatted_points,
