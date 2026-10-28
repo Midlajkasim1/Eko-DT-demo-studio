@@ -251,7 +251,9 @@ window.EKO_DATA.marsa = {
     "alarmTargets": { "standingHours": 24, "standingTarget": 10, "standingSource": "EEMUA 191", "rateWindowMin": 60, "rateTargetPer10Min": 1, "rateSource": "EEMUA 191", "floodPer10Min": 10, "floodSource": "ISA-18.2", "priorityRef": [5, 15, 80], "prioritySource": "EEMUA 191" },
     "shifts": { "starts": ["06:00", "14:00", "22:00"] },
     "watch": { "autonomyDays": 3, "trendWindowH": 24 } },
-  "features": { "control": "demo", "cmms": "mock", "llm": "mock" },
+  /* ask: "eko-chat" sends Ask EKO questions to the backend (POST /api/chat; the backend owns the model, its key and the tools);
+     "local" keeps the offline prototype that answers from this file through the llm adapter. llm stays the reports' narration adapter. */
+  "features": { "control": "demo", "cmms": "mock", "llm": "mock", "ask": "eko-chat" },
   /* D125: ENTITLEMENTS — which modules are active, offered as add-ons ("available") or hidden.
      Production reads the tenant's licence; the administrator's overrides live in localStorage
      (Account menu › Administration › Modules and add-ons). Keys: a module id, or module.sub.

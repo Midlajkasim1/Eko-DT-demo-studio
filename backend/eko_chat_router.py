@@ -1,0 +1,265 @@
+"""Eko-Chat fast query router (speed phase 1): deterministic, no LLM.
+
+route(question) decides whether a question is one of a few simple, current-data questions that an
+existing typed tool answers on its own. It is pure text matching: no model, no network, no FIN.
+
+  {"route": "direct", "intent": <tool>, "parameters": {...}, "confidence": "high", "rule": <rule id>}
+  {"route": "llm_fallback", "reason": "empty" | "unsafe_content" | "complex_question" |
+                                      "multiple_equipment" | "invalid_parameters" | "unsupported_or_ambiguous"}
+
+A question is routed directly only when a whole-question template matches (anchored, after removing
+polite filler); anything with a time window, comparison, ranking, cause, several parts or more than one
+equipment item goes to llm_fallback. The intent is always one of the four existing tools and the
+parameters are checked against that tool's own schema.
+
+execute(decision, view) answers a direct decision with the existing run_tool() and build_card() over the
+same DataView the tools already read, so nothing here touches FIN or adds a query of its own.
+
+Speed phase 2: POST /api/chat routes every question here first (unless chat.fast_router is false). A
+direct question is answered by execute() plus direct_text() without building a model adapter; an
+llm_fallback question continues to the unchanged converse() / stream_chat().
+"""
+from __future__ import annotations
+
+import re
+from typing import Any, Optional
+
+from eko_chat import MAX_MESSAGE_CHARS, TOOLS, DataView, _validate, build_card, run_tool
+
+SEVERITY_WORDS = {"critical": "critical", "warning": "warning", "warnings": "warning", "info": "info"}
+
+# An explicit equipment id: letters, then at least one "-" or "_" separated part, with a digit somewhere
+# (FCU-ANC09-GF-02, EQ-1, AHU_01). Plain words ("built-in") and floors ("L1") are not ids.
+EQUIPMENT_ID = re.compile(r"(?<![\w-])([A-Za-z]{1,8}[0-9]*(?:[-_][A-Za-z0-9]+)+)(?![\w-])")
+
+# Raw FIN / Zinc / Axon, SQL, shell, URLs or markup: never routed, whatever else the question says
+UNSAFE = re.compile(
+    r"readall|readbyid|hisread|hiswrite|pointwrite|commit\s*\(|eval\s*\(|@p:|\bp:\w+:r:|"
+    r"\bselect\b.+\bfrom\b|\bdrop\s+table\b|\binsert\s+into\b|\bdelete\s+from\b|\bupdate\s+\w+\s+set\b|"
+    r"https?://|\bfile:|\bftp:|`|\$\(|;|&&|\|\||\brm\s+-|<\s*/?\s*[a-z]+[^>]*>|\{\{|\}\}",
+    re.I)
+
+# Words that make a question more than "read the current value": time windows, comparisons, rankings,
+# causes, advice, predictions and joins of several questions
+COMPLEX = re.compile(
+    r"\b(why|cause[sd]?|causing|reason|reasons|root|compare[sd]?|comparing|comparison|versus|vs|trend|trends|"
+    r"trending|history|historical|yesterday|today|tonight|week|weeks|weekly|month|months|monthly|year|years|"
+    r"daily|hour|hours|last|previous|past|since|until|between|ago|most|least|top|highest|lowest|worst|best|"
+    r"more|fewer|less|average|avg|mean|total|sum|rank|ranking|predict|prediction|forecast|expect|should|"
+    r"recommend|recommendation|suggest|fix|improve|could|might|will|if|and|or|also|then|after|before|"
+    r"times|often|frequently|usually|deviation|anomal\w*)\b")
+
+POLITE_PREFIX = re.compile(r"^(?:(?:hi|hey|hello)(?: eko)?[, ]+|eko[, ]+|please |kindly |can you |could you |would you |"
+                           r"can i see |i want to see |i want to know |i would like to see |let me see )+")
+POLITE_SUFFIX = re.compile(r"(?: please| thanks| thank you)+$")
+NOW = r"(?: (?:right now|now|currently|at the moment|at present))?"
+SEV = r"(?:(?P<sev>critical|warnings?|info) )?"
+SHOW = r"(?:what are |what is |what's |which are |show(?: me)? |list |get |give me |display |check )?"
+
+# (rule id, intent, anchored pattern). <eq> stands for the one explicit equipment id in the question.
+RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat + "$")) for rid, intent, pat in [
+    # current open alarms (optionally one severity)
+    ("alarms.list", "get_alarms",
+     SHOW + r"(?:all )?(?:the )?(?:(?:current|currently|active|open|live|ongoing) )*" + SEV + r"alarms(?: (?:that are |which are )?(?:open|active))?" + NOW),
+    ("alarms.any", "get_alarms",
+     r"(?:are there |is there |do we have |do i have )?any (?:(?:current|active|open|live) )*" + SEV + r"alarms(?: (?:open|active))?" + NOW),
+    ("alarms.which", "get_alarms",
+     r"(?:what|which) (?:" + SEV + r")?alarms (?:are|is) (?:open|active|on|raised)" + NOW),
+    ("alarms.count", "get_alarms",
+     r"how many (?:(?:current|active|open|live) )*" + SEV + r"alarms(?: (?:are there|are open|are active|do we have|are raised))?" + NOW),
+    # alarms on one explicit equipment item
+    ("alarms.equipment", "get_alarms",
+     SHOW + r"(?:any |the )?(?:(?:current|active|open) )*alarms (?:on|for|of) <eq>" + NOW),
+    ("alarms.equipment.has", "get_alarms",
+     r"(?:does|has) <eq> (?:have |got )?(?:any )?(?:(?:current|active|open) )*alarms" + NOW),
+    # building snapshot / status
+    ("snapshot.status", "get_building_snapshot",
+     SHOW + r"(?:the )?(?:(?:current|overall|live) )*(?:building|site) (?:status|overview|snapshot|summary|state)" + NOW),
+    ("snapshot.status_of", "get_building_snapshot",
+     SHOW + r"(?:the )?(?:current |overall )?(?:status|overview|snapshot|summary|state) of the (?:building|site)" + NOW),
+    # current power / load: answered by the snapshot's configured live points
+    ("snapshot.power", "get_building_snapshot",
+     SHOW + r"(?:the )?(?:(?:current|live|present) )+(?:building |site )?(?:power(?: consumption| usage| demand| draw)?|electrical load|load|demand)" + NOW),
+    ("snapshot.power_now", "get_building_snapshot",
+     SHOW + r"(?:the )?(?:building |site )?(?:power(?: consumption| usage| demand| draw)?|electrical load) (?:right now|now|currently|at the moment)"),
+    # equipment currently in alarm / the equipment list
+    ("equipment.in_alarm", "find_equipment",
+     r"(?:what|which) equipment (?:is|are) (?:currently )?in alarm" + NOW),
+    ("equipment.in_alarm.list", "find_equipment",
+     SHOW + r"(?:all )?(?:the )?equipment (?:that is |that are |which is |which are )?(?:currently )?in alarm" + NOW),
+    ("equipment.list", "find_equipment",
+     r"(?:show(?: me)? |list )(?:all )?(?:the )?equipment"),
+    # status / information of one explicit equipment item
+    ("equipment.status_of", "get_equipment_status",
+     SHOW + r"(?:the )?(?:(?:current|live|latest) )*(?:status|state|condition|details|information|info|readings|points) (?:of|for|on) <eq>" + NOW),
+    ("equipment.status", "get_equipment_status",
+     SHOW + r"(?:the )?<eq>(?:'s)?(?: (?:current|live|latest))? (?:status|state|condition|details|information|info|readings|points)" + NOW),
+    ("equipment.how", "get_equipment_status",
+     r"how(?: is|'s) <eq>(?: (?:doing|running|performing|working))?" + NOW),
+    ("equipment.is", "get_equipment_status",
+     r"is <eq> (?:ok|okay|fine|running|working|online|healthy|in alarm|alarming)" + NOW),
+    ("equipment.about", "get_equipment_status",
+     r"(?:tell me about |show(?: me)? |check |look up |lookup |find )?<eq>"),
+]]
+
+
+def _fallback(reason: str) -> dict:
+    return {"route": "llm_fallback", "reason": reason}
+
+
+def _normalize(text: str) -> str:
+    t = text.strip().lower()
+    t = re.sub(r"[?!.]+$", "", t).strip()
+    t = re.sub(r"\s+", " ", t)
+    t = POLITE_PREFIX.sub("", t)
+    t = POLITE_SUFFIX.sub("", t)
+    return t.strip(" ,")
+
+
+def route(question: Any) -> dict:
+    """The routing decision for one question. Deterministic; never raises."""
+    if not isinstance(question, str) or not question.strip():
+        return _fallback("empty")
+    if len(question) > MAX_MESSAGE_CHARS:
+        return _fallback("unsupported_or_ambiguous")
+    if UNSAFE.search(question):
+        return _fallback("unsafe_content")
+    ids = list(dict.fromkeys(m.group(1) for m in EQUIPMENT_ID.finditer(question) if re.search(r"\d", m.group(1))))
+    if len(ids) > 1:
+        return _fallback("multiple_equipment")
+    equipment = ids[0] if ids else None
+    text = question if equipment is None else question.replace(equipment, "<eq>")
+    text = _normalize(text)
+    if text.count("?") or text.count(",") or COMPLEX.search(text):
+        return _fallback("complex_question")
+    for rid, intent, pattern in RULES:
+        m = pattern.match(text)
+        if not m:
+            continue
+        params: dict = {}
+        if "<eq>" in pattern.pattern:
+            params["equipment"] = equipment
+        sev = m.groupdict().get("sev")
+        if sev:
+            params["severity"] = SEVERITY_WORDS[sev]
+        if rid.startswith("equipment.in_alarm"):
+            params["in_alarm"] = True
+        if _validate(params, TOOLS[intent]["parameters"]):
+            return _fallback("invalid_parameters")
+        return {"route": "direct", "intent": intent, "parameters": params, "confidence": "high", "rule": rid}
+    return _fallback("unsupported_or_ambiguous")
+
+
+def execute(decision: dict, view: DataView) -> dict:
+    """Answer a direct decision from the backend's own data: the existing tool and card, nothing else.
+
+    Returns {"route": "direct", "intent", "parameters", "result", "card"}, or {"route": "rejected",
+    "reason"} for anything that is not a valid direct decision (unknown tool, bad parameters)."""
+    if not isinstance(decision, dict) or decision.get("route") != "direct":
+        return {"route": "rejected", "reason": "not_direct"}
+    intent, params = decision.get("intent"), decision.get("parameters")
+    if intent not in TOOLS:
+        return {"route": "rejected", "reason": "unknown_tool"}
+    if not isinstance(params, dict) or _validate(params, TOOLS[intent]["parameters"]):
+        return {"route": "rejected", "reason": "invalid_parameters"}
+    result = run_tool(intent, params, view)
+    return {"route": "direct", "intent": intent, "parameters": params, "result": result,
+            "card": build_card(intent, params, result)}
+
+
+def answer(question: str, view: DataView) -> Optional[dict]:
+    """route() then execute(): the direct answer, or None when the question needs the model."""
+    decision = route(question)
+    return execute(decision, view) if decision["route"] == "direct" else None
+
+
+# ─── Direct answer text (speed phase 2) ──────────────────────────────────────
+# One or two plain sentences written by code from the tool result; every value in them is copied from
+# that result. The card next to it is build_card()'s, unchanged.
+
+MAX_NAMES = 5
+_UNAVAILABLE = {
+    "fin_not_connected": "There is no authenticated FIN session, so live building data is not available.",
+    "no_active_project": "No FIN project is active, so live building data is not available.",
+    "no_data_yet": "The backend has not read this data from FIN yet. Please try again shortly.",
+    "stale": "The latest reading of this data is too old to be shown as current.",
+}
+
+
+def _names(items: list) -> str:
+    names = [str(n) for n in items[:MAX_NAMES]]
+    more = len(items) - len(names)
+    return ", ".join(names) + (f" and {more} more" if more > 0 else "")
+
+
+def direct_text(out: dict, rule: str = "") -> str:
+    """The answer sentence for an execute() result."""
+    intent, params, r = out.get("intent"), out.get("parameters") or {}, out.get("result") or {}
+    if not r.get("available"):
+        return _UNAVAILABLE.get(r.get("reason"), "This data could not be read right now.")
+    if intent == "get_alarms":
+        sev = f" {params['severity']}" if params.get("severity") else ""
+        where = f" on {params['equipment']}" if params.get("equipment") else ""
+        total = r.get("total", 0)
+        if not total:
+            return f"There are no open{sev} alarms{where}."
+        c = r.get("counts") or {}
+        text = f"Open{sev} alarms{where}: {total}"
+        text += "." if sev else f" ({c.get('critical', 0)} critical, {c.get('warning', 0)} warning, {c.get('info', 0)} info)."
+        shown = [f"{a.get('source')} ({a.get('severity')}): {a.get('message')}" for a in (r.get("alarms") or [])[:3]]
+        return text + (" " + "; ".join(shown) + "." if shown else "")
+    if intent == "find_equipment":
+        total, names = r.get("total", 0), [i.get("name") for i in r.get("items") or []]
+        if params.get("in_alarm"):
+            return f"Equipment currently in alarm ({total}): {_names(names)}." if total else "No equipment is currently in alarm."
+        return f"Equipment items: {total}." + (f" Including {_names(names)}." if names else "")
+    if intent == "get_equipment_status":
+        if not r.get("found"):
+            cands = r.get("candidates") or []
+            lead = (f"More than one equipment item matches {params.get('equipment')}." if r.get("reason") == "ambiguous"
+                    else f"No equipment named {params.get('equipment')} was found.")
+            return lead + (f" Close matches: {_names(cands)}." if cands else "")
+        eq, pts, health = r.get("equipment") or {}, r.get("points") or {}, r.get("health_facts") or {}
+        text = (f"{eq.get('name')}: open alarms {health.get('open_alarms', 0)}; "
+                f"points reporting {pts.get('reporting', 0)} of {pts.get('total', 0)}.")
+        own = (r.get("alarms") or {}).get("on_equipment_record") or []
+        if own:
+            text += " " + "; ".join(str(a.get("message")) for a in own[:3]) + "."
+        return text
+    # get_building_snapshot
+    live = ((r.get("power") or {}).get("live_points")) or {}
+    unit = (r.get("power") or {}).get("unit_hint") or ""
+    readings = "; ".join(f"{k} {v}{(' ' + unit) if unit else ''}" for k, v in live.items() if v is not None)
+    if rule.startswith("snapshot.power"):
+        if "power" in (r.get("sections_unavailable") or {}):
+            return "Live power data is not available right now."
+        return f"Current live readings: {readings}." if readings else "No live power readings are configured for this project."
+    parts = []
+    counts = (r.get("alarms") or {}).get("counts")
+    if counts:
+        parts.append(f"open alarms {counts.get('total', 0)}")
+    fac = r.get("facility_services") or {}
+    if fac.get("systems_online") is not None and fac.get("systems_total") is not None:
+        parts.append(f"systems online {fac['systems_online']} of {fac['systems_total']}")
+    if readings:
+        parts.append(f"live readings {readings}")
+    name = (r.get("project") or {}).get("name") or "the building"
+    return f"Building overview for {name}: " + ("; ".join(parts) if parts else "no current data sections are available") + "."
+
+
+# ─── Route counters ──────────────────────────────────────────────────────────
+# Process-wide counts for measuring the router: direct / llm_fallback, per intent and per fallback reason.
+# Internal only; nothing serves them to the browser.
+
+ROUTE_STATS: dict[str, int] = {}
+
+
+def record(decision: dict) -> None:
+    keys = [decision["route"]]
+    keys.append(f"intent:{decision['intent']}" if decision["route"] == "direct" else f"reason:{decision.get('reason')}")
+    for k in keys:
+        ROUTE_STATS[k] = ROUTE_STATS.get(k, 0) + 1
+
+
+def route_stats() -> dict:
+    return dict(ROUTE_STATS)

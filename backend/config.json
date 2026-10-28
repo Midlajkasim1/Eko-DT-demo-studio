@@ -3,6 +3,16 @@
   "fin_server_url": "https://localhost",
   "display_name": "Marsa Al Arab",
   "documents_file": "om-warranty.json",
+  "chat": {
+    "enabled": false,
+    "fast_router": true,
+    "max_concurrent_llm": 2,
+    "provider": "openai_compatible",
+    "base_url": "http://localhost:11434/v1",
+    "model": "qwen3:4b",
+    "api_key_env": "EKO_CHAT_API_KEY",
+    "timeout_s": 60
+  },
   "polling": {
     "live_ms": 5000,
     "realtime_ms": 30000

@@ -16,10 +16,11 @@ window.EKO_AI = (function(){
   'use strict';
   let E = null;
   const LS = 'eko-ai-conv-v1', LSF = 'eko-ai-feedback-v1', MAX_CONV = 10;
-  const C = () => window.EKO_C, R = () => window.EKO_R, RN = () => window.EKO_RN, LLM = () => window.EKO_LLM, RX = () => window.EKO_RX;
+  const C = () => window.EKO_C, R = () => window.EKO_R, RN = () => window.EKO_RN, LLM = () => window.EKO_LLM, RX = () => window.EKO_RX, CHAT = () => window.EKO_CHAT;
   const esc = s => C().esc(s);
   const icon = (n, s) => C().icon(n, s);
   const t = (k, v) => E.t(k, v);
+  const tOr = (k, fb, v) => { const s = E.t(k, v); return s !== k ? s : fb; };   /* a translation, or fb when the key does not exist */
   const hhmm = d => { d = d instanceof Date ? d : new Date(d); return isNaN(d) ? '' : String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
   const dateLbl = iso => { try{ return new Date(iso).toLocaleDateString(E.lang === 'ar' ? 'ar-AE' : 'en-GB', { day:'numeric', month:'short' }); }catch(e){ return ''; } };
   const uid = () => 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -143,7 +144,56 @@ window.EKO_AI = (function(){
     }, 30) };
     E.set({});   /* the input row shows Stop while the answer streams */
   }
-  function stop(){ if(!S.streaming) return; const turn = S.streaming.turn; clearInterval(S.streaming.timer); S.streaming = null; turn.a.text = turn.a.shown || ''; turn.a.stopped = true; delete turn.a.shown; save(); E.set({}); }
+  function stop(){
+    if(!S.streaming) return; const turn = S.streaming.turn, req = S.streaming.req, timer = S.streaming.timer;
+    S.streaming = null;
+    if(req) req.abort(); else clearInterval(timer);
+    turn.a.text = turn.a.shown || ''; turn.a.stopped = true; delete turn.a.shown;
+    if(turn.a.status === 'pending' || turn.a.status === 'streaming'){ turn.a.status = 'ok'; turn.a.at = new Date().toISOString(); }
+    save(); E.set({});
+  }
+
+  /* ---------------------------- Eko-Chat backend ---------------------------- */
+  /* features.ask = "eko-chat" (D-Phase 3): the question goes to POST /api/chat
+     (llm/eko-chat.js) and the answer streams back. The backend runs the tools,
+     checks every number in the answer and builds the card from the tool
+     result; this file only renders what arrives. Every callback first checks
+     that its turn is still the streaming one, so a replaced request can never
+     write into a newer answer. */
+  const useBackend = () => !!(E && E.data && (E.data.features || {}).ask === 'eko-chat' && CHAT());
+  let chat = null;
+  function askBackend(q, turn){
+    if(!chat) chat = CHAT().session();
+    Object.assign(turn.a, { backend:true, tools:[], card:null, figures:[], evidence:null, actions:[], sources:'', window:'' });
+    turn.a.shown = '';
+    const live = () => !!S.streaming && S.streaming.turn === turn;
+    const req = chat.send(q, {
+      start(d){ if(live()) turn.a.model = d.model || ''; },
+      tool(d){
+        if(!live()) return;
+        const run = d.status !== 'running' && turn.a.tools.find(x => x.tool === d.tool && x.status === 'running');
+        if(run) Object.assign(run, d); else turn.a.tools.push(Object.assign({}, d));
+        patchMsgs();
+      },
+      token(d){ if(!live()) return; turn.a.shown += d.text; turn.a.status = 'streaming'; patchMsgs(); },
+      done(d){
+        if(!live()) return;
+        turn.a.text = String(d.answer || ''); turn.a.status = d.grounded === false ? 'ungrounded' : 'ok';
+        turn.a.card = d.card || null; turn.a.model = d.model || turn.a.model || '';
+        turn.a.sources = d.card ? t('ai.srcLive', { project: d.card.project || (d.project && d.project.name) || '', t: hhmm(d.card.as_of) }) : '';
+      },
+      error(d){ if(!live()) return; turn.a.status = 'error'; turn.a.errCode = d.code || 'error'; }
+    });
+    S.streaming = { turn, req };
+    E.set({});   /* the input row shows Stop */
+    req.promise.then(r => {
+      if(!live()) return;
+      S.streaming = null; delete turn.a.shown; turn.a.at = new Date().toISOString();
+      if(r.status !== 'done' && turn.a.status !== 'error'){ turn.a.status = 'error'; turn.a.errCode = r.code || 'stream_interrupted'; }
+      if(!S.open) S.unread = true;
+      save(); E.set({});
+    });
+  }
 
   /* ---------------------------------- ask ---------------------------------- */
   async function ask(question, opts){
@@ -158,6 +208,7 @@ window.EKO_AI = (function(){
     if(opts.regenerateOf != null) c.turns.splice(opts.regenerateOf, 1, turn); else c.turns.push(turn);
     c.updated = new Date().toISOString();
     open(); save(); E.set({});
+    if(useBackend()){ askBackend(q, turn); return; }
     await answer(q, S.ctx, turn);
     turn.a.at = new Date().toISOString();
     if(turn.a.status === 'error'){ if(!S.open) S.unread = true; save(); E.set({}); return; }
@@ -197,7 +248,15 @@ window.EKO_AI = (function(){
 
   /* ------------------------------- clipboard ------------------------------- */
   function copyText(text){ S.lastCopy = text; try{ if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => {}); }catch(e){} }
-  function turnText(turn, withSources){ return turn.a.text + (withSources && turn.a.sources ? '\n' + turn.a.sources : ''); }
+  function turnText(turn, withSources){ return turn.a.text + (turn.a.card ? '\n' + cardHeadline(turn.a.card) : '') + (withSources && turn.a.sources ? '\n' + turn.a.sources : ''); }
+  function cardMd(c){
+    if(!c || !c.headline) return [];
+    const cols = c.columns || [], cell = (v, k) => cardCell(v, k).replace(/\|/g, '\\|');
+    const out = ['**' + cardHeadline(c) + '**', ''];
+    if((c.rows || []).length) out.push('| ' + cols.map(k => tOr('ai.card.c.' + k, k)).join(' | ') + ' |', '|' + cols.map(() => '---').join('|') + '|', ...c.rows.map(r => '| ' + cols.map((k, j) => cell(r[j], k)).join(' | ') + ' |'), '');
+    if(c.interpreted_as) out.push('_' + cardInterpreted(c) + '_', '');
+    return out;
+  }
   function convText(c){ return c.turns.map(tr => t('ai.youLbl') + ': ' + tr.q.text + '\n' + t('ai.ekoLbl') + ': ' + tr.a.text + (tr.a.sources ? '\n' + tr.a.sources : '') + '\n' + hhmm(tr.a.at || tr.q.at)).join('\n\n'); }
 
   /* -------------------------------- export --------------------------------- */
@@ -210,6 +269,7 @@ window.EKO_AI = (function(){
   function exportMd(c){
     const lines = ['# ' + t('ai.exportTitle'), '', t('ai.convLine', { n:c.turns.length, d:dateLbl(c.at) }), ''];
     c.turns.forEach(tr => { lines.push('## ' + t('ai.youLbl') + ' · ' + hhmm(tr.q.at)); lines.push(tr.q.text, ''); lines.push('**' + t('ai.ekoLbl') + '** · ' + hhmm(tr.a.at || tr.q.at) + (tr.a.window ? ' · ' + tr.a.window : '')); lines.push(tr.a.text || '', '');
+      lines.push(...cardMd(tr.a.card));
       if(tr.a.figures && tr.a.figures.length){ lines.push('| ' + t('ai.colFig') + ' | ' + t('ai.colVal') + ' |', '|---|---|'); tr.a.figures.forEach(f => lines.push('| ' + f.label + ' | ' + f.fmt + (f.unit ? ' ' + f.unit : '') + ' |')); lines.push(''); }
       if(tr.a.sources) lines.push('_' + tr.a.sources + '_', ''); });
     lines.push('---', '**' + t('rpFt.label') + '**'); footerRows().forEach(([k, v]) => lines.push('- ' + k + ': ' + v));
@@ -221,6 +281,7 @@ window.EKO_AI = (function(){
     const body = `<div class="aiprint"><h1>${esc(t('ai.exportTitle'))}</h1><p class="tCap">${esc(t('ai.convLine', { n:c.turns.length, d:dateLbl(c.at) }))}</p>
       ${c.turns.map(tr => `<section class="aiprintturn"><h3>${esc(t('ai.youLbl'))} · ${esc(hhmm(tr.q.at))}</h3><p>${esc(tr.q.text)}</p>
         <h3>${esc(t('ai.ekoLbl'))} · ${esc(hhmm(tr.a.at || tr.q.at))}${tr.a.window ? ' · ' + esc(tr.a.window) : ''}</h3>${(tr.a.text || '').split(/\n+/).map(p => `<p>${esc(p)}</p>`).join('')}
+        ${cardHtml(tr.a.card)}
         ${tr.a.figures && tr.a.figures.length ? `<table class="rpt"><thead><tr><th>${esc(t('ai.colFig'))}</th><th>${esc(t('ai.colVal'))}</th></tr></thead><tbody>${tr.a.figures.map(f => `<tr><td>${esc(f.label)}</td><td class="tMonoS">${esc(f.fmt)}${f.unit ? ' ' + esc(f.unit) : ''}</td></tr>`).join('')}</tbody></table>` : ''}
         ${tr.a.sources ? `<p class="tCap">${esc(tr.a.sources)}</p>` : ''}</section>`).join('')}
       <div class="rpfootblock"><b>${esc(t('rpFt.label'))}</b>${footerRows().map(([k, v]) => `<div class="rpfootrow"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}</div></div>`;
@@ -245,18 +306,49 @@ window.EKO_AI = (function(){
     if(!figs || !figs.length) return '';
     return `<table class="aifigs"><tbody>${figs.map(f => `<tr><td>${esc(f.label)}</td><td class="tMonoS">${esc(f.fmt)}${f.unit ? ` <span class="tCap">${esc(f.unit)}</span>` : ''}${f.flagged ? ` <span class="aiflag tipU" data-tip="${esc(t('rpB.flagged'))}" role="img" aria-label="${esc(t('rpB.flagged'))}">${icon('warn', 12)}</span>` : ''}</td></tr>`).join('')}</tbody></table>`;
   }
+  /* Eko-Chat answers: the card the backend built from the tool result, rendered as given */
+  function cardText(o, kind, extra){ if(!o) return ''; return tOr('ai.card.' + kind + '.' + o.key, o.text || '', Object.assign({}, o.params || {}, extra || {})); }
+  function filtersText(list){
+    return (list || []).map(f => ' · ' + tOr('ai.card.f.' + f.name, f.name) + ': ' + (typeof f.value === 'boolean' ? t(f.value ? 'ai.card.yes' : 'ai.card.no') : f.value)).join('');
+  }
+  function cardCell(v, col){
+    if(v == null || v === '') return '—';
+    if(typeof v === 'boolean') return t(v ? 'ai.card.yes' : 'ai.card.no');
+    if(col === 'metric') return tOr('ai.card.m.' + v, String(v));
+    if(col === 'severity') return tOr('ai.card.sev.' + v, String(v));
+    return String(v);
+  }
+  function cardHeadline(c){ return c && c.headline ? cardText(c.headline, 'h') : ''; }
+  function cardInterpreted(c){ return c && c.interpreted_as ? t('ai.interpreted', { text: cardText(c.interpreted_as, 'i', { f: filtersText(c.filters) }) }) : ''; }
+  function cardHtml(c){
+    if(!c || !c.headline) return '';
+    const cols = c.columns || [], rows = c.rows || [];
+    const table = rows.length ? `<table class="aitbl"><thead><tr>${cols.map(k => `<th class="tCap">${esc(tOr('ai.card.c.' + k, k))}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(r => `<tr>${cols.map((k, j) => `<td>${esc(cardCell(r[j], k))}</td>`).join('')}</tr>`).join('')}</tbody></table>` : '';
+    const more = c.truncated ? `<p class="tCap">${esc(t('ai.card.more', { n: rows.length, total: c.total }))}</p>` : '';
+    return `<div class="aicard"><p><b>${esc(cardHeadline(c))}</b></p>${table}${more}${c.interpreted_as ? `<p class="aisrc">${esc(cardInterpreted(c))}</p>` : ''}</div>`;
+  }
+  function toolText(x){
+    if(x.tool === 'unknown') return t('ai.tool.unknown');
+    const name = tOr('ai.toolName.' + x.tool, x.tool);
+    if(x.status === 'failed') return t('ai.tool.failed', { name, reason: tOr('ai.reason.' + x.reason, x.reason || '') });
+    return t(x.status === 'completed' ? 'ai.tool.completed' : 'ai.tool.running', { name });
+  }
+  function toolsHtml(a){ return a.tools && a.tools.length ? `<div class="aitools tCap">${a.tools.map(x => `<div data-status="${esc(x.status)}">${esc(toolText(x))}</div>`).join('')}</div>` : ''; }
+  function errText(a){ return a.errCode ? tOr('ai.err.' + a.errCode, t('ai.error')) : t('ai.error'); }
   function turnHtml(tr, i){
     const a = tr.a, streaming = S.streaming && S.streaming.turn === tr, text = streaming ? (a.shown || '') : (a.text || '');
     const paras = text.split(/\n+/).filter(Boolean).map(p => `<p>${esc(p)}</p>`).join('');
-    const note = a.status === 'unreachable' ? t('ai.unreachable') : a.status === 'fallback' ? t('ai.fallback') : a.stopped ? t('ai.stopped') : a.status === 'regenerated' ? t('ai.regenerated') : '';
+    const note = a.status === 'unreachable' ? t('ai.unreachable') : a.status === 'fallback' ? t('ai.fallback') : a.status === 'ungrounded' ? t('ai.notSupported') : a.stopped ? t('ai.stopped') : a.status === 'regenerated' ? t('ai.regenerated') : '';
     const fb = a.feedback || null;
     const fbForm = S.fbOpen === i ? `<div class="aifb"><input class="aifbin" data-chg="aiFbNote" data-i="${i}" value="${esc((fb && fb.note) || '')}" placeholder="${esc(t('ai.fbNotePh'))}" maxlength="140"><button class="btnG btnSm" data-act="aiFbSave" data-i="${i}">${esc(t('saveW'))}</button></div>` : '';
     return `<div class="aiturn aiq"><div class="aibubble">${esc(tr.q.text)}</div><span class="aitime tMonoS">${esc(hhmm(tr.q.at))}</span></div>
       <div class="aiturn aia" data-status="${esc(a.status || '')}" data-i="${i}">
         <div class="aibubble">
           ${a.status === 'pending' ? `<div class="aityping" aria-label="${esc(t('ai.typing'))}"><span></span><span></span><span></span></div>` : ''}
-          ${a.status === 'error' ? `<p class="aierr">${esc(t('ai.error'))}</p><button class="btnG btnSm" data-act="aiRetry" data-i="${i}">${esc(t('ai.retry'))}</button>` : `<div class="aitext">${paras}${streaming ? '<span class="aicaret"></span>' : ''}</div>`}
-          ${!streaming && a.status !== 'pending' && a.status !== 'error' ? `${evidenceHtml(a.evidence)}${figsHtml(a.figures)}
+          ${toolsHtml(a)}
+          ${a.status === 'error' ? `<p class="aierr">${esc(errText(a))}</p><button class="btnG btnSm" data-act="aiRetry" data-i="${i}">${esc(t('ai.retry'))}</button>` : `<div class="aitext">${paras}${streaming ? '<span class="aicaret"></span>' : ''}</div>`}
+          ${!streaming && a.status !== 'pending' && a.status !== 'error' ? `${cardHtml(a.card)}${evidenceHtml(a.evidence)}${figsHtml(a.figures)}
             ${a.sources ? `<p class="aisrc">${esc(a.sources)}</p>` : ''}
             ${a.actions && a.actions.length ? `<div class="aiacts2">${a.actions.map(x => `<button class="btnG btnSm" data-act="${esc(x.act)}" data-asset="${esc(x.asset)}">${esc(t(x.key))}</button>`).join('')}</div>` : ''}
             <div class="aimeta tCap"><span class="tMonoS">${esc(hhmm(a.at || tr.q.at))}</span>${a.window ? ` · ${esc(a.window)}` : ''}${note ? ` · <span class="ainote">${esc(note)}</span>` : ''}</div>` : ''}

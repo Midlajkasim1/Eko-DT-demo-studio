@@ -163,6 +163,28 @@ signed in for another project see nothing new for theirs until it is the one ser
 refused with 409 meanwhile). The unique user is the FIN username the sign-in accepted; names are
 compared exactly as FIN returned them (case is not folded). Sessions are in memory (above).
 
+## Eko-Chat (Ask EKO's backend)
+
+`POST /api/chat` answers a question about the open project from **typed, read-only tools** over the caches the polling loops
+already keep (`get_building_snapshot`, `find_equipment`, `get_equipment_status`, `get_alarms`). Nothing in it can write, acknowledge or
+reach FIN, and a model can only call those four tools; every number in an answer must come from a tool result, and the card shown
+with it is built by code from the tool result. Code: `eko_chat.py`, `eko_chat_router.py`; browser side: `static/dashboard/js/llm/eko-chat.js`.
+
+- **Off by default.** `config.json` has a `chat` block with `"enabled": false`; nothing is answered until it is `true`.
+  `fast_router` answers simple English questions from the tools with no model. For the rest, `provider: "openai_compatible"` talks to any
+  OpenAI-style `/chat/completions` server with native tool calling (Ollama at `http://localhost:11434/v1` by default) with `model`,
+  `timeout_s` and `max_concurrent_llm`. An API key is read only from the environment variable named by `api_key_env` (`EKO_CHAT_API_KEY`);
+  a key written into `config.json` is refused, and no project setting can supply the chat configuration.
+- **Who may ask.** The signed-in user of the open project, enforced on `/api/chat` and `/api/chat/stats` by the same checks as the
+  notification routes: the FIN connection, this browser's own session cookie, an `X-Eko-Project` header equal to the project the backend
+  serves, and a session that signed in for this project. Failures answer 401 (`fin_not_connected`, `session_required`, `session_expired`),
+  400 (`project_required`) or 409 (`project_mismatch`, `session_project_mismatch`, `project_not_validated`) as JSON
+  `{"detail": {"error", "message"}}`. A disabled chat answers 503 first, whoever asks. The browser client sends the header from the project the
+  Studio opened and refuses an answer that comes back for any other project.
+- **Logging.** Tool-selection diagnostics (`CHAT_DEBUG` in `eko_chat.py`) are off: they would print each user's question to the server log.
+- **Load test.** `scripts/eko_chat_load_test.py` needs `--cookie` (the `eko_session` value, or `EKO_SESSION_COOKIE`) and `--project`.
+- **Export.** `eko_chat.py` and `eko_chat_router.py` are in the backend export list (`src/lib/backendExport.ts`): `main.py` imports them.
+
 ## Running the Server
 
 Start the FastAPI development server with live-reloading enabled using Uvicorn:

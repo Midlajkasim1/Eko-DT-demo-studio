@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import eko_chat
 from fin_client import (
     PROJECT_ID_RE,
     FinScramClient,
@@ -853,11 +854,14 @@ app.add_middleware(
 # /models/*: those are already-compressed or huge, and deflating them costs
 # seconds of the single uvicorn worker for a few percent.
 COMPRESSIBLE_PREFIXES = ("/api/", "/assets/")
+# Eko-Chat streams Server-Sent Events; gzip would hold them back until its buffer fills
+UNCOMPRESSED_PATHS = ("/api/chat",)
 
 
 class PathScopedGZipMiddleware(GZipMiddleware):
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or not scope["path"].startswith(COMPRESSIBLE_PREFIXES):
+        if scope["type"] != "http" or not scope["path"].startswith(COMPRESSIBLE_PREFIXES) \
+                or scope["path"] in UNCOMPRESSED_PATHS:
             await self.app(scope, receive, send)
             return
         await super().__call__(scope, receive, send)
@@ -2365,6 +2369,39 @@ async def serve_viewer():
             headers={"Cache-Control": "no-store, must-revalidate"},
         )
     return {"error": "Viewer not found. Make sure static/ folder is present."}
+
+
+# ─── Eko-Chat ────────────────────────────────────────────────────────────────
+# Read-only tools over the caches above; registered before the static mount so it is reachable.
+
+def _chat_view() -> eko_chat.DataView:
+    """What the chat tools may read, taken from the current globals (never the FIN client itself)."""
+    return eko_chat.DataView(
+        authenticated=bool(client and client.is_authenticated),
+        project_id=ACTIVE_PROJECT_ID,
+        project_name=PROJECT_NAME,
+        power=cached_power_data,
+        equipment=cached_equip_data,
+        alarms=cached_alarm_data,
+        facility=cached_facility,
+        fdd=cached_fdd_summary,
+        sensor_avg=cached_sensor_avg,
+    )
+
+
+def _chat_guard(request: Request) -> None:
+    """Who may use Eko-Chat: the signed-in user of the open project, nobody else. The same checks as every notification
+    route (the FIN connection, this browser's own session cookie, the X-Eko-Project header against the project the backend
+    serves, and the project the session signed in for), re-raised in the {"error", "message"} shape the chat client reads.
+    Nothing a request says about who it is or which site it wants is trusted: the user and site come from the session."""
+    try:
+        _notification_scope(request)
+    except NotificationApiError as exc:
+        code = "fin_not_connected" if exc.code == "unauthenticated" else exc.code
+        raise HTTPException(status_code=exc.status, detail={"error": code, "message": exc.message})
+
+
+app.include_router(eko_chat.build_router(_chat_view, lambda: CONFIG.get("chat") or {}, _chat_guard))
 
 
 if os.path.exists(STATIC_DIR):
