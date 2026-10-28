@@ -82,7 +82,7 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
     id: 'photoreal',
     label: 'Photoreal',
     note: 'Soft daylight',
-    description: 'Warm blue sky with a soft sun, contact shadows and a subtle colour grade. Best for realistic presentation views.',
+    description: 'Warm blue sky with a soft sun, cast shadows, contact shading and a subtle colour grade. Best for realistic presentation views.',
     scene: {
       sky: [
         [0, '#5388c2'],
@@ -133,7 +133,7 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
     id: 'minimal',
     label: 'Minimalist',
     note: 'White model',
-    description: 'Bleached-white surfaces on a bright studio backdrop, with soft grey AO shadows and thin pencil-line edges.',
+    description: 'Bleached-white surfaces on a bright studio backdrop, with a soft sun shadow, grey AO and thin pencil-line edges.',
     scene: {
       sky: [
         [0, '#e9eff5'],

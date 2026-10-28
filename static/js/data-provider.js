@@ -241,12 +241,53 @@
     if (usable(alarmHistory)) { state.alarmHistory = alarmHistory; emit('alarmHistory', alarmHistory); }
   }
 
+  // The backend polls FIN only while a dashboard holds this id. A closed tab stops
+  // refreshing it, and the loops end on their own after the hold goes stale.
+  let watchId = null;
+  let watchTimer = null;
+
+  function postWatch(path, body) {
+    return fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+      keepalive: true,
+    }).catch(function () { return null; });
+  }
+
+  async function beatWatch() {
+    const res = await postWatch('/api/fin/watch', watchId ? { id: watchId } : {});
+    if (!res || !res.ok) return;
+    try {
+      const data = await res.json();
+      if (data && data.id) watchId = data.id;
+    } catch (_) {}
+  }
+
+  function onPageHide() { releaseWatch(); }
+
+  function holdWatch() {
+    if (watchTimer) return;
+    beatWatch();
+    watchTimer = setInterval(beatWatch, 5000);
+    window.addEventListener('pagehide', onPageHide);
+  }
+
+  function releaseWatch() {
+    if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
+    window.removeEventListener('pagehide', onPageHide);
+    const id = watchId;
+    watchId = null;
+    if (id) postWatch('/api/fin/unwatch', { id: id });
+  }
+
   async function start() {
     stop();
     const generation = state.generation;
     state.config = await resolveConfig();
     if (generation !== state.generation) return;
     state.provider = state.config && state.config.directMode ? new DirectProvider(state.config) : new BackendProvider(state.config && state.config.projectId);
+    holdWatch();
     await Promise.all([pollRealtime(), pollLive()]);
     // stop() during either await would otherwise be undone by the timers below
     if (generation !== state.generation) return;
@@ -259,6 +300,7 @@
     state.timers.forEach(clearInterval);
     state.timers = [];
     if (catchUp) { clearTimeout(catchUp); catchUp = null; }
+    releaseWatch();
   }
 
   window.DashboardData = {

@@ -30,6 +30,17 @@
     if(!_pluralRules[lang]){ try{ _pluralRules[lang] = new Intl.PluralRules(lang); }catch(e){ _pluralRules[lang] = { select: x => x === 1 ? 'one' : 'other' }; } }
     return _pluralRules[lang].select(n);
   }
+  /* GlobalIds of the heatmap rooms, once live data has filled them. */
+  function heatSpaceIds(app) {
+    const zones = (app.data && app.data.heat && app.data.heat.zones) || [];
+    const ids = [];
+    zones.forEach(z => {
+      const list = (z.bimIds && z.bimIds.length) ? z.bimIds : (z.bimId ? [z.bimId] : []);
+      list.forEach(id => { if (id && ids.indexOf(id) < 0) ids.push(id); });
+    });
+    return ids;
+  }
+
   const E = window.EKO = {
     data: window.EKO_DATA.marsa,
     nav: window.EKO_LAYOUTS.nav,
@@ -209,12 +220,12 @@
       const enteringHeat = pageId === 'heatmap' && from !== 'heatmap';
       const leavingHeat = from === 'heatmap' && pageId !== 'heatmap';
       const HEAT_LAYERS = ['arch','elec','int','mech'];
-      /* HVAC & Mechanical and Electrical read best as the white model. Any other page returns to the style it had. */
+      /* HVAC & Mechanical share one model. Electrical is the other. Both open in Photoreal. Any other page returns to the style it had. */
       const mep = pageId !== 'heatmap' && targetModule === 'systems' && (targetSub === 'hvac' || targetSub === 'mechanical' || targetSub === 'electrical');
       if (this.state.dock) {
         if (mep) {
           if (this.state._styleBeforeMep == null) this.state._styleBeforeMep = this.state.dock.style;
-          this.state.dock.style = 'minimal';
+          this.state.dock.style = 'photo';
         } else if (this.state._styleBeforeMep != null) {
           this.state.dock.style = this.state._styleBeforeMep;
           this.state._styleBeforeMep = null;
@@ -225,14 +236,16 @@
         if (this.state.dock) { this.state.dock.level = 'Ground floor'; this.state.dock.layer = HEAT_LAYERS; }
         if (this.engine && this.engine.isolateLevel) this.engine.isolateLevel('Ground floor', true);
         if (this.engine && this.engine.isolateLayer) this.engine.isolateLayer(HEAT_LAYERS, true);
+        if (this.engine && this.engine.fadeArch) this.engine.fadeArch(true);
         if (enteringHeat || !this.state._heatViewed) {
           this.state._heatViewed = true;
-          window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true } }));
+          window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true, spaceIds: heatSpaceIds(this) } }));
         }
       } else if (leavingHeat) {
         if (this.state.dock) { this.state.dock.level = 'ALL'; this.state.dock.layer = 'all'; }
         if (this.engine && this.engine.isolateLevel) this.engine.isolateLevel('ALL', true);
         if (this.engine && this.engine.setLayerVisibility) this.engine.setLayerVisibility('all');
+        if (this.engine && this.engine.fadeArch) this.engine.fadeArch(false);
         if (this.engine && typeof this.engine.resetView === 'function') this.engine.resetView();
         this.state._heatViewed = false;
       } else {
@@ -1161,7 +1174,7 @@
       if(k === 'closeMore'){ d.bloom = null; render(); return; }
       /* Reset is everything back to how the viewer opens: camera, floor, style,
          layers, and the selection too (popup, equipment colour, asset panel).
-         HVAC & Mechanical and Electrical keep their own model and the minimal style. */
+         HVAC & Mechanical keep the mech model, Electrical keeps the elec model, and both keep Photoreal. */
       if(k === 'reset'){
         const mepLayer = E.state.module === 'systems' && E.state.pageId !== 'heatmap'
           ? (E.state.sub === 'hvac' || E.state.sub === 'mechanical' ? 'mech' : E.state.sub === 'electrical' ? 'elec' : null)
@@ -1169,7 +1182,7 @@
         if(E.state.pageId === 'heatmap'){
           if(E.engine.isolateLevel) E.engine.isolateLevel('Ground floor', true);
           if(E.engine.isolateLayer) E.engine.isolateLayer(['arch','elec','int','mech'], true);
-          window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true } }));
+          window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true, spaceIds: heatSpaceIds(E) } }));
         } else if(E.engine.resetView){
           E.engine.resetView();
           if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
@@ -1184,7 +1197,7 @@
         E.set(Object.assign({
           dock: heat
             ? Object.assign({}, E.state.dock, { tool:null, slice:false, bloom:null, style:'default', tone:'blue', minimap:false, level:'Ground floor', layer:['arch','elec','int','mech'] })
-            : { tool:null, slice:false, bloom:null, style: mepLayer ? 'minimal' : 'default', tone:'blue', level:'ALL', layer: mepLayer || 'all', alerts:'all', minimap:false },
+            : { tool:null, slice:false, bloom:null, style: mepLayer ? 'photo' : 'default', tone:'blue', level:'ALL', layer: mepLayer || 'all', alerts:'all', minimap:false },
           histAge:null, measureResult:null
         }, NO_SEL)); return; }
       if(!def) return;

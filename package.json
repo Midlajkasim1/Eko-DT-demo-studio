@@ -12,13 +12,6 @@
     "test": "node tests/run.mjs",
     "test:unit": "node tests/run.mjs --unit",
     "test:browser": "node tests/run.mjs --browser",
-    "test:labels": "node scripts/test-hvac-labels.mjs",
-    "test:fdd": "node scripts/test-fdd-recommendations.mjs",
-    "test:alarmhist": "node scripts/test-alarm-history.mjs",
-    "test:role": "node scripts/test-default-role.mjs",
-    "test:notices": "node scripts/test-notification-notices.mjs",
-    "test:siteadmin": "node scripts/test-notification-admin.mjs",
-    "test:askinput": "node scripts/test-ask-input.mjs",
     "build:renders": "node scripts/buildBuiltinRenders.mjs"
   },
   "dependencies": {

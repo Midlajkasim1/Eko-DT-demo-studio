@@ -70,6 +70,7 @@ interface DeliveredMaterial {
   flatShading: boolean
   visible: boolean
   side: THREE.Side
+  shadowSide: THREE.Side | null
   envMap: THREE.Texture | null
   envMapIntensity: number | null
   reflectivity: number | null
@@ -88,6 +89,7 @@ function capture(mat: any): DeliveredMaterial {
     flatShading: mat.flatShading ?? false,
     visible: mat.visible ?? true,
     side: mat.side ?? THREE.FrontSide,
+    shadowSide: 'shadowSide' in mat ? mat.shadowSide : null,
     envMap: mat.envMap ?? null,
     envMapIntensity: 'envMapIntensity' in mat ? mat.envMapIntensity : null,
     reflectivity: 'reflectivity' in mat ? mat.reflectivity : null,
@@ -114,6 +116,14 @@ export function dressMaterial(
 
   let base = cache.get(material)
   if (!base) {
+    // A heatmap fade is already on this material. Capture the opacity it had
+    // before the fade, so a template can still be taken back off cleanly.
+    const saved = mat.userData?.ekoArchSaved
+    if (saved) {
+      mat.opacity = saved.opacity
+      mat.transparent = saved.transparent
+      mat.depthWrite = saved.depthWrite
+    }
     base = capture(mat)
     cache.set(material, base)
   }
@@ -162,6 +172,9 @@ export function dressMaterial(
   // away from the light. By forcing DoubleSide, they receive lighting on both 
   // sides and wash correctly.
   if ('side' in mat) mat.side = THREE.DoubleSide
+  // Back faces stay lit, but only the front face writes the shadow map. A
+  // double-sided shadow darkens both sides of thin BIM shells.
+  if ('shadowSide' in mat) mat.shadowSide = THREE.FrontSide
 
   // For dark opaque materials (dark concrete, dark steel, etc.) we still want
   // them visible but washed aggressively toward the template tint
@@ -194,6 +207,13 @@ export function dressMaterial(
   const solid = mat.opacity > 0.99
   mat.transparent = !solid
   mat.depthWrite = solid
+  // The heatmap keeps the architecture faded after a template dresses it.
+  const archFade = mat.userData?.ekoArchFade
+  if (typeof archFade === 'number') {
+    mat.opacity = archFade
+    mat.transparent = true
+    mat.depthWrite = false
+  }
 
   mat.needsUpdate = true
   return true
@@ -215,6 +235,7 @@ export function restoreMaterial(material: THREE.Material, cache: DeliveredMateri
   mat.depthWrite = base.depthWrite
   if ('flatShading' in mat) mat.flatShading = base.flatShading
   if ('side' in mat) mat.side = base.side ?? THREE.FrontSide
+  if ('shadowSide' in mat) mat.shadowSide = base.shadowSide
   mat.envMap = base.envMap
   if (base.envMapIntensity !== null) mat.envMapIntensity = base.envMapIntensity
   if (base.reflectivity !== null) mat.reflectivity = base.reflectivity

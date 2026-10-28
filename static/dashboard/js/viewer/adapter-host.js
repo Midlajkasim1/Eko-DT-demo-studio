@@ -76,6 +76,11 @@
           window.EKO_HOST_ENGINE.isolateLayer(layerId, force);
         }
       },
+      fadeArch: function (on) {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.fadeArch) {
+          window.EKO_HOST_ENGINE.fadeArch(!!on);
+        }
+      },
 
       setSectionPlane: noop,
       startSlice: function () {

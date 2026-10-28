@@ -569,15 +569,43 @@ export async function initFragmentsEngine(
     world.renderer.three.toneMappingExposure = frame.exposure
 
     // ── Ground ──────────────────────────────────────────────────────────────
-    // No shadow map and no slab. The reference lights the model with sun, fill
-    // and bounce and lets the occlusion pass do the contact darkening; a hard sun
-    // shadow across a white or ghosted model reads as a mistake.
+    // Photoreal and Minimalist cast a soft sun shadow onto the model itself.
+    // The grade plane stays hidden: it slices through the building as a shadow
+    // line. X-ray stays unshadowed, because ghosted surfaces turn a sun shadow
+    // into a dark slab.
+    const sunShadow = params.templateId === 'photoreal' || params.templateId === 'minimal'
     world.renderer.three.shadowMap.enabled = true
+    world.renderer.three.shadowMap.type = THREE.PCFShadowMap
+    world.renderer.three.shadowMap.autoUpdate = true
     world.renderer.three.shadowMap.needsUpdate = true
-    tSun.castShadow = false
+    tSun.castShadow = sunShadow
 
-    // The catcher is a 10 km plane at grade. With no shadow map it has nothing to
-    // catch, and it paints a bright band across the horizon — glaring on X-ray.
+    if (sunShadow) {
+      // Cover the whole model. A 1500 cap leaves a hard shadow edge through
+      // the middle of a large building. Near/far hug the model so the depth
+      // range is not wasted on the empty gap out to a distant sun.
+      const coverage = Math.max(maxRadius, 1)
+      const reach = coverage * 2
+      tSun.shadow.mapSize.setScalar(coverage > 4000 ? 4096 : 2048)
+      tSun.shadow.camera.left = -coverage
+      tSun.shadow.camera.right = coverage
+      tSun.shadow.camera.top = coverage
+      tSun.shadow.camera.bottom = -coverage
+      tSun.shadow.camera.near = Math.max(0.5, sunDistance - reach)
+      tSun.shadow.camera.far = sunDistance + reach
+      tSun.shadow.bias = -0.0005 * Math.max(1, maxRadius / 10000)
+      tSun.shadow.normalBias = 0.05
+      tSun.shadow.radius = 4
+      tSun.shadow.camera.updateProjectionMatrix()
+
+      world.scene.three.traverse((child: any) => {
+        if (child.isMesh && child.name !== 'ShadowCatcherPlane') {
+          child.castShadow = true
+          child.receiveShadow = true
+        }
+      })
+    }
+
     const catcher = world.scene.three.getObjectByName('ShadowCatcherPlane')
     if (catcher) catcher.visible = false
     if (grid) grid.visible = false
@@ -1223,6 +1251,7 @@ export async function initFragmentsEngine(
         world.camera.controls.getTarget(target)
         tSun.target.position.copy(target)
         tSun.position.copy(target).add(tSun.userData.sunOffset)
+        if (tSun.castShadow) tSun.shadow.camera.updateProjectionMatrix()
       }
 
       world.renderer.needsUpdate = false
