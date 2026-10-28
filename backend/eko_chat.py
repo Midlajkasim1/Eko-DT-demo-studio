@@ -1166,9 +1166,13 @@ HELP_TEXT = ("I can answer these questions from this project's live FIN data: "
              "Ask one thing at a time and name the equipment, for example \"status of <equipment name>\".")
 
 
-def unsupported() -> dict:
-    """The reply to a question no rule answers when no language model is configured: what can be asked, nothing invented."""
-    return {"answer": HELP_TEXT, "answer_source": "code", "route": "unsupported", "grounded": True,
+NOT_VERIFIED = "The answer could not be checked against the data, so it was not shown. Please try again."
+
+
+def unsupported(reason: Optional[str] = None) -> dict:
+    """The reply to a question no rule answers when no language model is configured: what can be asked, nothing invented.
+    A rule that matched but whose answer failed its own checks (direct_*) is said so, not passed off as an unknown question."""
+    return {"answer": NOT_VERIFIED if str(reason).startswith("direct_") else HELP_TEXT, "answer_source": "code", "route": "unsupported", "grounded": True,
             "tool_calls": [], "card": None, "model": None}
 
 
@@ -1213,7 +1217,7 @@ def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
         if rules_only or cfg.get("fast_router", True) is not False:
             direct = try_direct(req.message, vf, fallback)
             if direct is None and rules_only:
-                direct = unsupported()
+                direct = unsupported(fallback.get("reason"))
             if direct is not None:
                 if req.stream:
                     return StreamingResponse(stream_direct(direct, _project(view)), media_type="text/event-stream",

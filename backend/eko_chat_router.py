@@ -94,7 +94,7 @@ RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat +
     ("equipment.in_alarm.has", "find_equipment",
      r"(?:what|which) " + ASSETS + r" (?:has|have) (?:any )?" + OPEN + ALARMS + NOW),
     ("equipment.list", "find_equipment",
-     r"(?:show(?: me)? |list |display |get |give me )(?:all )?(?:the )?" + ASSETS + HERE),
+     r"(?:show(?: me)? |list |display |get |give me )(?:all )?(?:the )?(?:(?:available|installed) )?" + ASSETS + HERE),
     ("equipment.available", "find_equipment",
      r"(?:what|which) " + ASSETS + r"(?: is| are| do we have)(?: available)?" + HERE),
     ("equipment.count", "find_equipment",
@@ -213,9 +213,14 @@ _UNAVAILABLE = {
 
 
 def _names(items: list) -> str:
+    # no count of the rest: a number worked out here is in no tool result, and the grounding check would reject the answer
     names = [str(n) for n in items[:MAX_NAMES]]
-    more = len(items) - len(names)
-    return ", ".join(names) + (f" and {more} more" if more > 0 else "")
+    return ", ".join(names) + (" and others" if len(items) > len(names) else "")
+
+
+def _shown(r: dict) -> str:
+    """" Showing 20 of 120." when a list is cut; both numbers are the tool result's own."""
+    return f" Showing {r.get('returned', 0)} of {r.get('total', 0)}." if r.get("truncated") else ""
 
 
 def direct_text(out: dict, rule: str = "") -> str:
@@ -237,8 +242,8 @@ def direct_text(out: dict, rule: str = "") -> str:
     if intent == "find_equipment":
         total, names = r.get("total", 0), [i.get("name") for i in r.get("items") or []]
         if params.get("in_alarm"):
-            return f"Equipment currently in alarm ({total}): {_names(names)}." if total else "No equipment is currently in alarm."
-        return f"Equipment items: {total}." + (f" Including {_names(names)}." if names else "")
+            return f"Equipment currently in alarm ({total}): {_names(names)}.{_shown(r)}" if total else "No equipment is currently in alarm."
+        return f"Equipment items: {total}." + (f" Including {_names(names)}." if names else "") + _shown(r)
     if intent == "get_equipment_status":
         if not r.get("found"):
             cands = r.get("candidates") or []

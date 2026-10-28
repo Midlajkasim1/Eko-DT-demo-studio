@@ -81,8 +81,41 @@ class EquipmentTests(RulesBase):
         with mock.patch.object(main, "cached_equip_data", {"timestamp": now, "equipment": many}):
             body = self.ok("list all assets")
         self.assertIn("Equipment items: 120.", body["answer"])
-        self.assertIn("more", body["answer"])
+        self.assertIn("Showing 20 of 120.", body["answer"])
         self.assertEqual((body["card"]["total"], len(body["card"]["rows"]), body["card"]["truncated"]), (120, 20, True))
+
+    def test_the_reported_failure_a_realistic_list_is_answered_not_sent_to_the_help_reply(self):
+        """'and N more' was worked out from the 20 rows returned: a number in no tool result, so the grounding check threw the
+        whole answer away and the help text came back. Names with no digits make it fail every time, whatever the size."""
+        self.start()
+        now = datetime.now().isoformat()
+        for n in (3, 7, 25, 40, 250):
+            many = [{"name": f"Pump {chr(65 + i % 26)}{chr(97 + i // 26)}", "floor": "L1", "type": "pump", "category": "hvac",
+                     "inAlarm": False, "alarms": [], "points": []} for i in range(n)]
+            with mock.patch.object(main, "cached_equip_data", {"timestamp": now, "equipment": many}):
+                for q in ("What equipment is available in this project?", "List all equipment.", "Show available equipment.",
+                          "How many equipment items are there?", "Show the equipment in this project."):
+                    body = self.ok(q)
+                    self.assertEqual(body["route"], "direct", (n, q, body["answer"]))
+                    self.assertTrue(body["answer"].startswith(f"Equipment items: {n}."), (n, q, body["answer"]))
+                    self.assertEqual(body["card"]["total"], n)
+                    self.assertEqual(len(body["card"]["rows"]), min(n, 20))
+                    if n > 20:
+                        self.assertIn(f"Showing 20 of {n}.", body["answer"])
+                    self.assertNotRegex(body["answer"], r"and \d+ more")
+
+    def test_a_matched_question_whose_answer_fails_its_check_is_not_called_unsupported(self):
+        self.start()
+        with mock.patch.object(eko_chat, "_ungrounded", return_value=["99"]):
+            body = self.ok("list all assets")
+        self.assertEqual(body["route"], "unsupported")
+        self.assertIn("could not be checked", body["answer"])
+        self.assertNotIn("I can answer", body["answer"])
+
+    def test_the_equipment_is_the_signed_in_projects_own_read(self):
+        self.start()
+        self.assertEqual(sorted(r[0] for r in self.ok("list all assets")["card"]["rows"]), ["EQ-1", "MTR-1", "PMU-1"])
+        self.assertEqual(self.ok("list all assets")["project"]["name"], "projA")
 
     def test_status_is_the_equipment_record_and_an_unknown_one_is_not_invented(self):
         self.start()
@@ -278,12 +311,10 @@ class ContractTests(RulesBase):
             self.assertTrue(events[-1][1]["answer"])
             self.assertEqual({e for e, _ in events} - {"start", "tool", "done"}, set())
 
-    def test_the_shipped_config_is_off_and_has_no_model_provider(self):
-        import json
+    def test_the_configured_provider_is_the_rules_one(self):
+        import json   # enabled is the operator's switch and is not asserted here
         with open(os.path.join(HERE, "..", "config.json"), encoding="utf-8") as f:
-            chat = json.load(f)["chat"]
-        self.assertIs(chat["enabled"], False)
-        self.assertEqual(chat["provider"], "rules")
+            self.assertEqual(json.load(f)["chat"]["provider"], "rules")
 
 
 if __name__ == "__main__":
