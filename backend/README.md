@@ -183,7 +183,78 @@ with it is built by code from the tool result. Code: `eko_chat.py`, `eko_chat_ro
   Studio opened and refuses an answer that comes back for any other project.
 - **Logging.** Tool-selection diagnostics (`CHAT_DEBUG` in `eko_chat.py`) are off: they would print each user's question to the server log.
 - **Load test.** `scripts/eko_chat_load_test.py` needs `--cookie` (the `eko_session` value, or `EKO_SESSION_COOKIE`) and `--project`.
-- **Export.** `eko_chat.py` and `eko_chat_router.py` are in the backend export list (`src/lib/backendExport.ts`): `main.py` imports them.
+- **Export.** `eko_chat.py`, `eko_chat_router.py` and `eko_chat_llm.py` are in the backend export list (`src/lib/backendExport.ts`): `main.py` imports them.
+
+### Hybrid mode: a local model for questions the rules do not know (Ollama)
+
+`chat.provider = "ollama"` adds a small **local** model behind the rules. The order of a request is unchanged up to the rules:
+session and project checks, then the deterministic router answers everything it knows with **no model call**. Only a question the rules do not
+recognise goes to Ollama, once, and the model's whole job is to return one JSON intent (schema-constrained, `think` off, at most 160 tokens).
+The backend then checks the intent against an allowlist (the eight existing read-only tools; `INTENTS` in `eko_chat_llm.py`), checks the
+parameters against that tool's own schema, requires any equipment name, class or floor to be written in the question itself, and runs the same
+tool the rules use over the signed-in user's own project. The answer text and the card are built by code from the tool result, so numbers,
+units and times are never the model's. The model never sees FIN data, credentials or other projects, and cannot name a tool, endpoint or
+project. The one second call is an optional plain-English summary for "explain the current building conditions": it is used only when every
+number in it is one of the facts it was given, otherwise the code's own text is shown.
+
+When Ollama is not running, is slow, or the model is not installed, the reply is a short plain message plus the list of supported questions, the rules keep
+answering, and the model is not called again for `llm_cooldown_s` (30 s) so a dead server does not delay every question (a refused
+connection alone takes about 2 s on Windows). Latency and an error category are logged (`[eko-chat-llm]`, and `/api/chat/stats`), never the question.
+
+**Model.** The default is `qwen3.5:4b` (a 4-billion-parameter model; the file is a few GB, so with a 4 GB GPU part of it may run on the CPU).
+Whether it runs on your Ollama depends on the Ollama version, which only `ollama pull` can tell you: if the pull or the first call fails,
+use `qwen3:4b` (smaller, long supported) or `qwen2.5:3b`. Set it with `OLLAMA_MODEL`; nothing else changes.
+
+**Setup (Windows PowerShell)**
+
+```powershell
+# 1. install Ollama (https://ollama.com/download/windows), then check it
+ollama --version
+Invoke-RestMethod http://localhost:11434/api/version     # the service starts with Windows; or run: ollama serve
+# 2. pull the model once (a multi-GB download; run it deliberately, nothing in Eko-DT does)
+ollama pull qwen3.5:4b
+ollama list
+# 3. turn the hybrid mode on for this backend process only (config.json keeps provider "rules")
+$env:LLM_ENABLED = "true"
+$env:OLLAMA_MODEL = "qwen3.5:4b"
+# 4. chat itself must also be on: "chat": {"enabled": true} in config.json (local edit; do not commit it)
+cd backend; python -m uvicorn main:app --port 8000
+```
+
+| Setting | Where | Meaning |
+|---|---|---|
+| `LLM_ENABLED` | env | `true` selects `ollama`; `false` is the kill switch (rules only), whatever `config.json` says |
+| `LLM_PROVIDER` | env | `ollama`, `rules` or `openai_compatible` (the older tool-calling provider) |
+| `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | env | default `http://localhost:11434`, `qwen3.5:4b`; a `/v1` suffix is ignored |
+| `LLM_TIMEOUT_SECONDS`, `LLM_MAX_OUTPUT_TOKENS` | env | defaults 30 s (config.json: `timeout_s`) and 160 (`max_output_tokens`) |
+| `num_ctx`, `keep_alive`, `llm_cooldown_s`, `max_concurrent_llm` | config.json `chat` | context 2048, model kept loaded 10m, cooldown 30 s, 2 model calls at once |
+| `allow_remote_llm` | config.json `chat` | an Ollama on another machine is refused unless this is `true`; the default is this computer only |
+
+Environment values override `config.json`; an invalid value is ignored. No API key is used. To **turn the model off**, unset `LLM_ENABLED`
+(or set it to `false`): the rules answer as before and unknown questions get the list of supported questions.
+
+**Try it** (signed in to FIN in the Studio, chat enabled): "How clean is the air inside at the moment?", "Anything critical going wrong right now?",
+"Do I have anything unread waiting for me?", "Can you explain the current building conditions?" The rule-known "What is the current IAQ index?" must not
+call the model (`/api/chat/stats` shows the runs).
+
+**Tests and measurement**
+
+```powershell
+cd backend
+$env:EKO_NOTIFICATION_DB = "$env:TEMP\eko-test-notifications.db"      # keeps the tests off the real notification history
+python -m unittest tests.test_eko_chat_llm tests.test_eko_chat tests.test_eko_chat_router tests.test_eko_chat_rules tests.test_eko_chat_metrics
+cd ..
+python scripts/eko_chat_llm_benchmark.py                 # live: cold start, intent latency, end-to-end, accuracy (needs Ollama + the model)
+python scripts/eko_chat_llm_benchmark.py --unavailable   # how the chat behaves with Ollama off
+python scripts/eko_chat_llm_benchmark.py --simulate      # checks the harness only; its times mean nothing
+```
+
+The unit tests use a scripted fake Ollama; they test the guards and the flow, not a real model's accuracy or speed, and not live FIN.
+
+**Limitations.** A 4B model misreads some phrasings (the benchmark's accuracy line shows how many on your machine); a misread becomes a
+wrong-but-read-only lookup or a "could you be more specific", never a write. The model sees one question at a time (no conversation memory)
+and the English prompt works best for English. Equipment names must be written in the question, so "the fan coil on level 2" cannot be resolved.
+Streaming is not used: the answer arrives whole, after the model call.
 
 ## Running the Server
 

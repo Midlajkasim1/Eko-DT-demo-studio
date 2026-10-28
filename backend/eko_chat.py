@@ -1540,20 +1540,27 @@ def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
             raise _error(401, "fin_not_connected", "Sign in to FIN first.")
         _debug("question", req.message)
         fallback: dict = {}
+        # the deployment's environment (LLM_ENABLED, OLLAMA_MODEL, ...) is applied on top of config.json's chat block
+        from eko_chat_llm import PROVIDER as HYBRID, effective, hybrid   # imported here: that module imports this one
+        cfg = effective(cfg)
         rules_only = cfg.get("provider") == RULES_PROVIDER
+        direct = None
         if rules_only or cfg.get("fast_router", True) is not False:
             direct = try_direct(req.message, vf, fallback)
-            if direct is None and rules_only:
-                direct = unsupported(fallback.get("reason"))
-            if direct is not None:
-                if req.stream:
-                    return StreamingResponse(stream_direct(direct, _project(view)), media_type="text/event-stream",
-                                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-                return {**direct, "project": _project(view),
-                        "timestamp": datetime.now().astimezone().isoformat(timespec="seconds")}
         else:
             fallback["reason"] = "fast_router_off"
             _debug_kv(route="llm_fallback", reason="fast_router_off")
+        if direct is None and rules_only:
+            direct = unsupported(fallback.get("reason"))
+        if direct is None and cfg.get("provider") == HYBRID:
+            # the rules did not know it: one model call reads the intent, the existing tool answers (see eko_chat_llm)
+            direct = await hybrid(cfg, req.message, vf, fallback.get("reason"), bool(req.stream), t0)
+        if direct is not None:
+            if req.stream:
+                return StreamingResponse(stream_direct(direct, _project(view)), media_type="text/event-stream",
+                                         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+            return {**direct, "project": _project(view),
+                    "timestamp": datetime.now().astimezone().isoformat(timespec="seconds")}
         try:
             adapter = get_adapter(cfg)
         except ValueError as exc:

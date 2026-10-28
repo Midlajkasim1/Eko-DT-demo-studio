@@ -108,7 +108,7 @@
     pluralCat(n){ return pluralCat(this.lang, n); },
     alarm(id){ return this.data.alarms.find(a => a.id === id) },
     /* D105: the role model. Role = defaults; permissions stay in user.canControl / features. */
-    role(){ const roles = this.data.roles || {}; const r = this.state.rolePreview || (this.data.user || {}).role; return roles[r] ? r : (roles.superuser ? 'superuser' : roles.technician ? 'technician' : Object.keys(roles)[0] || 'technician'); },
+    role(){ const roles = this.data.roles || {}; const r = this.state.rolePreview || (this.data.user || {}).role; return roles[r] ? r : (roles.technician ? 'technician' : Object.keys(roles)[0] || 'technician'); },
     roleCfg(){ return (this.data.roles || {})[this.role()] || {}; },
     /* the signed-in user's initials, from data.user.name ("Arman Y." → "AY"); '' when no user is known */
     initials(){ return String((this.data.user || {}).name || '').trim().split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase(); },
