@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAppStore } from '@/store/useAppStore'
-import { VIEW_TEMPLATES, getViewTemplate, skyCss, type ViewTemplate } from '@/constants/viewTemplates'
+import { VIEW_TEMPLATES, getViewTemplate, isDarkTheme, skyCss, type ViewTemplate } from '@/constants/viewTemplates'
 import type { TemplateId } from '@/constants/renderSettings'
 
 
@@ -16,6 +16,7 @@ export function TemplatePicker({ variant = 'panel' }: TemplatePickerProps) {
   const setLightingParams = useAppStore(s => s.setLightingParams)
   const currentProject = useProjectStore(s => s.currentProject)
   const xrayColor = useAppStore(s => s.xrayColor || 'blue')
+  const dark = useDarkTheme()
 
   const handlePick = (id: TemplateId) => {
     if (id === 'default' && currentProject?.renderSettings) {
@@ -37,6 +38,7 @@ export function TemplatePicker({ variant = 'panel' }: TemplatePickerProps) {
             key={template.id}
             template={template}
             active={templateId === template.id}
+            dark={dark}
             onPick={handlePick}
           />
         ))}
@@ -71,14 +73,32 @@ export function TemplatePicker({ variant = 'panel' }: TemplatePickerProps) {
   )
 }
 
+function useDarkTheme() {
+  const [dark, setDark] = useState(isDarkTheme)
+  useEffect(() => {
+    const sync = () => setDark(isDarkTheme())
+    sync()
+    const watch = new MutationObserver(sync)
+    watch.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+      subtree: true,
+    })
+    return () => watch.disconnect()
+  }, [])
+  return dark
+}
+
 function TemplateCard({
-  template, active, onPick,
-}: { template: ViewTemplate; active: boolean; onPick: (id: TemplateId) => void }) {
+  template, active, onPick, dark,
+}: { template: ViewTemplate; active: boolean; dark: boolean; onPick: (id: TemplateId) => void }) {
   const { card } = template
-  
+  const sky = dark && card.skyDark ? card.skyDark : card.sky
+  const horizon = dark && card.horizonDark ? card.horizonDark : card.horizon
+
   const style = {
-    '--card-sky': skyCss(card.sky),
-    '--card-horizon': card.horizon,
+    '--card-sky': skyCss(sky),
+    '--card-horizon': horizon,
     '--card-face': card.face,
     '--card-shade': card.shade,
     '--card-ink': card.ink,

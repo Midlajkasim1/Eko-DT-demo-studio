@@ -30,7 +30,7 @@ import {
 import * as SunCalc from 'suncalc'
 import { PBR_MATERIAL_MAPPINGS } from '../constants/pbrMaterials'
 import { RENDER_DEFAULTS, type RenderSettings, type ToneMappingId } from '../constants/renderSettings'
-import { getTemplateScene, type TemplateScene } from '../constants/viewTemplates'
+import { getTemplateScene, sceneSky, type TemplateScene } from '../constants/viewTemplates'
 import { paintStudioModel } from '../constants/studioPalette'
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { N8AOPass } from 'n8ao'
@@ -678,10 +678,11 @@ export async function initFragmentsEngine(
     })
 
     // ── Sky, environment, tone ──────────────────────────────────────────────
+    const stops = sceneSky(template)
     templateSky?.dispose()
     templateEnv?.dispose()
-    templateSky = makeSkyTexture(template.sky)
-    templateEnv = makeSkyEnvironment(template.sky)
+    templateSky = makeSkyTexture(stops)
+    templateEnv = makeSkyEnvironment(stops)
     world.scene.three.background = templateSky
     world.scene.three.environment = templateEnv
     world.scene.three.environmentIntensity = 1
@@ -1810,9 +1811,32 @@ export async function initFragmentsEngine(
     }
   })
 
+  // The Studio sky is the only backdrop with a dark pair. Swap it when the
+  // dashboard theme changes, without repainting the model.
+  let themeWatch: MutationObserver | null = null
+  const refreshThemeSky = () => {
+    if (!activeTemplate?.skyDark) return
+    const next = sceneSky(activeTemplate)
+    templateSky?.dispose()
+    templateEnv?.dispose()
+    templateSky = makeSkyTexture(next)
+    templateEnv = makeSkyEnvironment(next)
+    world.scene.three.background = templateSky
+    world.scene.three.environment = templateEnv
+    requestFrame()
+  }
+  themeWatch = new MutationObserver(refreshThemeSky)
+  themeWatch.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme'],
+    subtree: true,
+  })
+
   const dispose = async () => {
     loopReady = false
     components.enabled = false
+    themeWatch?.disconnect()
+    themeWatch = null
     viewCanvas.removeEventListener('webglcontextrestored', onContextRestored)
     viewCanvas.removeEventListener('pointerdown', onUserInput)
     viewCanvas.removeEventListener('wheel', onUserInput)
