@@ -84,7 +84,7 @@ interface ProjectState {
    *  project) into this project's folder, then makes it the open project's configuration.
    *  Throws when anything is not written, so the caller never reports a save that did not happen. */
   saveApiSettings: (apiSettings: import('@/types').ProjectApiSettings) => Promise<ProjectMeta>
-  /** Asset Links → Save. Writes project.json, then makes the links the open project's; throws when not written */
+  /** Equipment & Spaces → Save. Writes project.json, then makes the links the open project's; throws when not written */
   saveAssetLinks: (assetLinks: import('@/types').AssetLink[]) => Promise<void>
   setMaterialOverride: (modelId: string, override: import('@/types').MaterialOverride) => Promise<void>
   removeMaterialOverride: (modelId: string, overrideId: string) => Promise<void>

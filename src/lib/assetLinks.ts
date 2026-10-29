@@ -11,9 +11,31 @@ export interface LinkIndex {
   byFold: Map<string, AssetLink>
 }
 
+/** Equipment links only. A room name must not take a machine's guid. */
 export function indexLinks(links: AssetLink[] | undefined): LinkIndex {
-  const list = (links ?? []).filter(l => l.equip && isGuid(l.guid))
+  const list = (links ?? []).filter(l => l.kind !== 'space' && l.equip && isGuid(l.guid))
   return { list, byFold: new Map(list.map(l => [foldName(l.equip), l])) }
+}
+
+export interface SpacePin {
+  name: string
+  guid: string
+  element?: string
+}
+
+/** Heatmap rooms. Two rooms may share a display name; the GlobalId is the identity. */
+export function indexSpaceLinks(links: AssetLink[] | undefined): SpacePin[] {
+  return (links ?? [])
+    .filter(l => l.kind === 'space' && l.equip && isGuid(l.guid))
+    .map(l => ({ name: l.equip, guid: l.guid, element: l.element }))
+}
+
+/** Room label from the model: "EXAM ROOM 12" when the long name and the name differ. */
+export function spaceLabel(el: { name?: string; longName?: string; objectType?: string; guid?: string }): string {
+  const long = (el.longName || '').trim()
+  const name = (el.name || '').trim()
+  if (long && name && foldName(long) !== foldName(name)) return `${long} ${name}`
+  return long || name || (el.objectType || '').trim() || el.guid || ''
 }
 
 /** Words that name each equipment type in a model element's name, type or class */
@@ -42,6 +64,7 @@ export const KNOWN_TYPES = Object.keys(TYPE_WORDS)
 export interface ModelElement {
   guid: string
   name: string
+  longName?: string
   objectType: string
   tag: string
   category: string
@@ -178,20 +201,26 @@ function csvCells(line: string): string[] {
   return cells.map(c => c.trim())
 }
 
-const CSV_COLUMNS = ['equip', 'guid', 'type', 'finId', 'element'] as const
+const CSV_COLUMNS = ['equip', 'guid', 'type', 'finId', 'element', 'kind'] as const
 
 function linkFrom(rec: Record<string, unknown>): AssetLink | string {
+  const kind = String(rec.kind ?? '').trim().toLowerCase() === 'space' ? 'space' as const : undefined
   const equip = String(rec.equip ?? rec.name ?? rec.id ?? '').trim()
   const guid = String(rec.guid ?? rec.bimId ?? '').trim()
-  if (!equip) return 'a link has no equipment name'
+  if (!equip) return kind === 'space' ? 'a space link has no heatmap name' : 'a link has no equipment name'
   if (!isGuid(guid)) return `"${equip}" has no valid IFC GlobalId`
-  const link: AssetLink = { equip, guid, type: String(rec.type ?? '').trim() || defaultType({ name: equip }) }
+  const link: AssetLink = {
+    equip,
+    guid,
+    type: kind === 'space' ? 'SPACE' : (String(rec.type ?? '').trim() || defaultType({ name: equip })),
+    ...(kind ? { kind } : {}),
+  }
   if (rec.finId) link.finId = String(rec.finId).trim()
   if (rec.element) link.element = String(rec.element).trim()
   return link
 }
 
-/** A JSON list of links, the old { name: { bimId, type } } table, or CSV with an equip,guid,type,finId,element header */
+/** A JSON list of links, the old { name: { bimId, type } } table, or CSV with an equip,guid header. kind=space marks a heatmap room. */
 export function parseLinks(text: string): { links?: AssetLink[]; error?: string } {
   const trimmed = text.trim()
   if (!trimmed) return { error: 'Nothing to import.' }
@@ -233,18 +262,25 @@ export function parseLinks(text: string): { links?: AssetLink[]; error?: string 
   return out.length ? { links: out } : { error: 'No links found.' }
 }
 
-/** Imported links replace the ones for the same equipment */
+/** Imported equipment replaces the same name. Imported spaces replace the same GlobalId. */
 export function mergeLinks(current: AssetLink[], incoming: AssetLink[]): { links: AssetLink[]; added: number; replaced: number } {
-  const byFold = new Map(current.map(l => [foldName(l.equip), l]))
+  const equip = new Map(current.filter(l => l.kind !== 'space').map(l => [foldName(l.equip), l]))
+  const spaces = new Map(current.filter(l => l.kind === 'space').map(l => [l.guid, l]))
   let added = 0
   let replaced = 0
   for (const link of incoming) {
-    const key = foldName(link.equip)
-    if (byFold.has(key)) replaced++
-    else added++
-    byFold.set(key, link)
+    if (link.kind === 'space') {
+      if (spaces.has(link.guid)) replaced++
+      else added++
+      spaces.set(link.guid, link)
+    } else {
+      const key = foldName(link.equip)
+      if (equip.has(key)) replaced++
+      else added++
+      equip.set(key, link)
+    }
   }
-  return { links: [...byFold.values()], added, replaced }
+  return { links: [...equip.values(), ...spaces.values()], added, replaced }
 }
 
 export function linksToCsv(links: AssetLink[]): string {

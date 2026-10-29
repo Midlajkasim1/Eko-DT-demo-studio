@@ -2050,6 +2050,22 @@ Wait, if iframe has pointer-events: auto, it works. Let's fix this in iframe bod
   gap: 6px;
   flex-wrap: wrap;
 }
+.al-models {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.al-models label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--text-primary);
+}
 .ds-btn.al-small {
   padding: 4px 12px;
   font-size: 12px;

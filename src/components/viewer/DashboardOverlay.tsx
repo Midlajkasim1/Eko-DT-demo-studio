@@ -5,7 +5,7 @@ import * as OBC from '@thatopen/components'
 import { useProjectStore } from '@/store/useProjectStore'
 import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
-import { foldName, indexLinks, isGuid } from '@/lib/assetLinks'
+import { foldName, indexLinks, indexSpaceLinks, isGuid } from '@/lib/assetLinks'
 import type { AssetLink } from '@/types'
 import { resetCameraToHome } from '@/lib/cameraUtils'
 import { frameSphereInView } from '@/lib/viewFraming'
@@ -114,7 +114,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
 
     const normAssetId = (id: string) => (id.startsWith('ast-') ? id.substring(4) : id)
     const fold = foldName
-    // Read from the open project on use, so links saved in Asset Links apply without a reload
+    // Read from the open project on use, so links saved in Equipment & Spaces apply without a reload
     let linkSrc: AssetLink[] | undefined | null = null
     let linkIdx = indexLinks(undefined)
     const links = () => {
@@ -1234,6 +1234,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const unsubLinks = useProjectStore.subscribe((s, prev) => {
       if (s.currentProject?.assetLinks === prev.currentProject?.assetLinks) return
       void resolveAllAssetPositions()
+      try { (window as { EKO_HEAT?: { relink?: () => void } }).EKO_HEAT?.relink?.() } catch { /* the next equipment refresh rebuilds the zones */ }
       try { (window as { EKO?: { set?: (patch: object) => void } }).EKO?.set?.({}) } catch { /* the dashboard redraws on its next refresh */ }
     })
 
@@ -1357,6 +1358,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       bimIdFor,
       isAlarmed,
       listMapped: () => links().list.map(m => ({ id: m.equip, bimId: m.guid })),
+      spaceLinks: () => indexSpaceLinks(useProjectStore.getState().currentProject?.assetLinks),
       listLevels: () => levels.map(l => ({ id: l.id, name: l.name })),
       isolateLevel,
       listLayers: () => layersFor(

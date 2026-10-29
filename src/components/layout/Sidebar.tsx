@@ -179,7 +179,7 @@ export function Sidebar({ onFiles, engineRef }: SidebarProps) {
                   style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)', marginBottom: '8px' }}
                   onClick={() => setShowLinks(true)}>
                   <i className="bx bx-link" style={{ marginRight: '8px', fontSize: '16px' }}></i>
-                  Asset Links
+                  Equipment & Spaces
                 </button>
                 <button
                   className="download-btn"
