@@ -7,13 +7,15 @@
    floor holds) visible from 1440px; the phone FAB is Alarms, the primary action.
    cap = engine capability flag that must be true or the tool renders
    disabled with the honest tooltip. kind: tool (arms), bloom (opens a
-   list), toggle, action, more (opens the overflow).
+   list), toggle, action, more (opens the overflow), panel (swaps the summary
+   panel's content for another view: the model tree; desk = desktop shell only).
    ============================================================================ */
 window.EKO_LAYOUTS = window.EKO_LAYOUTS || {};
 window.EKO_LAYOUTS.tools = {
   "schemaVersion": 1,
   "all": [
     { "id": "select",  "icon": "cursor",  "label": "dockSelect",  "key": "V", "kind": "tool" },
+    { "id": "tree",    "icon": "tree",    "label": "dockTree",    "key": "E", "kind": "panel", "desk": true },
     { "id": "levels",  "icon": "levels",  "label": "dockLevels",  "key": "L", "kind": "bloom",  "cap": "levels" },
     { "id": "reset",   "icon": "reset",   "label": "dockReset",   "key": "R", "kind": "action" },
     { "id": "measure", "icon": "ruler",   "label": "dockMeasure", "key": "M", "kind": "tool",   "cap": "measure" },
@@ -23,7 +25,7 @@ window.EKO_LAYOUTS.tools = {
     { "id": "minimap", "icon": "map",     "label": "dockMinimap", "key": "N", "kind": "toggle" },
     { "id": "style",   "icon": "palette", "label": "dockStyle",   "key": "B", "kind": "bloom",  "cap": "style" }
   ],
-  "resting":  ["select", "levels", "reset"],                              /* group A — navigation */
+  "resting":  ["select", "tree", "levels", "reset"],                            /* group A — navigation */
   "analysis": ["measure", "slice", "layers", "minimap", "style"],         /* group B — analysis (D73: all visible) */
   "more":     ["measure", "slice", "layers", "minimap", "style"],         /* the phone tools sheet */
   "radial":   ["select", "measure", "slice", "levels", "layers", "minimap", "style", "reset"],

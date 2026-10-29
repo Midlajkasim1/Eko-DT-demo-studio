@@ -11,6 +11,7 @@ import { resetCameraToHome } from '@/lib/cameraUtils'
 import { frameSphereInView } from '@/lib/viewFraming'
 import { createMiniMap } from '@/lib/miniMap'
 import { disciplineOf, layersFor, layerShows } from '@/lib/modelDiscipline'
+import { setHidden, isHidden, onVisibilityApplied } from '@/lib/visibilityCoordinator'
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
 import { createFcuSchematic } from '@/lib/fcuSchematic'
@@ -25,6 +26,8 @@ import type { ProjectApiSettings } from '@/types'
 import { dashboardProjectInfo } from '@/lib/finSettings'
 
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
+import { DashboardModelTree } from '@/components/viewer/DashboardModelTree'
+import { isJunkStorey } from '@/lib/modelTree'
 
 interface DashboardOverlayProps {
   visible: boolean
@@ -470,7 +473,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         rec.group.matrix.copy(rec.model.object.matrixWorld)
         rec.group.matrixWorldNeedsUpdate = true
         rec.group.visible = rec.model.object.visible !== false && colored?.bimId !== bimId
-          && !levelHidden.get(rec.model)?.has(rec.localId)
+          && !levelHidden.get(rec.model)?.has(rec.localId) && !isHidden(rec.model, rec.localId)
       })
     }
     const mountInternals = (group: THREE.Group, entry: Located, internals: Internals, bimId: string) => {
@@ -705,7 +708,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const numberedFloor = (n: number) => namedFloor(n, n >= 0 && n < ORDINALS.length ? ORDINALS[n] : `Floor ${n}`)
     const floorKey = (raw: string): Floor | null => {
       const name = raw.trim()
-      if (!name || /delete/i.test(name)) return null
+      if (!name || isJunkStorey(name)) return null
       const s = name.toUpperCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim()
       if (/\bBASEMENT\b|^BF$|^B\d+$/.test(s)) return namedFloor(-10, 'Basement')
       if (/\bROOF\b|^RF$/.test(s)) return namedFloor(1000, 'Roof')
@@ -883,20 +886,18 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const seq = ++levelSeq
       for (const model of engine.fragments?.models?.list?.values() ?? []) {
         const m = model as any
-        if (typeof m.resetVisible !== 'function') continue
+        if (typeof m.setVisible !== 'function') continue
         if (seq !== levelSeq) return
         const entry = await indexModel(m)
         if (seq !== levelSeq) return
-        await m.resetVisible()
+        /* The level filter states what IT hides; the coordinator keeps whatever the
+           tree and the template hide, instead of resetVisible() wiping them. */
+        const hideAll = () => { levelHidden.set(m, new Set(entry.geom)); return setHidden(m, 'level', entry.geom) }
         levelHidden.delete(m)
-        if (!levelId || levelId === 'ALL' || !entry.byFloor.size) continue
+        if (!levelId || levelId === 'ALL' || !entry.byFloor.size) { await setHidden(m, 'level', []); continue }
         /* Basement is only itself. Each floor above also keeps everything below it. */
         const picked = floorCatalog.get(levelId)
-        if (!picked) {
-          levelHidden.set(m, new Set(entry.geom))
-          if (entry.geom.length) await m.setVisible(entry.geom, false)
-          continue
-        }
+        if (!picked) { await hideAll(); continue }
         const show = new Set<number>()
         let covered = false
         for (const [id, ids] of entry.byFloor) {
@@ -905,15 +906,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           covered = true
           for (const n of ids) show.add(n)
         }
-        if (!covered) {
-          levelHidden.set(m, new Set(entry.geom))
-          if (entry.geom.length) await m.setVisible(entry.geom, false)
-          continue
-        }
-        if (!show.size) continue
+        if (!covered) { await hideAll(); continue }
+        if (!show.size) { await setHidden(m, 'level', []); continue }
         const hide = entry.geom.filter(id => !show.has(id))
         levelHidden.set(m, new Set(hide))
-        if (hide.length) await m.setVisible(hide, false)
+        await setHidden(m, 'level', hide)
       }
       if (seq === levelSeq) repositionMarkers()
     }
@@ -1336,6 +1333,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       repositionMarkers()
     }
 
+    /* Floor, tree and template hides all land here once the worker has them */
+    const unsubVisibility = onVisibilityApplied(() => {
+      void engine.fragments?.update?.(true)
+      repositionMarkers()
+    })
+
     const miniMap = createMiniMap(engine)
     const afterFrame = () => {
       drawGhost()
@@ -1481,6 +1484,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       removeGhost()
       unsubTemplate()
       unsubLinks()
+      unsubVisibility()
       alarmSeq++
       for (const bimId of [...alarmGlow.keys()]) dropAlarmGlow(bimId)
       unwatchClipping(alarmFill)
@@ -1640,6 +1644,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         data-nav="full"
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
       />
+      {/* renders into its own host, which the dashboard moves into its summary panel while the Tree tool is on */}
+      {engineRef && <DashboardModelTree engineRef={engineRef} engineReady={engineReady} />}
     </div>
   )
 }

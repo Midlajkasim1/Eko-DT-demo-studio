@@ -58,6 +58,7 @@
       dock: { tool: null, slice: false, bloom: null, style: 'default', tone: 'blue',
               level: 'ALL', layer: 'all', alerts: 'all', minimap: false },
       mkPop: null, mkPopN: 0, mkPulse: null, paint: null, radial: null, vbarMin: ls.get('eko-vbar') === 'min',   /* D73 */
+      treeOpen: false, sumScroll: 0, sumScrollBack: null,   /* the model tree replaces the summary panel's body while open */
       ovpMin: ls.get('eko-ovp') === 'min', panMin: ls.get('eko-pan') === 'min', regMin: ls.get('eko-reg') === 'min',   /* D128: the register's model strip */
       /* `born` marks the element a state change just opened, so entry
          animations play once on open — not on every re-render. render()
@@ -693,6 +694,26 @@
      opened). Positions are captured before the rebuild and restored after,
      matched by selector and order. */
   const SCROLLERS = ['#modcontent', '.ovpad', '.apbody', '.nflist', '.regscroll', '.dgscroll', '.dlg', '.aclist', '.vplist', '#ekonav', '.rpwrap', '.rphub', '.pagepad', '.pwarea', '.scrollY', '.pmurows'];
+  /* The model tree's host sits outside the markup render() rebuilds. render() puts it back in the panel,
+     and keepTree() carries its scroll position and focus across the rebuild. */
+  let treeScrollTop = 0;
+  function keepTree(){
+    const host = window.EKO_TREE_HOST;
+    if(!host) return () => {};
+    const pad = host.isConnected ? host.querySelector('.mtscroll') : null;
+    if(pad) treeScrollTop = pad.scrollTop;
+    const had = host.contains(document.activeElement) ? document.activeElement : null;
+    return () => {
+      const slot = document.getElementById('eko-tree-slot');
+      if(slot){
+        slot.replaceWith(host);
+        const el = host.querySelector('.mtscroll');
+        if(el){ el.scrollTop = treeScrollTop; requestAnimationFrame(() => { el.scrollTop = treeScrollTop; }); }
+        if(had && had.isConnected) had.focus({ preventScroll: true });
+      }
+      window.dispatchEvent(new Event('eko-tree-sync'));
+    };
+  }
   function keepScroll(){
     const saved = [];
     SCROLLERS.forEach(sel => {
@@ -732,6 +753,7 @@
       E.state.born = null; return;
     }
     const restoreScroll = keepScroll();
+    const adoptTree = keepTree();
     if(window.EKO_SURF) window.EKO_SURF.reconcile();            /* R2 (D67) */
     (document.querySelector('.dashboard-native-container') || window.DASHBOARD_ROOT || document.documentElement).removeAttribute('data-wall');
     (window.DASHBOARD_ROOT||document.documentElement).setAttribute('data-nav', E.state.navMin ? 'min' : 'full');
@@ -812,8 +834,14 @@
        300 ms tick, or the panel visibly re-lays out after every click. */
     if(window.EKO_SPLIT && window.EKO_SPLIT.sync) window.EKO_SPLIT.sync();
     if(window.EKO_SHEET && window.EKO_SHEET.sync) window.EKO_SHEET.sync();
+    adoptTree();
     restoreScroll();                                             /* D86: after layout so flex overflow does not snap to top */
     requestAnimationFrame(() => { restoreScroll(); requestAnimationFrame(restoreScroll); });
+    if(E.state.sumScrollBack != null){   /* closing the tree: the summary comes back where it was */
+      const back = E.state.sumScrollBack, pad = document.querySelector('#ovp:not([data-tree]) .ovpad');
+      E.state.sumScrollBack = null;
+      if(pad){ pad.scrollTop = back; requestAnimationFrame(() => { pad.scrollTop = back; requestAnimationFrame(() => { pad.scrollTop = back; }); }); }
+    }
     E.state.born = null;
     if(window.EKO_SURF) window.EKO_SURF.afterRender();          /* R5 (D67) */
     if(window.EKO_HOST_ENGINE){
@@ -852,10 +880,11 @@
     else if(typeof E.engine.clearHighlight === 'function') E.engine.clearHighlight();
   }
   /* select + fly to it; or, when it is already selected, deselect + home */
-  function selectEquipment(assetId, patch){
+  function selectEquipment(assetId, patch, still){   /* still: select without moving the camera (the model tree) */
+    if(still && E.state.paint === assetId) return false;
     if(E.state.paint && E.state.paint === assetId){ E.set({ mkPop: null, mkPopN: 0, paint: null }); goHome(); return false; }
     E.set(Object.assign({}, patch, { paint: assetId }));
-    if(typeof E.engine.flyTo === 'function') E.engine.flyTo(assetId);
+    if(!still && typeof E.engine.flyTo === 'function') E.engine.flyTo(assetId);
     return true;
   }
   function goHome(){ if(E.engine && typeof E.engine.resetView === 'function') E.engine.resetView(); }
@@ -1193,6 +1222,7 @@
         }
         if(E.engine.clearMeasure) E.engine.clearMeasure();
         if(E.engine.clearSection) E.engine.clearSection();
+        window.dispatchEvent(new Event('eko-tree-reset'));   /* what the model tree hid comes back with the floors and layers */
         const heat = E.state.pageId === 'heatmap';
         E.set(Object.assign({
           dock: heat
@@ -1201,6 +1231,11 @@
           histAge:null, measureResult:null
         }, NO_SEL)); return; }
       if(!def) return;
+      /* The tree shares the summary panel with nothing else, so picking any other tool closes it the way
+         clicking Tree again does (the summary comes back where it was). Reset and the phone's More leave it. */
+      if(E.state.treeOpen && ['tool','bloom','toggle'].includes(def.kind)){
+        E.state.sumScrollBack = E.state.sumScroll || 0; E.state.treeOpen = false;
+      }
       if(def.kind === 'tool'){
         /* Select and Measure take clicks. Slice is a latch: it stays on beside them.
            Clicking Slice while another tool has the clicks re-arms the cut.
@@ -1224,6 +1259,15 @@
           d.tool = next; d.bloom = null;
           if(next === 'measure' && E.engine.startMeasure) E.engine.startMeasure('point');
         }
+      }
+      else if(def.kind === 'panel'){
+        if(E.stacked()) return;
+        /* The summary and the tree share one panel. Opening the tree leaves the summary's state alone
+           (collapsed or not, scrolled where it was); closing brings it back as it was. */
+        const pad = document.querySelector('#ovp:not([data-tree]) .ovpad');
+        if(!E.state.treeOpen){ if(pad) E.state.sumScroll = pad.scrollTop; }
+        else E.state.sumScrollBack = E.state.sumScroll || 0;
+        E.state.treeOpen = !E.state.treeOpen; d.bloom = null;
       }
       else if(def.kind === 'toggle'){ d.minimap = !d.minimap; d.bloom = null; if(d.minimap) E.state.born = 'bloom'; }
       else if(def.kind === 'more'){ const inMore = ['more','layers','style'].includes(d.bloom);
@@ -1562,16 +1606,16 @@
   window.addEventListener('viewer-command', ev => {
     const d = ev.detail || {};
     if (d.action === 'openAssetByBimId' && d.bimId) {
-      if (E.state.dock && E.state.dock.tool !== 'select') return;
+      if (!d.fromTree && E.state.dock && E.state.dock.tool !== 'select') return;   /* the tree selects without arming the tool */
       const HE = window.EKO_HOST_ENGINE;
       const assets = E.data.assets || [];
       const found = assets.find(a => a.bimId === d.bimId || (HE && HE.bimIdFor && HE.bimIdFor(a.id) === d.bimId));
       const mapped = !found && HE && HE.listMapped ? HE.listMapped().find(m => m.bimId === d.bimId) : null;
       const id = found ? found.id : (mapped ? mapped.id : null);
-      if (id) { selectEquipment(id, { born:'pop', mkPop: 'asset:' + id, mkPopN: 0 }); return; }
+      if (id) { selectEquipment(id, { born:'pop', mkPop: 'asset:' + id, mkPopN: 0 }, !!d.fromTree); return; }
       /* Not in the register: the same card, filled from the element itself. */
       E.state.pickEl = { bimId: d.bimId, name: d.name || '', type: d.type || '', category: d.category || '' };
-      selectEquipment(d.bimId, { born:'pop', mkPop: 'el:' + d.bimId, mkPopN: 0 });
+      selectEquipment(d.bimId, { born:'pop', mkPop: 'el:' + d.bimId, mkPopN: 0 }, !!d.fromTree);
     }
   });
 
