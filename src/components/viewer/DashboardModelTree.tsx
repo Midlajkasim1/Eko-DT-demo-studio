@@ -2,7 +2,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useReducer, us
 import { createPortal } from 'react-dom'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import { useModelStore } from '@/store/useModelStore'
-import { disciplineOf } from '@/lib/modelDiscipline'
+import { classifyLoaded } from '@/lib/layerGroups'
 import { setHidden, type VisibilityModel } from '@/lib/visibilityCoordinator'
 import {
   buildModelTree, categoryLabel, checkStateOf, disciplineKey, hiddenItems, loadElementNames, mergeByDiscipline,
@@ -23,7 +23,7 @@ import {
 
 const PAGE = 50
 const DISCIPLINE_KEY: Record<string, string> = {
-  arch: 'layArch', elec: 'layElec', int: 'layInt', mech: 'layMech', str: 'layStr',
+  arch: 'layArch', elec: 'layElec', int: 'layInt', mech: 'layMech', str: 'layStr', equip: 'layEquip', site: 'laySite', land: 'layLand',
 }
 
 type FragModel = TreeSourceModel & VisibilityModel & object
@@ -353,7 +353,10 @@ export function DashboardModelTree({ engineRef, engineReady }: Props) {
     const sources: DisciplineSource[] = []
     const byDiscipline = new Map<string, { discipline: string | null; label: string; recs: typeof models }>()
     for (const rec of models) {
-      const discipline = disciplineOf(rec.originalFileName || '')
+      // The same classifier as the Layers menu; a name it cannot place stays Unclassified
+      const classified = classifyLoaded(rec)
+      if (classified.group === 'spaces') continue // the heat map's own model: not browsed, only kept loaded
+      const discipline = classified.known ? classified.group : null
       const key = disciplineKey(discipline)
       let d = byDiscipline.get(key)
       if (!d) {

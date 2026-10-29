@@ -10,7 +10,13 @@ import type { AssetLink } from '@/types'
 import { resetCameraToHome } from '@/lib/cameraUtils'
 import { frameSphereInView } from '@/lib/viewFraming'
 import { createMiniMap } from '@/lib/miniMap'
-import { disciplineOf, layersFor, layerShows } from '@/lib/modelDiscipline'
+import { disciplineOf } from '@/lib/modelDiscipline'
+import {
+  classifyLoaded, classifyModel, describeModels, describeUnclassified, hasContentProfile, isProjectSwitch, layerIds, layerVisibility,
+  onContentProfiles, pruneContentProfiles, setContentProfile, type ContentProfile,
+} from '@/lib/layerGroups'
+import { runIfcDiagnostics } from '@/lib/ifcDiagnostics' // TEMPORARY, with EKO_IFC_DIAGNOSTICS below
+import { HVAC_GENERIC, HVAC_SPECIFIC, isCeilingType, levelHides, type LevelIndex, type MechanicalInfo } from '@/lib/floorPolicy'
 import { setHidden, isHidden, onVisibilityApplied } from '@/lib/visibilityCoordinator'
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
@@ -692,7 +698,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     let levels: Floor[] = []
     let levelSig = ''
     let levelSeq = 0
-    const floorJobs = new WeakMap<object, Promise<{ geom: number[]; byFloor: Map<string, number[]> }>>()
+    const floorJobs = new WeakMap<object, Promise<LevelIndex>>()
     const floorCatalog = new Map<string, Floor>()
     const ORDINALS = ['Ground floor', 'First floor', 'Second floor', 'Third floor', 'Fourth floor', 'Fifth floor', 'Sixth floor', 'Seventh floor', 'Eighth floor', 'Ninth floor', 'Tenth floor', 'Eleventh floor', 'Twelfth floor', 'Thirteenth floor', 'Fourteenth floor', 'Fifteenth floor', 'Sixteenth floor', 'Seventeenth floor', 'Eighteenth floor', 'Nineteenth floor', 'Twentieth floor']
     const attrText = (row: any, key: string) => {
@@ -755,7 +761,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       else if (rels && typeof rels === 'object') for (const [k, v] of Object.entries(rels)) put(k, v)
       return out
     }
-    const assignByHeight = (geom: number[], boxes: THREE.Box3[], storeys: { floor: Floor; elevation: number }[]) => {
+    /* `reference` is the set of boxes the model's height range is read from. It is the boxes themselves unless
+       a small subset (the HVAC) is being placed against the whole model's range. */
+    const assignByHeight = (geom: number[], boxes: THREE.Box3[], storeys: { floor: Floor; elevation: number }[], reference: THREE.Box3[] = boxes) => {
       const byFloor = new Map<string, number[]>()
       const floors: { id: string; elevation: number }[] = []
       for (const s of storeys) {
@@ -766,7 +774,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
       floors.sort((a, b) => a.elevation - b.elevation)
       const ys: number[] = []
-      for (const b of boxes) if (b && !b.isEmpty() && Number.isFinite(b.min.y)) ys.push(b.min.y)
+      for (const b of reference) if (b && !b.isEmpty() && Number.isFinite(b.min.y)) ys.push(b.min.y)
       ys.sort((a, b) => a - b)
       if (ys.length < 2 || floors.length < 2) return byFloor
       const yLo = ys[Math.floor(ys.length * 0.02)]
@@ -853,7 +861,40 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
             byFloor.get(floorId)!.push(...ids)
           }
         }
-        return { geom, byFloor }
+        /* What the floor filter treats specially: the ceilings, and the HVAC. A model that cannot
+           answer leaves both empty, which is the plain floor filter. */
+        const ceilings = new Set<number>()
+        const hvac = new Map<number, MechanicalInfo>()
+        try {
+          const onGeometry = new Set(geom)
+          const idsOf = (found: any) => (Object.values(found || {}).flat() as number[]).filter(id => onGeometry.has(id))
+          if (typeof model.getItemsOfCategories === 'function') {
+            const coverings = idsOf(await model.getItemsOfCategories([/^IFCCOVERING$/i]))
+            if (coverings.length && typeof model.getItemsData === 'function') {
+              const rows = await model.getItemsData(coverings, {
+                attributesDefault: false, attributes: ['PredefinedType'], relationsDefault: { attributes: false, relations: false },
+              })
+              coverings.forEach((id, i) => { if (isCeilingType(attrText(rows[i], 'PredefinedType'))) ceilings.add(id) })
+            }
+            const fileName = useModelStore.getState().models.find(r => r.modelId === model.modelId)?.originalFileName || ''
+            // The generic flow classes are electrical work too, in an electrical model
+            const patterns = classifyModel(fileName).group === 'elec' ? [HVAC_SPECIFIC] : [HVAC_SPECIFIC, HVAC_GENERIC]
+            const mech = idsOf(await model.getItemsOfCategories(patterns))
+            if (mech.length) {
+              const assigned = new Set<number>()
+              for (const ids of byFloor.values()) for (const id of ids) assigned.add(id)
+              const boxOf = new Map<number, THREE.Box3>()
+              geom.forEach((id, i) => { if (boxes[i]) boxOf.set(id, boxes[i]) })
+              const heightFloor = new Map<number, string>()
+              if (storeys.length >= 2) {
+                const partBoxes = mech.map(id => boxOf.get(id) as THREE.Box3)
+                for (const [floorId, ids] of assignByHeight(mech, partBoxes, storeys, boxes)) for (const id of ids) heightFloor.set(id, floorId)
+              }
+              for (const id of mech) hvac.set(id, { assigned: assigned.has(id), heightFloor: heightFloor.get(id) ?? null })
+            }
+          }
+        } catch { /* plain floor filter */ }
+        return { geom, byFloor, ceilings, hvac }
       })().catch((err) => { floorJobs.delete(model); throw err })
       floorJobs.set(model, job)
       return job
@@ -861,7 +902,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const refreshLevels = async () => {
       const byId = new Map<string, Floor>()
       for (const model of engine.fragments?.models?.list?.values() ?? []) {
-        let entry: { geom: number[]; byFloor: Map<string, number[]> } = { geom: [], byFloor: new Map() }
+        let entry: LevelIndex = { geom: [], byFloor: new Map(), ceilings: new Set(), hvac: new Map() }
         try { entry = await indexModel(model) } catch { /* model not ready */ }
         for (const id of entry.byFloor.keys()) {
           const known = floorCatalog.get(id)
@@ -881,8 +922,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const gf = [...floorCatalog.values()].find(f => /ground/i.test(f.name) || f.rank === 0)
         if (gf) levelId = gf.id
       }
-      if (!force && levelId === lastLevelId) return
-      lastLevelId = levelId
+      // "Isolate floor" is a dock setting, read here so the picker, the stepper and the toggle all go through this one function
+      const alone = !!(window as any).EKO?.state?.dock?.floorAlone
+      const levelKey = levelId + (alone ? '|alone' : '')
+      if (!force && levelKey === lastLevelId) return
+      lastLevelId = levelKey
       const seq = ++levelSeq
       for (const model of engine.fragments?.models?.list?.values() ?? []) {
         const m = model as any
@@ -895,24 +939,29 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const hideAll = () => { levelHidden.set(m, new Set(entry.geom)); return setHidden(m, 'level', entry.geom) }
         levelHidden.delete(m)
         if (!levelId || levelId === 'ALL' || !entry.byFloor.size) { await setHidden(m, 'level', []); continue }
-        /* Basement is only itself. Each floor above also keeps everything below it. */
+        /* Basement is only itself. Each floor above also keeps everything below it, unless Isolate floor is on.
+           What the floor hides beyond that (its own ceilings) and keeps beyond that (the HVAC) is lib/floorPolicy. */
         const picked = floorCatalog.get(levelId)
         if (!picked) { await hideAll(); continue }
-        const show = new Set<number>()
-        let covered = false
-        for (const [id, ids] of entry.byFloor) {
-          const floor = floorCatalog.get(id)
-          if (!floor || floor.rank > picked.rank) continue
-          covered = true
-          for (const n of ids) show.add(n)
-        }
-        if (!covered) { await hideAll(); continue }
-        if (!show.size) { await setHidden(m, 'level', []); continue }
-        const hide = entry.geom.filter(id => !show.has(id))
+        const hide = levelHides(entry, picked, id => floorCatalog.get(id)?.rank, { alone })
+        if (!hide) { await setHidden(m, 'level', []); continue }
         levelHidden.set(m, new Set(hide))
         await setHidden(m, 'level', hide)
       }
       if (seq === levelSeq) repositionMarkers()
+    }
+
+    /* The Spaces model is the heat map's: hidden in normal viewing, shown while the heat map is applied.
+       (The heat plates follow their model's visibility, so it has to be on for them to draw.) */
+    let spaceHeatActive = false
+    const applySpacesGate = () => {
+      const state = useModelStore.getState()
+      for (const rec of state.models) {
+        if (classifyLoaded(rec).group !== 'spaces') continue
+        if (state.modelVisibility[rec.modelId] !== spaceHeatActive) state.setModelVisibility(rec.modelId, spaceHeatActive)
+        const root = modelObject(rec)
+        if (root && root.visible !== spaceHeatActive) root.visible = spaceHeatActive
+      }
     }
 
     const heatGeoms = new Map<string, THREE.BufferGeometry[]>()
@@ -980,6 +1029,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       heatSheets = []
     }
     const clearSpaceHeat = async () => {
+      spaceHeatActive = false
+      applySpacesGate()
       heatSig = ''
       dropHeatSheets()
       heatByBim.forEach(rec => {
@@ -1119,6 +1170,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       return mesh
     }
     const applySpaceHeat = async (zones: { bimId?: string; bimIds?: string[]; tempC?: number | null; rh?: number | null; co2?: number | null }[], mode?: string) => {
+      spaceHeatActive = true
+      applySpacesGate()
       const md = mode === 'comfort' || mode === 'hum' ? mode : 'temp'
       const idsOf = (z: { bimId?: string; bimIds?: string[] }) =>
         (z.bimIds && z.bimIds.length ? z.bimIds : (z.bimId ? [z.bimId] : [])).filter(id => isGuid(id))
@@ -1299,24 +1352,21 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
     }
 
-    /* Whole models, by the discipline in the file name. Item visibility
-       (the floor filter) is left as it is. */
+    /* Whole models, by the discipline in the file name (lib/layerGroups): every model of a chosen
+       discipline shows, the rest hide. Item visibility (the floor filter) is left as it is. */
     let lastLayerKey = ''
     const isolateLayer = (layerId: string | string[], force?: boolean) => {
-      const key = Array.isArray(layerId) ? layerId.slice().sort().join('|') : String(layerId || '')
+      const models = useModelStore.getState().models
+      /* A view the dashboard set up (heat map, Systems page, Reset) keeps site, landscape and other models around it */
+      const keepContext = !!(window as any).EKO?.state?.dock?.layerContext
+      const key = (Array.isArray(layerId) ? layerId.slice().sort().join('|') : String(layerId || ''))
+        + (keepContext ? '+ctx' : '') + '#' + [...new Set(models.map(m => m.modelId))].sort().join(',')
       if (!force && key === lastLayerKey) return
       lastLayerKey = key
-      const models = useModelStore.getState().models
-      const present = new Set(
-        models.map(m => disciplineOf(m.originalFileName || '')).filter((d): d is NonNullable<typeof d> => !!d)
-      )
-      const hideStr = Array.isArray(layerId) && !layerId.includes('str')
+      const shown = layerVisibility(models, layerId, { keepContext, spacesVisible: spaceHeatActive })
       const fragList = engine.fragments?.models?.list
       for (const m of models) {
-        const name = m.originalFileName || ''
-        const disc = disciplineOf(name)
-        let visible = layerShows(disc, layerId, present)
-        if (hideStr && (disc === 'str' || /struct|(?:^|[^A-Z0-9])ST(?:[^A-Z0-9]|$)/i.test(name.toUpperCase()))) visible = false
+        const visible = shown.get(m.modelId) ?? true
         useModelStore.getState().setModelVisibility(m.modelId, visible)
         let object3D = m.type === 'glb'
           ? engine.world?.scene?.three?.children?.find((c: any) => c.userData?.modelId === m.modelId)
@@ -1333,6 +1383,82 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
       repositionMarkers()
     }
+
+    /* The Layers menu follows the registry: a model that registers late adds its discipline, a new
+       project replaces the list, and a choice left over from the old project goes back to All layers. */
+    let layerSig = ''
+    let knownIds = new Set<string>()
+    let warnedOther = ''
+
+    /* A model whose name says nothing is read once for what it contains (lib/layerGroups.disciplineFromContent). */
+    const readContentProfile = async (model: any): Promise<ContentProfile> => {
+      const ids: number[] = await model.getItemsIdsWithGeometry()
+      const withGeometry = new Set(ids)
+      const classes: Record<string, number> = {}
+      for (const category of (await model.getCategories()) as string[]) {
+        if (/TYPE$/i.test(category)) continue
+        const found = await model.getItemsOfCategories([new RegExp(`^${category}$`, 'i')])
+        const n = (Object.values(found || {}).flat() as number[]).filter(id => withGeometry.has(id)).length
+        if (n) classes[category] = n
+      }
+      return { total: ids.length, classes }
+    }
+    const profileTries = new Map<string, number>()
+    const profiling = new Set<string>()
+    const ensureProfiles = () => {
+      const fragList = engine.fragments?.models?.list
+      if (!fragList) return
+      for (const rec of useModelStore.getState().models) {
+        const id = rec.modelId
+        if (rec.type === 'glb' || hasContentProfile(id) || profiling.has(id) || classifyModel(rec.originalFileName).known) continue
+        const model = fragList.get(id) as any
+        if (!model || (profileTries.get(id) ?? 0) >= 5) continue
+        profileTries.set(id, (profileTries.get(id) ?? 0) + 1)
+        profiling.add(id)
+        // The worker registers a model a moment after it loads; a failed read is tried again on the next tick
+        readContentProfile(model).then(profile => setContentProfile(id, profile)).catch(() => {}).finally(() => profiling.delete(id))
+      }
+    }
+
+    const syncLayers = () => {
+      const models = useModelStore.getState().models
+      const ids = new Set(models.map(m => m.modelId))
+      pruneContentProfiles(ids)
+      ensureProfiles()
+      applySpacesGate()
+      const sig = layerIds(models).join('|') + '#' + models.map(m => `${m.modelId}:${classifyLoaded(m).group}:${hasContentProfile(m.modelId) ? 1 : 0}`).sort().join(',')
+      if (sig === layerSig) return
+      layerSig = sig
+      const eko = (window as any).EKO
+      const dock = eko?.state?.dock
+      // A pick from the menu belongs to the old project; a page's own layers (heat map, Systems) still apply
+      if (isProjectSwitch(knownIds, ids) && dock && dock.layer && dock.layer !== 'all' && !dock.layerContext) dock.layer = 'all'
+      knownIds = ids
+      // A model is reported once its content has been read (or when there is no content to read)
+      const lines = describeUnclassified(models.filter(m => m.type === 'glb' || hasContentProfile(m.modelId))).sort()
+      const other = lines.join(' | ')
+      if (other && other !== warnedOther) {
+        console.warn(`[layers] ${lines.length} model(s) have no recognised discipline: listed under Other in Layers and Unclassified in the tree. Add a rule in src/lib/layerGroups.ts: ${other}`)
+      }
+      warnedOther = other
+      // Only a real choice is applied; All layers leaves each model's own visibility alone
+      if (dock?.layer && dock.layer !== 'all') isolateLayer(dock.layer, true)
+      try { eko?.set?.({}) } catch { /* the dashboard redraws on its next render */ }
+    }
+    const unsubStore = useModelStore.subscribe(syncLayers)
+    // Content read: the Layers menu and the tree both place the model from it
+    const unsubProfiles = onContentProfiles(() => {
+      syncLayers()
+      window.dispatchEvent(new Event('eko-tree-sync'))
+    })
+    const unsubLayers = () => { unsubStore(); unsubProfiles() }
+    syncLayers()
+    ;(window as any).EKO_MODEL_DISCIPLINES = () => describeModels(useModelStore.getState().models)
+    // TEMPORARY, read-only: what the loaded models contain (lib/ifcDiagnostics.ts)
+    ;(window as any).EKO_IFC_DIAGNOSTICS = (which?: string | string[]) => runIfcDiagnostics({
+      models: useModelStore.getState().models, fragments: engine.fragments?.models?.list,
+      loadedInEngine: useModelStore.getState().modelsLoadedInEngine, classify: classifyLoaded,
+    }, which)
 
     /* Floor, tree and template hides all land here once the worker has them */
     const unsubVisibility = onVisibilityApplied(() => {
@@ -1361,9 +1487,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       spaceLinks: () => indexSpaceLinks(useProjectStore.getState().currentProject?.assetLinks),
       listLevels: () => levels.map(l => ({ id: l.id, name: l.name })),
       isolateLevel,
-      listLayers: () => layersFor(
-        useModelStore.getState().models.map(m => disciplineOf(m.originalFileName || ''))
-      ).map(id => ({ id, name: id })),
+      listLayers: () => layerIds(useModelStore.getState().models).map(id => ({ id, name: id })),
       isolateLayer,
       fadeArch,
       applySpaceHeat,
@@ -1437,6 +1561,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const keyOf = (m: object) => modelKeys.get(m) ?? (modelKeys.set(m, ++nextKey), nextKey)
     let modelsSig = ''
     const resolveTimer = setInterval(() => {
+      ensureProfiles()
+      applySpacesGate()
       const live = [...(engine.fragments?.models?.list?.values() ?? [])]
       const sig = live.map(keyOf).join('|')   // object identity: a reload of the same file counts as a change
       let modelsChanged = false
@@ -1487,6 +1613,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       unsubTemplate()
       unsubLinks()
       unsubVisibility()
+      unsubLayers()
       alarmSeq++
       for (const bimId of [...alarmGlow.keys()]) dropAlarmGlow(bimId)
       unwatchClipping(alarmFill)
@@ -1503,6 +1630,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ghostEdge.dispose()
       fcuEnv?.dispose()
       delete (window as any).EKO_HOST_ENGINE
+      delete (window as any).EKO_MODEL_DISCIPLINES
+      delete (window as any).EKO_IFC_DIAGNOSTICS
     }
   }, [engineReady])
 

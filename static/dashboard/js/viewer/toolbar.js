@@ -27,7 +27,7 @@ window.EKO_VT = (function(){
 
   /* ------------------------------ view state ------------------------------ */
   /* Every non-default view setting, named for people (D71). */
-  const LBL = { all:'layAll', arch:'layArch', elec:'layElec', int:'layInt', mech:'layMech', str:'layStr' };
+  const LBL = { all:'layAll', arch:'layArch', elec:'layElec', int:'layInt', mech:'layMech', str:'layStr', equip:'layEquip', site:'laySite', land:'layLand', other:'layOther' };
   const chosenLayers = d => Array.isArray(d.layer) ? d.layer : (d.layer && d.layer !== 'all' ? [d.layer] : []);
   const STY = { default:'styDefault', photo:'styPhoto', minimal:'styMinimal', studio:'styStudio', xray:'styXray' };
   const levelName = (E, l) => /^L\d+$/.test(l) ? E.t('lvlName', { n: l.slice(1) }) : l;
@@ -55,7 +55,7 @@ window.EKO_VT = (function(){
       case 'slice': on = !!d.slice; break;
       case 'tree':  on = !!E.state.treeOpen; break;
       case 'levels':  on = d.bloom === 'levels' || d.level !== 'ALL'; tag = d.level !== 'ALL' ? d.level : null; break;
-      case 'layers': { const sel = chosenLayers(d); on = sel.length > 0; tag = on ? E.t('layDisciplines') : null; break; }
+      case 'layers': on = chosenLayers(d).length > 0; break;   /* the button keeps its name; the pressed state says a layer is chosen */
       case 'minimap': on = !!d.minimap; break;
       case 'style':   on = d.style !== 'default'; tag = on ? E.t(STY[d.style] || 'styDefault') : null; break;
       case 'more':    on = BLOOMS_MORE.includes(d.bloom); dot = viewState(E).length > 0; break;
@@ -170,11 +170,16 @@ window.EKO_VT = (function(){
       const i = lv.indexOf(d.level);
       const rows = groups.map(G => `<span class="mzflyT vpgrp">${C().esc(t(G.k))}</span>` +
         G.items.map(l => `<button class="mzopt mzfan vprow" data-act="setLevel" data-v="${C().esc(l)}" data-on="${d.level === l}" data-q="${C().esc(levelName(E, l).toLowerCase())}">${C().esc(levelName(E, l))}</button>`).join('')).join('');
+      /* All and Isolate floor sit outside the scrolling list, under the search field, so they stay in view
+         while the floors scroll. The row keeps .vprow so the search and Enter/ArrowDown treat it as before. */
+      const allRow = opt('setLevel', 'ALL', t('lvlAll'), d.level === 'ALL').replace('class="mzopt', 'class="vprow mzopt').replace('data-on', 'data-q="all ' + C().esc(t('lvlAll').toLowerCase()) + '" data-on');
       return `<div class="vpick"><div class="row gap6 vphead">${title('dockLevels')}<span class="grow"></span>
           <button class="iconbtn icon26" data-act="lvlStep" data-v="up" data-tip="${C().esc(t('lvlUp'))}" aria-label="${C().esc(t('lvlUp'))}" ${i <= 0 && d.level !== 'ALL' ? 'disabled' : ''}>${C().icon('chevR2', 13)}</button>
           <button class="iconbtn icon26" data-act="lvlStep" data-v="down" data-tip="${C().esc(t('lvlDown'))}" aria-label="${C().esc(t('lvlDown'))}" ${(i >= lv.length - 1) ? 'disabled' : ''}>${C().icon('chevL2', 13)}</button></div>
         <input class="vpq" type="search" placeholder="${C().esc(t('pickFloor'))}" aria-label="${C().esc(t('pickFloor'))}" autocomplete="off">
-        <div class="vplist">${opt('setLevel', 'ALL', t('lvlAll'), d.level === 'ALL').replace('class="mzopt', 'class="vprow mzopt').replace('data-on', 'data-q="all ' + C().esc(t('lvlAll').toLowerCase()) + '" data-on')}${rows}</div></div>`;
+        ${allRow}
+        <button class="mzopt mzfan" role="switch" aria-checked="${!!d.floorAlone}" data-act="floorAlone" data-on="${!!d.floorAlone}">${C().esc(t('lvlAlone'))}</button>
+        <div class="vplist">${rows}</div></div>`;
     }
     if(which === 'more'){
       const note = '';
