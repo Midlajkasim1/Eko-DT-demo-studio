@@ -300,6 +300,19 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     setLinks(prev => [...prev.filter(l => !(l.kind === 'space' && l.guid === el.guid)), next])
   }
 
+  const addSpaces = (els: ModelElement[]) => {
+    const taken = new Set(spaceLinks.map(l => l.guid))
+    const fresh = els.filter(el => el.guid && !taken.has(el.guid))
+    if (!fresh.length) return
+    const next: AssetLink[] = fresh.map(el => {
+      const labelText = spaceLabel(el)
+      return { kind: 'space', equip: labelText, guid: el.guid, type: 'SPACE', element: labelText }
+    })
+    const guids = new Set(next.map(l => l.guid))
+    setLinks(prev => [...prev.filter(l => !(l.kind === 'space' && guids.has(l.guid))), ...next])
+    setNotice(`Added ${next.length} rooms from the model. Each name is the room label. Save to keep them.`)
+  }
+
   const addManualSpace = () => {
     const guid = manualGuid.trim()
     const name = manualName.trim()
@@ -406,6 +419,13 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
   })
   const addedCount = spaceRows.filter(r => r.link).length
   const openCount = spaceRows.filter(r => !r.link).length
+  const openByModel = new Map<string, ModelElement[]>()
+  for (const row of spaceRows) {
+    if (!row.el || row.link) continue
+    const list = openByModel.get(row.el.modelName) ?? []
+    list.push(row.el)
+    openByModel.set(row.el.modelName, list)
+  }
 
   const scanText = scan.state === 'scanning'
     ? 'Reading the model…'
@@ -470,18 +490,33 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
           {mode === 'space' && (
             <div className="al-models">
               <span>Scrape from</span>
-              {modelChoices.length ? modelChoices.map(m => (
-                <label key={m.key}>
-                  <input
-                    type="checkbox"
-                    checked={pickedKeys.includes(m.key)}
-                    onChange={() => applySpacePick(
-                      pickedKeys.includes(m.key) ? pickedKeys.filter(k => k !== m.key) : [...pickedKeys, m.key],
+              {modelChoices.length ? modelChoices.map(m => {
+                const pending = openByModel.get(m.name) ?? []
+                return (
+                  <span key={m.key} className="al-model">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={pickedKeys.includes(m.key)}
+                        onChange={() => applySpacePick(
+                          pickedKeys.includes(m.key) ? pickedKeys.filter(k => k !== m.key) : [...pickedKeys, m.key],
+                        )}
+                      />
+                      {fileLabel(m.name)}
+                    </label>
+                    {pickedKeys.includes(m.key) && (
+                      <button
+                        type="button"
+                        className="ds-btn ds-btn-secondary al-small"
+                        disabled={!pending.length || scan.state === 'scanning'}
+                        onClick={() => addSpaces(pending)}
+                      >
+                        Add all {pending.length}
+                      </button>
                     )}
-                  />
-                  {fileLabel(m.name)}
-                </label>
-              )) : <span>No model is loaded.</span>}
+                  </span>
+                )
+              }) : <span>No model is loaded.</span>}
               {modelChoices.length > 1 && (
                 <>
                   <button type="button" className="ds-btn ds-btn-secondary al-small" onClick={() => applySpacePick(modelChoices.map(m => m.key))}>All</button>
@@ -525,6 +560,16 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
               <button className="ds-btn ds-btn-primary al-small" onClick={linkAll} disabled={!autoMatches.length}
                 title={`Links each unlinked equipment to its best suggestion of ${pct(AUTO_MIN)} or more`}>
                 Link {autoMatches.length} suggestions ≥ {pct(AUTO_MIN)}
+              </button>
+            )}
+            {mode === 'space' && (
+              <button
+                className="ds-btn ds-btn-primary al-small"
+                onClick={() => addSpaces(spaceRows.flatMap(r => r.el && !r.link ? [r.el] : []))}
+                disabled={!openCount || scan.state === 'scanning'}
+                title="Adds every room scraped from the ticked models. Rooms already added keep their names."
+              >
+                Add all {openCount} from ticked models
               </button>
             )}
             <button className="ds-btn ds-btn-secondary al-small" onClick={() => setImportText(importText === null ? '' : null)}>Import</button>

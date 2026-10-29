@@ -2066,6 +2066,11 @@ Wait, if iframe has pointer-events: auto, it works. Let's fix this in iframe bod
   cursor: pointer;
   color: var(--text-primary);
 }
+.al-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .ds-btn.al-small {
   padding: 4px 12px;
   font-size: 12px;
