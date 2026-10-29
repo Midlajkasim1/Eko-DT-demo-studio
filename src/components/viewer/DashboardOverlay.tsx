@@ -9,7 +9,8 @@ import { ASSET_BIM_MAPPING } from '@/constants/assetBimMapping'
 import { resetCameraToHome } from '@/lib/cameraUtils'
 import { frameSphereInView } from '@/lib/viewFraming'
 import { createMiniMap } from '@/lib/miniMap'
-import { disciplineOf, layersFor, layerShows } from '@/lib/modelDiscipline'
+import { disciplineOf } from '@/lib/modelDiscipline'
+import { isProjectSwitch, layerIds, layerVisibility, unclassifiedModels } from '@/lib/layerGroups'
 import { setHidden, isHidden, onVisibilityApplied } from '@/lib/visibilityCoordinator'
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
@@ -1292,24 +1293,21 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
     }
 
-    /* Whole models, by the discipline in the file name. Item visibility
-       (the floor filter) is left as it is. */
+    /* Whole models, by the discipline in the file name (lib/layerGroups): every model of a chosen
+       discipline shows, the rest hide. Item visibility (the floor filter) is left as it is. */
     let lastLayerKey = ''
     const isolateLayer = (layerId: string | string[], force?: boolean) => {
-      const key = Array.isArray(layerId) ? layerId.slice().sort().join('|') : String(layerId || '')
+      const models = useModelStore.getState().models
+      /* A view the dashboard set up (heat map, Systems page, Reset) keeps site, landscape and other models around it */
+      const keepContext = !!(window as any).EKO?.state?.dock?.layerContext
+      const key = (Array.isArray(layerId) ? layerId.slice().sort().join('|') : String(layerId || ''))
+        + (keepContext ? '+ctx' : '') + '#' + [...new Set(models.map(m => m.modelId))].sort().join(',')
       if (!force && key === lastLayerKey) return
       lastLayerKey = key
-      const models = useModelStore.getState().models
-      const present = new Set(
-        models.map(m => disciplineOf(m.originalFileName || '')).filter((d): d is NonNullable<typeof d> => !!d)
-      )
-      const hideStr = Array.isArray(layerId) && !layerId.includes('str')
+      const shown = layerVisibility(models, layerId, { keepContext })
       const fragList = engine.fragments?.models?.list
       for (const m of models) {
-        const name = m.originalFileName || ''
-        const disc = disciplineOf(name)
-        let visible = layerShows(disc, layerId, present)
-        if (hideStr && (disc === 'str' || /struct|(?:^|[^A-Z0-9])ST(?:[^A-Z0-9]|$)/i.test(name.toUpperCase()))) visible = false
+        const visible = shown.get(m.modelId) ?? true
         useModelStore.getState().setModelVisibility(m.modelId, visible)
         let object3D = m.type === 'glb'
           ? engine.world?.scene?.three?.children?.find((c: any) => c.userData?.modelId === m.modelId)
@@ -1326,6 +1324,32 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
       repositionMarkers()
     }
+
+    /* The Layers menu follows the registry: a model that registers late adds its discipline, a new
+       project replaces the list, and a choice left over from the old project goes back to All layers. */
+    let layerSig = ''
+    let knownIds = new Set<string>()
+    let warnedOther = ''
+    const syncLayers = () => {
+      const models = useModelStore.getState().models
+      const ids = new Set(models.map(m => m.modelId))
+      const sig = layerIds(models).join('|') + '#' + [...ids].sort().join(',')
+      if (sig === layerSig) return
+      layerSig = sig
+      const eko = (window as any).EKO
+      const dock = eko?.state?.dock
+      // A pick from the menu belongs to the old project; a page's own layers (heat map, Systems) still apply
+      if (isProjectSwitch(knownIds, ids) && dock && dock.layer && dock.layer !== 'all' && !dock.layerContext) dock.layer = 'all'
+      knownIds = ids
+      const other = unclassifiedModels(models).map(m => m.originalFileName).sort().join(', ')
+      if (other && other !== warnedOther) console.warn(`[layers] no discipline recognised in: ${other}. Listed under Other.`)
+      warnedOther = other
+      // Only a real choice is applied; All layers leaves each model's own visibility alone
+      if (dock?.layer && dock.layer !== 'all') isolateLayer(dock.layer, true)
+      try { eko?.set?.({}) } catch { /* the dashboard redraws on its next render */ }
+    }
+    const unsubLayers = useModelStore.subscribe(syncLayers)
+    syncLayers()
 
     /* Floor, tree and template hides all land here once the worker has them */
     const unsubVisibility = onVisibilityApplied(() => {
@@ -1353,9 +1377,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       listMapped: () => mappedList.map(m => ({ id: m.id, bimId: m.bimId })),
       listLevels: () => levels.map(l => ({ id: l.id, name: l.name })),
       isolateLevel,
-      listLayers: () => layersFor(
-        useModelStore.getState().models.map(m => disciplineOf(m.originalFileName || ''))
-      ).map(id => ({ id, name: id })),
+      listLayers: () => layerIds(useModelStore.getState().models).map(id => ({ id, name: id })),
       isolateLayer,
       fadeArch,
       applySpaceHeat,
@@ -1478,6 +1500,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       removeGhost()
       unsubTemplate()
       unsubVisibility()
+      unsubLayers()
       alarmSeq++
       for (const bimId of [...alarmGlow.keys()]) dropAlarmGlow(bimId)
       unwatchClipping(alarmFill)

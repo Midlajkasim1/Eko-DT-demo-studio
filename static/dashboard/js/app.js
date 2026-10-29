@@ -234,7 +234,7 @@
       }
 
       if (pageId === 'heatmap') {
-        if (this.state.dock) { this.state.dock.level = 'Ground floor'; this.state.dock.layer = HEAT_LAYERS; }
+        if (this.state.dock) { this.state.dock.level = 'Ground floor'; this.state.dock.layer = HEAT_LAYERS; this.state.dock.layerContext = true; }
         if (this.engine && this.engine.isolateLevel) this.engine.isolateLevel('Ground floor', true);
         if (this.engine && this.engine.isolateLayer) this.engine.isolateLayer(HEAT_LAYERS, true);
         if (this.engine && this.engine.fadeArch) this.engine.fadeArch(true);
@@ -243,7 +243,7 @@
           window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true, spaceIds: heatSpaceIds(this) } }));
         }
       } else if (leavingHeat) {
-        if (this.state.dock) { this.state.dock.level = 'ALL'; this.state.dock.layer = 'all'; }
+        if (this.state.dock) { this.state.dock.level = 'ALL'; this.state.dock.layer = 'all'; this.state.dock.layerContext = false; }
         if (this.engine && this.engine.isolateLevel) this.engine.isolateLevel('ALL', true);
         if (this.engine && this.engine.setLayerVisibility) this.engine.setLayerVisibility('all');
         if (this.engine && this.engine.fadeArch) this.engine.fadeArch(false);
@@ -255,7 +255,7 @@
           if (targetSub === 'hvac' || targetSub === 'mechanical') targetLayer = 'mech';
           else if (targetSub === 'electrical') targetLayer = 'elec';
         }
-        if (this.state.dock) this.state.dock.layer = targetLayer;
+        if (this.state.dock) { this.state.dock.layer = targetLayer; this.state.dock.layerContext = targetLayer !== 'all'; }   /* a page's layer is a view: site and landscape stay around it */
         if (this.engine && this.engine.setLayerVisibility) this.engine.setLayerVisibility(targetLayer);
         if (moved && this.engine && typeof this.engine.resetView === 'function') this.engine.resetView();
       }
@@ -1208,6 +1208,7 @@
         const mepLayer = E.state.module === 'systems' && E.state.pageId !== 'heatmap'
           ? (E.state.sub === 'hvac' || E.state.sub === 'mechanical' ? 'mech' : E.state.sub === 'electrical' ? 'elec' : null)
           : null;
+        E.state.dock.layerContext = E.state.pageId === 'heatmap' || !!mepLayer;   /* the layers Reset restores are views, not picks */
         if(E.state.pageId === 'heatmap'){
           if(E.engine.isolateLevel) E.engine.isolateLevel('Ground floor', true);
           if(E.engine.isolateLayer) E.engine.isolateLayer(['arch','elec','int','mech'], true);
@@ -1226,8 +1227,8 @@
         const heat = E.state.pageId === 'heatmap';
         E.set(Object.assign({
           dock: heat
-            ? Object.assign({}, E.state.dock, { tool:null, slice:false, bloom:null, style:'default', tone:'blue', minimap:false, level:'Ground floor', layer:['arch','elec','int','mech'] })
-            : { tool:null, slice:false, bloom:null, style: mepLayer ? 'photo' : 'default', tone:'blue', level:'ALL', layer: mepLayer || 'all', alerts:'all', minimap:false },
+            ? Object.assign({}, E.state.dock, { tool:null, slice:false, bloom:null, style:'default', tone:'blue', minimap:false, level:'Ground floor', layer:['arch','elec','int','mech'], layerContext:true })
+            : { tool:null, slice:false, bloom:null, style: mepLayer ? 'photo' : 'default', tone:'blue', level:'ALL', layer: mepLayer || 'all', layerContext: !!mepLayer, alerts:'all', minimap:false },
           histAge:null, measureResult:null
         }, NO_SEL)); return; }
       if(!def) return;
@@ -1284,6 +1285,7 @@
       else if(sel.indexOf(layer) >= 0) sel = sel.filter(id => id !== layer);
       else sel.push(layer);
       E.state.dock.layer = sel.length ? sel : 'all';
+      E.state.dock.layerContext = false;   /* a pick from the menu shows exactly what was picked */
       if(E.engine && typeof E.engine.setLayerVisibility === 'function') E.engine.setLayerVisibility(E.state.dock.layer);
       render();
     },
