@@ -114,6 +114,15 @@
   --card-glow: 0;
   --card-line: 1.5px;
 }
+.dashboard-native-container .mztileimg[data-sty="studio"] {
+  --card-sky: linear-gradient(180deg, #F4F5F7 0%, #E3E6EA 100%);
+  --card-horizon: #E3E6EA;
+  --card-face: #F2F3F5;
+  --card-shade: #E4E7EB;
+  --card-ink: #222222;
+  --card-glow: 0;
+  --card-line: 1.5px;
+}
 .dashboard-native-container .mztileimg[data-sty="xray"] {
   --card-sky: linear-gradient(180deg, #0e1a2e 0%, #152840 100%);
   --card-horizon: #152840;

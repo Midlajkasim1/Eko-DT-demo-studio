@@ -192,6 +192,7 @@ window.EKO_I18N.en = {
   "styMinimal": "Minimal",
   "styXray": "X-ray",
   "styPhoto": "Photo",
+  "styStudio": "Studio",
   "toneGray": "Gray",
   "toneBlue": "Blue",
   "toneWhite": "White",

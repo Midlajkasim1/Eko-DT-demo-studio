@@ -12,7 +12,7 @@ export const TONE_MAPPING_OPTIONS: { value: ToneMappingId; label: string }[] = [
 
 export const SHADOW_MAP_SIZES = [1024, 2048, 4096, 8192]
 
-export type TemplateId = 'default' | 'photoreal' | 'minimal' | 'xray' | 'monochrome'
+export type TemplateId = 'default' | 'photoreal' | 'minimal' | 'studio' | 'xray' | 'monochrome'
 
 export const RENDER_DEFAULTS = {
   templateId: 'default' as TemplateId,

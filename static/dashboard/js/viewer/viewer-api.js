@@ -43,7 +43,7 @@ window.EKO_VIEWER = (function(){
                                       shell re-projects its marker layer here.
 
      appearance
-       setStyle(mode, tone)           mode: 'photo'|'minimal'|'bw'|'xray';
+       setStyle(mode, tone)           mode: 'photo'|'minimal'|'studio'|'bw'|'xray';
                                       tone (xray only): 'gray'|'bluegray'|'dot'|'sepia'.
        setAssetColor(assetId, colorOrNull)   per-asset alarm colouring; null clears one.
        clearAssetColors()

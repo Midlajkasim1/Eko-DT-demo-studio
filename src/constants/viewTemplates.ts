@@ -1,4 +1,5 @@
 import type { TemplateId } from './renderSettings'
+import { studioLocks } from './studioPalette'
 
 export type SkyStop = [number, string]
 
@@ -10,6 +11,8 @@ export interface TemplateSurfaces {
   faceted: boolean
   solidify: number
   ghost: number
+  /** Materials already painted in these colours are left at that colour. */
+  locks?: { color: string; opacity?: number }[]
 }
 
 export interface TemplateFrame {
@@ -274,6 +277,54 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
       shade: '#2a5a78',
       ink: '#9ad4f0',
       glow: 0.25,
+      line: true,
+    },
+  },
+  {
+    id: 'studio',
+    label: 'Studio',
+    note: 'Neutral model',
+    description: 'Grey studio backdrop. Walls, floors, glass and MEP use the muted palette, with soft shading and thin grey edges.',
+    scene: {
+      sky: [
+        [0, '#F4F5F7'],
+        [1, '#E3E6EA'],
+      ],
+      lights: {
+        sun: { color: '#f7f8fa', intensity: 1.65, from: [0.55, 1, 0.38] },
+        fill: { color: '#e6ebf1', intensity: 0.8 },
+        bounce: { sky: '#eef1f4', ground: '#e3e6ea', intensity: 0.7 },
+        ambient: 0.4,
+      },
+      surfaces: {
+        wash: 0.94,
+        tint: '#F2F3F5',
+        glow: 0,
+        reflect: 0.06,
+        faceted: false,
+        solidify: 0.15,
+        ghost: 0,
+        locks: studioLocks(),
+      },
+      frame: {
+        toneMapping: 'none',
+        exposure: 1,
+        ao: { radius: 1.8, intensity: 0.55 },
+        bloom: null,
+        ink: { color: '#222222', thickness: 1, depth: 1.15, crease: 0.7, strength: 0.25 },
+        grade: { saturation: 0.92, contrast: 1.04, warmth: 0, vignette: 0.12, levels: 0 },
+      },
+    },
+    card: {
+      sky: [
+        [0, '#F4F5F7'],
+        [1, '#E3E6EA'],
+      ],
+      horizon: '#E3E6EA',
+      face: '#F2F3F5',
+      shade: '#E4E7EB',
+      ink: '#222222',
+      glow: 0,
       line: true,
     },
   },

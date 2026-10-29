@@ -1,6 +1,25 @@
 import * as THREE from 'three'
 import type { SkyStop, TemplateSurfaces } from '@/constants/viewTemplates'
 
+const lockColor = new Map<string, THREE.Color>()
+
+function matchedLock(color: THREE.Color, locks: TemplateSurfaces['locks']) {
+  if (!locks?.length) return null
+  for (const lock of locks) {
+    let sample = lockColor.get(lock.color)
+    if (!sample) {
+      sample = new THREE.Color(lock.color)
+      lockColor.set(lock.color, sample)
+    }
+    if (
+      Math.abs(color.r - sample.r) < 0.02 &&
+      Math.abs(color.g - sample.g) < 0.02 &&
+      Math.abs(color.b - sample.b) < 0.02
+    ) return { color: sample, opacity: lock.opacity }
+  }
+  return null
+}
+
 /**
  * The pieces a view template puts on the scene that are not plain renderer flags:
  * the sky it is seen against, the same sky wrapped round for reflections, and
@@ -148,6 +167,43 @@ export function dressMaterial(
   }
 
   const { wash, tint, glow, reflect, faceted, solidify, ghost } = surfaces
+
+  // Studio paints walls, glass and MEP itself. Those materials already carry
+  // the palette colour, and the general wash would pull them back to one grey.
+  const lock = matchedLock(base.color, surfaces.locks)
+  if (lock) {
+    if ('side' in mat) mat.side = THREE.DoubleSide
+    if ('shadowSide' in mat) mat.shadowSide = THREE.FrontSide
+    mat.color.copy(lock.color)
+    if (mat.emissive) mat.emissive.setRGB(0, 0, 0)
+    if ('flatShading' in mat) mat.flatShading = faceted
+    mat.envMap = reflect > 0 ? env : base.envMap
+    if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
+      mat.envMapIntensity = reflect
+    } else {
+      if ('combine' in mat) mat.combine = THREE.MixOperation
+      if ('reflectivity' in mat) mat.reflectivity = reflect
+    }
+    if (lock.opacity != null) {
+      mat.opacity = lock.opacity
+      mat.transparent = lock.opacity < 0.99
+      mat.depthWrite = lock.opacity >= 0.99
+    } else {
+      mat.opacity = THREE.MathUtils.lerp(base.opacity, 1, solidify)
+      const solid = mat.opacity > 0.99
+      mat.transparent = !solid
+      mat.depthWrite = solid
+    }
+    const archFade = mat.userData?.ekoArchFade
+    if (typeof archFade === 'number') {
+      mat.opacity = archFade
+      mat.transparent = true
+      mat.depthWrite = false
+    }
+    mat.visible = true
+    mat.needsUpdate = true
+    return true
+  }
 
   // Proxy geometry (IfcSpace, IfcOpeningElement) is often exported as either
   // completely transparent (opacity 0) or extremely translucent. If we solidify

@@ -194,6 +194,7 @@ window.EKO_I18N.ar = {
   "styMinimal": "بسيط",
   "styXray": "أشعة",
   "styPhoto": "صورة",
+  "styStudio": "استوديو",
   "toneGray": "رمادي",
   "toneBlue": "أزرق",
   "toneWhite": "أبيض",

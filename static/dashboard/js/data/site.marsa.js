@@ -572,7 +572,7 @@ window.EKO_DATA.marsa = {
     },
     "levels": ["Roof","L12","L11","L3","L1","GF","B1"],
     "layers": ["all","arch","elec","int","mech","str"],
-    "styles": ["default","photo","minimal","xray"],
+    "styles": ["default","photo","minimal","studio","xray"],
     "xrayTones": ["gray","bluegray","dot","sepia"],
     "defaultStyle": "default"
   },
