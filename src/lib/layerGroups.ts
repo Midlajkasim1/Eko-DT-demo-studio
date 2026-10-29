@@ -10,10 +10,11 @@
  */
 import { TOKEN } from './modelDiscipline.ts'
 
-export type LayerGroupId = 'arch' | 'elec' | 'int' | 'mech' | 'str' | 'site' | 'land' | 'other'
+export type LayerGroupId = 'arch' | 'elec' | 'int' | 'mech' | 'str' | 'equip' | 'site' | 'land' | 'other' | 'spaces'
 
 /** Menu order. Other comes last and only exists when a model's name matched nothing. */
-export const GROUP_ORDER: LayerGroupId[] = ['arch', 'elec', 'int', 'mech', 'str', 'site', 'land', 'other']
+/** Spaces is last and is not a menu entry: it is the heat map's own model, shown only while the heat map runs. */
+export const GROUP_ORDER: LayerGroupId[] = ['arch', 'elec', 'int', 'mech', 'str', 'equip', 'site', 'land', 'other', 'spaces']
 
 /* Whole tokens only. The short forms are the ones the Tree Viewer already understands
    (modelDiscipline.TOKEN); the long forms are what discipline files are usually called. */
@@ -28,6 +29,17 @@ const WORDS: Record<string, LayerGroupId> = {
   LANDSCAPE: 'land', LANDSCAPES: 'land', LANDSCAPING: 'land',
   SITE: 'site', SITEWORK: 'site', SITEWORKS: 'site',
 }
+
+/**
+ * Job-number names, as in "1913-blc-pal-equipment_r21": job number, two project codes, then the discipline,
+ * then an optional revision. Equipment is only read from that discipline position. The word on its own
+ * ("Mechanical Equipment", "Fire equipment") is not a rule: it is not a discipline in any other convention
+ * here, and a model that says Mechanical or Electrical in its name must stay Mechanical or Electrical.
+ */
+const JOB_EQUIPMENT = /^\d{3,5}-[A-Z0-9]+-[A-Z0-9]+-EQUIPMENT(?:[_-]R\d+)?$/
+
+/** The room-volume model: "3D - SPACES", or just "Spaces". The word inside a longer name is not a rule. */
+const SPACES_NAME = /^(?:3D[ _-]*)?SPACES$/
 
 /**
  * ISO 19650 style names: Project-Originator-Volume-Level-Type-Role-Number, as in
@@ -128,6 +140,8 @@ export function classifyModel(fileName: string): Classification {
     const group = ISO_ROLES[iso[1]]
     return group ? { group, known: true } : { group: 'other', known: false }
   }
+  if (JOB_EQUIPMENT.test(base.toUpperCase())) return { group: 'equip', known: true }
+  if (SPACES_NAME.test(base.trim().toUpperCase())) return { group: 'spaces', known: true }
   for (const token of modelTokens(fileName)) {
     const bare = token.replace(/\d+$/, '')
     const hit = WORDS[token] ?? (bare && bare !== token && !NOT_WITH_DIGITS.has(bare) ? WORDS[bare] : undefined)
@@ -196,11 +210,11 @@ export const describeModels = (models: LayerModel[]): Array<{ modelId: string; f
 
 /** The menu: All layers, then each discipline the project actually has a model for */
 export function layerIds(models: LayerModel[]): string[] {
-  return ['all', ...groupModels(models).map(g => g.id)]
+  return ['all', ...groupModels(models).map(g => g.id).filter(id => id !== 'spaces')]
 }
 
-/** Not building disciplines: the ground, the planting, and whatever no name rule recognised */
-const CONTEXT: ReadonlySet<LayerGroupId> = new Set<LayerGroupId>(['site', 'land', 'other'])
+/** Not building disciplines: the equipment, the ground, the planting, and whatever no name rule recognised */
+const CONTEXT: ReadonlySet<LayerGroupId> = new Set<LayerGroupId>(['equip', 'site', 'land', 'other'])
 
 export interface VisibilityOptions {
   /**
@@ -209,6 +223,8 @@ export interface VisibilityOptions {
    * models always have there.
    */
   keepContext?: boolean
+  /** The heat map is running, so the Spaces model is shown. Otherwise it is hidden, whatever the choice. */
+  spacesVisible?: boolean
 }
 
 /**
@@ -218,12 +234,14 @@ export interface VisibilityOptions {
  *    model for shows nothing; it never shows some other discipline instead.
  */
 export function layerVisibility(models: LayerModel[], layer: string | string[], options: VisibilityOptions = {}): Map<string, boolean> {
-  const valid = new Set<string>(GROUP_ORDER)
+  const valid = new Set<string>(GROUP_ORDER.filter(id => id !== 'spaces'))
   const raw = Array.isArray(layer) ? layer : [layer]
   const selected = new Set(raw.filter(id => valid.has(id)))
   const out = new Map<string, boolean>()
   for (const g of groupModels(models)) {
-    const shown = selected.size === 0 || selected.has(g.id) || (!!options.keepContext && CONTEXT.has(g.id))
+    const shown = g.id === 'spaces'
+      ? !!options.spacesVisible
+      : selected.size === 0 || selected.has(g.id) || (!!options.keepContext && CONTEXT.has(g.id))
     for (const id of g.modelIds) out.set(id, shown)
   }
   return out

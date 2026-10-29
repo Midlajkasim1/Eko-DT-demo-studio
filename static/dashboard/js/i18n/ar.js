@@ -228,6 +228,7 @@ window.EKO_I18N.ar = {
   "layInt": "التصميم الداخلي",
   "layMech": "الميكانيكا",
   "layStr": "الإنشاءات",
+  "layEquip": "المعدات",
   "laySite": "الموقع",
   "layLand": "تنسيق الموقع",
   "layOther": "أخرى",

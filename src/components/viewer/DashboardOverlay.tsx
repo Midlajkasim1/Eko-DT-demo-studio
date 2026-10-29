@@ -947,6 +947,19 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (seq === levelSeq) repositionMarkers()
     }
 
+    /* The Spaces model is the heat map's: hidden in normal viewing, shown while the heat map is applied.
+       (The heat plates follow their model's visibility, so it has to be on for them to draw.) */
+    let spaceHeatActive = false
+    const applySpacesGate = () => {
+      const state = useModelStore.getState()
+      for (const rec of state.models) {
+        if (classifyLoaded(rec).group !== 'spaces') continue
+        if (state.modelVisibility[rec.modelId] !== spaceHeatActive) state.setModelVisibility(rec.modelId, spaceHeatActive)
+        const root = modelObject(rec)
+        if (root && root.visible !== spaceHeatActive) root.visible = spaceHeatActive
+      }
+    }
+
     const heatGeoms = new Map<string, THREE.BufferGeometry[]>()
     const heatByBim = new Map<string, { mat: THREE.MeshBasicMaterial; model: any; localId: number }>()
     let heatSheets: THREE.Mesh[] = []
@@ -1012,6 +1025,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       heatSheets = []
     }
     const clearSpaceHeat = async () => {
+      spaceHeatActive = false
+      applySpacesGate()
       heatSig = ''
       dropHeatSheets()
       heatByBim.forEach(rec => {
@@ -1151,6 +1166,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       return mesh
     }
     const applySpaceHeat = async (zones: { bimId?: string; bimIds?: string[]; tempC?: number | null; rh?: number | null; co2?: number | null }[], mode?: string) => {
+      spaceHeatActive = true
+      applySpacesGate()
       const md = mode === 'comfort' || mode === 'hum' ? mode : 'temp'
       const idsOf = (z: { bimId?: string; bimIds?: string[] }) =>
         (z.bimIds && z.bimIds.length ? z.bimIds : (z.bimId ? [z.bimId] : [])).filter(id => isGuid(id))
@@ -1336,7 +1353,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         + (keepContext ? '+ctx' : '') + '#' + [...new Set(models.map(m => m.modelId))].sort().join(',')
       if (!force && key === lastLayerKey) return
       lastLayerKey = key
-      const shown = layerVisibility(models, layerId, { keepContext })
+      const shown = layerVisibility(models, layerId, { keepContext, spacesVisible: spaceHeatActive })
       const fragList = engine.fragments?.models?.list
       for (const m of models) {
         const visible = shown.get(m.modelId) ?? true
@@ -1398,6 +1415,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const ids = new Set(models.map(m => m.modelId))
       pruneContentProfiles(ids)
       ensureProfiles()
+      applySpacesGate()
       const sig = layerIds(models).join('|') + '#' + models.map(m => `${m.modelId}:${classifyLoaded(m).group}:${hasContentProfile(m.modelId) ? 1 : 0}`).sort().join(',')
       if (sig === layerSig) return
       layerSig = sig
@@ -1533,6 +1551,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     let modelsSig = ''
     const resolveTimer = setInterval(() => {
       ensureProfiles()
+      applySpacesGate()
       const live = [...(engine.fragments?.models?.list?.values() ?? [])]
       const sig = live.map(keyOf).join('|')   // object identity: a reload of the same file counts as a change
       let modelsChanged = false

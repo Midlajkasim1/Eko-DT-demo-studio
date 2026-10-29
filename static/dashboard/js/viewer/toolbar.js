@@ -27,7 +27,7 @@ window.EKO_VT = (function(){
 
   /* ------------------------------ view state ------------------------------ */
   /* Every non-default view setting, named for people (D71). */
-  const LBL = { all:'layAll', arch:'layArch', elec:'layElec', int:'layInt', mech:'layMech', str:'layStr', site:'laySite', land:'layLand', other:'layOther' };
+  const LBL = { all:'layAll', arch:'layArch', elec:'layElec', int:'layInt', mech:'layMech', str:'layStr', equip:'layEquip', site:'laySite', land:'layLand', other:'layOther' };
   const chosenLayers = d => Array.isArray(d.layer) ? d.layer : (d.layer && d.layer !== 'all' ? [d.layer] : []);
   const STY = { default:'styDefault', photo:'styPhoto', minimal:'styMinimal', xray:'styXray' };
   const levelName = (E, l) => /^L\d+$/.test(l) ? E.t('lvlName', { n: l.slice(1) }) : l;

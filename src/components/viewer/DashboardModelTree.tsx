@@ -23,7 +23,7 @@ import {
 
 const PAGE = 50
 const DISCIPLINE_KEY: Record<string, string> = {
-  arch: 'layArch', elec: 'layElec', int: 'layInt', mech: 'layMech', str: 'layStr', site: 'laySite', land: 'layLand',
+  arch: 'layArch', elec: 'layElec', int: 'layInt', mech: 'layMech', str: 'layStr', equip: 'layEquip', site: 'laySite', land: 'layLand',
 }
 
 type FragModel = TreeSourceModel & VisibilityModel & object
@@ -355,6 +355,7 @@ export function DashboardModelTree({ engineRef, engineReady }: Props) {
     for (const rec of models) {
       // The same classifier as the Layers menu; a name it cannot place stays Unclassified
       const classified = classifyLoaded(rec)
+      if (classified.group === 'spaces') continue // the heat map's own model: not browsed, only kept loaded
       const discipline = classified.known ? classified.group : null
       const key = disciplineKey(discipline)
       let d = byDiscipline.get(key)

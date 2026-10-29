@@ -31,8 +31,8 @@ const fake = () => {
 }
 
 const models = [
-  { modelId: 'm1', originalFileName: '3D - SPACES.ifc' },
-  { modelId: 'm2', originalFileName: '1913-blc-pal-equipment_r21.ifc' },
+  { modelId: 'm1', originalFileName: 'Mystery-model.ifc' },
+  { modelId: 'm2', originalFileName: 'Zebra-block.ifc' },
   { modelId: 'm3', originalFileName: 'Structures.ifc' },
   { modelId: 'm4', originalFileName: 'Glb thing.glb', type: 'glb' },
 ]
@@ -41,7 +41,7 @@ test('by default it reports the models no rule could place, and reads only', asy
   const f = fake()
   const list = new Map<string, unknown>([['m1', f.model], ['m2', f.model], ['m3', f.model]])
   const out = await runIfcDiagnostics({ models, fragments: list, loadedInEngine: { m1: true, m2: true, m3: true }, classify: classifyLoaded })
-  assert.deepEqual(out.map(o => o.fileName), ['3D - SPACES.ifc', '1913-blc-pal-equipment_r21.ifc', 'Glb thing.glb'])
+  assert.deepEqual(out.map(o => o.fileName), ['Mystery-model.ifc', 'Zebra-block.ifc', 'Glb thing.glb'])
   const spaces = out[0]
   assert.deepEqual(spaces.classification, { group: 'other', known: false, basis: 'nothing' })
   assert.equal(spaces.totals.itemsWithGeometry, 5)
@@ -59,7 +59,7 @@ test('by default it reports the models no rule could place, and reads only', asy
 test('a model can be picked by name fragment or id, or all of them', async () => {
   const f = fake()
   const src = { models, fragments: new Map<string, unknown>([['m1', f.model], ['m3', f.model]]), loadedInEngine: {}, classify: classifyLoaded }
-  assert.deepEqual((await runIfcDiagnostics(src, 'spaces')).map(o => o.modelId), ['m1'])
+  assert.deepEqual((await runIfcDiagnostics(src, 'mystery')).map(o => o.modelId), ['m1'])
   assert.deepEqual((await runIfcDiagnostics(src, ['M2', 'structures'])).map(o => o.modelId), ['m2', 'm3'])
   assert.equal((await runIfcDiagnostics(src, 'all')).length, 4)
   assert.equal((await runIfcDiagnostics(src, 'nothing-like-this')).length, 0)
@@ -67,11 +67,20 @@ test('a model can be picked by name fragment or id, or all of them', async () =>
 
 test('a model that is not in the engine, or a query that fails, is reported as an error, not as data', async () => {
   const src = { models, fragments: new Map<string, unknown>(), loadedInEngine: { m1: false }, classify: classifyLoaded }
-  const [one] = await runIfcDiagnostics(src, 'spaces')
+  const [one] = await runIfcDiagnostics(src, 'mystery')
   assert.equal(one.engineModelFound, false)
   assert.match(one.errors[0], /not in the engine/)
   assert.equal(one.totals.itemsWithGeometry, null)
   const broken = new Proxy({}, { get: () => async () => { throw new Error('worker not ready') } })
-  const [two] = await runIfcDiagnostics({ ...src, fragments: new Map<string, unknown>([['m1', broken]]) }, 'spaces')
+  const [two] = await runIfcDiagnostics({ ...src, fragments: new Map<string, unknown>([['m1', broken]]) }, 'mystery')
   assert.ok(two.errors.some(e => /worker not ready/.test(e)))
+})
+
+test('the Spaces model, which no longer shows as unclassified, can still be inspected by name', async () => {
+  const f = fake()
+  const src = { models: [{ modelId: 'sp', originalFileName: '3D - SPACES.ifc' }, ...models], fragments: new Map<string, unknown>([['sp', f.model]]), loadedInEngine: { sp: true }, classify: classifyLoaded }
+  assert.ok(!(await runIfcDiagnostics(src)).some(o => o.modelId === 'sp'))           // not in the default list
+  const [spaces] = await runIfcDiagnostics(src, 'spaces')                            // but reachable
+  assert.deepEqual([spaces.modelId, spaces.classification.group, spaces.classification.known], ['sp', 'spaces', true])
+  assert.equal(spaces.engineModelFound, true)
 })

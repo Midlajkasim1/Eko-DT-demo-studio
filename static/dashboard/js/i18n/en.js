@@ -226,6 +226,7 @@ window.EKO_I18N.en = {
   "layInt": "Interior",
   "layMech": "Mechanical",
   "layStr": "Structures",
+  "layEquip": "Equipment",
   "laySite": "Site",
   "layLand": "Landscape",
   "layOther": "Other",
