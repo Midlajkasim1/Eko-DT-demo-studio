@@ -2,7 +2,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useReducer, us
 import { createPortal } from 'react-dom'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import { useModelStore } from '@/store/useModelStore'
-import { classifyModel } from '@/lib/layerGroups'
+import { classifyLoaded } from '@/lib/layerGroups'
 import { setHidden, type VisibilityModel } from '@/lib/visibilityCoordinator'
 import {
   buildModelTree, categoryLabel, checkStateOf, disciplineKey, hiddenItems, loadElementNames, mergeByDiscipline,
@@ -354,7 +354,7 @@ export function DashboardModelTree({ engineRef, engineReady }: Props) {
     const byDiscipline = new Map<string, { discipline: string | null; label: string; recs: typeof models }>()
     for (const rec of models) {
       // The same classifier as the Layers menu; a name it cannot place stays Unclassified
-      const classified = classifyModel(rec.originalFileName || '')
+      const classified = classifyLoaded(rec)
       const discipline = classified.known ? classified.group : null
       const key = disciplineKey(discipline)
       let d = byDiscipline.get(key)

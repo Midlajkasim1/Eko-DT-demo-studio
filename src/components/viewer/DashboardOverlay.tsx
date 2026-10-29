@@ -10,7 +10,10 @@ import { resetCameraToHome } from '@/lib/cameraUtils'
 import { frameSphereInView } from '@/lib/viewFraming'
 import { createMiniMap } from '@/lib/miniMap'
 import { disciplineOf } from '@/lib/modelDiscipline'
-import { classifyModel, describeUnclassified, isProjectSwitch, layerIds, layerVisibility } from '@/lib/layerGroups'
+import {
+  classifyLoaded, classifyModel, describeModels, describeUnclassified, hasContentProfile, isProjectSwitch, layerIds, layerVisibility,
+  onContentProfiles, pruneContentProfiles, setContentProfile, type ContentProfile,
+} from '@/lib/layerGroups'
 import { HVAC_GENERIC, HVAC_SPECIFIC, isCeilingType, levelHides, type LevelIndex, type MechanicalInfo } from '@/lib/floorPolicy'
 import { setHidden, isHidden, onVisibilityApplied } from '@/lib/visibilityCoordinator'
 import { measureTool } from '@/lib/measureTool'
@@ -1358,10 +1361,43 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     let layerSig = ''
     let knownIds = new Set<string>()
     let warnedOther = ''
+
+    /* A model whose name says nothing is read once for what it contains (lib/layerGroups.disciplineFromContent). */
+    const readContentProfile = async (model: any): Promise<ContentProfile> => {
+      const ids: number[] = await model.getItemsIdsWithGeometry()
+      const withGeometry = new Set(ids)
+      const classes: Record<string, number> = {}
+      for (const category of (await model.getCategories()) as string[]) {
+        if (/TYPE$/i.test(category)) continue
+        const found = await model.getItemsOfCategories([new RegExp(`^${category}$`, 'i')])
+        const n = (Object.values(found || {}).flat() as number[]).filter(id => withGeometry.has(id)).length
+        if (n) classes[category] = n
+      }
+      return { total: ids.length, classes }
+    }
+    const profileTries = new Map<string, number>()
+    const profiling = new Set<string>()
+    const ensureProfiles = () => {
+      const fragList = engine.fragments?.models?.list
+      if (!fragList) return
+      for (const rec of useModelStore.getState().models) {
+        const id = rec.modelId
+        if (rec.type === 'glb' || hasContentProfile(id) || profiling.has(id) || classifyModel(rec.originalFileName).known) continue
+        const model = fragList.get(id) as any
+        if (!model || (profileTries.get(id) ?? 0) >= 5) continue
+        profileTries.set(id, (profileTries.get(id) ?? 0) + 1)
+        profiling.add(id)
+        // The worker registers a model a moment after it loads; a failed read is tried again on the next tick
+        readContentProfile(model).then(profile => setContentProfile(id, profile)).catch(() => {}).finally(() => profiling.delete(id))
+      }
+    }
+
     const syncLayers = () => {
       const models = useModelStore.getState().models
       const ids = new Set(models.map(m => m.modelId))
-      const sig = layerIds(models).join('|') + '#' + [...ids].sort().join(',')
+      pruneContentProfiles(ids)
+      ensureProfiles()
+      const sig = layerIds(models).join('|') + '#' + models.map(m => `${m.modelId}:${classifyLoaded(m).group}:${hasContentProfile(m.modelId) ? 1 : 0}`).sort().join(',')
       if (sig === layerSig) return
       layerSig = sig
       const eko = (window as any).EKO
@@ -1369,7 +1405,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       // A pick from the menu belongs to the old project; a page's own layers (heat map, Systems) still apply
       if (isProjectSwitch(knownIds, ids) && dock && dock.layer && dock.layer !== 'all' && !dock.layerContext) dock.layer = 'all'
       knownIds = ids
-      const lines = describeUnclassified(models).sort()
+      // A model is reported once its content has been read (or when there is no content to read)
+      const lines = describeUnclassified(models.filter(m => m.type === 'glb' || hasContentProfile(m.modelId))).sort()
       const other = lines.join(' | ')
       if (other && other !== warnedOther) {
         console.warn(`[layers] ${lines.length} model(s) have no recognised discipline: listed under Other in Layers and Unclassified in the tree. Add a rule in src/lib/layerGroups.ts: ${other}`)
@@ -1379,8 +1416,15 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (dock?.layer && dock.layer !== 'all') isolateLayer(dock.layer, true)
       try { eko?.set?.({}) } catch { /* the dashboard redraws on its next render */ }
     }
-    const unsubLayers = useModelStore.subscribe(syncLayers)
+    const unsubStore = useModelStore.subscribe(syncLayers)
+    // Content read: the Layers menu and the tree both place the model from it
+    const unsubProfiles = onContentProfiles(() => {
+      syncLayers()
+      window.dispatchEvent(new Event('eko-tree-sync'))
+    })
+    const unsubLayers = () => { unsubStore(); unsubProfiles() }
     syncLayers()
+    ;(window as any).EKO_MODEL_DISCIPLINES = () => describeModels(useModelStore.getState().models)
 
     /* Floor, tree and template hides all land here once the worker has them */
     const unsubVisibility = onVisibilityApplied(() => {
@@ -1482,6 +1526,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const keyOf = (m: object) => modelKeys.get(m) ?? (modelKeys.set(m, ++nextKey), nextKey)
     let modelsSig = ''
     const resolveTimer = setInterval(() => {
+      ensureProfiles()
       const live = [...(engine.fragments?.models?.list?.values() ?? [])]
       const sig = live.map(keyOf).join('|')   // object identity: a reload of the same file counts as a change
       let modelsChanged = false
@@ -1548,6 +1593,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ghostEdge.dispose()
       fcuEnv?.dispose()
       delete (window as any).EKO_HOST_ENGINE
+      delete (window as any).EKO_MODEL_DISCIPLINES
     }
   }, [engineReady])
 
