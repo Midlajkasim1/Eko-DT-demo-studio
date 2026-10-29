@@ -1,6 +1,6 @@
 export type LayerId = 'all' | 'arch' | 'elec' | 'int' | 'mech' | 'str'
 
-const TOKEN: Record<string, Exclude<LayerId, 'all'>> = {
+export const TOKEN: Record<string, Exclude<LayerId, 'all'>> = {
   AR: 'arch', ARCH: 'arch', ARC: 'arch',
   ST: 'str', STR: 'str', STRUCT: 'str', STRUCTURAL: 'str', STEEL: 'str',
   EL: 'elec', EE: 'elec', ELEC: 'elec',

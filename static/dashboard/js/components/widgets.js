@@ -71,6 +71,7 @@ window.EKO_C = (function(){
     warn:'<path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 10v4"/><path d="M12 17.5h.01"/>',
     eyeOff:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path d="m3 3 18 18"/>',
     cursor:'<path d="m4 4 7 16 2-7 7-2L4 4Z"/>',
+    tree:'<path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/>',
     ruler:'<path d="m3 17 14-14 4 4L7 21l-4-4Z"/><path d="m8 12 1.5 1.5"/><path d="m11 9 1.5 1.5"/><path d="m14 6 1.5 1.5"/>',
     slice:'<path d="M3 12h18"/><path d="M5 12V5h14v7"/><path d="M8 19h8"/>',
     levels:'<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M5 8.5h14M5 13h14M5 17.5h14"/>',
@@ -222,9 +223,9 @@ window.EKO_C = (function(){
   /* --------------------- summary panel (#ovp overlay) ----------------------
      Reference anatomy: absolute overlay on the viewer; ovglass blur mask,
      ovtint gradient, ovvs shade, title row, KPI rows. */
-  function summaryShell(E, title, inner, fit){   /* fit: the Energy summary, as tall as its cards (components.css, #ovp[data-fit]) */
+  function summaryShell(E, title, inner, fit, attrs){   /* fit: the Energy summary, as tall as its cards (components.css, #ovp[data-fit]) */
     const mn = E.state.ovpMin;
-    return `<div id="ovp" data-min="${mn?1:0}"${fit ? ' data-fit="1"' : ''}>
+    return `<div id="ovp" data-min="${mn?1:0}"${fit ? ' data-fit="1"' : ''}${attrs || ''}>
       <div class="ovglass" aria-hidden="true"></div>
       <div class="ovtint" aria-hidden="true"></div>
       <div class="ovvs" aria-hidden="true"></div>
@@ -237,6 +238,13 @@ window.EKO_C = (function(){
         </div>
         <div class="ovpad">${inner}</div>
       </div></div>`;
+  }
+
+  /* The model tree takes the summary panel's place while it is open. Only the body differs: React owns
+     it (DashboardModelTree.tsx) and app.js moves its host into this slot after every render, so the
+     tree keeps its state however often the dashboard rebuilds its markup. */
+  function treeShell(E){
+    return summaryShell(E, E.t('treeTitle'), '<div id="eko-tree-slot"></div>', false, ' data-tree="1"');
   }
 
   /* Overview executive summary: KPI rows with domain hue wash + sparkline. */
@@ -1465,5 +1473,5 @@ window.EKO_C = (function(){
   }
   return { esc, fmt, icon, aiBtn, ctl, sevGlyph, sevAction, sevTipFor, actTip, sparkPath, ribbon, woBtn, brandLogo, utilitiesSummary, mkEye,
            execSummary, energySummary, alarmModPanel, energyModPanel,
-           powerPage, consModelPanel, utilitiesPanel, registerTable, assetPanel, summaryShell, modShell };
+           powerPage, consModelPanel, utilitiesPanel, registerTable, assetPanel, summaryShell, treeShell, modShell };
 })();
