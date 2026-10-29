@@ -1,8 +1,8 @@
 /**
- * The dashboard's model tree: model > storey > IFC category > element, built
- * from what a loaded fragments model already answers (`getSpatialStructure`,
- * `getItemsIdsWithGeometry`, `getItemsData`). Nothing here is persisted or
- * scraped a second time, and no discipline, storey or category is assumed.
+ * The dashboard's model tree: discipline > storey > IFC category > element. Each model
+ * is built on its own from what a loaded fragments model already answers (`getSpatialStructure`,
+ * `getItemsIdsWithGeometry`, `getItemsData`), then filed under its discipline. Nothing here
+ * is persisted or scraped a second time, and no discipline, storey or category is assumed.
  */
 
 /** The slice of a fragments model this file reads */
@@ -276,3 +276,105 @@ export function hiddenItems(data: ModelTreeData): number[] {
   }
   return out
 }
+
+/* ------------------------------ by discipline ------------------------------ */
+
+/** One model's category group, with the model it belongs to; ids are only unique within their model */
+export interface Part {
+  modelId: string
+  group: CategoryGroup
+}
+
+/** A category on a storey, across every model of the discipline that has it */
+export interface MergedCategory {
+  key: string
+  category: string | null
+  parts: Part[]
+  count: number
+}
+
+/** A storey of a discipline. Models of the discipline that agree on its name and elevation share it. */
+export interface MergedStorey {
+  key: string
+  unassigned: boolean
+  name: string
+  elevation: number | null
+  categories: MergedCategory[]
+}
+
+export interface DisciplineGroup {
+  key: string
+  discipline: string | null
+  storeys: MergedStorey[]
+}
+
+/** A built model and the discipline its file belongs to */
+export interface DisciplineSource {
+  modelId: string
+  discipline: string | null
+  data: ModelTreeData
+}
+
+export const disciplineKey = (discipline: string | null): string => `disc:${discipline ?? 'none'}`
+
+/** Storeys of different models are one storey when they have the same name and elevation */
+const storeyIdentity = (modelId: string, s: StoreyGroup): string => {
+  if (s.unassigned) return 'none'
+  const name = s.name.trim().toLowerCase()
+  if (!name && s.elevation == null) return `${modelId}:${s.key}`
+  return `${name}|${s.elevation ?? ''}`
+}
+
+/**
+ * Files the built models under their disciplines. The groups keep pointing at their own model's
+ * hidden sets, so a checkbox over several models changes each model's own state.
+ */
+export function mergeByDiscipline(sources: DisciplineSource[]): DisciplineGroup[] {
+  const disciplines = new Map<string, DisciplineGroup>()
+  for (const { modelId, discipline, data } of sources) {
+    const key = disciplineKey(discipline)
+    let d = disciplines.get(key)
+    if (!d) {
+      d = { key, discipline, storeys: [] }
+      disciplines.set(key, d)
+    }
+    for (const s of data.storeys) {
+      const storeyKey = `${key}:s:${storeyIdentity(modelId, s)}`
+      let storey = d.storeys.find(x => x.key === storeyKey)
+      if (!storey) {
+        storey = { key: storeyKey, unassigned: s.unassigned, name: s.name, elevation: s.elevation, categories: [] }
+        d.storeys.push(storey)
+      } else if (!storey.name) {
+        storey.name = s.name
+      }
+      for (const c of s.categories) {
+        const catKey = `${storeyKey}:c:${c.category || 'none'}`
+        let cat = storey.categories.find(x => x.key === catKey)
+        if (!cat) {
+          cat = { key: catKey, category: c.category, parts: [], count: 0 }
+          storey.categories.push(cat)
+        }
+        cat.parts.push({ modelId, group: c })
+        cat.count += c.ids.length
+      }
+    }
+  }
+  const out = [...disciplines.values()]
+  for (const d of out) {
+    d.storeys.sort((a, b) => {
+      if (a.unassigned !== b.unassigned) return a.unassigned ? 1 : -1
+      if (a.elevation != null && b.elevation != null && a.elevation !== b.elevation) return b.elevation - a.elevation
+      return 0
+    })
+    d.storeys.forEach(s => s.categories.sort((a, b) => categoryLabel(a.category).localeCompare(categoryLabel(b.category))))
+  }
+  return out
+}
+
+/** Every model group below these categories */
+export const partsOfCategories = (categories: MergedCategory[]): Part[] => categories.flatMap(c => c.parts)
+
+export const tallyParts = (parts: Part[]): Tally => tallyCategories(parts.map(p => p.group))
+
+/** Hide or show every element in these parts, each in its own model */
+export const setPartsVisible = (parts: Part[], visible: boolean): void => setCategoriesVisible(parts.map(p => p.group), visible)

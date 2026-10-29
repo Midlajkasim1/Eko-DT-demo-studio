@@ -5,9 +5,10 @@ import { useModelStore } from '@/store/useModelStore'
 import { disciplineOf } from '@/lib/modelDiscipline'
 import { setHidden, type VisibilityModel } from '@/lib/visibilityCoordinator'
 import {
-  buildModelTree, categoryLabel, checkStateOf, hiddenItems, loadElementNames, setCategoriesVisible,
-  setElementVisible, tallyCategories,
-  type CategoryGroup, type CheckState, type ModelTreeData, type StoreyGroup, type TreeSourceModel,
+  buildModelTree, categoryLabel, checkStateOf, disciplineKey, hiddenItems, loadElementNames, mergeByDiscipline,
+  partsOfCategories, setCategoriesVisible, setElementVisible, setPartsVisible, tallyParts,
+  type CategoryGroup, type CheckState, type DisciplineSource, type MergedCategory, type MergedStorey,
+  type ModelTreeData, type Part, type TreeSourceModel,
 } from '@/lib/modelTree'
 
 /*
@@ -15,6 +16,9 @@ import {
  * (#ovp) while the toolbar's Tree tool is on. The dashboard rebuilds its markup
  * on every state change, so this renders into a host element that lives outside
  * that markup; app.js moves the host into `#eko-tree-slot` after each render.
+ *
+ * The top level is the disciplines of the loaded models. Models of one discipline share its
+ * storeys and classes; each element row still knows its own model.
  */
 
 const PAGE = 50
@@ -28,7 +32,12 @@ type Entry =
   | { status: 'error'; model: FragModel }
   | { status: 'ready'; model: FragModel; data: ModelTreeData }
 
-type RowKind = 'root' | 'model' | 'storey' | 'category' | 'element' | 'more' | 'status'
+type RowKind = 'discipline' | 'storey' | 'category' | 'element' | 'more' | 'status'
+
+/** An element, with the model group that holds it */
+interface Item extends Part {
+  id: number
+}
 
 interface Row {
   key: string
@@ -43,10 +52,15 @@ interface Row {
   dim: boolean
   /** Changes whenever what the row shows changes; rows with the same sig are not re-rendered */
   sig: string
+  /** What the row's checkbox covers: one group per model holding something below it */
+  parts?: Part[]
+  /** For an element: its model, the group holding it and its IFC class */
   modelId?: string
-  storey?: StoreyGroup
-  category?: CategoryGroup
+  group?: CategoryGroup
+  className?: string | null
   elementId?: number
+  /** For "more": the category whose list grows */
+  pageKey?: string
   retry?: boolean
 }
 
@@ -186,7 +200,7 @@ export function DashboardModelTree({ engineRef, engineReady }: Props) {
   const loaded = useModelStore(s => s.modelsLoadedInEngine)
   const layerShown = useModelStore(s => s.modelVisibility)
 
-  /** Rows whose open state the user flipped from its default (the root and the models start open) */
+  /** Rows whose open state the user flipped from its default (disciplines start open) */
   const [flipped, setFlipped] = useState<Set<string>>(() => new Set())
   const [pages, setPages] = useState<Map<string, number>>(() => new Map())
   const [query, setQuery] = useState('')
@@ -313,122 +327,142 @@ export function DashboardModelTree({ engineRef, engineReady }: Props) {
     const plain = (r: Omit<Row, 'expandable' | 'expanded' | 'dim' | 'sig'> & Partial<Row>): Row =>
       ({ expandable: false, expanded: false, dim: false, sig: `${r.kind}|${r.label}`, ...r })
 
-    const storeyLabel = (s: StoreyGroup) => (s.unassigned ? tr('treeUnassigned') : (s.name || tr('treeUnnamed')))
-    const catLabel = (c: CategoryGroup) => categoryLabel(c.category) || tr('treeUncategorised')
+    const storeyLabel = (s: MergedStorey) => (s.unassigned ? tr('treeUnassigned') : (s.name || tr('treeUnnamed')))
+    const catLabel = (c: MergedCategory) => categoryLabel(c.category) || tr('treeUncategorised')
+    const layerOff = (modelId: string) => layerShown[modelId] === false
+    /** A row is dimmed when every model behind it is switched off by the layer picker */
+    const allOff = (parts: Part[]) => parts.length > 0 && parts.every(p => layerOff(p.modelId))
     /** Names already loaded that match; an element's name is only known once it has been on screen */
-    const namedHits = (modelId: string, c: CategoryGroup) => {
+    const namedHits = (c: MergedCategory): Item[] => c.parts.flatMap(({ modelId, group }) => {
       const known = store.names.get(modelId)
-      return known ? c.ids.filter(id => { const n = known.get(id); return !!n && hit(n) }) : []
+      return known ? group.ids.filter(id => { const n = known.get(id); return !!n && hit(n) }).map(id => ({ modelId, group, id })) : []
+    })
+    /** The first `n` elements of a category, in model order */
+    const firstItems = (c: MergedCategory, n: number): Item[] => {
+      const out: Item[] = []
+      for (const { modelId, group } of c.parts) {
+        for (const id of group.ids) {
+          if (out.length >= n) return out
+          out.push({ modelId, group, id })
+        }
+      }
+      return out
     }
-    const catBelow = (modelId: string, c: CategoryGroup) => namedHits(modelId, c).length > 0
-    const storeyBelow = (modelId: string, s: StoreyGroup) => s.categories.some(c => hit(catLabel(c)) || catBelow(modelId, c))
 
-    const rootTally = { total: 0, hidden: 0 }
-    const blocks: Row[][] = []
-
+    // Models by discipline, in the order the dashboard lists them
+    const sources: DisciplineSource[] = []
+    const byDiscipline = new Map<string, { discipline: string | null; label: string; recs: typeof models }>()
     for (const rec of models) {
-      const entry = store.entries.get(rec.modelId)
       const discipline = disciplineOf(rec.originalFileName || '')
-      const badge = discipline ? tr(DISCIPLINE_KEY[discipline] ?? discipline) : tr('treeUnclassified')
-      const layerHidden = layerShown[rec.modelId] === false
-      const mKey = `model:${rec.modelId}`
-      const modelHit = hit(rec.originalFileName) || hit(badge)
-      const block: Row[] = []
-
-      if (rec.type === 'glb') {
-        if (q && !modelHit) continue
-        block.push(plain({ key: mKey, kind: 'model', level: 1, label: rec.originalFileName, badge: tr('treeNoData'), dim: layerHidden, sig: `m|${rec.originalFileName}|nd|${layerHidden}` }))
-        blocks.push(block)
-        continue
+      const key = disciplineKey(discipline)
+      let d = byDiscipline.get(key)
+      if (!d) {
+        d = { discipline, label: discipline ? tr(DISCIPLINE_KEY[discipline] ?? discipline) : tr('treeUnclassified'), recs: [] }
+        byDiscipline.set(key, d)
       }
-      if (!entry || entry.status !== 'ready') {
-        if (q && !modelHit) continue
-        const status = entry?.status === 'error' ? 'error' : 'loading'
-        block.push(plain({ key: mKey, kind: 'model', level: 1, label: rec.originalFileName, badge, dim: layerHidden, sig: `m|${rec.originalFileName}|${badge}|${status}|${layerHidden}` }))
-        block.push(plain({
-          key: `${mKey}:status`, kind: 'status', level: 2, label: tr(status === 'error' ? 'treeError' : 'treeLoading'),
-          sig: status, retry: status === 'error', modelId: rec.modelId,
-        }))
-        blocks.push(block)
-        continue
-      }
+      d.recs.push(rec)
+      const entry = store.entries.get(rec.modelId)
+      if (rec.type !== 'glb' && entry?.status === 'ready') sources.push({ modelId: rec.modelId, discipline, data: entry.data })
+    }
+    const merged = new Map(mergeByDiscipline(sources).map(d => [d.key, d]))
+    const disciplines = [...byDiscipline.entries()].sort(([, a], [, b]) => {
+      if ((a.discipline == null) !== (b.discipline == null)) return a.discipline == null ? 1 : -1
+      return a.label.localeCompare(b.label)
+    })
 
-      const { storeys } = entry.data
-      const mTally = tallyCategories(storeys.flatMap(s => s.categories))
-      rootTally.total += mTally.total
-      rootTally.hidden += mTally.hidden
-      const mBelow = storeys.some(s => hit(storeyLabel(s)) || storeyBelow(rec.modelId, s))
-      if (q && !modelHit && !mBelow) continue
-      const mOpen = isOpen(mKey, true) || (q !== '' && mBelow)
-      block.push({
-        key: mKey, kind: 'model', level: 1, label: rec.originalFileName, badge, count: mTally.total,
-        check: checkStateOf(mTally), expandable: true, expanded: mOpen, dim: layerHidden, modelId: rec.modelId,
-        sig: `m|${rec.originalFileName}|${badge}|${mTally.total}|${mTally.hidden}|${mOpen}|${layerHidden}`,
-      })
-      if (mOpen) {
+    const blocks: Row[][] = []
+    for (const [dKey, d] of disciplines) {
+      const storeys = merged.get(dKey)?.storeys ?? []
+      const dHit = hit(d.label)
+      // Models with nothing to list yet, or nothing to list at all
+      const notes = d.recs.flatMap(rec => {
+        const entry = store.entries.get(rec.modelId)
+        if (rec.type !== 'glb' && entry?.status === 'ready') return []
+        const state = rec.type === 'glb' ? 'nodata' : entry?.status === 'error' ? 'error' : 'loading'
+        return [{ rec, state }]
+      }).filter(({ rec }) => !q || dHit || hit(rec.originalFileName))
+      const storeyBelow = (s: MergedStorey) => s.categories.some(c => hit(catLabel(c)) || namedHits(c).length > 0)
+      const dBelow = storeys.some(s => hit(storeyLabel(s)) || storeyBelow(s))
+      if (q && !dHit && !dBelow && !notes.length) continue
+
+      const dParts = partsOfCategories(storeys.flatMap(s => s.categories))
+      const dTally = tallyParts(dParts)
+      const dOpen = isOpen(dKey, true) || (q !== '' && (dBelow || notes.length > 0))
+      const dDim = d.recs.every(rec => layerOff(rec.modelId))
+      const expandable = storeys.length > 0 || notes.length > 0
+      const block: Row[] = [{
+        key: dKey, kind: 'discipline', level: 0, label: d.label, count: merged.has(dKey) ? dTally.total : undefined,
+        check: merged.has(dKey) ? checkStateOf(dTally) : undefined, expandable, expanded: expandable && dOpen, dim: dDim,
+        parts: dParts,
+        sig: `d|${d.label}|${dTally.total}|${dTally.hidden}|${expandable && dOpen}|${dDim}|${merged.has(dKey)}`,
+      }]
+      if (dOpen) {
         for (const storey of storeys) {
           const sHit = hit(storeyLabel(storey))
-          const sBelow = storeyBelow(rec.modelId, storey)
-          if (q && !modelHit && !sHit && !sBelow) continue
-          const sTally = tallyCategories(storey.categories)
-          const sOpen = isOpen(storey.key, false) || (q !== '' && sBelow)
+          if (q && !dHit && !sHit && !storeyBelow(storey)) continue
+          const sParts = partsOfCategories(storey.categories)
+          const sTally = tallyParts(sParts)
+          const sOpen = isOpen(storey.key, false) || (q !== '' && storeyBelow(storey))
+          const sDim = allOff(sParts)
           block.push({
-            key: storey.key, kind: 'storey', level: 2, label: storeyLabel(storey), count: sTally.total,
-            check: checkStateOf(sTally), expandable: true, expanded: sOpen, dim: layerHidden, modelId: rec.modelId, storey,
-            sig: `s|${storeyLabel(storey)}|${sTally.total}|${sTally.hidden}|${sOpen}|${layerHidden}`,
+            key: storey.key, kind: 'storey', level: 1, label: storeyLabel(storey), count: sTally.total,
+            check: checkStateOf(sTally), expandable: true, expanded: sOpen, dim: sDim, parts: sParts,
+            sig: `s|${storeyLabel(storey)}|${sTally.total}|${sTally.hidden}|${sOpen}|${sDim}`,
           })
           if (!sOpen) continue
           for (const cat of storey.categories) {
             const cHit = hit(catLabel(cat))
-            const cBelow = catBelow(rec.modelId, cat)
-            if (q && !modelHit && !sHit && !cHit && !cBelow) continue
-            const cTally = tallyCategories([cat])
-            const cOpen = isOpen(cat.key, false) || (q !== '' && cBelow)
+            const hits = q ? namedHits(cat) : []
+            if (q && !dHit && !sHit && !cHit && !hits.length) continue
+            const cTally = tallyParts(cat.parts)
+            const cOpen = isOpen(cat.key, false) || (q !== '' && hits.length > 0)
+            const cDim = allOff(cat.parts)
             block.push({
-              key: cat.key, kind: 'category', level: 3, label: catLabel(cat), count: cat.ids.length,
-              check: checkStateOf(cTally), expandable: true, expanded: cOpen, dim: layerHidden, modelId: rec.modelId, storey, category: cat,
-              sig: `c|${catLabel(cat)}|${cTally.total}|${cTally.hidden}|${cOpen}|${layerHidden}`,
+              key: cat.key, kind: 'category', level: 2, label: catLabel(cat), count: cat.count,
+              check: checkStateOf(cTally), expandable: true, expanded: cOpen, dim: cDim, parts: cat.parts,
+              sig: `c|${catLabel(cat)}|${cTally.total}|${cTally.hidden}|${cOpen}|${cDim}`,
             })
             if (!cOpen) continue
             // Under a search that matched above this category, every element is a match
-            const all = !q || modelHit || sHit || cHit
-            const list = all ? cat.ids : namedHits(rec.modelId, cat)
+            const all = !q || dHit || sHit || cHit
+            const total = all ? cat.count : hits.length
             const shown = (pages.get(cat.key) ?? 1) * PAGE
-            const missing: number[] = []
-            for (const id of list.slice(0, shown)) {
-              const known = nameOf(rec.modelId, id)
-              if (known === undefined && !store.asked.has(`${rec.modelId}:${id}`)) missing.push(id)
+            const missing = new Map<string, number[]>()
+            for (const { modelId, group, id } of all ? firstItems(cat, shown) : hits.slice(0, shown)) {
+              const known = nameOf(modelId, id)
+              if (known === undefined && !store.asked.has(`${modelId}:${id}`)) missing.set(modelId, [...(missing.get(modelId) ?? []), id])
               const label = known || `${catLabel(cat)} #${id}`
-              const isHidden = cat.hidden.has(id)
+              const isHidden = group.hidden.has(id)
+              const eDim = layerOff(modelId)
               block.push({
-                key: `${rec.modelId}:${id}`, kind: 'element', level: 4, label, check: isHidden ? 'unchecked' : 'checked',
-                expandable: false, expanded: false, dim: layerHidden, modelId: rec.modelId, storey, category: cat, elementId: id,
-                sig: `e|${label}|${isHidden}|${layerHidden}`,
+                key: `${modelId}:${id}`, kind: 'element', level: 3, label, check: isHidden ? 'unchecked' : 'checked',
+                expandable: false, expanded: false, dim: eDim, modelId, group, elementId: id, className: cat.category,
+                sig: `e|${label}|${isHidden}|${eDim}`,
               })
             }
-            if (missing.length) want.set(rec.modelId, [...(want.get(rec.modelId) ?? []), ...missing])
-            if (list.length > shown) {
+            missing.forEach((ids, modelId) => want.set(modelId, [...(want.get(modelId) ?? []), ...ids]))
+            if (total > shown) {
               block.push(plain({
-                key: `${cat.key}:more`, kind: 'more', level: 4, label: tr('treeMore', { n: Math.min(PAGE, list.length - shown) }),
-                category: cat, sig: `more|${list.length - shown}`,
+                key: `${cat.key}:more`, kind: 'more', level: 3, label: tr('treeMore', { n: Math.min(PAGE, total - shown) }),
+                pageKey: cat.key, sig: `more|${total - shown}`,
               }))
             }
           }
+        }
+        for (const { rec, state } of notes) {
+          const text = tr(state === 'error' ? 'treeError' : state === 'loading' ? 'treeLoading' : 'treeNoData')
+          block.push(plain({
+            key: `${dKey}:status:${rec.modelId}`, kind: 'status', level: 1, label: `${rec.originalFileName} · ${text}`,
+            sig: `${state}|${rec.originalFileName}|${text}`, retry: state === 'error', modelId: rec.modelId,
+          }))
         }
       }
       blocks.push(block)
     }
 
     if (!models.length) return { rows: [plain({ key: 'empty', kind: 'status', level: 0, label: tr('treeEmpty') })], pendingNames: want }
-    const rootOpen = isOpen('root', true) || (q !== '' && blocks.length > 0)
-    const out: Row[] = [{
-      key: 'root', kind: 'root', level: 0, label: tr('treeRoot'),
-      count: rootTally.total || undefined, check: rootTally.total ? checkStateOf(rootTally) : undefined,
-      expandable: true, expanded: rootOpen, dim: false,
-      sig: `r|${tr('treeRoot')}|${rootTally.total}|${rootTally.hidden}|${rootOpen}`,
-    }]
-    if (rootOpen) for (const block of blocks) out.push(...block)
-    if (q && !blocks.length) out.push(plain({ key: 'nomatch', kind: 'status', level: 1, label: tr('treeNoMatch', { q: deferredQuery.trim() }), sig: `nm|${q}` }))
+    const out = blocks.flat()
+    if (q && !blocks.length) out.push(plain({ key: 'nomatch', kind: 'status', level: 0, label: tr('treeNoMatch', { q: deferredQuery.trim() }), sig: `nm|${q}` }))
     return { rows: out, pendingNames: want }
     // `version` stands for the store and the groups' hidden sets, which change in place
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -466,23 +500,11 @@ export function DashboardModelTree({ engineRef, engineReady }: Props) {
     const touched = new Set<string>()
     if (row.kind === 'element') {
       touched.add(row.modelId!)
-      setElementVisible(row.category!, row.elementId!, row.category!.hidden.has(row.elementId!))
-    } else {
-      let groups: CategoryGroup[] = []
-      if (row.kind === 'root') {
-        for (const [id, entry] of store.entries) {
-          if (entry.status !== 'ready') continue
-          touched.add(id)
-          groups.push(...entry.data.storeys.flatMap(s => s.categories))
-        }
-      } else {
-        touched.add(row.modelId!)
-        const entry = store.entries.get(row.modelId!)
-        if (row.kind === 'model') groups = entry?.status === 'ready' ? entry.data.storeys.flatMap(s => s.categories) : []
-        else groups = row.kind === 'storey' ? row.storey!.categories : [row.category!]
-      }
+      setElementVisible(row.group!, row.elementId!, row.group!.hidden.has(row.elementId!))
+    } else if (row.parts) {
+      row.parts.forEach(p => touched.add(p.modelId))
       // Anything hidden or partly hidden shows everything below it; a fully visible node hides it
-      setCategoriesVisible(groups, checkStateOf(tallyCategories(groups)) !== 'checked')
+      setPartsVisible(row.parts, checkStateOf(tallyParts(row.parts)) !== 'checked')
     }
     touched.forEach(pushVisibility)
     bump()
@@ -499,7 +521,7 @@ export function DashboardModelTree({ engineRef, engineReady }: Props) {
       // The same event the Select tool sends, so the dashboard opens the same card. `fromTree` lets it
       // through without arming the tool and keeps the camera where it is.
       window.dispatchEvent(new CustomEvent('viewer-command', {
-        detail: { action: 'openAssetByBimId', bimId: guid, expressId: row.elementId, name: row.label, type: '', category: categoryLabel(row.category?.category ?? null), fromTree: true },
+        detail: { action: 'openAssetByBimId', bimId: guid, expressId: row.elementId, name: row.label, type: '', category: categoryLabel(row.className ?? null), fromTree: true },
       }))
     } catch { /* a miss is not a selection */ }
   }, [engineRef])
@@ -508,7 +530,7 @@ export function DashboardModelTree({ engineRef, engineReady }: Props) {
     if (row.kind === 'status') {
       if (row.retry && row.modelId) retry(row.modelId)
     } else if (row.kind === 'more') {
-      const key = row.category!.key
+      const key = row.pageKey!
       setPages(prev => new Map(prev).set(key, (prev.get(key) ?? 1) + 1))
     } else if (row.kind === 'element') {
       void select(row)
