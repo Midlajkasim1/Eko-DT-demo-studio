@@ -10,7 +10,8 @@ import { resetCameraToHome } from '@/lib/cameraUtils'
 import { frameSphereInView } from '@/lib/viewFraming'
 import { createMiniMap } from '@/lib/miniMap'
 import { disciplineOf } from '@/lib/modelDiscipline'
-import { isProjectSwitch, layerIds, layerVisibility, unclassifiedModels } from '@/lib/layerGroups'
+import { classifyModel, isProjectSwitch, layerIds, layerVisibility, unclassifiedModels } from '@/lib/layerGroups'
+import { HVAC_GENERIC, HVAC_SPECIFIC, isCeilingType, levelHides, type LevelIndex, type MechanicalInfo } from '@/lib/floorPolicy'
 import { setHidden, isHidden, onVisibilityApplied } from '@/lib/visibilityCoordinator'
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
@@ -692,7 +693,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     let levels: Floor[] = []
     let levelSig = ''
     let levelSeq = 0
-    const floorJobs = new WeakMap<object, Promise<{ geom: number[]; byFloor: Map<string, number[]> }>>()
+    const floorJobs = new WeakMap<object, Promise<LevelIndex>>()
     const floorCatalog = new Map<string, Floor>()
     const ORDINALS = ['Ground floor', 'First floor', 'Second floor', 'Third floor', 'Fourth floor', 'Fifth floor', 'Sixth floor', 'Seventh floor', 'Eighth floor', 'Ninth floor', 'Tenth floor', 'Eleventh floor', 'Twelfth floor', 'Thirteenth floor', 'Fourteenth floor', 'Fifteenth floor', 'Sixteenth floor', 'Seventeenth floor', 'Eighteenth floor', 'Nineteenth floor', 'Twentieth floor']
     const attrText = (row: any, key: string) => {
@@ -755,7 +756,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       else if (rels && typeof rels === 'object') for (const [k, v] of Object.entries(rels)) put(k, v)
       return out
     }
-    const assignByHeight = (geom: number[], boxes: THREE.Box3[], storeys: { floor: Floor; elevation: number }[]) => {
+    /* `reference` is the set of boxes the model's height range is read from. It is the boxes themselves unless
+       a small subset (the HVAC) is being placed against the whole model's range. */
+    const assignByHeight = (geom: number[], boxes: THREE.Box3[], storeys: { floor: Floor; elevation: number }[], reference: THREE.Box3[] = boxes) => {
       const byFloor = new Map<string, number[]>()
       const floors: { id: string; elevation: number }[] = []
       for (const s of storeys) {
@@ -766,7 +769,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
       floors.sort((a, b) => a.elevation - b.elevation)
       const ys: number[] = []
-      for (const b of boxes) if (b && !b.isEmpty() && Number.isFinite(b.min.y)) ys.push(b.min.y)
+      for (const b of reference) if (b && !b.isEmpty() && Number.isFinite(b.min.y)) ys.push(b.min.y)
       ys.sort((a, b) => a - b)
       if (ys.length < 2 || floors.length < 2) return byFloor
       const yLo = ys[Math.floor(ys.length * 0.02)]
@@ -853,7 +856,40 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
             byFloor.get(floorId)!.push(...ids)
           }
         }
-        return { geom, byFloor }
+        /* What the floor filter treats specially: the ceilings, and the HVAC. A model that cannot
+           answer leaves both empty, which is the plain floor filter. */
+        const ceilings = new Set<number>()
+        const hvac = new Map<number, MechanicalInfo>()
+        try {
+          const onGeometry = new Set(geom)
+          const idsOf = (found: any) => (Object.values(found || {}).flat() as number[]).filter(id => onGeometry.has(id))
+          if (typeof model.getItemsOfCategories === 'function') {
+            const coverings = idsOf(await model.getItemsOfCategories([/^IFCCOVERING$/i]))
+            if (coverings.length && typeof model.getItemsData === 'function') {
+              const rows = await model.getItemsData(coverings, {
+                attributesDefault: false, attributes: ['PredefinedType'], relationsDefault: { attributes: false, relations: false },
+              })
+              coverings.forEach((id, i) => { if (isCeilingType(attrText(rows[i], 'PredefinedType'))) ceilings.add(id) })
+            }
+            const fileName = useModelStore.getState().models.find(r => r.modelId === model.modelId)?.originalFileName || ''
+            // The generic flow classes are electrical work too, in an electrical model
+            const patterns = classifyModel(fileName).group === 'elec' ? [HVAC_SPECIFIC] : [HVAC_SPECIFIC, HVAC_GENERIC]
+            const mech = idsOf(await model.getItemsOfCategories(patterns))
+            if (mech.length) {
+              const assigned = new Set<number>()
+              for (const ids of byFloor.values()) for (const id of ids) assigned.add(id)
+              const boxOf = new Map<number, THREE.Box3>()
+              geom.forEach((id, i) => { if (boxes[i]) boxOf.set(id, boxes[i]) })
+              const heightFloor = new Map<number, string>()
+              if (storeys.length >= 2) {
+                const partBoxes = mech.map(id => boxOf.get(id) as THREE.Box3)
+                for (const [floorId, ids] of assignByHeight(mech, partBoxes, storeys, boxes)) for (const id of ids) heightFloor.set(id, floorId)
+              }
+              for (const id of mech) hvac.set(id, { assigned: assigned.has(id), heightFloor: heightFloor.get(id) ?? null })
+            }
+          }
+        } catch { /* plain floor filter */ }
+        return { geom, byFloor, ceilings, hvac }
       })().catch((err) => { floorJobs.delete(model); throw err })
       floorJobs.set(model, job)
       return job
@@ -861,7 +897,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const refreshLevels = async () => {
       const byId = new Map<string, Floor>()
       for (const model of engine.fragments?.models?.list?.values() ?? []) {
-        let entry: { geom: number[]; byFloor: Map<string, number[]> } = { geom: [], byFloor: new Map() }
+        let entry: LevelIndex = { geom: [], byFloor: new Map(), ceilings: new Set(), hvac: new Map() }
         try { entry = await indexModel(model) } catch { /* model not ready */ }
         for (const id of entry.byFloor.keys()) {
           const known = floorCatalog.get(id)
@@ -895,20 +931,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const hideAll = () => { levelHidden.set(m, new Set(entry.geom)); return setHidden(m, 'level', entry.geom) }
         levelHidden.delete(m)
         if (!levelId || levelId === 'ALL' || !entry.byFloor.size) { await setHidden(m, 'level', []); continue }
-        /* Basement is only itself. Each floor above also keeps everything below it. */
+        /* Basement is only itself. Each floor above also keeps everything below it. What the floor
+           hides beyond that (its own ceilings) and keeps beyond that (the HVAC) is lib/floorPolicy. */
         const picked = floorCatalog.get(levelId)
         if (!picked) { await hideAll(); continue }
-        const show = new Set<number>()
-        let covered = false
-        for (const [id, ids] of entry.byFloor) {
-          const floor = floorCatalog.get(id)
-          if (!floor || floor.rank > picked.rank) continue
-          covered = true
-          for (const n of ids) show.add(n)
-        }
-        if (!covered) { await hideAll(); continue }
-        if (!show.size) { await setHidden(m, 'level', []); continue }
-        const hide = entry.geom.filter(id => !show.has(id))
+        const hide = levelHides(entry, picked, id => floorCatalog.get(id)?.rank)
+        if (!hide) { await setHidden(m, 'level', []); continue }
         levelHidden.set(m, new Set(hide))
         await setHidden(m, 'level', hide)
       }
