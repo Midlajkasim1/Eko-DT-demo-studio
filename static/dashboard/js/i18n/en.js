@@ -1154,6 +1154,7 @@ window.EKO_I18N.en = {
   "lvlGroupBasement": "Basement",
   "lvlUp": "Floor above",
   "lvlDown": "Floor below",
+  "lvlAlone": "Isolate floor",
   "pickFloor": "Find a floor",
   "pickLayer": "Find a layer",
   "moreLiveNote": "{list} arrive with the live 3D model",

@@ -173,6 +173,7 @@ window.EKO_VT = (function(){
       return `<div class="vpick"><div class="row gap6 vphead">${title('dockLevels')}<span class="grow"></span>
           <button class="iconbtn icon26" data-act="lvlStep" data-v="up" data-tip="${C().esc(t('lvlUp'))}" aria-label="${C().esc(t('lvlUp'))}" ${i <= 0 && d.level !== 'ALL' ? 'disabled' : ''}>${C().icon('chevR2', 13)}</button>
           <button class="iconbtn icon26" data-act="lvlStep" data-v="down" data-tip="${C().esc(t('lvlDown'))}" aria-label="${C().esc(t('lvlDown'))}" ${(i >= lv.length - 1) ? 'disabled' : ''}>${C().icon('chevL2', 13)}</button></div>
+        <button class="mzopt mzfan" role="switch" aria-checked="${!!d.floorAlone}" data-act="floorAlone" data-on="${!!d.floorAlone}">${C().esc(t('lvlAlone'))}</button>
         <input class="vpq" type="search" placeholder="${C().esc(t('pickFloor'))}" aria-label="${C().esc(t('pickFloor'))}" autocomplete="off">
         <div class="vplist">${opt('setLevel', 'ALL', t('lvlAll'), d.level === 'ALL').replace('class="mzopt', 'class="vprow mzopt').replace('data-on', 'data-q="all ' + C().esc(t('lvlAll').toLowerCase()) + '" data-on')}${rows}</div></div>`;
     }

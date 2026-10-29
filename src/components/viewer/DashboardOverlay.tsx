@@ -921,8 +921,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const gf = [...floorCatalog.values()].find(f => /ground/i.test(f.name) || f.rank === 0)
         if (gf) levelId = gf.id
       }
-      if (!force && levelId === lastLevelId) return
-      lastLevelId = levelId
+      // "Isolate floor" is a dock setting, read here so the picker, the stepper and the toggle all go through this one function
+      const alone = !!(window as any).EKO?.state?.dock?.floorAlone
+      const levelKey = levelId + (alone ? '|alone' : '')
+      if (!force && levelKey === lastLevelId) return
+      lastLevelId = levelKey
       const seq = ++levelSeq
       for (const model of engine.fragments?.models?.list?.values() ?? []) {
         const m = model as any
@@ -935,11 +938,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const hideAll = () => { levelHidden.set(m, new Set(entry.geom)); return setHidden(m, 'level', entry.geom) }
         levelHidden.delete(m)
         if (!levelId || levelId === 'ALL' || !entry.byFloor.size) { await setHidden(m, 'level', []); continue }
-        /* Basement is only itself. Each floor above also keeps everything below it. What the floor
-           hides beyond that (its own ceilings) and keeps beyond that (the HVAC) is lib/floorPolicy. */
+        /* Basement is only itself. Each floor above also keeps everything below it, unless Isolate floor is on.
+           What the floor hides beyond that (its own ceilings) and keeps beyond that (the HVAC) is lib/floorPolicy. */
         const picked = floorCatalog.get(levelId)
         if (!picked) { await hideAll(); continue }
-        const hide = levelHides(entry, picked, id => floorCatalog.get(id)?.rank)
+        const hide = levelHides(entry, picked, id => floorCatalog.get(id)?.rank, { alone })
         if (!hide) { await setHidden(m, 'level', []); continue }
         levelHidden.set(m, new Set(hide))
         await setHidden(m, 'level', hide)

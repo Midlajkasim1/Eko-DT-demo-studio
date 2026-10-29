@@ -1236,6 +1236,7 @@ window.EKO_I18N.ar = {
   "lvlGroupBasement": "القبو",
   "lvlUp": "الطابق الأعلى",
   "lvlDown": "الطابق الأدنى",
+  "lvlAlone": "عزل الطابق",
   "pickFloor": "ابحث عن طابق",
   "pickLayer": "ابحث عن طبقة",
   "moreLiveNote": "{list} تتوفر مع النموذج ثلاثي الأبعاد الحي",
