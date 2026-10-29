@@ -14,6 +14,7 @@ import {
   classifyLoaded, classifyModel, describeModels, describeUnclassified, hasContentProfile, isProjectSwitch, layerIds, layerVisibility,
   onContentProfiles, pruneContentProfiles, setContentProfile, type ContentProfile,
 } from '@/lib/layerGroups'
+import { runIfcDiagnostics } from '@/lib/ifcDiagnostics' // TEMPORARY, with EKO_IFC_DIAGNOSTICS below
 import { HVAC_GENERIC, HVAC_SPECIFIC, isCeilingType, levelHides, type LevelIndex, type MechanicalInfo } from '@/lib/floorPolicy'
 import { setHidden, isHidden, onVisibilityApplied } from '@/lib/visibilityCoordinator'
 import { measureTool } from '@/lib/measureTool'
@@ -1425,6 +1426,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const unsubLayers = () => { unsubStore(); unsubProfiles() }
     syncLayers()
     ;(window as any).EKO_MODEL_DISCIPLINES = () => describeModels(useModelStore.getState().models)
+    // TEMPORARY, read-only: what the loaded models contain (lib/ifcDiagnostics.ts)
+    ;(window as any).EKO_IFC_DIAGNOSTICS = (which?: string | string[]) => runIfcDiagnostics({
+      models: useModelStore.getState().models, fragments: engine.fragments?.models?.list,
+      loadedInEngine: useModelStore.getState().modelsLoadedInEngine, classify: classifyLoaded,
+    }, which)
 
     /* Floor, tree and template hides all land here once the worker has them */
     const unsubVisibility = onVisibilityApplied(() => {
@@ -1594,6 +1600,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       fcuEnv?.dispose()
       delete (window as any).EKO_HOST_ENGINE
       delete (window as any).EKO_MODEL_DISCIPLINES
+      delete (window as any).EKO_IFC_DIAGNOSTICS
     }
   }, [engineReady])
 
