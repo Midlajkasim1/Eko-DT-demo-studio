@@ -243,6 +243,7 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
 
 
   const { engineRef, isReady, error } = useFragmentsEngine(containerRef)
+
   const { loadModel, isLoading } = useModelLoader(engineRef)
   const progressSessionActive = useLoadingProgressStore(s => s.sessionActive)
   
@@ -252,6 +253,37 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
   const models = useModelStore(s => s.models)
   const step = useAppStore(s => s.step)
   const renderSettings = useAppStore(useShallow(pickRenderSettings))
+
+  useEffect(() => {
+    const engine = engineRef.current
+    if (!isReady || !engine) return
+    const themeRoot = () => document.querySelector('.dashboard-overlay-container .dashboard-native-container')
+    // Same choice the dashboard uses: saved Dark, saved Light, or Auto from the system.
+    // The overlay's first paint is hardcoded dark, so that attribute is not the choice.
+    const chosenDark = () => {
+      let mode = 'auto'
+      try { mode = localStorage.getItem('eko-theme-mode') || 'auto' } catch { /* private window */ }
+      if (mode === 'dark') return true
+      if (mode === 'light') return false
+      return window.matchMedia('(prefers-color-scheme: dark)').matches
+    }
+    const sync = () => {
+      const open = dashboardVisible && step === 'viewing' && !!themeRoot()
+      engine.setDashboardDark(open && chosenDark())
+    }
+    sync()
+    if (!(dashboardVisible && step === 'viewing')) return
+    const watch = new MutationObserver(sync)
+    const host = document.querySelector('.dashboard-overlay-container')
+    if (host) watch.observe(host, { attributes: true, attributeFilter: ['data-theme'], subtree: true })
+    const scheme = window.matchMedia('(prefers-color-scheme: dark)')
+    scheme.addEventListener('change', sync)
+    return () => {
+      watch.disconnect()
+      scheme.removeEventListener('change', sync)
+      engine.setDashboardDark(false)
+    }
+  }, [dashboardVisible, isReady, engineRef, step])
   // Subscribed (not getState) so project switches actually re-run the effects below
   const currentProjectId = useProjectStore(s => s.currentProject?.projectId)
 

@@ -30,8 +30,8 @@ import {
 } from './templateScene'
 import * as SunCalc from 'suncalc'
 import { PBR_MATERIAL_MAPPINGS } from '../constants/pbrMaterials'
-import { RENDER_DEFAULTS, type RenderSettings, type ToneMappingId } from '../constants/renderSettings'
-import { getTemplateScene, sceneSky, type TemplateScene } from '../constants/viewTemplates'
+import { RENDER_DEFAULTS, studioAdjustOf, type RenderSettings, type ToneMappingId } from '../constants/renderSettings'
+import { applyStudioAdjust, DASHBOARD_DARK_SKY, getTemplateScene, type TemplateScene } from '../constants/viewTemplates'
 import { paintStudioModel } from '../constants/studioPalette'
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { N8AOPass } from 'n8ao'
@@ -52,6 +52,8 @@ export interface FragmentsEngine {
   components: OBC.Components
   dispose: () => Promise<void>
   setLightingParams: (params: RenderSettings) => void
+  /** Dark backdrop for every style. On only while the dashboard is open in dark mode. */
+  setDashboardDark: (on: boolean) => void
 }
 
 export async function initFragmentsEngine(
@@ -280,6 +282,17 @@ export async function initFragmentsEngine(
     world.scene.three.background = gradTexture
   }
 
+  const darkBackdrop = makeSkyTexture(DASHBOARD_DARK_SKY)
+  let dashboardDark = false
+  let lastLighting: RenderSettings | null = null
+
+  /** The style keeps its own sky. This only covers it while the dashboard is dark. */
+  const paintDashboardBackdrop = () => {
+    world.scene.three.background = darkBackdrop
+    sky.visible = false
+    cloudsDome.visible = false
+  }
+
   let isRealistic = false
   let isRenderLite = false
   let bloomPass: UnrealBloomPass
@@ -308,6 +321,10 @@ export async function initFragmentsEngine(
   let savedTemplateInkEnabled = false
   /** The template driving the scene, or null when the project settings do */
   let activeTemplate: TemplateScene | null = null
+  /** Which template id is on the scene, so a Studio slider can retune without rebuilding it. */
+  let activeTemplateId: string | null = null
+  /** Studio meshes already cast, so a softness slider does not walk the whole model again. */
+  let studioShadowsArmed = false
   /** Studio palette is painted once per visit, then cleared on the way out. */
   let studioActive = false
   let studioEpoch = 0
@@ -397,6 +414,59 @@ export async function initFragmentsEngine(
     // Tone maps and converts to sRGB; every pass above works in linear light
     composer.addPass(new OutputPass())
     templateComposer = composer
+  }
+
+  /** Updates occlusion and edges in place. Rebuilds only when a pass is added or removed. */
+  const syncTemplateFrame = (frame: TemplateScene['frame']) => {
+    const wantAo = !!frame.ao
+    const wantInk = !!frame.ink
+    if (!templateComposer || wantAo !== !!templateAoPass || wantInk !== !!templateInkPass) {
+      buildTemplateComposer(frame)
+      return
+    }
+    if (frame.ao && templateAoPass) {
+      templateAoPass.updateGtaoMaterial({ radius: frame.ao.radius, distanceExponent: 1.5, thickness: 1 })
+      templateAoPass.blendIntensity = frame.ao.intensity
+      templateAoPass.enabled = true
+    }
+    if (frame.ink && templateInkPass) {
+      templateInkPass.setInk(frame.ink)
+      templateInkPass.enabled = true
+    }
+  }
+
+  /** Studio sun shadow from the saved adjustments. The shadow camera is already fitted. */
+  const retuneStudioShadows = (params: RenderSettings) => {
+    const tune = studioAdjustOf(params.studioAdjust)
+    tSun.castShadow = tune.shadows
+    world.renderer.three.shadowMap.enabled = true
+    world.renderer.three.shadowMap.autoUpdate = true
+    world.renderer.three.shadowMap.needsUpdate = true
+    if (!tune.shadows) {
+      studioShadowsArmed = false
+      return
+    }
+    const soft = tune.softShadows
+    const nextType = soft ? THREE.PCFShadowMap : THREE.BasicShadowMap
+    const typeChanged = world.renderer.three.shadowMap.type !== nextType
+    world.renderer.three.shadowMap.type = nextType
+    tSun.shadow.radius = soft ? tune.shadowRadius : 0
+    const armMeshes = !studioShadowsArmed
+    if (armMeshes || typeChanged) {
+      world.scene.three.traverse((child: any) => {
+        if (!child.isMesh || child.name === 'ShadowCatcherPlane') return
+        if (armMeshes) {
+          child.castShadow = true
+          child.receiveShadow = true
+        }
+        if (typeChanged && child.material) {
+          const update = (m: any) => { if (m) m.needsUpdate = true }
+          if (Array.isArray(child.material)) child.material.forEach(update)
+          else update(child.material)
+        }
+      })
+    }
+    studioShadowsArmed = true
   }
 
   /**
@@ -601,6 +671,8 @@ export async function initFragmentsEngine(
     const catcher = world.scene.three.getObjectByName('ShadowCatcherPlane')
     if (catcher) catcher.visible = true
     void showNonPhysical()
+    activeTemplateId = null
+    studioShadowsArmed = false
     templateSky?.dispose()
     templateSky = null
     templateEnv?.dispose()
@@ -679,7 +751,7 @@ export async function initFragmentsEngine(
     })
 
     // ── Sky, environment, tone ──────────────────────────────────────────────
-    const stops = sceneSky(template)
+    const stops = template.sky
     templateSky?.dispose()
     templateEnv?.dispose()
     templateSky = makeSkyTexture(stops)
@@ -699,7 +771,8 @@ export async function initFragmentsEngine(
     // The grade plane stays hidden: it slices through the building as a shadow
     // line. X-ray stays unshadowed, because ghosted surfaces turn a sun shadow
     // into a dark slab.
-    const sunShadow = params.templateId === 'photoreal' || params.templateId === 'minimal' || params.templateId === 'studio'
+    const studioTune = params.templateId === 'studio' ? studioAdjustOf(params.studioAdjust) : null
+    const sunShadow = params.templateId === 'photoreal' || params.templateId === 'minimal' || !!studioTune?.shadows
     world.renderer.three.shadowMap.enabled = true
     world.renderer.three.shadowMap.type = THREE.PCFShadowMap
     world.renderer.three.shadowMap.autoUpdate = true
@@ -721,7 +794,12 @@ export async function initFragmentsEngine(
       tSun.shadow.camera.far = sunDistance + reach
       tSun.shadow.bias = -0.0005 * Math.max(1, maxRadius / 10000)
       tSun.shadow.normalBias = 0.05
-      tSun.shadow.radius = 4
+      tSun.shadow.radius = studioTune
+        ? (studioTune.softShadows ? studioTune.shadowRadius : 0)
+        : 4
+      if (studioTune && !studioTune.softShadows) {
+        world.renderer.three.shadowMap.type = THREE.BasicShadowMap
+      }
       tSun.shadow.camera.updateProjectionMatrix()
 
       world.scene.three.traverse((child: any) => {
@@ -731,6 +809,7 @@ export async function initFragmentsEngine(
         }
       })
     }
+    studioShadowsArmed = !!studioTune?.shadows
 
     const catcher = world.scene.three.getObjectByName('ShadowCatcherPlane')
     if (catcher) catcher.visible = false
@@ -763,13 +842,37 @@ export async function initFragmentsEngine(
   }
 
   const setLightingParams = (params: RenderSettings) => {
-    const template = getTemplateScene(params.templateId, params.xrayColor)
+    lastLighting = params
+    const base = getTemplateScene(params.templateId, params.xrayColor)
+    const template = base && params.templateId === 'studio'
+      ? applyStudioAdjust(base, params.studioAdjust)
+      : base
+    // A slider on an already-applied Studio style only restates lights, shadows
+    // and the frame. Rebuilding the sky and the materials on every tick is wasted.
+    // Turning shadows on after they were off refits the shadow camera, so that
+    // path falls through to a full apply.
+    const studioShadowsOn = params.templateId === 'studio' && studioAdjustOf(params.studioAdjust).shadows
+    if (params.templateId === 'studio' && activeTemplateId === 'studio' && template
+      && !(studioShadowsOn && !studioShadowsArmed)) {
+      tSun.intensity = template.lights.sun.intensity
+      tAmbient.intensity = template.lights.ambient
+      world.renderer.three.toneMappingExposure = template.frame.exposure
+      retuneStudioShadows(params)
+      syncTemplateFrame(template.frame)
+      activeTemplate = template
+      if (params.progressiveRendering !== undefined) progressiveRenderingEnabled = params.progressiveRendering
+      if (dashboardDark) paintDashboardBackdrop()
+      else if (templateSky) world.scene.three.background = templateSky
+      requestFrame()
+      return
+    }
     // A template owns the whole picture, so it stands in for the other modes
     // rather than layering on top of them. Studio colours are highlights, so
     // they have to come off even when another template takes the scene.
     if (params.templateId !== 'studio') endStudioPaint()
     if (activeTemplate && !template) clearTemplate()
     activeTemplate = template
+    activeTemplateId = template ? params.templateId : null
 
     if (template) {
       isRealistic = false
@@ -789,6 +892,7 @@ export async function initFragmentsEngine(
         }
       })
 
+      if (dashboardDark) paintDashboardBackdrop()
       requestFrame()
       return
     }
@@ -1210,7 +1314,19 @@ export async function initFragmentsEngine(
         else update(child.material)
       }
     })
+    if (dashboardDark) paintDashboardBackdrop()
     requestFrame()
+  }
+
+  const setDashboardDark = (on: boolean) => {
+    if (dashboardDark === on) return
+    dashboardDark = on
+    if (on) {
+      paintDashboardBackdrop()
+      requestFrame()
+      return
+    }
+    if (lastLighting) setLightingParams(lastLighting)
   }
 
   setLightingParams(RENDER_DEFAULTS)
@@ -1812,32 +1928,10 @@ export async function initFragmentsEngine(
     }
   })
 
-  // The Studio sky is the only backdrop with a dark pair. Swap it when the
-  // dashboard theme changes, without repainting the model.
-  let themeWatch: MutationObserver | null = null
-  const refreshThemeSky = () => {
-    if (!activeTemplate?.skyDark) return
-    const next = sceneSky(activeTemplate)
-    templateSky?.dispose()
-    templateEnv?.dispose()
-    templateSky = makeSkyTexture(next)
-    templateEnv = makeSkyEnvironment(next)
-    world.scene.three.background = templateSky
-    world.scene.three.environment = templateEnv
-    requestFrame()
-  }
-  themeWatch = new MutationObserver(refreshThemeSky)
-  themeWatch.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme'],
-    subtree: true,
-  })
-
   const dispose = async () => {
     loopReady = false
     components.enabled = false
-    themeWatch?.disconnect()
-    themeWatch = null
+    darkBackdrop.dispose()
     viewCanvas.removeEventListener('webglcontextrestored', onContextRestored)
     viewCanvas.removeEventListener('pointerdown', onUserInput)
     viewCanvas.removeEventListener('wheel', onUserInput)
@@ -1851,5 +1945,5 @@ export async function initFragmentsEngine(
     components.dispose()
   }
 
-  return { fragments, world, components, dispose, setLightingParams }
+  return { fragments, world, components, dispose, setLightingParams, setDashboardDark }
 }

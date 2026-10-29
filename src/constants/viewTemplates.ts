@@ -1,4 +1,4 @@
-import type { TemplateId } from './renderSettings'
+import { studioAdjustOf, type StudioAdjust, type TemplateId } from './renderSettings'
 import { studioLocks } from './studioPalette'
 
 export type SkyStop = [number, string]
@@ -32,8 +32,6 @@ export interface TemplateFrame {
 
 export interface TemplateScene {
   sky: SkyStop[]
-  /** Used instead of `sky` while the dashboard theme is dark. */
-  skyDark?: SkyStop[]
   lights: {
     sun: { color: string; intensity: number; from: [number, number, number] }
     fill: { color: string; intensity: number }
@@ -46,9 +44,7 @@ export interface TemplateScene {
 
 export interface TemplateCard {
   sky: SkyStop[]
-  skyDark?: SkyStop[]
   horizon: string
-  horizonDark?: string
   face: string
   shade: string
   ink: string
@@ -71,10 +67,10 @@ const STUDIO_SKY: SkyStop[] = [
   [1, '#E3E6EA'],
 ]
 /**
- * Same cool grey, dropped to sit with the dark theme.
- * Top stays a step lighter than the bottom, as in the light pair.
+ * Backdrop behind every style while the dashboard is open in dark mode.
+ * Top stays a step lighter than the bottom, as in the light Studio pair.
  */
-const STUDIO_SKY_DARK: SkyStop[] = [
+export const DASHBOARD_DARK_SKY: SkyStop[] = [
   [0, '#1C2436'],
   [1, '#121824'],
 ]
@@ -302,10 +298,9 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
     id: 'studio',
     label: 'Studio',
     note: 'Neutral model',
-    description: 'Grey studio backdrop. Walls, floors, glass and MEP use the muted palette, with soft shading and thin grey edges.',
+    description: 'Grey studio backdrop with the muted palette. Shadows, shading and edges can be switched and adjusted below. Export keeps those choices with the Studio style.',
     scene: {
       sky: STUDIO_SKY,
-      skyDark: STUDIO_SKY_DARK,
       lights: {
         sun: { color: '#f7f8fa', intensity: 1.65, from: [0.55, 1, 0.38] },
         fill: { color: '#e6ebf1', intensity: 0.8 },
@@ -333,9 +328,7 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
     },
     card: {
       sky: STUDIO_SKY,
-      skyDark: STUDIO_SKY_DARK,
       horizon: '#E3E6EA',
-      horizonDark: '#121824',
       face: '#F2F3F5',
       shade: '#E4E7EB',
       ink: '#222222',
@@ -374,16 +367,29 @@ export function getTemplateScene(
   return t.scene
 }
 
-/** Dark unless the dashboard, or the page before it mounts, is explicitly light. */
-export function isDarkTheme(): boolean {
-  if (typeof document === 'undefined') return false
-  const root = (window as unknown as { DASHBOARD_ROOT?: Element }).DASHBOARD_ROOT
-    ?? document.documentElement
-  return root.getAttribute('data-theme') !== 'light'
-}
-
-export function sceneSky(scene: TemplateScene): SkyStop[] {
-  return scene.skyDark && isDarkTheme() ? scene.skyDark : scene.sky
+/**
+ * Studio scene with the saved adjustments applied.
+ * The shared template is left as it is, so the style card and the defaults stay put.
+ */
+export function applyStudioAdjust(scene: TemplateScene, adjust: Partial<StudioAdjust> | null | undefined): TemplateScene {
+  const tune = studioAdjustOf(adjust)
+  const ink = scene.frame.ink
+  return {
+    ...scene,
+    lights: {
+      ...scene.lights,
+      sun: { ...scene.lights.sun, intensity: tune.sunIntensity },
+      ambient: tune.ambient,
+    },
+    frame: {
+      ...scene.frame,
+      exposure: tune.exposure,
+      ao: tune.ambientOcclusion
+        ? { radius: tune.aoRadius, intensity: tune.aoIntensity }
+        : null,
+      ink: tune.edges && ink ? { ...ink, strength: tune.edgeStrength } : null,
+    },
+  }
 }
 
 export function skyCss(stops: SkyStop[]): string {
