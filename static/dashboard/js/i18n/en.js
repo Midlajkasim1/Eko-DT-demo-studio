@@ -192,7 +192,6 @@ window.EKO_I18N.en = {
   "treeTitle": "MODEL TREE",
   "treeSearch": "Search the tree",
   "treeSearchClear": "Clear search",
-  "treeRoot": "Digital Twin model",
   "treeEmpty": "No model is loaded. Load one to browse its structure.",
   "treeLoading": "Reading the model structure…",
   "treeError": "This model's structure couldn't be read.",

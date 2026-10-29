@@ -16705,7 +16705,7 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   box-shadow:inset 0 0 0 2px var(--acc)
 }
 
-.dashboard-native-container .mtrow[data-kind="root"],.dashboard-native-container .mtrow[data-kind="model"] {
+.dashboard-native-container .mtrow[data-kind="discipline"] {
   font-weight:600
 }
 
