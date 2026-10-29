@@ -53,6 +53,7 @@ window.EKO_VT = (function(){
     switch(def.id){
       case 'select': case 'measure': on = d.tool === def.id; break;
       case 'slice': on = !!d.slice; break;
+      case 'tree':  on = !!E.state.treeOpen; break;
       case 'levels':  on = d.bloom === 'levels' || d.level !== 'ALL'; tag = d.level !== 'ALL' ? d.level : null; break;
       case 'layers': { const sel = chosenLayers(d); on = sel.length > 0; tag = on ? E.t('layDisciplines') : null; break; }
       case 'minimap': on = !!d.minimap; break;
@@ -70,12 +71,13 @@ window.EKO_VT = (function(){
     if(def.id === 'levels' && E.state.dock.level !== 'ALL') return t('tipShortcut', { t: t('lvlIsolatedTip', { lvl: levelName(E, E.state.dock.level) }), k: def.key });
     if(def.id === 'reset'){ const l = resetList(E); return t('tipShortcut', { t: l.length ? t('resetListTip', { list: l.join(', ') }) : name, k: def.key }); }
     if(def.id === 'measure') return t('tipShortcut', { t: t('measureHow'), k: def.key });
+    if(def.id === 'tree') return t('tipShortcut', { t: t('dockTreeTip'), k: def.key });
     if(def.id === 'slice') return t('tipShortcut', { t: t('sliceHow'), k: def.key });
     return t('tipShortcut', { t: name, k: def.key });
   }
   function button(E, def, cls){
     const s = state(E, def), tp = tip(E, def, s);
-    const pressed = (def.kind === 'tool' || def.kind === 'toggle' || def.kind === 'bloom' || def.kind === 'more') ? ` aria-pressed="${s.on}"` : '';
+    const pressed = (def.kind === 'tool' || def.kind === 'toggle' || def.kind === 'bloom' || def.kind === 'more' || def.kind === 'panel') ? ` aria-pressed="${s.on}"` : '';
     /* Levels / Layers / Style: the state REPLACES the label ("L11", "ME",
        "B/W"); the icon stays, in the accent when on. */
     const label = (PICKERS.includes(def.id) && s.tag) ? s.tag : E.t(def.label);
@@ -113,7 +115,9 @@ window.EKO_VT = (function(){
   function toolbar(E){
     const doc = T(), t = E.t.bind(E), d = E.state.dock;
     const wrap = def => `<div class="vtw">${button(E, def, 'vtb')}${phone() ? '' : flyoutFor(E, def.id)}</div>`;
-    const grp = (ids, g, lbl) => `<div class="vgrp" data-g="${g}" role="group" aria-label="${C().esc(t(lbl))}">${ids.map(id => wrap(byId(id))).join('')}</div>`;
+    /* desk tools (the model tree) need the desktop shell's side panel */
+    const deskOnly = id => !(byId(id).desk && E.stacked());
+    const grp = (ids, g, lbl) => `<div class="vgrp" data-g="${g}" role="group" aria-label="${C().esc(t(lbl))}">${ids.filter(deskOnly).map(id => wrap(byId(id))).join('')}</div>`;
     /* D73: every tool is on the bar (unsupported ones muted, with the reason
        in their tooltip); a small control collapses the bar to one icon. */
     if(!phone() && E.state.vbarMin){
