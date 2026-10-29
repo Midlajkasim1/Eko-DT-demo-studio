@@ -1231,6 +1231,11 @@
           histAge:null, measureResult:null
         }, NO_SEL)); return; }
       if(!def) return;
+      /* The tree shares the summary panel with nothing else, so picking any other tool closes it the way
+         clicking Tree again does (the summary comes back where it was). Reset and the phone's More leave it. */
+      if(E.state.treeOpen && ['tool','bloom','toggle'].includes(def.kind)){
+        E.state.sumScrollBack = E.state.sumScroll || 0; E.state.treeOpen = false;
+      }
       if(def.kind === 'tool'){
         /* Select and Measure take clicks. Slice is a latch: it stays on beside them.
            Clicking Slice while another tool has the clicks re-arms the cut.

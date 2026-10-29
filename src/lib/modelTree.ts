@@ -67,6 +67,9 @@ const STOREY = /^IFCBUILDINGSTOREY$/i
 /** Spaces are elements in their own right but also hold the things placed in them */
 const SPACE_LIKE = /^IFC(SPACE|SPATIALZONE|EXTERNALSPATIALELEMENT)$/i
 
+/** Placeholder storeys the authoring tools leave behind ("delete BR ROOF"). The Levels filter drops them too. */
+export const isJunkStorey = (name: string): boolean => /delete/i.test(name)
+
 const text = (row: unknown, key: string): string => {
   const v = (row as Record<string, unknown> | undefined)?.[key]
   const raw = v && typeof v === 'object' && 'value' in v ? (v as { value: unknown }).value : v
@@ -149,6 +152,15 @@ export function groupStructure(
     if (parts.length || !own) group.hideIds.set(id, own ? [id, ...parts] : parts)
   }
 
+  const skip = (node: SpatialNode) => {
+    const stack = [...(node.children ?? [])]
+    while (stack.length) {
+      const next = stack.pop()!
+      if (next.localId != null) seen.add(next.localId)
+      if (next.children) stack.push(...next.children)
+    }
+  }
+
   /** `groupCategory` is the class of the group this node sits in, when it sits in one */
   const walk = (node: SpatialNode, groupCategory: string | null, storeyId: number | null) => {
     if (node.localId == null) {
@@ -161,6 +173,11 @@ export function groupStructure(
     const into = (nextStorey: number | null) => node.children?.forEach(child => walk(child, null, nextStorey))
     if (STOREY.test(category ?? '')) {
       seen.add(id)
+      if (isJunkStorey(storeyInfo.get(id)?.name ?? '')) {
+        // Neither the storey nor what it holds is listed; marking them seen keeps them out of "No level assigned"
+        skip(node)
+        return
+      }
       storeyFor(id)
       into(id)
     } else if (SPATIAL_CONTAINER.test(category ?? '')) {

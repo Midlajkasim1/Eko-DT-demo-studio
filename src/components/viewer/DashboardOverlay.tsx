@@ -26,6 +26,7 @@ import { dashboardProjectInfo } from '@/lib/finSettings'
 
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import { DashboardModelTree } from '@/components/viewer/DashboardModelTree'
+import { isJunkStorey } from '@/lib/modelTree'
 
 interface DashboardOverlayProps {
   visible: boolean
@@ -706,7 +707,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const numberedFloor = (n: number) => namedFloor(n, n >= 0 && n < ORDINALS.length ? ORDINALS[n] : `Floor ${n}`)
     const floorKey = (raw: string): Floor | null => {
       const name = raw.trim()
-      if (!name || /delete/i.test(name)) return null
+      if (!name || isJunkStorey(name)) return null
       const s = name.toUpperCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim()
       if (/\bBASEMENT\b|^BF$|^B\d+$/.test(s)) return namedFloor(-10, 'Basement')
       if (/\bROOF\b|^RF$/.test(s)) return namedFloor(1000, 'Roof')
