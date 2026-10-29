@@ -16617,3 +16617,191 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   align-items:center;
   margin-top:4px
 }
+
+/* ============================================================================
+   MODEL TREE — the summary panel's second view (Tree tool in the viewer bar).
+   The host element is moved into #ovp by app.js after every render; the
+   rules below only style what the tree itself renders.
+   ============================================================================ */
+.dashboard-native-container #ovp[data-tree="1"] .ovpad {
+  overflow:hidden;
+  padding:6px 24px 84px 16px;
+  gap:8px
+}
+
+.dashboard-native-container[dir="rtl"] #ovp[data-tree="1"] .ovpad {
+  padding:6px 16px 84px 24px
+}
+
+.dashboard-native-container .mthost {
+  flex:1;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  pointer-events:auto
+}
+
+.dashboard-native-container .mtwrap {
+  flex:1;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  gap:6px
+}
+
+.dashboard-native-container .mtsearch {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  color:var(--t2)
+}
+
+.dashboard-native-container .mtsearch .mtq {
+  flex:1;
+  min-width:0;
+  margin-block:0
+}
+
+.dashboard-native-container .mtnote {
+  margin:0;
+  color:var(--warnTx)
+}
+
+.dashboard-native-container .mtscroll {
+  flex:1;
+  min-height:0;
+  overflow-y:auto;
+  display:flex;
+  flex-direction:column;
+  gap:1px;
+  scrollbar-width:thin;
+  scrollbar-color:var(--bd2) transparent
+}
+
+.dashboard-native-container .mtic {
+  display:inline-flex;
+  flex:none
+}
+
+.dashboard-native-container .mtrow {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  min-height:32px;
+  padding-block:2px;
+  padding-inline-end:8px;
+  border-radius:8px;
+  color:var(--t1);
+  font-size:var(--txBodySz);
+  cursor:pointer;
+  outline:none
+}
+
+.dashboard-native-container .mtrow:hover {
+  background:var(--s3)
+}
+
+.dashboard-native-container .mtrow:focus-visible {
+  box-shadow:inset 0 0 0 2px var(--acc)
+}
+
+.dashboard-native-container .mtrow[data-kind="root"],.dashboard-native-container .mtrow[data-kind="model"] {
+  font-weight:600
+}
+
+.dashboard-native-container .mtrow[data-kind="element"] {
+  color:var(--t2)
+}
+
+.dashboard-native-container .mtrow[data-sel="1"] {
+  background:var(--accT);
+  color:var(--t1)
+}
+
+.dashboard-native-container .mtrow[data-dim="1"] .mtlbl,.dashboard-native-container .mtrow[data-dim="1"] .mtbadge {
+  opacity:.5
+}
+
+.dashboard-native-container .mttog {
+  width:22px;
+  height:22px;
+  flex:none;
+  display:inline-grid;
+  place-items:center;
+  padding:0;
+  background:none;
+  border:0;
+  border-radius:6px;
+  color:var(--t2);
+  cursor:pointer
+}
+
+.dashboard-native-container .mttog:hover {
+  background:var(--s3);
+  color:var(--t1)
+}
+
+.dashboard-native-container .mttog--none {
+  pointer-events:none
+}
+
+.dashboard-native-container[dir="rtl"] .mttog .mtic svg {
+  transform:scaleX(-1)
+}
+
+.dashboard-native-container .mtcheck {
+  width:15px;
+  height:15px;
+  margin:0;
+  flex:none;
+  accent-color:var(--acc);
+  cursor:pointer
+}
+
+.dashboard-native-container .mtlbl {
+  flex:1;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+
+.dashboard-native-container .mtbadge {
+  flex:none;
+  padding-inline:8px;
+  border:1px solid var(--bd1);
+  border-radius:999px;
+  background:var(--s3);
+  color:var(--t2);
+  font-size:var(--txChipSz)
+}
+
+.dashboard-native-container .mtcount {
+  flex:none;
+  min-width:2ch;
+  text-align:end;
+  color:var(--t3)
+}
+
+.dashboard-native-container .mtstatus {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding-block:10px;
+  padding-inline-end:8px;
+  color:var(--t2);
+  font-size:var(--txSubSz)
+}
+
+.dashboard-native-container .mtmore {
+  padding:6px 8px;
+  background:none;
+  border:0;
+  color:var(--link);
+  font-size:var(--txSubSz);
+  cursor:pointer
+}
+
+.dashboard-native-container .mtmore:hover {
+  text-decoration:underline
+}

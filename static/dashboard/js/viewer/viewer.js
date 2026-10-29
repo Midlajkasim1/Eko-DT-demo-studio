@@ -486,7 +486,7 @@ window.EKO_V = (function(){
         return `data-bimid="${C().esc(bimId)}" data-key="${C().esc(key)}"${st}`;
       })) : ''}
       ${mkPop(E)}
-      ${summaryHtml || ''}
+      ${E.state.treeOpen && config.dock !== 'none' && !E.stacked() ? C().treeShell(E) : (summaryHtml || '')}
       ${config.dock === 'none' ? '' : `<div id="vbottom">${window.EKO_VT.readout(E)}${dock(E)}</div>`}
       ${config.dock === 'none' ? '' : (E.state.dock.minimap ? minimap(E) : '') + window.EKO_VT.extras(E)}
       ${config.pills === false ? '' : `<div id="vcap">${config.dock === 'none' ? '' : window.EKO_VT.chip(E)}${caption(E)}</div>`}

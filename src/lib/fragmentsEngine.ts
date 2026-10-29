@@ -20,6 +20,7 @@ import { TemplateGradeShader } from './TemplateGradeShader'
 import { GodRayShader } from './GodRayShader'
 import { CustomEdgeShader } from './CustomEdgeShader'
 import { InkPass } from './InkPass'
+import { setHidden } from './visibilityCoordinator'
 import {
   dressMaterial,
   makeSkyEnvironment,
@@ -355,17 +356,17 @@ export async function initFragmentsEngine(
         return Object.values(found ?? {}).flat() as number[]
       })
       if (!localIds?.length) continue
-      const applied = await withRetry(() => (model as any).setVisible(localIds, false))
-      if (applied !== null) hiddenNonPhysical.set(id, localIds)
+      // Through the coordinator so the Levels picker and the tree neither undo this nor get undone by it
+      if (await setHidden(model, 'nonPhysical', localIds)) hiddenNonPhysical.set(id, localIds)
     }
     void fragments.update(true)
   }
 
   const showNonPhysical = async () => {
-    for (const [id, localIds] of hiddenNonPhysical.entries()) {
+    for (const id of hiddenNonPhysical.keys()) {
       const model = fragments.models.list.get(id)
       if (!model) continue
-      try { await (model as any).setVisible(localIds, true) } catch { /* model gone */ }
+      try { await setHidden(model, 'nonPhysical', []) } catch { /* model gone */ }
     }
     hiddenNonPhysical.clear()
     void fragments.update(true)
