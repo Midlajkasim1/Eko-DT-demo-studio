@@ -10,7 +10,7 @@ import { resetCameraToHome } from '@/lib/cameraUtils'
 import { frameSphereInView } from '@/lib/viewFraming'
 import { createMiniMap } from '@/lib/miniMap'
 import { disciplineOf } from '@/lib/modelDiscipline'
-import { classifyModel, isProjectSwitch, layerIds, layerVisibility, unclassifiedModels } from '@/lib/layerGroups'
+import { classifyModel, describeUnclassified, isProjectSwitch, layerIds, layerVisibility } from '@/lib/layerGroups'
 import { HVAC_GENERIC, HVAC_SPECIFIC, isCeilingType, levelHides, type LevelIndex, type MechanicalInfo } from '@/lib/floorPolicy'
 import { setHidden, isHidden, onVisibilityApplied } from '@/lib/visibilityCoordinator'
 import { measureTool } from '@/lib/measureTool'
@@ -1369,8 +1369,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       // A pick from the menu belongs to the old project; a page's own layers (heat map, Systems) still apply
       if (isProjectSwitch(knownIds, ids) && dock && dock.layer && dock.layer !== 'all' && !dock.layerContext) dock.layer = 'all'
       knownIds = ids
-      const other = unclassifiedModels(models).map(m => m.originalFileName).sort().join(', ')
-      if (other && other !== warnedOther) console.warn(`[layers] no discipline recognised in: ${other}. Listed under Other.`)
+      const lines = describeUnclassified(models).sort()
+      const other = lines.join(' | ')
+      if (other && other !== warnedOther) {
+        console.warn(`[layers] ${lines.length} model(s) have no recognised discipline: listed under Other in Layers and Unclassified in the tree. Add a rule in src/lib/layerGroups.ts: ${other}`)
+      }
       warnedOther = other
       // Only a real choice is applied; All layers leaves each model's own visibility alone
       if (dock?.layer && dock.layer !== 'all') isolateLayer(dock.layer, true)

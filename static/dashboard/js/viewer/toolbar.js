@@ -55,7 +55,7 @@ window.EKO_VT = (function(){
       case 'slice': on = !!d.slice; break;
       case 'tree':  on = !!E.state.treeOpen; break;
       case 'levels':  on = d.bloom === 'levels' || d.level !== 'ALL'; tag = d.level !== 'ALL' ? d.level : null; break;
-      case 'layers': { const sel = chosenLayers(d); on = sel.length > 0; tag = on ? E.t('layDisciplines') : null; break; }
+      case 'layers': on = chosenLayers(d).length > 0; break;   /* the button keeps its name; the pressed state says a layer is chosen */
       case 'minimap': on = !!d.minimap; break;
       case 'style':   on = d.style !== 'default'; tag = on ? E.t(STY[d.style] || 'styDefault') : null; break;
       case 'more':    on = BLOOMS_MORE.includes(d.bloom); dot = viewState(E).length > 0; break;

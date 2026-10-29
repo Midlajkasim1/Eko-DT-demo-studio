@@ -220,7 +220,7 @@ window.EKO_I18N.en = {
   "toneDot": "Dot tone",
   "toneSepia": "Sepia",
   "layAll": "All layers",
-  "layDisciplines": "Disciplines",
+  "layDisciplines": "Layers",
   "layArch": "Architecture",
   "layElec": "Electrical",
   "layInt": "Interior",

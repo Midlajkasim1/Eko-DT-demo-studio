@@ -4,7 +4,8 @@
  * its own, so a project switch or a late-loading model only means calling these again.
  *
  * Discipline comes from the file name. The registry holds no discipline field, so there is no
- * better source to prefer.
+ * better source to prefer. The Tree Viewer groups its models with the same function, so the two
+ * always agree.
  */
 import { TOKEN } from './modelDiscipline.ts'
 
@@ -17,17 +18,39 @@ export const GROUP_ORDER: LayerGroupId[] = ['arch', 'elec', 'int', 'mech', 'str'
    (modelDiscipline.TOKEN); the long forms are what discipline files are usually called. */
 const WORDS: Record<string, LayerGroupId> = {
   ...TOKEN,
-  ELECTRICAL: 'elec', ELECTRIC: 'elec',
+  ELECTRICAL: 'elec', ELECTRIC: 'elec', ELECT: 'elec', ELE: 'elec',
   MECHANICAL: 'mech', MECH: 'mech',
-  ARCHITECTURE: 'arch', ARCHITECTURAL: 'arch',
-  STRUCTURE: 'str', STRUCTURES: 'str',
+  ARCHITECTURE: 'arch', ARCHITECTURAL: 'arch', ARCHI: 'arch',
+  STRUCTURE: 'str', STRUCTURES: 'str', STRUC: 'str',
+  CON: 'str', // "Eng-CON": the construction set. Its content is beams, columns and footings.
   INTERIOR: 'int', INTERIORS: 'int',
-  LANDSCAPE: 'land', LANDSCAPING: 'land',
-  SITE: 'site',
+  LANDSCAPE: 'land', LANDSCAPES: 'land', LANDSCAPING: 'land',
+  SITE: 'site', SITEWORK: 'site', SITEWORKS: 'site',
+}
+
+/**
+ * ISO 19650 style names: Project-Originator-Volume-Level-Type-Role-Number, as in
+ * "MAA-KLD-AN09-ZZ-M3-AR-0001". The role is a field of its own, so it is read from there and nowhere
+ * else in the name: an originator that happens to be "ST" does not make a model structural.
+ */
+const ISO_NAME = /^[A-Z0-9]+-[A-Z0-9]+-[A-Z0-9]+-[A-Z0-9]+-[A-Z][A-Z0-9]-([A-Z]{1,2})-\d{3,6}(?:-|$)/
+const ISO_ROLES: Record<string, LayerGroupId> = {
+  A: 'arch', AR: 'arch',
+  S: 'str', ST: 'str',
+  E: 'elec', EL: 'elec',
+  M: 'mech', ME: 'mech', H: 'mech',
+  I: 'int', ID: 'int',
+  L: 'land', LA: 'land',
 }
 
 /** "ID" and "IN" are ordinary words and identifiers; they only count when they stand alone ("ID2024" is not Interior) */
 const NOT_WITH_DIGITS = new Set(['ID', 'IN'])
+
+const stripExtension = (fileName: string): string => String(fileName || '').replace(/\.(ifc|frag|glb|gltf)$/i, '')
+
+/** The words of a file name, upper-cased: split on anything that is not a letter or digit, and between camelCase words */
+export const modelTokens = (fileName: string): string[] =>
+  stripExtension(fileName).replace(/([a-z])([A-Z])/g, '$1 $2').toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean)
 
 export interface Classification {
   group: LayerGroupId
@@ -40,9 +63,13 @@ export interface Classification {
  * are Electrical, Mechanical, Electrical, Electrical. "Website" is not Site. The first matching token wins.
  */
 export function classifyModel(fileName: string): Classification {
-  const base = String(fileName || '').replace(/\.(ifc|frag|glb|gltf)$/i, '')
-  const tokens = base.replace(/([a-z])([A-Z])/g, '$1 $2').toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean)
-  for (const token of tokens) {
+  const base = stripExtension(fileName)
+  const iso = ISO_NAME.exec(base.toUpperCase())
+  if (iso) {
+    const group = ISO_ROLES[iso[1]]
+    return group ? { group, known: true } : { group: 'other', known: false }
+  }
+  for (const token of modelTokens(fileName)) {
     const bare = token.replace(/\d+$/, '')
     const hit = WORDS[token] ?? (bare && bare !== token && !NOT_WITH_DIGITS.has(bare) ? WORDS[bare] : undefined)
     if (hit) return { group: hit, known: true }
@@ -79,6 +106,14 @@ export function groupModels(models: LayerModel[]): LayerGroup[] {
 /** Models whose names matched nothing, for the report and the console */
 export const unclassifiedModels = (models: LayerModel[]): LayerModel[] =>
   unique(models).filter(m => !classifyModel(m.originalFileName).known)
+
+/** One line per model that needs a classification rule, saying which name and which words were tried */
+export const describeUnclassified = (models: LayerModel[]): string[] =>
+  unclassifiedModels(models).map(m => {
+    const iso = ISO_NAME.exec(stripExtension(m.originalFileName).toUpperCase())
+    const why = iso ? `ISO 19650 role code "${iso[1]}" is not in ISO_ROLES` : `no discipline word in [${modelTokens(m.originalFileName).join(', ') || 'empty name'}]`
+    return `"${m.originalFileName}" (model ${m.modelId}): ${why}`
+  })
 
 /** The menu: All layers, then each discipline the project actually has a model for */
 export function layerIds(models: LayerModel[]): string[] {
