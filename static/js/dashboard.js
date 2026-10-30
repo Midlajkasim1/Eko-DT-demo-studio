@@ -3444,6 +3444,7 @@
         { id: 'default', label: 'Default' },
         { id: 'photoreal', label: 'Photoreal' },
         { id: 'minimal', label: 'Minimalist' },
+        { id: 'studio', label: 'Studio' },
         { id: 'xray', label: 'X-ray' }
       ];
 

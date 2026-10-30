@@ -1947,7 +1947,7 @@
     return '';
   }
 
-  /* IfcSpace GlobalIds from the Including Spaces mech model.
+  /* Marsa Including Spaces rooms. Used only when the project has no space links.
      Old and new ids: docs/Models/MAA-RAM-AN09-ZZ-ME-M3-0001-space-ids.json.
      IS-01..07 → Space 22..28 one-to-one. IAQ-01..04 → two rooms each. */
   var SPACE_22 = { bimId: '1udQe6xPr0vPBzlkNZrBsM', space: 'Space 22' };
@@ -1966,10 +1966,36 @@
     IAQ04: [SPACE_28]
   };
 
+  function readSpaceLinks() {
+    var host = window.EKO_HOST_ENGINE;
+    var list = host && typeof host.spaceLinks === 'function' ? host.spaceLinks() : [];
+    return Array.isArray(list) ? list : [];
+  }
+
+  function foldId(id) {
+    var s = String(id || '');
+    if (s.indexOf('ast-') === 0) s = s.substring(4);
+    return s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  }
+
+  /* A linked room wins. Any space link at all turns the Marsa room table off. */
+  function pinsFor(key, name) {
+    var links = readSpaceLinks();
+    var hits = links.filter(function (l) {
+      var n = String(l.name || '');
+      var sk = sensorKey(n);
+      if (key && sk && sk === key) return true;
+      return foldId(n) === foldId(name);
+    });
+    if (hits.length) return hits.map(function (l) { return { bimId: l.guid, space: l.element || l.name }; });
+    if (links.length) return [];
+    return (SPACE_GUID[key] || []).slice();
+  }
+
   function blankZone(key) {
     var kind = key.indexOf('IAQ') === 0 ? 'iaq' : 'is';
     var name = key.slice(0, kind === 'iaq' ? 3 : 2) + '-' + key.slice(kind === 'iaq' ? 3 : 2);
-    var pins = SPACE_GUID[key] || [];
+    var pins = pinsFor(key, name);
     return {
       nameEn: name, nameAr: name, floor: '', kind: kind,
       tempC: null, rh: null, co2: null, hours: [],
@@ -1989,6 +2015,7 @@
     return { id: '', value: null };
   }
 
+  var heatEquip = null;
   var heatRange = 'today';
   var heatStep = null;
   var heatHist = {};
@@ -2170,11 +2197,15 @@
   }
 
   function applyHeat(list) {
+    if (Array.isArray(list)) heatEquip = list;
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !site.heat || !Array.isArray(list)) return;
     var zones = [];
-    for (var i = 1; i <= 4; i++) zones.push(blankZone('IAQ' + String(i).padStart(2, '0')));
-    for (var j = 1; j <= 7; j++) zones.push(blankZone('IS' + String(j).padStart(2, '0')));
+    var linkedSpaces = readSpaceLinks();
+    if (!linkedSpaces.length) {
+      for (var i = 1; i <= 4; i++) zones.push(blankZone('IAQ' + String(i).padStart(2, '0')));
+      for (var j = 1; j <= 7; j++) zones.push(blankZone('IS' + String(j).padStart(2, '0')));
+    }
     var byKey = {};
     zones.forEach(function (z) { byKey[sensorKey(z.nameEn)] = z; });
     list.forEach(function (eq) {
@@ -2197,6 +2228,23 @@
       }
       if (eq.floor) z.floor = floorToken(eq.floor);
     });
+    var usedGuid = {};
+    zones.forEach(function (z) {
+      (z.bimIds || []).forEach(function (id) { if (id) usedGuid[id] = true; });
+    });
+    linkedSpaces.forEach(function (l) {
+      if (!l || !l.guid || usedGuid[l.guid]) return;
+      usedGuid[l.guid] = true;
+      var key = sensorKey(l.name);
+      var kind = key.indexOf('IAQ') === 0 ? 'iaq' : 'is';
+      zones.push({
+        nameEn: l.name, nameAr: l.name, floor: '', kind: kind,
+        tempC: null, rh: null, co2: null, hours: [],
+        bimId: l.guid,
+        bimIds: [l.guid],
+        spaceName: l.element || l.name
+      });
+    });
     zones.sort(function (a, b) { return a.nameEn.localeCompare(b.nameEn, undefined, { numeric: true }); });
     zones.forEach(function (z, i) {
       z.rect = [10 + (i % 4) * 22, 16 + Math.floor(i / 4) * 22, 18, 16];
@@ -2205,7 +2253,7 @@
     var seen = {};
     zones.forEach(function (z) { seen[z.floor] = true; });
     var floors = ['All'].concat(order.filter(function (f) { return seen[f]; }));
-    Object.keys(seen).forEach(function (f) { if (order.indexOf(f) < 0) floors.push(f); });
+    Object.keys(seen).forEach(function (f) { if (f && order.indexOf(f) < 0) floors.push(f); });
     site.heat.zones = zones;
     site.heat.floors = floors;
     zones.forEach(function (z) { ensureHistory(z.tempId); ensureHistory(z.rhId); ensureHistory(z.co2Id); });
@@ -2225,6 +2273,10 @@
       heatStep = i == null ? null : i;
       applyShown();
       return playLabel();
+    },
+    relink: function () {
+      if (!Array.isArray(heatEquip)) return;
+      applyHeat(heatEquip);
     }
   };
 

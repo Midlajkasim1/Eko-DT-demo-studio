@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  var STYLE = { default: 'default', photo: 'photoreal', minimal: 'minimal', xray: 'xray' };
+  var STYLE = { default: 'default', photo: 'photoreal', minimal: 'minimal', studio: 'studio', xray: 'xray' };
 
   window.EKO_VIEWER.register('host', function () {
     var host = null;

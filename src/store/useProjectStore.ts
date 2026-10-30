@@ -84,6 +84,8 @@ interface ProjectState {
    *  project) into this project's folder, then makes it the open project's configuration.
    *  Throws when anything is not written, so the caller never reports a save that did not happen. */
   saveApiSettings: (apiSettings: import('@/types').ProjectApiSettings) => Promise<ProjectMeta>
+  /** Equipment & Spaces → Save. Writes project.json, then makes the links the open project's; throws when not written */
+  saveAssetLinks: (assetLinks: import('@/types').AssetLink[]) => Promise<void>
   setMaterialOverride: (modelId: string, override: import('@/types').MaterialOverride) => Promise<void>
   removeMaterialOverride: (modelId: string, overrideId: string) => Promise<void>
   setDirty: (dirty: boolean) => void
@@ -499,6 +501,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (failed) throw new Error(`Settings were saved to project.json, but api-config.json could not be written: ${failed}`)
     }
     return updated
+  },
+
+  saveAssetLinks: async (assetLinks) => {
+    const { currentProject, folderHandle } = get()
+    if (!currentProject || !folderHandle) throw new Error('No project is open.')
+    const projectId = currentProject.projectId
+    const updated: ProjectMeta = { ...currentProject, assetLinks, updatedAt: Date.now() }
+    await writeJson(folderHandle, 'project.json', updated)
+    if (get().currentProject?.projectId === projectId && get().folderHandle === folderHandle) {
+      set({ currentProject: { ...get().currentProject!, assetLinks, updatedAt: updated.updatedAt } })
+    }
+    try { await cacheHandle(projectId, folderHandle, updated, updated.thumbnail) } catch { /* recent-list card only */ }
+    set({ recentProjects: refreshCard(get().recentProjects, updated) })
   },
 
   setMaterialOverride: async (modelId: string, override: import('@/types').MaterialOverride) => {

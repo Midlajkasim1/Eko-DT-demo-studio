@@ -193,8 +193,30 @@ export interface ProjectMeta {
   materialOverrides?: Record<string, MaterialOverride>
   mapConfig?: MapConfig
   mapAssets?: Record<string, MapAsset>
+  /** FIN equipment and heatmap spaces ↔ model elements, edited in Equipment & Spaces */
+  assetLinks?: AssetLink[]
   /** Attached from thumbnail.webp on open, and persisted back by saveProjectMeta */
   thumbnail?: string
+}
+
+/**
+ * One named thing and the model element it is drawn as.
+ * Equipment links omit `kind`. Space links set `kind: 'space'` and use `equip` as the heatmap name.
+ * Keyed on the IFC GlobalId, which a revised model keeps.
+ */
+export interface AssetLink {
+  /** FIN equipment name, or the heatmap name of a space */
+  equip: string
+  /** FIN equipment record id, so a rename in FIN can be followed */
+  finId?: string
+  /** IFC GlobalId */
+  guid: string
+  /** Equipment type (FCU, AHU…) or SPACE. The type picks the schematic drawn inside equipment. */
+  type: string
+  /** The element's name when it was linked */
+  element?: string
+  /** Absent on equipment links saved before spaces existed */
+  kind?: 'equip' | 'space'
 }
 
 /** Everything the project list renders, so opening it never parses project.json */

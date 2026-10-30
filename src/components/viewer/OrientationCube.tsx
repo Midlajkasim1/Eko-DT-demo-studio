@@ -48,7 +48,6 @@ const FACE_LABELS: { face: string; transform: string; accent?: boolean }[] = [
 
 export function OrientationCube({ engineRef, dashboardVisible }: OrientationCubeProps) {
   const cubeRef = useRef<HTMLDivElement>(null)
-  const frameRef = useRef(0)
   const lookSeq = useRef(0)
 
   // Aggressive RTL detection (FIN dashboard might set it on body or a child container)
@@ -192,22 +191,37 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
     return () => window.removeEventListener('eko-look-face', onLook)
   }, [snapTo])
 
-  /** Sync cube rotation to the live camera */
+  /** Follow the camera, and only while it is actually moving. */
   useEffect(() => {
-    const tick = () => {
+    let controls: { addEventListener: Function; removeEventListener: Function } | null = null
+    let raf = 0
+    let stopped = false
+    const apply = () => {
       const cube = cubeRef.current
-      const engine = engineRef.current
-      if (cube && engine?.world?.camera?.three) {
-        const cam = engine.world.camera.three as THREE.PerspectiveCamera
-        const euler = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ')
-        const xDeg = THREE.MathUtils.radToDeg(euler.x)
-        const yDeg = -THREE.MathUtils.radToDeg(euler.y)
-        cube.style.transform = `rotateX(${xDeg.toFixed(2)}deg) rotateY(${yDeg.toFixed(2)}deg)`
-      }
-      frameRef.current = requestAnimationFrame(tick)
+      const cam = engineRef.current?.world?.camera?.three as THREE.PerspectiveCamera | undefined
+      if (!cube || !cam) return
+      const euler = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ')
+      const xDeg = THREE.MathUtils.radToDeg(euler.x)
+      const yDeg = -THREE.MathUtils.radToDeg(euler.y)
+      cube.style.transform = `rotateX(${xDeg.toFixed(2)}deg) rotateY(${yDeg.toFixed(2)}deg)`
     }
-    frameRef.current = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(frameRef.current)
+    const wait = () => {
+      if (stopped) return
+      const next = engineRef.current?.world?.camera?.controls
+      if (!next) {
+        raf = requestAnimationFrame(wait)
+        return
+      }
+      controls = next
+      controls.addEventListener('update', apply)
+      apply()
+    }
+    wait()
+    return () => {
+      stopped = true
+      cancelAnimationFrame(raf)
+      controls?.removeEventListener('update', apply)
+    }
   }, [engineRef])
 
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -441,20 +455,34 @@ function CompassRing({ engineRef }: { engineRef: React.MutableRefObject<Fragment
   const needleRef = useRef<SVGGElement>(null)
 
   useEffect(() => {
-    let frame = 0
-    const tick = () => {
-      const engine = engineRef.current
-      if (engine?.world?.camera?.three && needleRef.current) {
-        const cam = engine.world.camera.three as THREE.PerspectiveCamera
-        const euler = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ')
-        const deg = THREE.MathUtils.radToDeg(euler.y)
-        needleRef.current.style.transform = `rotate(${-deg.toFixed(1)}deg)`
-        needleRef.current.style.transformOrigin = '18px 18px'
-      }
-      frame = requestAnimationFrame(tick)
+    let controls: { addEventListener: Function; removeEventListener: Function } | null = null
+    let raf = 0
+    let stopped = false
+    const apply = () => {
+      const cam = engineRef.current?.world?.camera?.three as THREE.PerspectiveCamera | undefined
+      if (!cam || !needleRef.current) return
+      const euler = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ')
+      const deg = THREE.MathUtils.radToDeg(euler.y)
+      needleRef.current.style.transform = `rotate(${-deg.toFixed(1)}deg)`
+      needleRef.current.style.transformOrigin = '18px 18px'
     }
-    frame = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(frame)
+    const wait = () => {
+      if (stopped) return
+      const next = engineRef.current?.world?.camera?.controls
+      if (!next) {
+        raf = requestAnimationFrame(wait)
+        return
+      }
+      controls = next
+      controls.addEventListener('update', apply)
+      apply()
+    }
+    wait()
+    return () => {
+      stopped = true
+      cancelAnimationFrame(raf)
+      controls?.removeEventListener('update', apply)
+    }
   }, [engineRef])
 
   return (

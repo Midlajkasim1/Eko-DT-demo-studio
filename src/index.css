@@ -2017,6 +2017,174 @@ Wait, if iframe has pointer-events: auto, it works. Let's fix this in iframe bod
   cursor: not-allowed;
 }
 
+.asset-links-modal {
+  max-width: 1120px;
+  width: calc(100% - 32px);
+  max-height: 90vh;
+}
+.al-sources,
+.al-toolbar,
+.al-actions,
+.al-import-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.al-sources {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.al-sources span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.al-actions {
+  justify-content: flex-start;
+}
+.al-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.al-models {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.al-models label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+.al-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ds-btn.al-small {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+.al-search,
+.al-search-row input,
+.al-type {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.al-search {
+  min-width: 220px;
+}
+.al-type {
+  width: 96px;
+  font-family: var(--font-mono);
+}
+.al-import textarea {
+  width: 100%;
+  min-height: 120px;
+  box-sizing: border-box;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+.al-notice,
+.al-error {
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+.al-notice {
+  color: var(--text-secondary);
+}
+.al-error {
+  color: var(--red);
+}
+.al-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.al-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: -24px;
+  background: var(--bg-raised);
+}
+.al-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.al-name {
+  font-weight: 500;
+}
+.al-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.al-guid {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.al-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.al-chip {
+  text-align: left;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.al-chip:hover {
+  border-color: var(--accent);
+}
+.al-search-row {
+  display: flex;
+  gap: 6px;
+}
+.al-search-row input {
+  flex: 1;
+  min-width: 0;
+}
+.al-status {
+  display: inline-block;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.al-ok { color: #2ecc71; }
+.al-warn { color: #f59e0b; }
+.al-bad { color: var(--red); }
+.al-none { color: var(--text-muted); }
+
 .confirm-modal {
   max-width: 440px;
   width: calc(100% - 32px);

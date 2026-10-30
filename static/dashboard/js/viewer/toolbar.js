@@ -29,7 +29,7 @@ window.EKO_VT = (function(){
   /* Every non-default view setting, named for people (D71). */
   const LBL = { all:'layAll', arch:'layArch', elec:'layElec', int:'layInt', mech:'layMech', str:'layStr', equip:'layEquip', site:'laySite', land:'layLand', other:'layOther' };
   const chosenLayers = d => Array.isArray(d.layer) ? d.layer : (d.layer && d.layer !== 'all' ? [d.layer] : []);
-  const STY = { default:'styDefault', photo:'styPhoto', minimal:'styMinimal', xray:'styXray' };
+  const STY = { default:'styDefault', photo:'styPhoto', minimal:'styMinimal', studio:'styStudio', xray:'styXray' };
   const levelName = (E, l) => /^L\d+$/.test(l) ? E.t('lvlName', { n: l.slice(1) }) : l;
   const styleName = (E, d) => E.t(STY[d.style] || 'styDefault');
   function viewState(E){
@@ -198,7 +198,7 @@ window.EKO_VT = (function(){
         <div class="vplist">${rows}</div></div>`;
     }
     if(which === 'style'){
-      const DEFS = [['default', t('styDefault')], ['photo', t('styPhoto')], ['minimal', t('styMinimal')], ['xray', t('styXray')]];
+      const DEFS = [['default', t('styDefault')], ['photo', t('styPhoto')], ['minimal', t('styMinimal')], ['studio', t('styStudio')], ['xray', t('styXray')]];
       const tiles = DEFS.map(sd =>
         `<button class="mztile mzfan" data-act="setStyle" data-v="${sd[0]}" data-on="${d.style === sd[0]}">
            <span class="mztileimg tpl-shot" data-sty="${sd[0]}" aria-hidden="true"><span class="tpl-sun"></span><span class="tpl-ground"></span><span class="tpl-mass tpl-mass--tall"></span><span class="tpl-mass tpl-mass--low"></span></span>

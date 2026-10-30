@@ -12,7 +12,49 @@ export const TONE_MAPPING_OPTIONS: { value: ToneMappingId; label: string }[] = [
 
 export const SHADOW_MAP_SIZES = [1024, 2048, 4096, 8192]
 
-export type TemplateId = 'default' | 'photoreal' | 'minimal' | 'xray' | 'monochrome'
+export type TemplateId = 'default' | 'photoreal' | 'minimal' | 'studio' | 'xray' | 'monochrome'
+
+/** What the Studio style can turn on and tune. Exported inside renderSettings. */
+export interface StudioAdjust {
+  shadows: boolean
+  softShadows: boolean
+  /** PCF shadow radius for the Studio sun. */
+  shadowRadius: number
+  ambientOcclusion: boolean
+  /** GTAO radius in world units. */
+  aoRadius: number
+  aoIntensity: number
+  edges: boolean
+  edgeStrength: number
+  sunIntensity: number
+  ambient: number
+  exposure: number
+}
+
+export const STUDIO_ADJUST_DEFAULTS: StudioAdjust = {
+  shadows: true,
+  softShadows: true,
+  shadowRadius: 4,
+  ambientOcclusion: true,
+  aoRadius: 1.8,
+  aoIntensity: 0.55,
+  edges: true,
+  edgeStrength: 0.25,
+  sunIntensity: 1.65,
+  ambient: 0.4,
+  exposure: 1,
+}
+
+/** Fills any key a saved project left out, so older files still open on the Studio look. */
+export function studioAdjustOf(source: Partial<StudioAdjust> | null | undefined): StudioAdjust {
+  const next = { ...STUDIO_ADJUST_DEFAULTS }
+  if (!source) return next
+  for (const key of Object.keys(STUDIO_ADJUST_DEFAULTS) as (keyof StudioAdjust)[]) {
+    const value = source[key]
+    if (value !== undefined) next[key] = value as never
+  }
+  return next
+}
 
 export const RENDER_DEFAULTS = {
   templateId: 'default' as TemplateId,
@@ -88,6 +130,13 @@ export const RENDER_DEFAULTS = {
   ssrEnabled: false,
 
   pbrMaterials: true,
+
+  /**
+   * Adjustments for the Studio dashboard style only.
+   * Kept apart from shadowsEnabled / aoRadius: those belong to Advanced Rendering
+   * and Render Lite, and their AO radius is in different units (N8AO, default 50).
+   */
+  studioAdjust: { ...STUDIO_ADJUST_DEFAULTS },
 }
 
 export type RenderSettings = typeof RENDER_DEFAULTS

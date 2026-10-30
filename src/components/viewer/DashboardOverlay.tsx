@@ -5,7 +5,8 @@ import * as OBC from '@thatopen/components'
 import { useProjectStore } from '@/store/useProjectStore'
 import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
-import { ASSET_BIM_MAPPING } from '@/constants/assetBimMapping'
+import { foldName, indexLinks, indexSpaceLinks, isGuid } from '@/lib/assetLinks'
+import type { AssetLink } from '@/types'
 import { resetCameraToHome } from '@/lib/cameraUtils'
 import { frameSphereInView } from '@/lib/viewFraming'
 import { createMiniMap } from '@/lib/miniMap'
@@ -41,7 +42,7 @@ interface DashboardOverlayProps {
   engineReady?: boolean
 }
 
-/* Equipment type (ASSET_BIM_MAPPING) -> the internals drawn inside its casing on selection */
+/* Equipment type (from the project's asset links) -> the internals drawn inside its casing on selection */
 const SCHEMATICS: Record<string, (localBox: THREE.Box3, modelMatrix: THREE.Matrix4, casing?: THREE.Object3D) => HvacSchematic | null> = {
   FCU:  createFcuSchematic,
   AHU:  createAhuSchematic,
@@ -117,27 +118,28 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     let colored: { bimId: string; tone: 'alarm' | 'healthy' | 'amber' } | null = null
     let highlightSeq = 0
 
-    /* IFC GlobalIds are 22 chars of [0-9A-Za-z_$]. FIN hands out point refs
-       ("@p:site:r:…") in the same bimId field; those are not in the model. */
-    const isGuid = (id: unknown): id is string => typeof id === 'string' && /^[0-9A-Za-z_$]{22}$/.test(id)
     const normAssetId = (id: string) => (id.startsWith('ast-') ? id.substring(4) : id)
-    /* FIN names differ from the mapping keys by spaces and dashes ("FCU ANC09 GF 02"). */
-    const fold = (id: string) => normAssetId(id).toUpperCase().replace(/[^A-Z0-9]/g, '')
-    const mappedByFold = new Map<string, string>()
-    const mappedList: { id: string; bimId: string }[] = []
-    for (const [id, rec] of Object.entries(ASSET_BIM_MAPPING)) {
-      if (!rec.bimId || !isGuid(rec.bimId)) continue
-      mappedByFold.set(fold(id), rec.bimId)
-      mappedList.push({ id, bimId: rec.bimId })
+    const fold = foldName
+    // Read from the open project on use, so links saved in Equipment & Spaces apply without a reload
+    let linkSrc: AssetLink[] | undefined | null = null
+    let linkIdx = indexLinks(undefined)
+    const links = () => {
+      const src = useProjectStore.getState().currentProject?.assetLinks
+      if (src !== linkSrc) {
+        linkSrc = src
+        linkIdx = indexLinks(src)
+      }
+      return linkIdx
     }
+    const linkFor = (assetId?: string | null) => (assetId ? links().byFold.get(fold(assetId)) : undefined)
 
     /* Asset id (with or without the ast- prefix) -> IFC GUID, or null.
-       The curated mapping wins over whatever id the live feed carries. */
+       The project's asset link wins over whatever id the live feed carries. */
     const bimIdFor = (assetId?: string | null): string | null => {
       if (!assetId) return null
       const norm = normAssetId(assetId)
-      const mapped = ASSET_BIM_MAPPING[norm]?.bimId || ASSET_BIM_MAPPING[assetId]?.bimId || mappedByFold.get(fold(assetId))
-      if (mapped && isGuid(mapped)) return mapped
+      const mapped = linkFor(assetId)?.guid
+      if (mapped) return mapped
       const assets: any[] = (window as any).EKO?.data?.assets || []
       const asset = assets.find(a => a.id === assetId || normAssetId(a.id || '') === norm)
       return isGuid(asset?.bimId) ? asset.bimId : null
@@ -318,13 +320,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     type Internals = { assetId: string; type: string }
     let active: (Internals & { schematic: HvacSchematic; bimId: string; last: number; synced: number }) | null = null
     /* The asset whose internals to draw: the asked one if its type has a
-       schematic, else any mapped asset on the same element that has one. */
+       schematic, else any linked asset on the same element that has one. */
     const internalsFor = (asked: string, bimId: string): Internals | null => {
-      const norm = normAssetId(asked)
-      const rec = ASSET_BIM_MAPPING[norm] || ASSET_BIM_MAPPING[asked]
-      if (rec && SCHEMATICS[rec.type]) return { assetId: norm, type: rec.type }
-      const hit = mappedList.find(m => m.bimId === bimId && SCHEMATICS[ASSET_BIM_MAPPING[m.id]?.type])
-      return hit ? { assetId: hit.id, type: ASSET_BIM_MAPPING[hit.id].type } : null
+      const rec = linkFor(asked)
+      if (rec && SCHEMATICS[rec.type]) return { assetId: normAssetId(asked), type: rec.type }
+      const hit = links().list.find(m => m.guid === bimId && SCHEMATICS[m.type])
+      return hit ? { assetId: hit.equip, type: hit.type } : null
     }
     const pointsFor = (assetId: string, bimId: string) => {
       const want = fold(assetId)
@@ -532,7 +533,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
 
     /* Equipment is green or red. Anything else stays amber. */
     const isEquipment = (asked: string, bimId: string) => {
-      if (mappedList.some(m => m.id === asked || m.bimId === bimId)) return true
+      if (linkFor(asked) || links().list.some(m => m.guid === bimId)) return true
       const assets: any[] = (window as any).EKO?.data?.assets || []
       return assets.some(a => a.id === asked || bimIdFor(a.id) === bimId)
     }
@@ -1283,6 +1284,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const unsubTemplate = useAppStore.subscribe((s, prev) => {
       if (s.templateId !== prev.templateId) void syncAlarmGlow()
     })
+    const unsubLinks = useProjectStore.subscribe((s, prev) => {
+      if (s.currentProject?.assetLinks === prev.currentProject?.assetLinks) return
+      void resolveAllAssetPositions()
+      try { (window as { EKO_HEAT?: { relink?: () => void } }).EKO_HEAT?.relink?.() } catch { /* the next equipment refresh rebuilds the zones */ }
+      try { (window as { EKO?: { set?: (patch: object) => void } }).EKO?.set?.({}) } catch { /* the dashboard redraws on its next refresh */ }
+    })
 
     /* While the heatmap is up, the architecture model stays present but light,
        so the room colour reads through the walls. Glass that is already fainter
@@ -1476,7 +1483,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       resetView: () => resetCameraToHome(engine),
       bimIdFor,
       isAlarmed,
-      listMapped: () => mappedList.map(m => ({ id: m.id, bimId: m.bimId })),
+      listMapped: () => links().list.map(m => ({ id: m.equip, bimId: m.guid })),
+      spaceLinks: () => indexSpaceLinks(useProjectStore.getState().currentProject?.assetLinks),
       listLevels: () => levels.map(l => ({ id: l.id, name: l.name })),
       isolateLevel,
       listLayers: () => layerIds(useModelStore.getState().models).map(id => ({ id, name: id })),
@@ -1603,6 +1611,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       void clearSpaceHeat()
       removeGhost()
       unsubTemplate()
+      unsubLinks()
       unsubVisibility()
       unsubLayers()
       alarmSeq++
