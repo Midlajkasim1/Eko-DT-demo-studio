@@ -29,6 +29,7 @@ window.EKO_LAYOUTS.tools = {
   "analysis": ["measure", "slice", "layers", "minimap", "style"],         /* group B — analysis (D73: all visible) */
   "more":     ["measure", "slice", "layers", "minimap", "style"],         /* the phone tools sheet */
   "radial":   ["select", "measure", "slice", "levels", "layers", "minimap", "style", "reset"],
+  "defaultStyle": "studio",                                           /* the style the viewer opens on, and that Reset returns to */
   "expandKey": "\\",                                                    /* collapse / expand the bar */
   "phone":    { "bar": ["select", "levels", "reset", "more"],
                 "fab": { "id": "alerts", "icon": "warn", "label": "alertCentre", "tip": "alertCentreTip",

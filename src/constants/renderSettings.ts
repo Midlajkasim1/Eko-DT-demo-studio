@@ -57,7 +57,7 @@ export function studioAdjustOf(source: Partial<StudioAdjust> | null | undefined)
 }
 
 export const RENDER_DEFAULTS = {
-  templateId: 'default' as TemplateId,
+  templateId: 'studio' as TemplateId,
   templateSwitcher: true,
 
   realisticMode: false,
@@ -140,6 +140,15 @@ export const RENDER_DEFAULTS = {
 }
 
 export type RenderSettings = typeof RENDER_DEFAULTS
+
+/**
+ * The template a project opens on. Settings saved before templates existed have no templateId and were
+ * always the project's own look (Basic), so they stay that way; a project that never saved settings is new.
+ */
+export function savedTemplateId(saved: { templateId?: TemplateId } | null | undefined): TemplateId {
+  if (!saved) return RENDER_DEFAULTS.templateId
+  return saved.templateId ?? 'default'
+}
 
 export const RENDER_SETTING_KEYS = Object.keys(RENDER_DEFAULTS) as (keyof RenderSettings)[]
 

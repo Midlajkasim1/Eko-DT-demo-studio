@@ -210,7 +210,7 @@ window.EKO_I18N.en = {
   "treeAria": "Model tree",
   "dockTools": "Viewer tools",
   "styDefault": "Default",
-  "styMinimal": "Minimal",
+  "styMinimal": "B/W",
   "styXray": "X-ray",
   "styPhoto": "Photo",
   "styStudio": "Studio",

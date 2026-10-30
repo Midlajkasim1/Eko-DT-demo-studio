@@ -8,6 +8,7 @@ import { useProjectStore } from '@/store/useProjectStore'
 import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import { useMapStore } from '@/store/useMapStore'
 import { hasMap } from '@/lib/mapConfig'
+import { savedTemplateId } from '@/constants/renderSettings'
 import { dashboardProjectInfo } from '@/lib/finSettings'
 import { MapLayer } from '@/components/map/MapLayer'
 import { SignInOverlay, checkSession } from '@/viewer/SignInOverlay'
@@ -52,7 +53,7 @@ export default function ViewerApp() {
   const applyRenderSettings = useCallback((meta: ProjectMeta) => {
     if (meta.renderSettings) {
       setRealisticMode(meta.renderSettings.realisticMode)
-      setLightingParams(meta.renderSettings)
+      setLightingParams({ ...meta.renderSettings, templateId: savedTemplateId(meta.renderSettings) })
     }
   }, [setRealisticMode, setLightingParams])
 

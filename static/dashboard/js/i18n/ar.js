@@ -212,7 +212,7 @@ window.EKO_I18N.ar = {
   "treeAria": "شجرة النموذج",
   "dockTools": "أدوات العرض",
   "styDefault": "افتراضي",
-  "styMinimal": "بسيط",
+  "styMinimal": "أبيض وأسود",
   "styXray": "أشعة",
   "styPhoto": "صورة",
   "styStudio": "استوديو",

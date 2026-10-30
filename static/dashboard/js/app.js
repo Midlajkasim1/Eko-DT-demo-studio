@@ -44,6 +44,7 @@
   const E = window.EKO = {
     data: window.EKO_DATA.marsa,
     nav: window.EKO_LAYOUTS.nav,
+    defaultStyle: window.EKO_LAYOUTS.tools.defaultStyle,   /* what the viewer opens on and Reset returns to (layouts/tools.js) */
     lang: ls.get('eko-lang') || 'en',
     state: {
       pageId: 'marsa-overview', module: 'overview', sub: null,
@@ -55,7 +56,7 @@
       alarmF: { sev: new Set(), sys: new Set() },
       triageOpen: {}, alHistOpen: {},   /* alarm id -> its history is expanded */
       assetSel: null, apTab: 'alarms',
-      dock: { tool: null, slice: false, bloom: null, style: 'default', tone: 'blue',
+      dock: { tool: null, slice: false, bloom: null, style: window.EKO_LAYOUTS.tools.defaultStyle, tone: 'blue',
               level: 'ALL', layer: 'all', floorAlone: false, alerts: 'all', minimap: false },
       mkPop: null, mkPopN: 0, mkPulse: null, paint: null, radial: null, vbarMin: ls.get('eko-vbar') === 'min',   /* D73 */
       treeOpen: false, sumScroll: 0, sumScrollBack: null,   /* the model tree replaces the summary panel's body while open */
@@ -969,8 +970,8 @@
     const heat = E.state.pageId === 'heatmap';
     E.set(Object.assign({
       dock: heat
-        ? Object.assign({}, E.state.dock, { tool:null, slice:false, bloom:null, style:'default', tone:'blue', minimap:false, level:'Ground floor', floorAlone:false, layer:['arch','elec','int','mech'], layerContext:true })
-        : { tool:null, slice:false, bloom:null, style: mepLayer ? 'photo' : 'default', tone:'blue', level:'ALL', floorAlone:false, layer: mepLayer || 'all', layerContext: !!mepLayer, alerts:'all', minimap:false },
+        ? Object.assign({}, E.state.dock, { tool:null, slice:false, bloom:null, style:E.defaultStyle, tone:'blue', minimap:false, level:'Ground floor', floorAlone:false, layer:['arch','elec','int','mech'], layerContext:true })
+        : { tool:null, slice:false, bloom:null, style: mepLayer ? 'photo' : E.defaultStyle, tone:'blue', level:'ALL', floorAlone:false, layer: mepLayer || 'all', layerContext: !!mepLayer, alerts:'all', minimap:false },
       histAge:null, measureResult:null
     }, NO_SEL));
   }

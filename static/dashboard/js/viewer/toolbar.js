@@ -35,7 +35,7 @@ window.EKO_VT = (function(){
   function viewState(E){
     const d = E.state.dock, items = [];
     if(d.level !== 'ALL') items.push({ k:'level', text: levelName(E, d.level) });
-    if(d.style !== 'default') items.push({ k:'style', text: styleName(E, d) });
+    if(d.style !== T().defaultStyle) items.push({ k:'style', text: styleName(E, d) });
     const layersOn = chosenLayers(d);
     if(layersOn.length) items.push({ k:'layer', text: layersOn.map(id => E.t(LBL[id] || id)).join(', ') });
     if(d.minimap) items.push({ k:'minimap', text: E.t('dockMinimap') });
@@ -57,7 +57,7 @@ window.EKO_VT = (function(){
       case 'levels':  on = d.bloom === 'levels' || d.level !== 'ALL'; tag = d.level !== 'ALL' ? d.level : null; break;
       case 'layers': on = chosenLayers(d).length > 0; break;   /* the button keeps its name; the pressed state says a layer is chosen */
       case 'minimap': on = !!d.minimap; break;
-      case 'style':   on = d.style !== 'default'; tag = on ? E.t(STY[d.style] || 'styDefault') : null; break;
+      case 'style':   on = d.style !== T().defaultStyle; tag = on ? E.t(STY[d.style] || 'styDefault') : null; break;
       case 'more':    on = BLOOMS_MORE.includes(d.bloom); dot = viewState(E).length > 0; break;
       case 'reset':   on = resetList(E).length > 0; muted = !on; break;
     }
@@ -198,7 +198,8 @@ window.EKO_VT = (function(){
         <div class="vplist">${rows}</div></div>`;
     }
     if(which === 'style'){
-      const DEFS = [['default', t('styDefault')], ['photo', t('styPhoto')], ['minimal', t('styMinimal')], ['studio', t('styStudio')], ['xray', t('styXray')]];
+      /* Photo is not offered here; the Systems pages still use it, and STY above still names it */
+      const DEFS = [['default', t('styDefault')], ['minimal', t('styMinimal')], ['studio', t('styStudio')], ['xray', t('styXray')]];
       const tiles = DEFS.map(sd =>
         `<button class="mztile mzfan" data-act="setStyle" data-v="${sd[0]}" data-on="${d.style === sd[0]}">
            <span class="mztileimg tpl-shot" data-sty="${sd[0]}" aria-hidden="true"><span class="tpl-sun"></span><span class="tpl-ground"></span><span class="tpl-mass tpl-mass--tall"></span><span class="tpl-mass tpl-mass--low"></span></span>
