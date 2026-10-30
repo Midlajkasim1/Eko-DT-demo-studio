@@ -220,10 +220,12 @@ test('isolate with the visibility coordinator: the Tree hides survive switching 
   assert.ok(!isHidden(model, wall(5)) && !isHidden(model, ceil(4)) && isHidden(model, wall(3)))
 })
 
-test('the ground around the building (Landscape) is not filtered by a floor pick, unless the floor is isolated', () => {
-  assert.equal(floorFilterSkips('land', false), true)
-  assert.equal(floorFilterSkips('land', true), false, 'isolating a floor keeps the existing floor-only filter')
-  for (const group of ['arch', 'elec', 'mech', 'str', 'int', 'site', 'equip', 'other']) {
+test('the ground around the building (Landscape, Site) is not filtered by a floor pick, unless the floor is isolated', () => {
+  for (const ground of ['land', 'site']) {
+    assert.equal(floorFilterSkips(ground, false), true, ground)
+    assert.equal(floorFilterSkips(ground, true), false, 'isolating a floor keeps the existing floor-only filter')
+  }
+  for (const group of ['arch', 'elec', 'mech', 'str', 'int', 'equip', 'other']) {
     assert.equal(floorFilterSkips(group, false), false, `${group} still follows the floors`)
     assert.equal(floorFilterSkips(group, true), false)
   }
@@ -254,4 +256,35 @@ test('the report agrees with levelHides, and shows a Landscape model skipped unl
   const isolated = reportLevel(ix, pick('F2'), rankOf, { alone: true }, 'land')
   assert.equal(isolated.skipped, false)
   assert.ok(isolated.hidden > 0)
+})
+
+test('ground the building model carries (IfcSite, terrain) stays under a floor pick, and goes with Isolate Floor', () => {
+  const ix = arch()
+  ix.geom.push(900, 901, 902, 903)
+  ix.byFloor.get('F5')!.push(903)                       // the model also files one piece of it under a floor above
+  ix.ground = new Set([900, 901, 903])                  // 900 and 901 sit on no floor; 902 is loose geometry that is not ground
+  const cumulative = shown(ix, levelHides(ix, pick('F3'), rankOf, { alone: false }))
+  assert.ok(cumulative.includes(900) && cumulative.includes(901), 'floor-less ground stays')
+  assert.ok(cumulative.includes(903), 'ground is not part of the floor stack, even when the model files it on a floor')
+  assert.ok(!cumulative.includes(902), 'floor-less items that are not ground are filtered as before')
+  assert.ok(!cumulative.includes(wall(5)), 'the floors above still hide')
+  const alone = shown(ix, levelHides(ix, pick('F3'), rankOf, { alone: true }))
+  assert.ok(![900, 901, 902, 903].some(id => alone.includes(id)), 'Isolate Floor keeps its existing behaviour: the ground goes too')
+})
+
+test('a model without ground information filters exactly as before', () => {
+  const ix = arch()
+  ix.geom.push(900)
+  assert.equal(ix.ground, undefined)
+  assert.ok(!shown(ix, levelHides(ix, pick('F3'), rankOf, { alone: false })).includes(900))
+})
+
+test('the report counts the ground it keeps', () => {
+  const ix = arch()
+  ix.geom.push(900, 901)
+  ix.ground = new Set([900])
+  const rep = reportLevel(ix, pick('F3'), rankOf, { alone: false }, 'arch')
+  assert.equal(rep.groundKept, 1)
+  assert.deepEqual(rep.onNoFloor, [901])
+  assert.equal(reportLevel(ix, pick('F3'), rankOf, { alone: true }, 'arch').groundKept, 0)
 })

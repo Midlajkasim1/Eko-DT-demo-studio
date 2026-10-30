@@ -865,10 +865,13 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
            answer leaves both empty, which is the plain floor filter. */
         const ceilings = new Set<number>()
         const hvac = new Map<number, MechanicalInfo>()
+        const ground = new Set<number>()
         try {
           const onGeometry = new Set(geom)
           const idsOf = (found: any) => (Object.values(found || {}).flat() as number[]).filter(id => onGeometry.has(id))
           if (typeof model.getItemsOfCategories === 'function') {
+            /* The terrain a building model carries: not part of any floor, so a floor pick keeps it (lib/floorPolicy) */
+            for (const id of idsOf(await model.getItemsOfCategories([/^IFCSITE$/i, /^IFCGEOGRAPHICELEMENT$/i]))) ground.add(id)
             const coverings = idsOf(await model.getItemsOfCategories([/^IFCCOVERING$/i]))
             if (coverings.length && typeof model.getItemsData === 'function') {
               const rows = await model.getItemsData(coverings, {
@@ -894,7 +897,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
             }
           }
         } catch { /* plain floor filter */ }
-        return { geom, byFloor, ceilings, hvac }
+        return { geom, byFloor, ceilings, hvac, ground }
       })().catch((err) => { floorJobs.delete(model); throw err })
       floorJobs.set(model, job)
       return job
@@ -982,7 +985,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         }
         models.push({
           file: rec?.originalFileName ?? m.modelId, group: cls?.group ?? 'unknown', classified: cls?.known ?? false,
-          skippedByFloorPick: rep.skipped, geometry: rep.geometry, floors: rep.floors, hidden: rep.hidden,
+          skippedByFloorPick: rep.skipped, groundKept: rep.groundKept, geometry: rep.geometry, floors: rep.floors, hidden: rep.hidden,
           onNoFloor: rep.onNoFloor.length, onNoFloorClasses: Object.entries(classes).sort((a, b) => b[1] - a[1]).slice(0, 8),
         })
       }

@@ -27,12 +27,12 @@ export const HVAC_GENERIC =
   /^IFC(?:FLOW(?:SEGMENT|FITTING|TERMINAL|MOVINGDEVICE|CONTROLLER|STORAGEDEVICE|TREATMENTDEVICE)|ENERGYCONVERSIONDEVICE|DISTRIBUTIONFLOWELEMENT)$/i
 
 /** Layer groups (lib/layerGroups) that are the ground around the building, not part of its floor stack */
-const GROUND_CONTEXT: ReadonlySet<string> = new Set(['land'])
+const GROUND_CONTEXT: ReadonlySet<string> = new Set(['land', 'site'])
 
 /**
- * Whether the floor pick leaves a model of this layer group alone. The Landscape has no floors of its own to
- * match against the pick (its elements sit on the site, or on storeys the building does not share), so the
- * floor filter would hide it at every pick. Isolating a floor is the one case that still filters it.
+ * Whether the floor pick leaves a model of this layer group alone. The Landscape and the Site have no floors of
+ * their own to match against the pick (their elements sit on the site, or on storeys the building does not share),
+ * so the floor filter would hide them at every pick. Isolating a floor is the one case that still filters them.
  */
 export const floorFilterSkips = (group: string, alone: boolean): boolean => !alone && GROUND_CONTEXT.has(group)
 
@@ -50,6 +50,11 @@ export interface LevelIndex {
   byFloor: Map<string, number[]>
   ceilings: ReadonlySet<number>
   hvac: ReadonlyMap<number, MechanicalInfo>
+  /**
+   * Items of the ground classes (IfcSite, IfcGeographicElement) a building model can carry: the terrain it
+   * stands on. They are not part of the floor stack, so a pick that keeps the floors below keeps them too.
+   */
+  ground?: ReadonlySet<number>
 }
 
 export interface PickedFloor {
@@ -98,6 +103,9 @@ export function levelHides(
     if (!info.assigned || (at !== undefined && shown(at))) show.add(id)
   }
 
+  // The ground the model carries is under every floor, so only isolating a floor takes it away
+  if (!alone && ix.ground) for (const id of ix.ground) show.add(id)
+
   // The picked floor's own ceilings. Ceilings of the floors below are under the plan and stay.
   if (ix.ceilings.size) {
     for (const id of ix.byFloor.get(picked.id) ?? []) if (ix.ceilings.has(id)) show.delete(id)
@@ -117,6 +125,8 @@ export interface LevelReport {
   onNoFloor: number[]
   /** The pick leaves this whole model alone (floorFilterSkips) */
   skipped: boolean
+  /** Ground items of this model (IfcSite, terrain) the pick keeps because the floor is not isolated */
+  groundKept: number
 }
 
 /**
@@ -138,5 +148,6 @@ export function reportLevel(
   }
   const skipped = floorFilterSkips(group, !!options.alone)
   const hides = skipped ? [] : (levelHides(ix, picked, rankOf, options) ?? [])
-  return { geometry: ix.geom.length, floors, hidden: hides.length, onNoFloor: hides.filter(id => !onAFloor.has(id)), skipped }
+  const groundKept = skipped || options.alone ? 0 : (ix.ground?.size ?? 0)
+  return { geometry: ix.geom.length, floors, hidden: hides.length, onNoFloor: hides.filter(id => !onAFloor.has(id)), skipped, groundKept }
 }
