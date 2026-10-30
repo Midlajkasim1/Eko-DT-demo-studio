@@ -211,7 +211,7 @@ window.EKO_I18N.ar = {
   "treeCollapse": "طي",
   "treeAria": "شجرة النموذج",
   "dockTools": "أدوات العرض",
-  "styDefault": "افتراضي",
+  "styDefault": "أساسي",
   "styMinimal": "أبيض وأسود",
   "styXray": "أشعة",
   "styPhoto": "صورة",

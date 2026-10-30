@@ -209,7 +209,7 @@ window.EKO_I18N.en = {
   "treeCollapse": "Collapse",
   "treeAria": "Model tree",
   "dockTools": "Viewer tools",
-  "styDefault": "Default",
+  "styDefault": "Basic",
   "styMinimal": "B/W",
   "styXray": "X-ray",
   "styPhoto": "Photo",

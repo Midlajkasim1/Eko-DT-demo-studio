@@ -45,6 +45,7 @@
     data: window.EKO_DATA.marsa,
     nav: window.EKO_LAYOUTS.nav,
     defaultStyle: window.EKO_LAYOUTS.tools.defaultStyle,   /* what the viewer opens on and Reset returns to (layouts/tools.js) */
+    systemsStyle: window.EKO_LAYOUTS.tools.systemsStyle,   /* what HVAC & Mechanical, Electrical and the Heat Map open on and Reset returns to */
     lang: ls.get('eko-lang') || 'en',
     state: {
       pageId: 'marsa-overview', module: 'overview', sub: null,
@@ -222,12 +223,13 @@
       const enteringHeat = pageId === 'heatmap' && from !== 'heatmap';
       const leavingHeat = from === 'heatmap' && pageId !== 'heatmap';
       const HEAT_LAYERS = ['arch','elec','int','mech'];
-      /* HVAC & Mechanical share one model. Electrical is the other. Both open in Photoreal. Any other page returns to the style it had. */
+      /* HVAC & Mechanical share one model. Electrical is the other. Those two and the Heat Map open in Studio, whatever the Style panel's default is.
+         Any other page returns to the style it had. */
       const mep = pageId !== 'heatmap' && targetModule === 'systems' && (targetSub === 'hvac' || targetSub === 'mechanical' || targetSub === 'electrical');
       if (this.state.dock) {
-        if (mep) {
+        if (mep || pageId === 'heatmap') {
           if (this.state._styleBeforeMep == null) this.state._styleBeforeMep = this.state.dock.style;
-          this.state.dock.style = 'photo';
+          this.state.dock.style = this.systemsStyle;
         } else if (this.state._styleBeforeMep != null) {
           this.state.dock.style = this.state._styleBeforeMep;
           this.state._styleBeforeMep = null;
@@ -945,7 +947,7 @@
 
   /* Reset is everything back to how the viewer opens: camera, floor, style,
      layers, and the selection too (popup, equipment colour, asset panel).
-     HVAC & Mechanical keep the mech model, Electrical keeps the elec model, and both keep Photoreal. */
+     HVAC & Mechanical keep the mech model, Electrical keeps the elec model; those two and the Heat Map return to Studio, every other page to the default style. */
   function resetViewer(){
     const mepLayer = E.state.module === 'systems' && E.state.pageId !== 'heatmap'
       ? (E.state.sub === 'hvac' || E.state.sub === 'mechanical' ? 'mech' : E.state.sub === 'electrical' ? 'elec' : null)
@@ -970,8 +972,8 @@
     const heat = E.state.pageId === 'heatmap';
     E.set(Object.assign({
       dock: heat
-        ? Object.assign({}, E.state.dock, { tool:null, slice:false, bloom:null, style:E.defaultStyle, tone:'blue', minimap:false, level:'Ground floor', floorAlone:false, layer:['arch','elec','int','mech'], layerContext:true })
-        : { tool:null, slice:false, bloom:null, style: mepLayer ? 'photo' : E.defaultStyle, tone:'blue', level:'ALL', floorAlone:false, layer: mepLayer || 'all', layerContext: !!mepLayer, alerts:'all', minimap:false },
+        ? Object.assign({}, E.state.dock, { tool:null, slice:false, bloom:null, style:E.systemsStyle, tone:'blue', minimap:false, level:'Ground floor', floorAlone:false, layer:['arch','elec','int','mech'], layerContext:true })
+        : { tool:null, slice:false, bloom:null, style: mepLayer ? E.systemsStyle : E.defaultStyle, tone:'blue', level:'ALL', floorAlone:false, layer: mepLayer || 'all', layerContext: !!mepLayer, alerts:'all', minimap:false },
       histAge:null, measureResult:null
     }, NO_SEL));
   }

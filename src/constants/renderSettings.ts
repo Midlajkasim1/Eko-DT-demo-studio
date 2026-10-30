@@ -12,7 +12,8 @@ export const TONE_MAPPING_OPTIONS: { value: ToneMappingId; label: string }[] = [
 
 export const SHADOW_MAP_SIZES = [1024, 2048, 4096, 8192]
 
-export type TemplateId = 'default' | 'photoreal' | 'minimal' | 'studio' | 'xray' | 'monochrome'
+export const TEMPLATE_IDS = ['default', 'photoreal', 'minimal', 'studio', 'xray', 'monochrome'] as const
+export type TemplateId = (typeof TEMPLATE_IDS)[number]
 
 /** What the Studio style can turn on and tune. Exported inside renderSettings. */
 export interface StudioAdjust {
@@ -57,7 +58,7 @@ export function studioAdjustOf(source: Partial<StudioAdjust> | null | undefined)
 }
 
 export const RENDER_DEFAULTS = {
-  templateId: 'studio' as TemplateId,
+  templateId: 'default' as TemplateId,
   templateSwitcher: true,
 
   realisticMode: false,
@@ -142,12 +143,12 @@ export const RENDER_DEFAULTS = {
 export type RenderSettings = typeof RENDER_DEFAULTS
 
 /**
- * The template a project opens on. Settings saved before templates existed have no templateId and were
- * always the project's own look (Basic), so they stay that way; a project that never saved settings is new.
+ * The template a project opens on: the one it saved, or Basic when it saved none (settings from before templates
+ * existed) or one this build does not know. Studio is chosen per project, never filled in here.
  */
 export function savedTemplateId(saved: { templateId?: TemplateId } | null | undefined): TemplateId {
-  if (!saved) return RENDER_DEFAULTS.templateId
-  return saved.templateId ?? 'default'
+  const id = saved?.templateId
+  return id && TEMPLATE_IDS.includes(id) ? id : RENDER_DEFAULTS.templateId
 }
 
 export const RENDER_SETTING_KEYS = Object.keys(RENDER_DEFAULTS) as (keyof RenderSettings)[]
