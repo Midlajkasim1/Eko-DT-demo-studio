@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { levelHides, isCeilingType, HVAC_SPECIFIC, HVAC_GENERIC } from '../src/lib/floorPolicy.ts'
+import { levelHides, floorFilterSkips, isCeilingType, HVAC_SPECIFIC, HVAC_GENERIC } from '../src/lib/floorPolicy.ts'
 import type { LevelIndex } from '../src/lib/floorPolicy.ts'
 import { setHidden, isHidden } from '../src/lib/visibilityCoordinator.ts'
 
@@ -218,4 +218,13 @@ test('isolate with the visibility coordinator: the Tree hides survive switching 
   assert.ok(isHidden(model, wall(5)) && isHidden(model, ceil(4)))
   await setHidden(model, 'level', [])                                                        // Reset
   assert.ok(!isHidden(model, wall(5)) && !isHidden(model, ceil(4)) && isHidden(model, wall(3)))
+})
+
+test('the ground around the building (Landscape) is not filtered by a floor pick, unless the floor is isolated', () => {
+  assert.equal(floorFilterSkips('land', false), true)
+  assert.equal(floorFilterSkips('land', true), false, 'isolating a floor keeps the existing floor-only filter')
+  for (const group of ['arch', 'elec', 'mech', 'str', 'int', 'site', 'equip', 'other']) {
+    assert.equal(floorFilterSkips(group, false), false, `${group} still follows the floors`)
+    assert.equal(floorFilterSkips(group, true), false)
+  }
 })

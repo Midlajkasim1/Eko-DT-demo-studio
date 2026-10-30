@@ -16,7 +16,7 @@ import {
   onContentProfiles, pruneContentProfiles, setContentProfile, type ContentProfile,
 } from '@/lib/layerGroups'
 import { runIfcDiagnostics } from '@/lib/ifcDiagnostics' // TEMPORARY, with EKO_IFC_DIAGNOSTICS below
-import { HVAC_GENERIC, HVAC_SPECIFIC, isCeilingType, levelHides, type LevelIndex, type MechanicalInfo } from '@/lib/floorPolicy'
+import { HVAC_GENERIC, HVAC_SPECIFIC, floorFilterSkips, isCeilingType, levelHides, type LevelIndex, type MechanicalInfo } from '@/lib/floorPolicy'
 import { setHidden, isHidden, onVisibilityApplied } from '@/lib/visibilityCoordinator'
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
@@ -939,6 +939,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const hideAll = () => { levelHidden.set(m, new Set(entry.geom)); return setHidden(m, 'level', entry.geom) }
         levelHidden.delete(m)
         if (!levelId || levelId === 'ALL' || !entry.byFloor.size) { await setHidden(m, 'level', []); continue }
+        /* The Landscape is not on the building's floors: it stays whole unless the floor is isolated */
+        const rec = useModelStore.getState().models.find(r => r.modelId === m.modelId)
+        if (rec && floorFilterSkips(classifyLoaded(rec).group, alone)) { await setHidden(m, 'level', []); continue }
         /* Basement is only itself. Each floor above also keeps everything below it, unless Isolate floor is on.
            What the floor hides beyond that (its own ceilings) and keeps beyond that (the HVAC) is lib/floorPolicy. */
         const picked = floorCatalog.get(levelId)

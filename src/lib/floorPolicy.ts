@@ -26,6 +26,16 @@ export const HVAC_SPECIFIC =
 export const HVAC_GENERIC =
   /^IFC(?:FLOW(?:SEGMENT|FITTING|TERMINAL|MOVINGDEVICE|CONTROLLER|STORAGEDEVICE|TREATMENTDEVICE)|ENERGYCONVERSIONDEVICE|DISTRIBUTIONFLOWELEMENT)$/i
 
+/** Layer groups (lib/layerGroups) that are the ground around the building, not part of its floor stack */
+const GROUND_CONTEXT: ReadonlySet<string> = new Set(['land'])
+
+/**
+ * Whether the floor pick leaves a model of this layer group alone. The Landscape has no floors of its own to
+ * match against the pick (its elements sit on the site, or on storeys the building does not share), so the
+ * floor filter would hide it at every pick. Isolating a floor is the one case that still filters it.
+ */
+export const floorFilterSkips = (group: string, alone: boolean): boolean => !alone && GROUND_CONTEXT.has(group)
+
 export interface MechanicalInfo {
   /** The model puts this element on some floor (by containment or by height) */
   assigned: boolean
