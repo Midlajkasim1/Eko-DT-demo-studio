@@ -148,7 +148,7 @@ export const VIEW_TEMPLATES: ViewTemplate[] = [
   },
   {
     id: 'minimal',
-    label: 'Minimalist',
+    label: 'B/W',
     note: 'White model',
     description: 'Bleached-white surfaces on a bright studio backdrop, with a soft sun shadow, grey AO and thin pencil-line edges.',
     scene: {
