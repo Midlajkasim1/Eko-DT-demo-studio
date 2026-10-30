@@ -942,6 +942,39 @@
     });
   }
 
+  /* Reset is everything back to how the viewer opens: camera, floor, style,
+     layers, and the selection too (popup, equipment colour, asset panel).
+     HVAC & Mechanical keep the mech model, Electrical keeps the elec model, and both keep Photoreal. */
+  function resetViewer(){
+    const mepLayer = E.state.module === 'systems' && E.state.pageId !== 'heatmap'
+      ? (E.state.sub === 'hvac' || E.state.sub === 'mechanical' ? 'mech' : E.state.sub === 'electrical' ? 'elec' : null)
+      : null;
+    E.state.dock.floorAlone = false;   /* Reset goes back to how the viewer opens: the floor filter is cumulative again */
+    E.state.dock.layerContext = E.state.pageId === 'heatmap' || !!mepLayer;   /* the layers Reset restores are views, not picks */
+    if(E.state.pageId === 'heatmap'){
+      if(E.engine.isolateLevel) E.engine.isolateLevel('Ground floor', true);
+      if(E.engine.isolateLayer) E.engine.isolateLayer(['arch','elec','int','mech'], true);
+      window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true, spaceIds: heatSpaceIds(E) } }));
+    } else if(E.engine.resetView){
+      E.engine.resetView();
+      if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
+      if(E.engine.setLayerVisibility) E.engine.setLayerVisibility(mepLayer || 'all');
+    } else {
+      if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
+      if(E.engine.setLayerVisibility) E.engine.setLayerVisibility(mepLayer || 'all');
+    }
+    if(E.engine.clearMeasure) E.engine.clearMeasure();
+    if(E.engine.clearSection) E.engine.clearSection();
+    window.dispatchEvent(new Event('eko-tree-reset'));   /* what the model tree hid comes back with the floors and layers */
+    const heat = E.state.pageId === 'heatmap';
+    E.set(Object.assign({
+      dock: heat
+        ? Object.assign({}, E.state.dock, { tool:null, slice:false, bloom:null, style:'default', tone:'blue', minimap:false, level:'Ground floor', floorAlone:false, layer:['arch','elec','int','mech'], layerContext:true })
+        : { tool:null, slice:false, bloom:null, style: mepLayer ? 'photo' : 'default', tone:'blue', level:'ALL', floorAlone:false, layer: mepLayer || 'all', layerContext: !!mepLayer, alerts:'all', minimap:false },
+      histAge:null, measureResult:null
+    }, NO_SEL));
+  }
+
   const ACTS = {
     goMod(el){ const m = E.nav.modules.find(x=>x.id===el.dataset.mod);
       if(!E.state.exp[m.id]) E.state.born = 'nsub:'+m.id;
@@ -1201,37 +1234,7 @@
       const prev = d.bloom;
       E.state.radial = null;
       if(k === 'closeMore'){ d.bloom = null; render(); return; }
-      /* Reset is everything back to how the viewer opens: camera, floor, style,
-         layers, and the selection too (popup, equipment colour, asset panel).
-         HVAC & Mechanical keep the mech model, Electrical keeps the elec model, and both keep Photoreal. */
-      if(k === 'reset'){
-        const mepLayer = E.state.module === 'systems' && E.state.pageId !== 'heatmap'
-          ? (E.state.sub === 'hvac' || E.state.sub === 'mechanical' ? 'mech' : E.state.sub === 'electrical' ? 'elec' : null)
-          : null;
-        E.state.dock.floorAlone = false;   /* Reset goes back to how the viewer opens: the floor filter is cumulative again */
-        E.state.dock.layerContext = E.state.pageId === 'heatmap' || !!mepLayer;   /* the layers Reset restores are views, not picks */
-        if(E.state.pageId === 'heatmap'){
-          if(E.engine.isolateLevel) E.engine.isolateLevel('Ground floor', true);
-          if(E.engine.isolateLayer) E.engine.isolateLayer(['arch','elec','int','mech'], true);
-          window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true, spaceIds: heatSpaceIds(E) } }));
-        } else if(E.engine.resetView){
-          E.engine.resetView();
-          if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
-          if(E.engine.setLayerVisibility) E.engine.setLayerVisibility(mepLayer || 'all');
-        } else {
-          if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
-          if(E.engine.setLayerVisibility) E.engine.setLayerVisibility(mepLayer || 'all');
-        }
-        if(E.engine.clearMeasure) E.engine.clearMeasure();
-        if(E.engine.clearSection) E.engine.clearSection();
-        window.dispatchEvent(new Event('eko-tree-reset'));   /* what the model tree hid comes back with the floors and layers */
-        const heat = E.state.pageId === 'heatmap';
-        E.set(Object.assign({
-          dock: heat
-            ? Object.assign({}, E.state.dock, { tool:null, slice:false, bloom:null, style:'default', tone:'blue', minimap:false, level:'Ground floor', floorAlone:false, layer:['arch','elec','int','mech'], layerContext:true })
-            : { tool:null, slice:false, bloom:null, style: mepLayer ? 'photo' : 'default', tone:'blue', level:'ALL', floorAlone:false, layer: mepLayer || 'all', layerContext: !!mepLayer, alerts:'all', minimap:false },
-          histAge:null, measureResult:null
-        }, NO_SEL)); return; }
+      if(k === 'reset'){ resetViewer(); return; }
       if(!def) return;
       /* The tree shares the summary panel with nothing else, so picking any other tool closes it the way
          clicking Tree again does (the summary comes back where it was). Reset and the phone's More leave it. */
@@ -1269,7 +1272,10 @@
         const pad = document.querySelector('#ovp:not([data-tree]) .ovpad');
         if(!E.state.treeOpen){ if(pad) E.state.sumScroll = pad.scrollTop; }
         else E.state.sumScrollBack = E.state.sumScroll || 0;
+        const closing = E.state.treeOpen;
         E.state.treeOpen = !E.state.treeOpen; d.bloom = null;
+        /* Closing the tree is Reset View: what it hid, the floors and the layers all come back. Opening leaves the view alone. */
+        if(closing){ resetViewer(); return; }
       }
       else if(def.kind === 'toggle'){ d.minimap = !d.minimap; d.bloom = null; if(d.minimap) E.state.born = 'bloom'; }
       else if(def.kind === 'more'){ const inMore = ['more','layers','style'].includes(d.bloom);
