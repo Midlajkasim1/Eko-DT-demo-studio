@@ -16,7 +16,7 @@ import {
   onContentProfiles, pruneContentProfiles, setContentProfile, type ContentProfile,
 } from '@/lib/layerGroups'
 import { runIfcDiagnostics } from '@/lib/ifcDiagnostics' // TEMPORARY, with EKO_IFC_DIAGNOSTICS below
-import { HVAC_GENERIC, HVAC_SPECIFIC, floorFilterSkips, isCeilingType, levelHides, type LevelIndex, type MechanicalInfo } from '@/lib/floorPolicy'
+import { HVAC_GENERIC, HVAC_SPECIFIC, floorFilterSkips, isCeilingType, levelHides, reportLevel, type LevelIndex, type MechanicalInfo } from '@/lib/floorPolicy'
 import { setHidden, isHidden, onVisibilityApplied } from '@/lib/visibilityCoordinator'
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
@@ -954,6 +954,41 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (seq === levelSeq) repositionMarkers()
     }
 
+    /* TEMPORARY, read-only: why the floor filter hides what it hides, model by model. Reached from the browser
+       console as EKO_FLOOR_FILTER_REPORT('Third floor'); the picked floor and Isolate floor are read as they stand.
+       It changes nothing: it only restates what isolateLevel would do (lib/floorPolicy reportLevel). */
+    const describeLevelFilter = async (levelId?: string) => {
+      const dock = (window as any).EKO?.state?.dock
+      const id = levelId || dock?.level
+      const alone = !!dock?.floorAlone
+      const picked = floorCatalog.get(id)
+      const models: Record<string, unknown>[] = []
+      for (const model of engine.fragments?.models?.list?.values() ?? []) {
+        const m = model as any
+        const rec = useModelStore.getState().models.find(r => r.modelId === m.modelId)
+        const cls = rec ? classifyLoaded(rec) : null
+        const rep = reportLevel(await indexModel(m), picked, fid => floorCatalog.get(fid)?.rank, { alone }, cls?.group ?? 'unknown')
+        // What the model files under no floor, by IFC class
+        const classes: Record<string, number> = {}
+        if (rep.onNoFloor.length && typeof m.getItemsData === 'function') {
+          try {
+            for (let i = 0; i < rep.onNoFloor.length; i += 1500) {
+              const rows = await m.getItemsData(rep.onNoFloor.slice(i, i + 1500), {
+                attributesDefault: false, attributes: ['Name'], relationsDefault: { attributes: false, relations: false },
+              })
+              for (const row of rows) { const c = row?._category?.value ?? '?'; classes[c] = (classes[c] ?? 0) + 1 }
+            }
+          } catch { /* the counts above stand */ }
+        }
+        models.push({
+          file: rec?.originalFileName ?? m.modelId, group: cls?.group ?? 'unknown', classified: cls?.known ?? false,
+          skippedByFloorPick: rep.skipped, geometry: rep.geometry, floors: rep.floors, hidden: rep.hidden,
+          onNoFloor: rep.onNoFloor.length, onNoFloorClasses: Object.entries(classes).sort((a, b) => b[1] - a[1]).slice(0, 8),
+        })
+      }
+      return { floor: id, floorKnown: !!picked, isolateFloor: alone, models }
+    }
+
     /* The Spaces model is the heat map's: hidden in normal viewing, shown while the heat map is applied.
        (The heat plates follow their model's visibility, so it has to be on for them to draw.) */
     let spaceHeatActive = false
@@ -1457,6 +1492,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const unsubLayers = () => { unsubStore(); unsubProfiles() }
     syncLayers()
     ;(window as any).EKO_MODEL_DISCIPLINES = () => describeModels(useModelStore.getState().models)
+    // TEMPORARY, read-only: why the floor filter hides what it hides (describeLevelFilter above)
+    ;(window as any).EKO_FLOOR_FILTER_REPORT = async (levelId?: string) => {
+      const report = await describeLevelFilter(levelId)
+      console.log('[EKO_FLOOR_FILTER_REPORT]', JSON.stringify(report, null, 2))
+      return report
+    }
     // TEMPORARY, read-only: what the loaded models contain (lib/ifcDiagnostics.ts)
     ;(window as any).EKO_IFC_DIAGNOSTICS = (which?: string | string[]) => runIfcDiagnostics({
       models: useModelStore.getState().models, fragments: engine.fragments?.models?.list,
@@ -1635,6 +1676,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       delete (window as any).EKO_HOST_ENGINE
       delete (window as any).EKO_MODEL_DISCIPLINES
       delete (window as any).EKO_IFC_DIAGNOSTICS
+      delete (window as any).EKO_FLOOR_FILTER_REPORT
     }
   }, [engineReady])
 

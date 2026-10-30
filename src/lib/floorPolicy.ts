@@ -105,3 +105,38 @@ export function levelHides(
 
   return ix.geom.filter(id => !show.has(id))
 }
+
+export interface LevelReport {
+  /** Items with geometry in the model */
+  geometry: number
+  /** Items the model files under each floor */
+  floors: Record<string, number>
+  /** Items the pick hides */
+  hidden: number
+  /** Of the hidden ones, the items the model files under no floor at all (a site, a topography, loose proxies) */
+  onNoFloor: number[]
+  /** The pick leaves this whole model alone (floorFilterSkips) */
+  skipped: boolean
+}
+
+/**
+ * What a floor pick does to one model, for finding out why something disappears. Read-only: it only
+ * restates levelHides. `group` is the model's layer group (lib/layerGroups).
+ */
+export function reportLevel(
+  ix: LevelIndex,
+  picked: PickedFloor | undefined,
+  rankOf: (floorId: string) => number | undefined,
+  options: LevelOptions,
+  group: string,
+): LevelReport {
+  const floors: Record<string, number> = {}
+  const onAFloor = new Set<number>()
+  for (const [id, ids] of ix.byFloor) {
+    floors[id] = ids.length
+    for (const n of ids) onAFloor.add(n)
+  }
+  const skipped = floorFilterSkips(group, !!options.alone)
+  const hides = skipped ? [] : (levelHides(ix, picked, rankOf, options) ?? [])
+  return { geometry: ix.geom.length, floors, hidden: hides.length, onNoFloor: hides.filter(id => !onAFloor.has(id)), skipped }
+}

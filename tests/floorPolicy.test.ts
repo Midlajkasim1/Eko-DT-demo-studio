@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { levelHides, floorFilterSkips, isCeilingType, HVAC_SPECIFIC, HVAC_GENERIC } from '../src/lib/floorPolicy.ts'
+import { levelHides, floorFilterSkips, reportLevel, isCeilingType, HVAC_SPECIFIC, HVAC_GENERIC } from '../src/lib/floorPolicy.ts'
 import type { LevelIndex } from '../src/lib/floorPolicy.ts'
 import { setHidden, isHidden } from '../src/lib/visibilityCoordinator.ts'
 
@@ -227,4 +227,31 @@ test('the ground around the building (Landscape) is not filtered by a floor pick
     assert.equal(floorFilterSkips(group, false), false, `${group} still follows the floors`)
     assert.equal(floorFilterSkips(group, true), false)
   }
+})
+
+test('the floor filter report says why each hidden item is hidden: a floor above the pick, or no floor at all', () => {
+  const ix = arch()
+  ix.geom.push(900, 901) // ground elements the model files under no floor (a site, a topography)
+  const rep = reportLevel(ix, pick('F3'), rankOf, { alone: false }, 'arch')
+  assert.equal(rep.skipped, false)
+  assert.deepEqual(rep.onNoFloor, [900, 901])
+  assert.equal(rep.hidden, 2 + 4 + 1, 'the two floor-less items, floors 4 and 5 (a wall and a ceiling each), and the ceiling of the picked floor')
+  assert.equal(rep.geometry, ix.geom.length)
+  assert.deepEqual(rep.floors, { F1: 2, F2: 2, F3: 2, F4: 2, F5: 2 })
+})
+
+test('the report agrees with levelHides, and shows a Landscape model skipped unless the floor is isolated', () => {
+  const ix = arch()
+  ix.geom.push(900)
+  for (const alone of [false, true]) {
+    const hides = levelHides(ix, pick('F2'), rankOf, { alone }) ?? []
+    assert.equal(reportLevel(ix, pick('F2'), rankOf, { alone }, 'arch').hidden, hides.length)
+  }
+  const cumulative = reportLevel(ix, pick('F2'), rankOf, { alone: false }, 'land')
+  assert.equal(cumulative.skipped, true)
+  assert.equal(cumulative.hidden, 0)
+  assert.deepEqual(cumulative.onNoFloor, [])
+  const isolated = reportLevel(ix, pick('F2'), rankOf, { alone: true }, 'land')
+  assert.equal(isolated.skipped, false)
+  assert.ok(isolated.hidden > 0)
 })
