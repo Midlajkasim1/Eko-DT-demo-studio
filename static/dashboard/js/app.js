@@ -20,8 +20,8 @@
     const cfg = window.INJECTED_PROJECT_CONFIG || {}, D = window.EKO_DATA || {};
     const extended = cfg.modules === 'extended';
     window.EKO_MODULES = extended ? 'extended' : 'standard';
-    /* the prototype styles (css/prototype-sync.css, the client's file, unchanged) are for a project on the extended module set only: for one on the standard module set (Marsa Al Arab) the sheet is switched off, so its own design stays as it was */
-    document.querySelectorAll('link[rel="stylesheet"][href*="prototype-sync.css"]').forEach(l => { l.disabled = !extended; });
+    /* one prototype sheet per module set: the extended one (the Hospital) takes css/prototype-sync.css, the client's current file; the standard one (Marsa Al Arab) takes css/prototype-sync.standard.css, that file as it was before the E17 update, so its design stays exactly as it was */
+    document.querySelectorAll('link[rel="stylesheet"][href*="prototype-sync"]').forEach(l => { l.disabled = /prototype-sync\.standard\.css/.test(l.getAttribute('href') || '') ? extended : !extended; });
     /* the Security entry reads "Security & life safety" on the extended module set and "Security" on the standard one (Marsa Al Arab) */
     { const sec = ((window.EKO_LAYOUTS.nav || {}).modules || []).find(m => m.id === 'security'); if(sec) sec.label = extended ? 'modSecLs' : 'modSecurity'; }
     const want = cfg.sampleData;
@@ -378,12 +378,26 @@
   E.engine.onError(err => console.warn(E.t('engineErr', { msg: err.message })));
   /* E15 port (D180): picking in a 3D engine that resolves a GlobalId to what the shell knows. A camera opens its camera view,
      a reader or door the access view, a bed the evacuation view. (Assets and spaces are handled where they were before.) */
-  if(E.engine.onAssetClick) E.engine.onAssetClick(h => {
+  const hotspot = h => {
     if(!h || typeof h !== 'object') return;
     if(h.kind === 'camera' && window.EKO_SEC) E.set({ born: 'dlg', dlg: 'sec', secDlg: { kind: 'cam', id: h.id } });
-    else if(h.kind === 'door') E.go('sec-access', 'security', 'access');
-    else if(h.kind === 'bed'){ E.state.evacBed = h.id; E.go('sec-evac', 'security', 'evac'); }
-  });
+    else if(h.kind === 'door'){ E.go('sec-access', 'security', 'access');
+      if((E.data.assets || []).some(a => a.id === h.id)) E.set({ born: 'asset', assetSel: h.id, apTab: E.state.apTab || 'alarms', mkPop: null }); }   /* a reader that is also an asset: its panel docks beside the page */
+    else if(h.kind === 'bed'){ const bd = (((E.data.security || {}).evac || {}).beds || []).find(x => x.id === h.id);
+      E.state.evacBed = h.id; if(bd && bd.floor) E.state.evacLv = bd.floor; E.state.evxView = 'plan';   /* the plan opens on the bed's own level, showing the bed in the plan and in the list */
+      E.go('sec-evac', 'security', 'evac');
+      const tile = document.querySelector('.evtile[data-on="true"]'), tab = tile && tile.closest('.pfbody');   /* open the page tab that holds the bed list, with the picked bed in view */
+      if(tab){ E.set({ pfTab: Object.assign({}, E.state.pfTab || {}, { [E.state.pageId]: tab.id.replace('pfb-' + E.state.pageId + '-', '') }) });
+        const shown = document.querySelector('.evtile[data-on="true"]'); if(shown && shown.scrollIntoView) shown.scrollIntoView({ block: 'nearest' }); } }
+  };
+  if(E.engine.onAssetClick) E.engine.onAssetClick(hotspot);
+  /* the Studio sends a 3D pick as a viewer-command with the element's GlobalId (the viewer adapters never fire assetClick): the camera, door reader or bed it names,
+     only where the site has that Security view open (a locked or hidden view, Marsa Al Arab's, never opens) */
+  const hotspotOf = gid => { const s = E.data.security, open = sub => !(window.EKO_ADDONS && window.EKO_ADDONS.lockFor(E, 'security', sub));
+    if(!gid || !s || !window.EKO_SEC) return null;
+    const c = (s.cameras || []).find(x => x.gid === gid); if(c) return open('cams') ? { kind: 'camera', id: c.id } : null;
+    const dr = (s.doors || []).find(x => x.gid === gid || x.doorGid === gid); if(dr) return open('access') ? { kind: 'door', id: dr.id } : null;
+    const bd = ((s.evac || {}).beds || []).find(x => x.gid === gid); return bd && open('evac') ? { kind: 'bed', id: bd.id } : null; };
 
   /* ------------------------------- theme ---------------------------------- */
   function applyTheme(){
@@ -1306,7 +1320,12 @@
     ackTgl(){ E.set({ showAcked: !E.state.showAcked }); },
     fltReset(){ E.state.alarmF.sev.clear();
       ss.del('eko-mk'); E.set({ showAcked: true, markersOn: true }); },
-    alertGo(el){ E.set({ born:'asset', dlg:null, assetSel: el.dataset.asset,
+    alertGo(el){
+      /* E15 port (D180): a fire alarm opens Security > Fire and a security alarm Security > Access, with the asset's panel docked beside the page; where the Security module is locked or hidden (Marsa Al Arab) the panel opens alone, as before */
+      const a = (E.data.assets || []).find(x => x.id === el.dataset.asset) || {};
+      const to = a.sys === 'fire' ? ['sec-fire', 'fire'] : a.sys === 'sec' ? ['sec-access', 'access'] : null;
+      if(to && window.EKO_SEC && !(window.EKO_ADDONS && window.EKO_ADDONS.lockFor(E, 'security', to[1]))) E.go(to[0], 'security', to[1]);
+      E.set({ born:'asset', dlg:null, assetSel: el.dataset.asset,
       apTab: E.state.apTab || 'alarms', mkPop: null }); },
     fltSys(el){ const s = E.state.alarmF.sys, v = el.dataset.v;
       s.has(v) ? s.delete(v) : s.add(v); render(); },
@@ -1592,10 +1611,11 @@
       l[el.dataset.v] = !l[el.dataset.v]; E.set({ hmLayers: l }); }
   };
   E.locExit = ACTS.locBack;   /* Escape leaves Locate-in-3D focus the way Back to Assets does (surfaces.js) */
+  E.runAct = (name, data) => { const f = ACTS[name]; if(f) f({ dataset: data || {}, value: (data || {}).v }); };   /* E15 port: e14.js's "show on the model" opens the asset through it */
 
   /* E15 port: the click and change handlers of the ported ESG, Security, Evacuation, Maintenance and scenario modules, looked up
      after ours in the pack's order (a name already in ACTS or an earlier module keeps winning) */
-  const E15_CLICK = ['ESG', 'SECP', 'SECW', 'EVACP', 'FRAME', 'OCC', 'SEC', 'EVAC', 'SCN', 'OPS'];
+  const E15_CLICK = ['ESG', 'SECP', 'SECW', 'EVACP', 'FRAME', 'OCC', 'SEC', 'EVAC', 'SCN', 'OPS', 'E14'];
   const E15_CHANGE = [['OCC', 'CHG'], ['ESG', 'ACTS'], ['SECP', 'ACTS'], ['EVACP', 'CHG'], ['SEC', 'ACTS'], ['SCN', 'CHG']];
   const e15Pick = (list, k) => { for(const item of list){ const [n, p] = Array.isArray(item) ? item : [item, 'ACTS']; const m = window['EKO_' + n], t = m && m[p]; if(t && Object.prototype.hasOwnProperty.call(t, k)) return t[k]; } };
   const e15Act = k => e15Pick(E15_CLICK, k), e15Chg = k => e15Pick(E15_CHANGE, k);
@@ -1778,6 +1798,7 @@
       const mapped = !found && HE && HE.listMapped ? HE.listMapped().find(m => m.bimId === d.bimId) : null;
       const id = found ? found.id : (mapped ? mapped.id : null);
       if (id) { selectEquipment(id, { born:'pop', mkPop: 'asset:' + id, mkPopN: 0 }, !!d.fromTree); return; }
+      const hs = !d.fromTree && hotspotOf(d.bimId); if(hs){ hotspot(hs); return; }   /* E15 port (D180) */
       /* Not in the register: the same card, filled from the element itself. */
       E.state.pickEl = { bimId: d.bimId, name: d.name || '', type: d.type || '', category: d.category || '' };
       selectEquipment(d.bimId, { born:'pop', mkPop: 'el:' + d.bimId, mkPopN: 0 }, !!d.fromTree);
