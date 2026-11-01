@@ -43,6 +43,28 @@
 .dashboard-native-container #modelfs :is(.mfsclose, #vbar, #vbottom, .vfab, #vcap, .vpback, .minimap, .histbanner, .mk, .mkpop, .vradial, .vsheet, .scrim) {
   pointer-events: auto;
 }
+/* Open model is a full-screen view of the canvas. The summary and the alarms
+   stay in the page under the transparent panel, so they have to go. The page
+   boxes also have to stop taking the pointer, or a drag never reaches the canvas.
+   The header, Close model, and the model tools stay clickable. */
+.dashboard-native-container[data-modelfs="1"] .mpage > :not(#modelfs) {
+  display: none;
+}
+.dashboard-native-container[data-modelfs="1"] body,
+.dashboard-native-container[data-modelfs="1"] #app,
+.dashboard-native-container[data-modelfs="1"] #shellmain,
+.dashboard-native-container[data-modelfs="1"] #mount {
+  pointer-events: none;
+  background: transparent;
+}
+.dashboard-native-container[data-modelfs="1"] #mount > .mpage:not(#vpmain) {
+  pointer-events: none;
+  background: transparent;
+}
+/* Close model sits on the same corner as the header's Model button. */
+.dashboard-native-container[data-modelfs="1"] #pagehead [data-act="modelFs"] {
+  display: none;
+}
 .dashboard-native-container #topbar,
 .dashboard-native-container #ekonav,
 .dashboard-native-container #mobtabs,

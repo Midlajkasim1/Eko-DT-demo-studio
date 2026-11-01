@@ -11,6 +11,7 @@ import { foldName, indexLinks, indexSpaceLinks, isGuid } from '@/lib/assetLinks'
 import type { AssetLink } from '@/types'
 import { resetCameraToHome } from '@/lib/cameraUtils'
 import { frameSphereInView } from '@/lib/viewFraming'
+import { startPeekFramer } from '@/lib/peekFrame'
 import { createMiniMap } from '@/lib/miniMap'
 import {
   classifyLoaded, classifyModel, describeModels, describeUnclassified, hasContentProfile, isProjectSwitch, layerIds, layerVisibility,
@@ -2053,7 +2054,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       void refreshLevels()
     }
 
+    const stopPeek = startPeekFramer(engine)
+
     return () => {
+      stopPeek()
       try {
         document.querySelectorAll('.wmodelhit').forEach((el) => el.remove())
         const canvas = engine.world?.renderer?.three?.domElement as HTMLElement | undefined
