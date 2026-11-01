@@ -544,6 +544,8 @@
   function mobtabs(){
     const tab = id => {
       const m = E.nav.modules.find(x => x.id === id);
+      /* the same rule as the rail: a module this site hides (Medical hides Utilities) is not a phone tab */
+      if(!m || !navVisible(m)) return '';
       return `<button data-on="${E.state.module===id?'page':'none'}" data-act="goMod" data-mod="${m.id}" data-page="${esc(m.pageId||'')}">
         ${icon(m.icon,18)}<span>${esc(E.t(m.mobile||m.label))}</span></button>`;
     };

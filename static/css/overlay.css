@@ -24,6 +24,25 @@
 .dashboard-native-container .v3glow {
   display: none;
 }
+/* Phone and tablet: the Studio canvas sits behind the dashboard. The full-screen
+   model panel was an opaque sheet, so Close model opened a blank page, and its
+   pointer-events stopped orbit. The panel is a hole; the buttons stay clickable. */
+.dashboard-native-container #modelfs,
+.dashboard-native-container .mpeek {
+  background: transparent;
+}
+.dashboard-native-container #modelfs {
+  pointer-events: none;
+}
+.dashboard-native-container #modelfs .v3tint,
+.dashboard-native-container #modelfs .v3glow,
+.dashboard-native-container .mpeek .v3tint,
+.dashboard-native-container .mpeek .v3glow {
+  display: none;
+}
+.dashboard-native-container #modelfs :is(.mfsclose, #vbar, #vbottom, .vfab, #vcap, .vpback, .minimap, .histbanner, .mk, .mkpop, .vradial, .vsheet, .scrim) {
+  pointer-events: auto;
+}
 .dashboard-native-container #topbar,
 .dashboard-native-container #ekonav,
 .dashboard-native-container #mobtabs,
