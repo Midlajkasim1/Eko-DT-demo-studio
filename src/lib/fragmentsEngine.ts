@@ -34,6 +34,7 @@ import { PBR_MATERIAL_MAPPINGS } from '../constants/pbrMaterials'
 import { RENDER_DEFAULTS, studioAdjustOf, type RenderSettings, type ToneMappingId } from '../constants/renderSettings'
 import { applyStudioAdjust, DASHBOARD_DARK_SKY, getTemplateScene, type TemplateScene } from '../constants/viewTemplates'
 import { paintStudioModel } from '../constants/studioPalette'
+import { azimuthDragSign } from './cameraUtils'
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { N8AOPass } from 'n8ao'
 
@@ -1352,6 +1353,21 @@ export async function initFragmentsEngine(
   }
 
   world.camera.controls.setLookAt(50, 30, 50, 0, 0, 0)
+
+  // Near straight down, the same right-drag that slides a side view to the right
+  // spins the plan so the far side goes left. The sign is chosen when the drag starts.
+  {
+    const controls = world.camera.controls as {
+      azimuthRotateSpeed: number
+      polarAngle: number
+      addEventListener: (type: string, fn: () => void) => void
+    }
+    const baseAzimuth = Math.abs(controls.azimuthRotateSpeed || 1)
+    controls.addEventListener('controlstart', () => {
+      if (!controls.azimuthRotateSpeed) return
+      controls.azimuthRotateSpeed = azimuthDragSign(controls.polarAngle) * baseAzimuth
+    })
+  }
 
   // Orbit, dolly and fit all set this flag. Waking from the flag means a parked
   // view still animates when the camera is moved from a button rather than a drag.

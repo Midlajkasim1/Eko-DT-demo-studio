@@ -1872,7 +1872,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const tgt = view?.target
       if (!camCtl?.setLookAt || !pos || !tgt || pos.length !== 3 || tgt.length !== 3) return false
       const cam = engine.world?.camera?.three as THREE.PerspectiveCamera | undefined
-      // A straight-down view leaves orbit and pan without a direction, so they run the wrong way: tilt it as OrientationCube does
+      // A straight-down view leaves orbit and pan without a direction. Tilt it, as the
+      // orientation cube does. Horizontal drag on that view is flipped in the engine.
       const target = new THREE.Vector3(tgt[0], tgt[1], tgt[2])
       const offset = new THREE.Vector3(pos[0], pos[1], pos[2]).sub(target)
       const dist = offset.length()

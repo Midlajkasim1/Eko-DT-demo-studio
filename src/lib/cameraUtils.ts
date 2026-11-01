@@ -2,6 +2,17 @@ import * as THREE from 'three'
 import type { FragmentsEngine } from './fragmentsEngine'
 import { useProjectStore } from '@/store/useProjectStore'
 
+/** Radians from straight up or straight down. Inside this cone a right-drag
+ *  spins the plan the other way from every shallower view. */
+const TOP_VIEW_RAD = 0.65
+
+/** +1 keeps the usual turntable. -1 is the top and bottom views, so a drag
+ *  to the right carries the far side of the plan to the right. */
+export function azimuthDragSign(polarAngle: number): number {
+  if (!Number.isFinite(polarAngle)) return 1
+  return polarAngle < TOP_VIEW_RAD || polarAngle > Math.PI - TOP_VIEW_RAD ? -1 : 1
+}
+
 /**
  * Universally unifies the "Home" and "Reset Camera" logic.
  * 1. Flies to the user's saved project camera if it exists.

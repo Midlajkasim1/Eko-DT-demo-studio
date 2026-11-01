@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
-import { resetCameraToHome } from '@/lib/cameraUtils'
+import { azimuthDragSign, resetCameraToHome } from '@/lib/cameraUtils'
 import * as THREE from 'three'
 
 interface OrientationCubeProps {
@@ -244,7 +244,8 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
         if (engine?.world?.camera?.controls) {
           const controls = engine.world.camera.controls as any
           if (typeof controls.rotate === 'function') {
-            controls.rotate(-dx * 0.008, -dy * 0.008, false)
+            const sign = azimuthDragSign(controls.polarAngle)
+            controls.rotate(sign * -dx * 0.008, -dy * 0.008, false)
           }
         }
         dragStartRef.current = { x: ev.clientX, y: ev.clientY }
