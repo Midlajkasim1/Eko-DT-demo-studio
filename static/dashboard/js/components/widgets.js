@@ -703,7 +703,7 @@ window.EKO_C = (function(){
       return s2;
     });
     const shareCap = simKw ? E.t('pwDbShareMw', { mw: fmt(totKwh / 1000, 2) }) : E.t('pwDbShareCap', { when: dbWhen, v: dbTot });
-    const dbSub = simKw ? E.t('pwDbSubKw', { n: boards.length, v: fmt(totKwh, 0) }) : E.t('pwDbSub', { n: boards.length, v: dbTot, when: dbWhen });
+    const dbSub = simKw ? E.t('pwDbSubMw', { n: boards.length, mw: fmt(totKwh / 1000, 2) }) : E.t('pwDbSub', { n: boards.length, v: dbTot, when: dbWhen });
     const share = `<article class="pwwidget">
       <div class="pwwh"><span class="alcardt">${esc(E.t('pwDbShare'))}</span>
         <span class="alcardm">${esc(shareCap)}</span>${window.EKO_A.chrome(E)}</div>
