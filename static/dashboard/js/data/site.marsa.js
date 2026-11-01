@@ -234,7 +234,7 @@ window.EKO_DATA.marsa = {
   /* Signed-in user + site capability flags (D43). Marsa carries control as a
      DEMO capability (the demo switch); Khazna carries it live. canControl is
      the per-role permission; both must hold for the Control tab to exist. */
-  "user": { "name": "Arman Y.", "nameAr": "\u0623\u0631\u0645\u0627\u0646 \u064a.", "role": "technician", "canControl": true },
+  "user": { "name": "the FM technician", "nameAr": "\u0641\u0646\u064a \u0625\u062f\u0627\u0631\u0629 \u0627\u0644\u0645\u0631\u0627\u0641\u0642", "initials": "FM", "role": "technician", "canControl": true },
   /* D105: the ROLE sets defaults (landing, wording, disclosure, layout controls) — never permissions.
      landing: site | portfolio | auto (portfolio when the user covers more than one site). Every disclosure
      is a per-user toggle the role only seeds; nothing here locks anything away. */
@@ -259,10 +259,13 @@ window.EKO_DATA.marsa = {
   "entitlements": { "showAddOns": true,
     "modules": { "esg": "available", "maintenance": "available", "security": "available",
                  "systems.life": "available", "systems.security": "available",
-                 "energy.bench": "available", "energy.fcst": "available" } },  /* the config lines: cmms mock | hexagon · llm mock | ollama | none */
+                 "energy.bench": "available", "energy.fcst": "available",
+                 /* E15 port: sub-views only the hospital has data for */
+                 "systems.other": "hidden", "systems.data": "hidden", "spaces.occ": "hidden",
+                 "security.evac": "hidden", "security.nurse": "hidden" } },  /* the config lines: cmms mock | hexagon · llm mock | ollama | none */
   "llm": { "ollama": { "baseUrl": "http://localhost:11434", "model": "llama3.1:8b", "timeoutMs": 20000, "stream": false } },
   "sites": [ { "id": "marsa", "control": "demo" }, { "id": "khazna", "control": "on" } ],
-  "controlUsers": ["Arman Y.", "S. Khan"],
+  "controlUsers": ["the FM technician", "the shift engineer"],
 
   "power": {
     "pmuChips": [
@@ -383,7 +386,7 @@ window.EKO_DATA.marsa = {
         { "id": "fan",  "nameEn": "Supply fan", "nameAr": "مروحة الإمداد", "kind": "binary", "value": "ON", "mode": "auto", "writable": false, "lifeSafety": false },
         { "id": "oad",  "nameEn": "OA damper", "nameAr": "مخمد الهواء الخارجي", "kind": "analog", "unit": "%", "value": 60, "min": 0, "max": 100, "mode": "auto", "writable": true, "lifeSafety": false, "mockFailOnce": true },
         { "id": "tsp",  "nameEn": "Temp setpoint", "nameAr": "نقطة ضبط الحرارة", "kind": "analog", "unit": "°C", "value": 22.0, "dp": 1, "min": 18, "max": 26, "mode": "manual", "writable": true, "lifeSafety": false,
-          "override": { "byEn": "S. Khan", "byAr": "س. خان", "whenEn": "09 Aug", "whenAr": "09 أغسطس", "expEn": "expires in 3 days", "expAr": "تنتهي خلال 3 أيام" } }
+          "override": { "byEn": "the shift engineer", "byAr": "مهندس الوردية", "whenEn": "09 Aug", "whenAr": "09 أغسطس", "expEn": "expires in 3 days", "expAr": "تنتهي خلال 3 أيام" } }
       ] },
     { "id": "FCU-L1-02", "sys": "vent", "crit": "C", "wtyEnd": null, "tags": [],   "st": "stale", "staleH": 26, "floor": "L1", "zone": "Kitchen", "zoneAr": "المطبخ", "typeEn": "Fan coil unit", "typeAr": "وحدة ملف مروحة", "level": "Level 1", "levelAr": "الطابق 1", "wos": 1, "wost": "asgn", "make": "Daikin FWB", "serial": "DK-77120", "svc": "10 Aug", "cafm": "HEX-4409", "spark7": null },
     { "id": "VAV-L2-03", "sys": "vent", "crit": "C", "wtyEnd": null, "tags": [],   "st": "stale", "staleH": 26, "floor": "L2", "zone": "Guest rooms W", "zoneAr": "غرف الضيوف غرب", "typeEn": "VAV terminal", "typeAr": "وحدة VAV", "level": "Level 2", "levelAr": "الطابق 2", "wos": 0, "wost": null, "make": "TROX TVE", "serial": "TV-30455", "svc": "–", "cafm": "HEX-4410", "spark7": null },

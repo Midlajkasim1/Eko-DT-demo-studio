@@ -20,11 +20,14 @@
     const cfg = window.INJECTED_PROJECT_CONFIG || {}, D = window.EKO_DATA || {};
     const extended = cfg.modules === 'extended';
     window.EKO_MODULES = extended ? 'extended' : 'standard';
+    /* the Security entry reads "Security & life safety" on the extended module set and "Security" on the standard one (Marsa Al Arab) */
+    { const sec = ((window.EKO_LAYOUTS.nav || {}).modules || []).find(m => m.id === 'security'); if(sec) sec.label = extended ? 'modSecLs' : 'modSecurity'; }
     const want = cfg.sampleData;
     if(want && D[want] && D.marsa && D[want] !== D.marsa){   // the sample site's data takes the place the dashboard reads, with the Studio viewer
       const site = D[want], row = (D.portfolio || []).find(p => p.key === 'marsa');
       site.viewer = D.marsa.viewer;
       delete site.overviewPage;   // its own Overview is not ported yet
+      { const nm = (cfg.site || {}).displayName || (cfg.site || {}).name; if(nm){ site.nameEn = nm; site.nameAr = nm; } }   // the Studio project's name, before the first render (data-map.js applies the same name later)
       if(row){ row.nameEn = site.nameEn; row.nameAr = site.nameAr; }   // the top bar names the site from this row
       D.marsa = site;
     }
@@ -211,8 +214,8 @@
     /* D105: the role model. Role = defaults; permissions stay in user.canControl / features. */
     role(){ const roles = this.data.roles || {}; const r = this.state.rolePreview || (this.data.user || {}).role; return roles[r] ? r : (roles.technician ? 'technician' : Object.keys(roles)[0] || 'technician'); },
     roleCfg(){ return (this.data.roles || {})[this.role()] || {}; },
-    /* the signed-in user's initials, from data.user.name ("Arman Y." → "AY"); '' when no user is known */
-    initials(){ return String((this.data.user || {}).name || '').trim().split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase(); },
+    /* the signed-in user's initials: data.user.initials, else from the name ("Facility Manager" → "FM"); '' when no user is known */
+    initials(){ const u = this.data.user || {}; return u.initials || String(u.name || '').trim().split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase(); },
     wording(){ return this.roleCfg().wording || 'plain'; },
     disclose(k){ const o = this.state.disclose || {}; return (k in o) ? !!o[k] : !!((this.roleCfg().disclose || {})[k]); },
     landing(){
@@ -293,7 +296,10 @@
     stacked(){ return window.matchMedia && matchMedia('(max-width:1023px)').matches; },
 
     go(pageId, module, sub){
+      if(pageId !== this.state.pageId && this.engine && this.engine.setLabels && !(window.EKO_SCN && window.EKO_SCN.on(this))) this.engine.setLabels(null);   /* E15 port (D182): labels on the model belong to the page that set them */
+      if(pageId !== 'sec-evac' && window.EKO_EVACP) window.EKO_EVACP.stopReplay(false);   /* E15 port (E6): the evacuation replay belongs to the Evacuation page */
       const gate = window.EKO_ADDONS && window.EKO_ADDONS.lockFor(this, module ?? this.state.module, sub);   /* D125: a gated route opens its add-on, never a half page */
+      if(gate === '#hidden'){ this.go(this.overviewId(), 'overview', null); return; }   /* E15 port (D169): a route this site hides goes to its Overview, never an add-on card */
       if(gate){ this.set({ born:'dlg', teaserKey: gate, dlg:'teaser', mobMore:false }); return; }
       if(pageId !== this.state.pageId) this.state._prev = { pageId: this.state.pageId, module: this.state.module, sub: this.state.sub };
       this.state.locFocus = null;   /* any navigation (the logo, a module, search, Back) ends Locate-in-3D focus */
@@ -380,6 +386,14 @@
   E.engine.onCameraChange(() => window.EKO_V.position(E));
   E.engine.onMarkerClick(id => E.set({ born:'pop', mkPop: id, mkPopN: 0 }));   /* D128: a marker opens its popup, never the panel */
   E.engine.onError(err => console.warn(E.t('engineErr', { msg: err.message })));
+  /* E15 port (D180): picking in a 3D engine that resolves a GlobalId to what the shell knows. A camera opens its camera view,
+     a reader or door the access view, a bed the evacuation view. (Assets and spaces are handled where they were before.) */
+  if(E.engine.onAssetClick) E.engine.onAssetClick(h => {
+    if(!h || typeof h !== 'object') return;
+    if(h.kind === 'camera' && window.EKO_SEC) E.set({ born: 'dlg', dlg: 'sec', secDlg: { kind: 'cam', id: h.id } });
+    else if(h.kind === 'door') E.go('sec-access', 'security', 'access');
+    else if(h.kind === 'bed'){ E.state.evacBed = h.id; E.go('sec-evac', 'security', 'evac'); }
+  });
 
   /* ------------------------------- theme ---------------------------------- */
   function applyTheme(){
@@ -671,9 +685,15 @@
         <div class="hpscroll" role="tabpanel">${tab==='legend' ? legend : keys}</div></div>`;
     } else if(d === 'teaser'){
       out += window.EKO_ADDONS.dialog(E);                          /* D125: one add-on dialog from the catalogue */
+    /* E15 port: the ESG, operations and security dialogs */
+    } else if(d === 'esg' && window.EKO_ESG){ out += window.EKO_ESG.dialog(E);               /* D175: the ESG detail popovers (depth three) */
+    } else if(d === 'ops' && window.EKO_OPS){ out += window.EKO_OPS.dialog(E);               /* D182: every number is a door */
+    } else if(d === 'sec' && window.EKO_SEC){ out += window.EKO_SEC.dialog(E);               /* D180: the security event, camera and bed dialogs */
+    } else if(d === 'esgfp' && window.EKO_ESG){ out += window.EKO_ESG.factorPop(E);          /* D176 C7: the factor chip's popover */
     } else if(d === 'addons' || d === 'settings'){
       /* D129: SETTINGS — Appearance (theme, layout), Administration (modules and add-ons), Security (PIN, audit) */
-      const tab = d === 'addons' ? 'administration' : (['appearance', 'system', 'administration', 'security'].includes(E.state.settingsTab) ? E.state.settingsTab : 'appearance');
+      const esgOn = !!(window.EKO_ESG && window.EKO_ESG.active(E));   /* E15 port (D175): Targets and Baselines, where ESG is active */
+      const tab = d === 'addons' ? 'administration' : (['appearance', 'system', 'administration', 'security'].concat(esgOn ? ['targets'] : []).includes(E.state.settingsTab) ? E.state.settingsTab : 'appearance');
       const segT = (v, lbl, on) => `<button class="seg" data-on="${on}" data-act="theme" data-v="${v}" aria-pressed="${on}">${esc(lbl)}</button>`;
       const tabBtn = (v, key) => `<button class="seg" role="tab" data-on="${tab === v}" aria-selected="${tab === v}" data-act="settingsTab" data-v="${v}">${esc(E.t(key))}</button>`;
       let body = '';
@@ -699,12 +719,13 @@
             ${irows ? `<div class="audwrap"><table class="audt stinteg"><thead><tr><th>${esc(E.t('intCol.name'))}</th><th>${esc(E.t('intCol.proto'))}</th><th>${esc(E.t('intCol.st'))}</th><th>${esc(E.t('intCol.hb'))}</th><th>${esc(E.t('intCol.pts'))}</th></tr></thead><tbody>${irows}</tbody></table></div>` : `<p class="tCap hbnote">${esc(E.t('stSysNoInteg'))}</p>`}
           </div>`;
       } else if(tab === 'administration'){ body = window.EKO_ADDONS ? window.EKO_ADDONS.adminBody(E) : ''; }
+      else if(tab === 'targets'){ body = window.EKO_ESG.settingsBody(E); }   /* E15 port (D175) */
       else { body = window.EKO_CTL && window.EKO_CTL.securityBody ? window.EKO_CTL.securityBody(E) : ''; }
       out += `<div class="scrim" data-born="${E.state.born==='dlg'?1:0}" data-act="closeDlg"></div>
       <div class="dlg dlgsettings" data-born="${E.state.born==='dlg'?1:0}" role="dialog" aria-label="${esc(E.t('stTitle'))}">
         <div class="draghandle"></div><div class="dlghead"><h2>${esc(E.t('stTitle'))}</h2>
         <button class="iconbtn msA" data-act="closeDlg" aria-label="${esc(E.t('close'))}">${icon('x',14)}</button></div>
-        <div class="segbox row sttabs" role="tablist">${tabBtn('appearance', 'stAppearance')}${tabBtn('system', 'stSystem')}${tabBtn('administration', 'accAdmin')}${tabBtn('security', 'stSecurity')}</div>
+        <div class="segbox row sttabs" role="tablist">${tabBtn('appearance', 'stAppearance')}${tabBtn('system', 'stSystem')}${tabBtn('administration', 'accAdmin')}${tabBtn('security', 'stSecurity')}${esgOn ? tabBtn('targets', 'stTargets') : ''}</div>
         <div class="stbody" data-tab="${tab}">${body}</div>
       </div>`;
     } else if(d === 'conn'){
@@ -911,7 +932,9 @@
       : E.state.born === 'navx' ? 'x'
       : (E.state.born === 'nav' || /^nsub:/.test(E.state.born || '')) ? '1' : '0');
     $('ekonav').innerHTML = navRail();
-    $('mount').innerHTML = NB((stacked ? pagehead() : '') + P.renderPage(E));
+    /* E15 port: the page frame (headline, how-to-read line, tiles, tabs) on every page of a project on the extended module set (the Hospital). A project on the standard module set, Marsa Al Arab included, keeps its own page layouts. */
+    const framed = window.EKO_FRAME && window.EKO_MODULES === 'extended';
+    $('mount').innerHTML = NB((stacked ? pagehead() : '') + (framed ? window.EKO_FRAME.apply(E, P.renderPage(E)) : P.renderPage(E)));
     /* E17: on a phone or a tablet the page's active sub-tab is scrolled into view when the page changes */
     if(stacked){ const k = E.state.pageId + '/' + (E.state.sub || ''); if(render._phOn !== k){ render._phOn = k;
       const on = $('mount').querySelector('#pagehead .phsub[data-on="1"]'), strip = on && on.parentElement;
@@ -921,6 +944,14 @@
     if(fresh && keptHost) fresh.replaceWith(keptHost);
     $('mobtabs').innerHTML = mobtabs();
     paintOverlays();
+    /* E15 port (D180): the demo scenario's presenter bar floats over every page while a scenario plays */
+    if(window.EKO_SCN && (window.EKO_SCN.on(E) || document.getElementById('scnbarhost'))){ let sb = document.getElementById('scnbarhost'); if(!sb){ sb = document.createElement('div'); sb.id = 'scnbarhost'; }   /* only a site with a scenario (the hospital) gets the host */
+      /* D182: on a page with the model the bar sits at the bottom of the model, never over the tiles; elsewhere at the bottom of the window */
+      const vp = document.getElementById('vpmain'); const home = vp || document.body; if(sb.parentNode !== home) home.appendChild(sb); sb.dataset.in = vp ? 'model' : 'page';
+      sb.innerHTML = window.EKO_SCN.bar(E);
+      /* the summary column ends above the bar, so the bar never covers a tile (the column scrolls) */
+      const ov = vp && document.getElementById('ovp');
+      if(ov){ ov.style.bottom = ''; if(sb.firstElementChild && ov.dataset.min !== '1') ov.style.bottom = Math.ceil(vp.getBoundingClientRect().bottom - sb.firstElementChild.getBoundingClientRect().top + 8) + 'px'; } }
     if(document.getElementById('enginehost')) window.EKO_V.mountEngine(E);
     clock();
     const pal = $('palin'); if(pal){ pal.focus(); pal.setSelectionRange(pal.value.length, pal.value.length); }
@@ -1264,7 +1295,8 @@
       ls.set('eko-nav', E.state.navMin?'min':'full'); render(); },
     sysExpTgl(el, ev){ ev.stopPropagation(); const g = el.dataset.v;
       E.state.sysExp[g] = E.state.sysExp[g] === false; render(); },
-    ovpMin(){ E.state.ovpMin = !E.state.ovpMin; ls.set('eko-ovp', E.state.ovpMin?'min':'full'); render(); },
+    ovpMin(){ if(window.EKO_SCN && window.EKO_SCN.on(E)){ E.state.scnOvpOpen = !E.state.scnOvpOpen; render(); return; }   /* E15 port (D182): the scenario's own setting, the user's choice kept */
+      E.state.ovpMin = !E.state.ovpMin; ls.set('eko-ovp', E.state.ovpMin?'min':'full'); render(); },
     panMin(){ E.state.panMin = !E.state.panMin; ls.set('eko-pan', E.state.panMin?'min':'full'); render(); },
     regMin(){ E.state.regMin = !E.state.regMin; ls.set('eko-reg', E.state.regMin?'min':'full'); render(); },
     mobMore(){ E.set({ born: E.state.mobMore?null:'dlg', mobMore: !E.state.mobMore }); },
@@ -1618,12 +1650,20 @@
   E.runAct = (name, data) => { const f = ACTS[name]; if(f) f({ dataset: data || {}, value: (data || {}).v }); };   /* E15: an action by name (js/e14.js) */
   E.locExit = ACTS.locBack;   /* Escape leaves Locate-in-3D focus the way Back to Assets does (surfaces.js) */
 
+  /* E15 port: the click and change handlers of the ported ESG, Security, Evacuation, Maintenance and scenario modules, looked up
+     after ours in the pack's order (a name already in ACTS or an earlier module keeps winning) */
+  const E15_CLICK = ['ESG', 'SECP', 'SECW', 'EVACP', 'FRAME', 'OCC', 'SEC', 'EVAC', 'SCN', 'OPS'];
+  const E15_CHANGE = [['OCC', 'CHG'], ['ESG', 'ACTS'], ['SECP', 'ACTS'], ['EVACP', 'CHG'], ['SEC', 'ACTS'], ['SCN', 'CHG']];
+  const e15Pick = (list, k) => { for(const item of list){ const [n, p] = Array.isArray(item) ? item : [item, 'ACTS']; const m = window['EKO_' + n], t = m && m[p]; if(t && Object.prototype.hasOwnProperty.call(t, k)) return t[k]; } };
+  const e15Act = k => e15Pick(E15_CLICK, k), e15Chg = k => e15Pick(E15_CHANGE, k);
+
   document.addEventListener('click', ev => {
     if (window.EKO !== E) return;
     const el = ev.target.closest('[data-act]');
     if(!el) return;
     if(window.EKO_SURF) window.EKO_SURF.noteClick(el);           /* R5: remember the opener */
-    const fn = ACTS[el.dataset.act] || (window.EKO_AI && window.EKO_AI.ACTS[el.dataset.act]) || (window.EKO_CTL && window.EKO_CTL.ACTS[el.dataset.act]) || (window.EKO_NF && window.EKO_NF.ACTS[el.dataset.act]) || (window.EKO_PWA && window.EKO_PWA.ACTS[el.dataset.act]) || (window.EKO_FB && window.EKO_FB.ACTS[el.dataset.act]) || (window.EKO_DG && window.EKO_DG.ACTS[el.dataset.act]) || (window.EKO_PF && window.EKO_PF.ACTS[el.dataset.act]) || (window.EKO_POINT_CONTROL && window.EKO_POINT_CONTROL.ACTS[el.dataset.act]);
+    if(window.EKO_ESG && window.EKO_ESG.partnerDenied && window.EKO_ESG.partnerDenied(E, el.dataset.act)){ if(window.EKO_FB) window.EKO_FB.toast({ text: E.t('esg.p.readOnly'), tone: 'info' }); return; }   /* E15 port (D176 B2): the partner is read only */
+    const fn = ACTS[el.dataset.act] || (window.EKO_AI && window.EKO_AI.ACTS[el.dataset.act]) || (window.EKO_CTL && window.EKO_CTL.ACTS[el.dataset.act]) || (window.EKO_NF && window.EKO_NF.ACTS[el.dataset.act]) || (window.EKO_PWA && window.EKO_PWA.ACTS[el.dataset.act]) || (window.EKO_FB && window.EKO_FB.ACTS[el.dataset.act]) || (window.EKO_DG && window.EKO_DG.ACTS[el.dataset.act]) || (window.EKO_PF && window.EKO_PF.ACTS[el.dataset.act]) || (window.EKO_POINT_CONTROL && window.EKO_POINT_CONTROL.ACTS[el.dataset.act]) || e15Act(el.dataset.act);   /* E15 port */
     if(fn) fn(el, ev);
   });
 
@@ -1751,7 +1791,8 @@
   });
   document.addEventListener('change', ev => {
     const el = ev.target.closest && ev.target.closest('[data-chg]');
-    const cfn = el && (ACTS[el.dataset.chg] || (window.EKO_AI && window.EKO_AI.ACTS[el.dataset.chg]) || (window.EKO_CTL && window.EKO_CTL.ACTS[el.dataset.chg]) || (window.EKO_NF && window.EKO_NF.ACTS[el.dataset.chg]) || (window.EKO_PWA && window.EKO_PWA.ACTS[el.dataset.chg]));
+    if(el && window.EKO_ESG && window.EKO_ESG.partnerDenied && window.EKO_ESG.partnerDenied(E, el.dataset.chg)) return;   /* E15 port (D176 B2) */
+    const cfn = el && (ACTS[el.dataset.chg] || (window.EKO_AI && window.EKO_AI.ACTS[el.dataset.chg]) || (window.EKO_CTL && window.EKO_CTL.ACTS[el.dataset.chg]) || (window.EKO_NF && window.EKO_NF.ACTS[el.dataset.chg]) || (window.EKO_PWA && window.EKO_PWA.ACTS[el.dataset.chg]) || e15Chg(el.dataset.chg));   /* E15 port */
     if(cfn) cfn(el, ev);
   });
 
@@ -1767,6 +1808,7 @@
   if(window.EKO_PERSONA) window.EKO_PERSONA.init(E);
   { const l = E.landing(); E.state.pageId = l.pageId; E.state.module = l.module; E.state.sub = l.sub || null; }   /* D105: the role picks the landing */
   try{ const u = new URL(location.href); if(u.searchParams.get('page') === 'portfolio' && (E.data.sites || []).length > 1 && u.searchParams.get('display') !== 'wall'){ E.state.pageId = 'portfolio'; E.state.module = 'overview'; } }catch(e){}   /* D108: the estate wall exits to the portfolio */
+  try{ const u = new URL(location.href); if(window.EKO_ESG && !E.state.wall && u.searchParams.get('display') !== 'wall') window.EKO_ESG.deepLink(E, u); }catch(e){}   /* E15 port (D175): ?page=esg and ?page=esg&view=<sub-view> */
   E.state.disclose = loadDisclose();
   try{ const u = new URL(location.href); if(u.searchParams.get('display') === 'wall'){ E.state.wall = true; E.state.wallOpt = { scope: u.searchParams.get('scope') || null, distance: u.searchParams.get('distance'), dwell: u.searchParams.get('dwell'), brightness: u.searchParams.get('brightness'), motion: u.searchParams.get('motion'), shifts: u.searchParams.get('shifts'), scale: u.searchParams.get('scale'), panel: u.searchParams.get('panel'), panelIn: u.searchParams.get('panelIn'), theme: u.searchParams.get('theme'), lock: u.searchParams.get('lock'), id: u.searchParams.get('id') || 'default', viaTab: u.searchParams.get('via') === 'tab' }; if(window.EKO_WALL) window.EKO_WALL.start(E); } }catch(e){}   /* D106 */
   applyTheme(); applyLang(); E.state.born = 'boot'; render();

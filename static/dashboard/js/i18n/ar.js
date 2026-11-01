@@ -6651,9 +6651,6 @@ window.EKO_I18N.paramAr = {
   "Temp setpoint": "نقطة ضبط الحرارة",
   "BMS poll": "استطلاع BMS",
   "Hexagon EAM (mock)": "Hexagon EAM (محاكاة)",
-  "S. Khan": "س. خان",
-  "M. Haddad": "م. حداد",
-  "Arman Y.": "أرمان ي.",
   "RA temp": "حرارة هواء العودة",
   "Jan": "يناير", "Feb": "فبراير", "Mar": "مارس", "Apr": "أبريل", "May": "مايو", "Jun": "يونيو",
   "Jul": "يوليو", "Aug": "أغسطس", "Sep": "سبتمبر", "Oct": "أكتوبر", "Nov": "نوفمبر", "Dec": "ديسمبر",
@@ -6678,4 +6675,27 @@ window.EKO_I18N.phrase = function(s){
    product names, protocols). The Arabic leak sweep (docs/tsweep.html
    ?lang=ar) and tools/parity.js read this list; anything Latin that is
    not a code, a unit or listed here is an untranslated string. */
-window.EKO_I18N.stayLatin = ["EKO", "Hexagon EAM", "FIN Framework", "Maximo", "BACnet", "Modbus", "OPC UA", "DEWA", "Burger King", "C-Store"];
+window.EKO_I18N.stayLatin = ["EKO", "Hexagon EAM", "FIN Framework", "Maximo", "BACnet", "Modbus", "OPC UA", "DEWA", "Burger King", "C-Store", "Wi-Fi", "ADDC grid", "ADDC", "CMMS", "DEWA grid 2025"];
+
+/* E15 port: 19 data phrases (room, equipment and event names) for the Arabic UI that the pack has and this file did not. Added only; no existing entry is changed. */
+Object.assign(window.EKO_I18N.paramAr, {
+  "Inlet temperature": "حرارة الدخول",
+  "CMMS (mock)": "CMMS (محاكاة)",
+  "the shift engineer": "مهندس الوردية",
+  "the duty engineer": "المهندس المناوب",
+  "the FM technician": "فني إدارة المرافق",
+  "the maintenance technician": "فني الصيانة",
+  "Inlet temperature investigation": "التحقق من حرارة الدخول",
+  "Filter replacement": "استبدال الفلتر",
+  "Fan and belt inspection": "فحص المروحة والسير",
+  "Condenser tube clean · quarterly": "تنظيف أنابيب المكثف · ربع سنوي",
+  "Fuel top-up request": "طلب تزويد بالوقود",
+  "Annual load-bank test · no completion recorded since handover": "اختبار حمل البنك السنوي · لا إنجاز مسجل منذ التسليم",
+  "Room cooling check": "فحص تبريد الغرفة",
+  "Damper synchronization check": "فحص تزامن المخمدات",
+  "sustainability consultant": "استشاري الاستدامة",
+  "ISO 50001 and ISO 50006 (energy baseline)": "ISO 50001 وISO 50006 (خط أساس الطاقة)",
+  "GHG Protocol Corporate Standard (Scope 1 and 2)": "المعيار المؤسسي لبروتوكول غازات الدفيئة (النطاقان 1 و2)",
+  "ASHRAE Guideline 14 (measurement)": "إرشاد ASHRAE رقم 14 (القياس)",
+  "ASHRAE 55 (thermal comfort bands)": "ASHRAE 55 (نطاقات الراحة الحرارية)"
+});
