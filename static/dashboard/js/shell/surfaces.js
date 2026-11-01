@@ -28,6 +28,11 @@ window.EKO_SURF = (function(){
     { id:'prefs',    kind:'dialog',  isOpen:()=>!!(NF()&&NF().st(E).prefs),                     close:()=>{ NF().st(E).prefs=false; } },
     { id:'help',     kind:'dialog',  isOpen:()=>E.state.dlg==='help',                           close:()=>{ E.state.dlg=null; } },
     { id:'teaser',   kind:'dialog',  isOpen:()=>E.state.dlg==='teaser',                         close:()=>{ E.state.dlg=null; } },
+    /* E15 port: the ESG, security and operations dialogs and the ESG factor popover close like every other surface (Escape, click-away, a route change) */
+    { id:'esg',      kind:'dialog',  isOpen:()=>E.state.dlg==='esg',                            close:()=>{ E.state.dlg=null; E.state.esgDlg=null; } },
+    { id:'sec',      kind:'dialog',  isOpen:()=>E.state.dlg==='sec',                            close:()=>{ E.state.dlg=null; E.state.secDlg=null; } },
+    { id:'ops',      kind:'dialog',  isOpen:()=>E.state.dlg==='ops',                            close:()=>{ E.state.dlg=null; E.state.opsDrill=null; } },
+    { id:'esgfp',    kind:'overlay', isOpen:()=>E.state.dlg==='esgfp',                          close:()=>{ E.state.dlg=null; E.state.esgFp=null; } },
     { id:'ai',       kind:'overlay', sticky:true, isOpen:()=>!!(window.EKO_AI&&window.EKO_AI.isOpen()), close:()=>{ window.EKO_AI.close(); } },   /* D132: the conversation panel; the page stays usable beside it; sticky = navigation keeps it (R4 exception) */
     { id:'alerts',   kind:'overlay', isOpen:()=>E.state.dlg==='alerts',                         close:()=>{ E.state.dlg=null; } },
     { id:'report',   kind:'overlay', isOpen:()=>E.state.dlg==='report',                         close:()=>{ E.state.dlg=null; } },
@@ -54,7 +59,7 @@ window.EKO_SURF = (function(){
 
   let last = new Set(), order = [], lastClick = null, openers = {}, pendingFocus = null, pendingEnter = null;
   /* where each surface's first focusable control lives (D121) */
-  const ROOTS = { mkpop:'.mkpop', conn:'.connpop', settings:'.dlgsettings', signout:'.dlgsignout', menu:'.accmenu', display:'.dispmenu', switcher:'.dlg[role="menu"]', more:'.dlg', notif:'.nfpanel, .nfpop', alerts:'.dlg', report:'.dlg', help:'.dlghelp', wallcfg:'.wcfg', pfcov:'.dlg', rpconfirm:'.dlg', teaser:'.dlg', ai:'#aipanel', prefs:'.dlg' };
+  const ROOTS = { mkpop:'.mkpop', conn:'.connpop', settings:'.dlgsettings', signout:'.dlgsignout', menu:'.accmenu', display:'.dispmenu', switcher:'.dlg[role="menu"]', more:'.dlg', notif:'.nfpanel, .nfpop', alerts:'.dlg', report:'.dlg', help:'.dlghelp', wallcfg:'.wcfg', pfcov:'.dlg', rpconfirm:'.dlg', teaser:'.dlg', ai:'#aipanel', prefs:'.dlg', esg:'.esgdlg', sec:'.secdlg', ops:'.opsdlg', esgfp:'.esgfpop' };
   function enterSurface(id){
     const sel = ROOTS[id]; if(!sel) return;
     const root = [...document.querySelectorAll(sel)].find(x => x.getClientRects().length); if(!root) return;   /* fixed-positioned surfaces have no offsetParent */

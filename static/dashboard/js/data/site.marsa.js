@@ -259,7 +259,10 @@ window.EKO_DATA.marsa = {
   "entitlements": { "showAddOns": true,
     "modules": { "esg": "available", "maintenance": "available", "security": "available",
                  "systems.life": "available", "systems.security": "available",
-                 "energy.bench": "available", "energy.fcst": "available" } },  /* the config lines: cmms mock | hexagon · llm mock | ollama | none */
+                 "energy.bench": "available", "energy.fcst": "available",
+                 /* E15 port: sub-views only the hospital has data for */
+                 "systems.other": "hidden", "systems.data": "hidden", "spaces.occ": "hidden",
+                 "security.evac": "hidden", "security.nurse": "hidden" } },  /* the config lines: cmms mock | hexagon · llm mock | ollama | none */
   "llm": { "ollama": { "baseUrl": "http://localhost:11434", "model": "llama3.1:8b", "timeoutMs": 20000, "stream": false } },
   "sites": [ { "id": "marsa", "control": "demo" }, { "id": "khazna", "control": "on" } ],
   "controlUsers": ["Arman Y.", "S. Khan"],
