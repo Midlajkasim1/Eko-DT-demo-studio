@@ -6572,7 +6572,7 @@ window.EKO_I18N.ar = {
   "per.hl.sec16.k_none": "أحداث الأمن والحريق المفتوحة: {n}؛ لا شيء منها يحتاجك الآن.",
   "per.hl.sec16.k_calm": "لا حدث أمن أو حريق مفتوح.",
   "cap3dModel": "نموذج ثلاثي الأبعاد",
-  "sp.cam.gridCap17": "مقاطع مسجلة في هذا العرض؛ وبث مباشر في الموقع.",
+  "sp.cam.gridCap17": "مقاطع مسجلة في هذا العرض؛ وبث مباشر في الموقع. الكاميرات غير المتصلة مظللة مع وقت آخر ظهور.",
   "sp.m.cam17": "المقطع: مقطع مسجل يُختار حسب نوع موقع الكاميرا. الحالة من فحص سلامة نظام الفيديو. الأحداث: أحداث الدخول والحريق والتسلل في منطقة الكاميرا خلال 24 ساعة.",
   "sp.clipNone17": "لا مقطع مسجل لهذا النوع من الغرف",
   "sp.clipRepeat17": "إطار ثابت: مقاطع هذا النوع من الغرف المسجلة تُعرض في المربعات المجاورة",
@@ -6635,9 +6635,6 @@ window.EKO_I18N.paramAr = {
   "Temp setpoint": "نقطة ضبط الحرارة",
   "BMS poll": "استطلاع BMS",
   "Hexagon EAM (mock)": "Hexagon EAM (محاكاة)",
-  "S. Khan": "س. خان",
-  "M. Haddad": "م. حداد",
-  "Arman Y.": "أرمان ي.",
   "RA temp": "حرارة هواء العودة",
   "Jan": "يناير", "Feb": "فبراير", "Mar": "مارس", "Apr": "أبريل", "May": "مايو", "Jun": "يونيو",
   "Jul": "يوليو", "Aug": "أغسطس", "Sep": "سبتمبر", "Oct": "أكتوبر", "Nov": "نوفمبر", "Dec": "ديسمبر",
@@ -6662,7 +6659,7 @@ window.EKO_I18N.phrase = function(s){
    product names, protocols). The Arabic leak sweep (docs/tsweep.html
    ?lang=ar) and tools/parity.js read this list; anything Latin that is
    not a code, a unit or listed here is an untranslated string. */
-window.EKO_I18N.stayLatin = ["EKO", "Hexagon EAM", "FIN Framework", "Maximo", "BACnet", "Modbus", "OPC UA", "DEWA", "Burger King", "C-Store"];
+window.EKO_I18N.stayLatin = ["EKO", "Hexagon EAM", "FIN Framework", "Maximo", "BACnet", "Modbus", "OPC UA", "DEWA", "Burger King", "C-Store", "Wi-Fi", "ADDC grid", "ADDC", "CMMS", "DEWA grid 2025"];
 
 /* E15 port: 19 data phrases (room, equipment and event names) for the Arabic UI that the pack has and this file did not. Added only; no existing entry is changed. */
 Object.assign(window.EKO_I18N.paramAr, {

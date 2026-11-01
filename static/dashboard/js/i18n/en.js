@@ -6067,7 +6067,7 @@ window.EKO_I18N.en = {
   "per.hl.sec16.k_none": "Open security and fire events: {n}; none needs you now.",
   "per.hl.sec16.k_calm": "No security or fire event is open.",
   "cap3dModel": "3D model",
-  "sp.cam.gridCap17": "Recorded clips in this demo; live streams on site.",
+  "sp.cam.gridCap17": "Recorded clips in this demo; live streams on site. Offline cameras are hatched with the time they were last seen.",
   "sp.m.cam17": "Clip: a recorded clip chosen by the camera’s location type. State from the video system’s health poll. Events: access, fire and intrusion events in the camera’s zone over 24 hours.",
   "sp.clipNone17": "No recorded clip for this room type",
   "sp.clipRepeat17": "Still frame: the recorded clips for this room type play in the tiles beside it",

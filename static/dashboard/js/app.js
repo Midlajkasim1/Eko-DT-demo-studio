@@ -20,8 +20,6 @@
     const cfg = window.INJECTED_PROJECT_CONFIG || {}, D = window.EKO_DATA || {};
     const extended = cfg.modules === 'extended';
     window.EKO_MODULES = extended ? 'extended' : 'standard';
-    /* the prototype styles (css/prototype-sync.css, the client's file, unchanged) are for a project on the extended module set only: for one on the standard module set (Marsa Al Arab) the sheet is switched off, so its own design stays as it was */
-    document.querySelectorAll('link[rel="stylesheet"][href*="prototype-sync.css"]').forEach(l => { l.disabled = !extended; });
     /* the Security entry reads "Security & life safety" on the extended module set and "Security" on the standard one (Marsa Al Arab) */
     { const sec = ((window.EKO_LAYOUTS.nav || {}).modules || []).find(m => m.id === 'security'); if(sec) sec.label = extended ? 'modSecLs' : 'modSecurity'; }
     const want = cfg.sampleData;
@@ -207,8 +205,8 @@
     /* D105: the role model. Role = defaults; permissions stay in user.canControl / features. */
     role(){ const roles = this.data.roles || {}; const r = this.state.rolePreview || (this.data.user || {}).role; return roles[r] ? r : (roles.technician ? 'technician' : Object.keys(roles)[0] || 'technician'); },
     roleCfg(){ return (this.data.roles || {})[this.role()] || {}; },
-    /* the signed-in user's initials, from data.user.name ("Arman Y." → "AY"); '' when no user is known */
-    initials(){ return String((this.data.user || {}).name || '').trim().split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase(); },
+    /* the signed-in user's initials: data.user.initials, else from the name ("Facility Manager" → "FM"); '' when no user is known */
+    initials(){ const u = this.data.user || {}; return u.initials || String(u.name || '').trim().split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase(); },
     wording(){ return this.roleCfg().wording || 'plain'; },
     disclose(k){ const o = this.state.disclose || {}; return (k in o) ? !!o[k] : !!((this.roleCfg().disclose || {})[k]); },
     landing(){ const c = this.roleCfg(); const l = c.landing === 'auto' ? ((this.data.sites || []).length > 1 ? 'portfolio' : 'site') : (c.landing || 'site');
