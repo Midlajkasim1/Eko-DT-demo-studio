@@ -9,6 +9,8 @@ window.EKO_LAYOUTS.nav = {
   "schemaVersion": 1,
   "modules": [
     { "id": "overview",  "label": "modOverview",  "icon": "home",   "pageId": "marsa-overview", "mobile": "mobOverview" },
+    /* E15: the executive summary (js/personas.js), for the roles that see money on a site run by the simulation engine (app.js navVisible) */
+    { "id": "exec",      "label": "modExec",      "icon": "gauge",  "pageId": "exec" },
     { "id": "systems",   "label": "modSystems",   "icon": "grid",   "pageId": "systems",
       "subs": [
         { "id": "hvac",       "label": "sysHvacMech", "pageId": "systems" },

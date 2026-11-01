@@ -412,6 +412,9 @@
     return m < 60 ? E.t('pfAgo.min', { n: m }) : m < 48 * 60 ? E.t('pfAgo.h', { n: Math.round(m / 60) }) : E.t('pfAgo.d', { n: Math.round(m / 1440) });
   };
 
+  /* E15: a module the nav shows: not hidden; the partner sees Energy and ESG only; the Executive summary for a money role on a site run by the simulation engine */
+  const navVisible = m => !m.hidden && (E.role() !== 'partner' || m.id === 'energy' || m.id === 'esg') && (m.id !== 'exec' || !!(window.EKO_PERSONA && window.EKO_PERSONA.money(E) && E.sim));
+
   /* ------------------------------- top bar -------------------------------- */
   function topbar(){
     const site = window.EKO_DATA.portfolio.find(p => p.key === 'marsa');
@@ -469,7 +472,7 @@
 
   /* ------------------------------- nav rail ------------------------------- */
   function navRail(){
-    const mods = E.nav.modules.filter(m => !m.hidden).map(m => {
+    const mods = E.nav.modules.filter(navVisible).map(m => {
       const on = E.state.module === m.id ? (E.state.sub ? 'contains' : 'page') : 'none';
       const hasSubs = m.subs && m.subs.length;
       const open = !!E.state.exp[m.id] || E.state.module === m.id;   /* D117: the active module shows its sub-items, as the mockup does */
@@ -540,7 +543,7 @@
             <button class="seg" data-on="${E.lang==='en'}" data-act="lang" data-v="en">EN</button>
             <button class="seg" data-on="${E.lang==='ar'}" data-act="lang" data-v="ar">عربي</button>
           </div></div>
-        <div class="col gap4">${E.nav.modules.filter(m=>!E.nav.phoneTabs.includes(m.id) && !m.hidden).map(m =>
+        <div class="col gap4">${E.nav.modules.filter(m=>!E.nav.phoneTabs.includes(m.id) && navVisible(m)).map(m =>
           `<button class="nvi" data-lock="${!!m.locked}" data-act="${m.locked?'teaser':'goMod'}" data-mod="${m.id}" ${m.teaser?`data-teaser="${m.teaser}"`:''} data-page="${esc(m.pageId||'')}">
              <span class="nvic">${icon(m.icon,17)}</span><span class="nlbl">${esc(E.t(m.label))}</span>
              <span class="nlock">${icon('lock',13)}</span></button>`).join('')}
@@ -758,7 +761,7 @@
           <span class="tCap">${esc(E.lang==='ar'?p.cityAr:p.cityEn)}</span></button>`).join('')}</div></div>`;
     } else if(d === 'pal'){
       const q = (E.state.palQ||'').toLowerCase();
-      const pages = E.nav.modules.filter(m=>!m.hidden).flatMap(m => [
+      const pages = E.nav.modules.filter(navVisible).flatMap(m => [
         { kind:'page', label:E.t(m.label), go:{page:m.pageId,mod:m.id}, locked:!!m.locked, teaser:m.teaser || m.id, mod:m.id },
         ...(m.subs||[]).filter(s => !s.hidden).map(s => ({ kind:'page', label:E.t(m.label)+' · '+E.t(s.label), go:{page:s.pageId,mod:m.id,sub:s.id}, locked:!!s.locked, teaser:s.teaser || (m.id + '.' + s.id), mod:m.id }))
       ]);
@@ -1578,7 +1581,8 @@
       l[el.dataset.v] = !l[el.dataset.v]; E.set({ hmLayers: l }); }
   };
   /* E15: the Brief's and its focus card's actions join the app's (no name is shared) */
-  [window.EKO_BRIEF, window.EKO_BFOCUS].forEach(m => { if(m && m.ACTS) Object.keys(m.ACTS).forEach(k => { if(!ACTS[k]) ACTS[k] = m.ACTS[k]; }); });
+  [window.EKO_BRIEF, window.EKO_BFOCUS, window.EKO_E14].forEach(m => { if(m && m.ACTS) Object.keys(m.ACTS).forEach(k => { if(!ACTS[k]) ACTS[k] = m.ACTS[k]; }); });
+  E.runAct = (name, data) => { const f = ACTS[name]; if(f) f({ dataset: data || {}, value: (data || {}).v }); };   /* E15: an action by name (js/e14.js) */
   E.locExit = ACTS.locBack;   /* Escape leaves Locate-in-3D focus the way Back to Assets does (surfaces.js) */
 
   document.addEventListener('click', ev => {
