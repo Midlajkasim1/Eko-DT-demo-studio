@@ -1,12 +1,12 @@
-/* Report template — Morning brief. A layout document: sections, the widgets
+/* Report template — Morning report. A layout document: sections, the widgets
    per section with their data bindings, the default period, the required
    sources, and which sections are optional when their data is unavailable.
    Adding a report = a file like this + i18n keys (rpT.* / rpS.* / rpW.*). */
 window.EKO_REPORTS = window.EKO_REPORTS || { templates: {} };
-window.EKO_REPORTS.templates['morning-brief'] = {
+window.EKO_REPORTS.templates['morning-report'] = {
   "schemaVersion": 1,
-  "id": "morning-brief",
-  "titleKey": "rpT.morningBrief", "family": "site", "descKey": "rpD.morningBrief",
+  "id": "morning-report",
+  "titleKey": "rpT.morningReport", "family": "site", "descKey": "rpD.morningReport",
   "defaultPeriod": { "kind": "today" },
   "sources": ["meters.main", "bms", "pmu", "alarms"],
   "sections": [

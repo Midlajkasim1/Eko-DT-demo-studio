@@ -253,7 +253,7 @@ window.EKO_R = (function(){
     const figures = {};
     const fig = id => {
       if(figures[id]) return figures[id];
-      const r = FIG[id] ? FIG[id](E, per, params) : null;
+      let r = null; try{ r = FIG[id] ? FIG[id](E, per, params) : null; }catch(e){ r = null; }   /* E15: a figure whose data the site does not have is left out, never a broken report; an empty value keeps its dash */
       if(!r) return null;
       const value = num(r.value);
       const f = Object.assign({ id }, r, { value, fmt: fmt(value, r.d) });
@@ -288,10 +288,10 @@ window.EKO_R = (function(){
         if(w.type === 'table.boards') return Object.assign({}, w, { rows: E.data.power.boards, basis: basisFor(E, Object.assign({ sources:['pmu'] }, at(E))) });
         if(w.type === 'table.waste') return Object.assign({}, w, { rows: E.data.energyLanding.kpis, tariff: tariff(E), basis: basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) });
         if(w.type === 'table.anom') return Object.assign({}, w, { rows: E.data.anom.items, tariff: tariff(E), basis: basisFor(E, Object.assign({ sources:['model.anom'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) });
-        if(w.type === 'table.bench') return Object.assign({}, w, { rows: E.data.bench.rows, basis: basisFor(E, Object.assign({ sources:['bench'] }, mtd(E))) });
+        if(w.type === 'table.bench') return Object.assign({}, w, { rows: benchRows(E), basis: basisFor(E, Object.assign({ sources:['bench'] }, mtd(E))) });
         if(w.type === 'status.leak'){ const l = E.data.water.leak; return Object.assign({}, w, { ready: num(l.nightsCollected) != null && num(l.nightsNeeded) != null && l.nightsCollected >= l.nightsNeeded, params:{ got:l.nightsCollected, need:l.nightsNeeded } }); }
         if(w.type === 'period.energy'){
-          return Object.assign({}, w, { available: per.kind === 'today', figures: per.kind === 'today' ? [fig('metrics.energyTodayMwh'), fig('derived.energyCostTodayAed'), fig('derived.co2TodayT')] : [] });
+          return Object.assign({}, w, { available: per.kind === 'today', figures: per.kind === 'today' ? [fig('metrics.energyTodayMwh'), fig('derived.energyCostTodayAed'), fig('derived.co2TodayT')].filter(Boolean) : [] });
         }
         /* generic tables: rows are localised at build time — the document is
            a fixed artefact in one language */
@@ -331,6 +331,8 @@ window.EKO_R = (function(){
         if(w.type === 'table.lifecycle' && incident){
           return { type:'table', labelKey:w.labelKey, head:[E.t('rpCol.step'), E.t('rpCol.when'), E.t('rpCol.state')], rows:incident.lifecycle.map(l => [E.t('rpLc.' +l[0].toLowerCase().replace(/\s+/g, '')), l[1], E.t(l[2] ? 'rpVal.done' : 'rpVal.pending')]), basis:basisFor(E, Object.assign({ sources:['alarms','cmms'] }, at(E))) };
         }
+        /* E15: a handover's PDF: the notes are the handover itself (js/handover.js) */
+        if(w.type === 'text.notes' && params.handoverId && window.EKO_HO){ const lines = window.EKO_HO.notesFor(E, params.handoverId); if(lines) return { type:'text', labelKey:w.labelKey, lines }; }
         if(w.type === 'text.notes') return { type:'text', labelKey:w.labelKey, textKey:'rpEmpty.notes' };
         return Object.assign({}, w);
       }).filter(Boolean);
@@ -381,7 +383,10 @@ window.EKO_R = (function(){
   /* ---- immutability: deep freeze + store --------------------------------- */
   function deepFreeze(o){ if(o && typeof o === 'object' && !Object.isFrozen(o)){ Object.freeze(o); Object.keys(o).forEach(k => deepFreeze(o[k])); } return o; }
   let docs = null;
-  function loadStore(){ if(docs) return docs; try{ docs = JSON.parse(localStorage.getItem(LS_STORE) || '[]'); }catch(e){ docs = []; } docs.forEach(deepFreeze); return docs; }
+  function loadStore(){ if(docs) return docs; try{ docs = JSON.parse(localStorage.getItem(LS_STORE) || '[]'); }catch(e){ docs = []; }
+    /* E15: the "morning-brief" template became the Morning report ("brief" now names the Brief); a document kept before keeps its content and takes the new name */
+    docs.forEach(d => { if(d.templateId === 'morning-brief'){ d.templateId = 'morning-report'; d.titleKey = 'rpT.morningReport'; } });
+    docs.forEach(deepFreeze); return docs; }
   function saveStore(){ try{ localStorage.setItem(LS_STORE, JSON.stringify(docs)); }catch(e){} }
   /* Removal is SOFT (D92): a document is immutable and its id stays unique
      and citable; "remove" hides it from the library, is audited, and can be
@@ -423,6 +428,16 @@ window.EKO_R = (function(){
       window.EKO_NOTIF.add({ type:'report.ready', params:{ report: title(E, doc) + ' · ' + doc.id, id: doc.id }, source:{ kind:'report', id:doc.id }, actorId:(E.data.user && E.data.user.name) || 'system' });
     }
     return doc;
+  }
+
+  /* E15: a site benchmarked against its design (bench.design) has no ready rows; they are made here from the same
+     systems, as Wh per m² against the design band, so the executive report renders on every site */
+  function benchRows(E){
+    const b = E.data.bench || {}; if(Array.isArray(b.rows)) return b.rows;
+    const d = b.design, area = (E.data.energyModel || {}).floorAreaM2; if(!d || !Array.isArray(d.systems) || !area) return [];
+    const tol = (d.tolPct || 5) / 100, wh = mwh => Math.round(mwh * 1e6 / area);
+    return d.systems.map(x => { const p = x.designMwh ? (x.actualMwh / x.designMwh - 1) * 100 : 0, n = E.t('rpB.vsDesign', { p: (p > 0 ? '+' : '') + Math.round(p) });
+      return { sysEn: x.sysEn, sysAr: x.sysAr, whm2: wh(x.actualMwh), bandLo: wh(x.designMwh * (1 - tol)), bandHi: wh(x.designMwh * (1 + tol)), noteEn: n, noteAr: n }; });
   }
 
   /* E15: THE delivery path: audit, then the notification with its deep link (a handover, the scheduled Brief) */
