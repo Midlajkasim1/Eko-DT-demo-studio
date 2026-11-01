@@ -5,6 +5,7 @@ import * as OBC from '@thatopen/components'
 import { useProjectStore } from '@/store/useProjectStore'
 import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import { useAppStore } from '@/store/useAppStore'
+import type { RenderSettings } from '@/constants/renderSettings'
 import { useModelStore } from '@/store/useModelStore'
 import { foldName, indexLinks, indexSpaceLinks, isGuid } from '@/lib/assetLinks'
 import type { AssetLink } from '@/types'
@@ -118,6 +119,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     /* The one highlighted equipment and the state it was drawn for */
     let colored: { bimId: string; tone: 'alarm' | 'healthy' | 'amber' } | null = null
     let highlightSeq = 0
+    /* The Brief's Show in the model: the colour its asset is drawn in, the style to go back to, its floor's outline */
+    let focusColour: THREE.Color | null = null
+    let focusPrev: Pick<RenderSettings, 'templateId' | 'realisticMode' | 'renderLite'> | null = null
+    let floorOutline: THREE.LineSegments | null = null
 
     const normAssetId = (id: string) => (id.startsWith('ast-') ? id.substring(4) : id)
     const fold = foldName
@@ -417,7 +422,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       return []
     }
     const tintGhost = (tone: 'alarm' | 'healthy' | 'amber') => {
-      const c = tone === 'alarm' ? ALARM : tone === 'amber' ? AMBER : HEALTHY
+      const c = focusColour || (tone === 'alarm' ? ALARM : tone === 'amber' ? AMBER : HEALTHY)
       ghostFill.uniforms.uColor.value.copy(c)
       ghostEdge.color.copy(c).multiplyScalar(0.45)   // a darker line of the same hue reads on light and dark styles
     }
@@ -437,7 +442,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const drawGhost = () => {
       labels.setVisible(!!(ghost && ghost.group.visible && active && labelsOn()))
       const hasHeat = heatRoots.size > 0 || alarmGlow.size > 0
-      if ((!ghost || !ghost.group.visible) && !hasHeat) return
+      if ((!ghost || !ghost.group.visible) && !hasHeat && !floorOutline) return
       // The selected equipment's internals, while its highlight is on screen
       const shown = ghost && ghost.group.visible ? active : null
       if (shown) {
@@ -478,6 +483,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       heatRoots.forEach(root => { if (root.children.length) heatGroups.push(root) })
       const seeThrough: THREE.Object3D[] = []
       if (ghost?.group) seeThrough.push(ghost.group)
+      if (floorOutline) seeThrough.push(floorOutline)
       alarmGlow.forEach(rec => seeThrough.push(rec.group))
       const heatDrawn = heatGroups.some(g => g.visible)
       const ghostDrawn = seeThrough.some(g => g.visible)
@@ -1029,11 +1035,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       try { (window as any).EKO?.set?.({}) } catch { /* dashboard not up yet */ }
     }
     let lastLevelId: string | null = null
-    let levelWait: { id: string; force?: boolean } | null = null
-    const isolateLevel = async (levelId: string, force?: boolean) => {
+    let levelWait: { id: string; force?: boolean; alone?: boolean } | null = null
+    const isolateLevel = async (levelId: string, force?: boolean, aloneAs?: boolean) => {
       /* Indexing a model asks the same worker that is parsing the next file. */
       if (useLoadingProgressStore.getState().sessionActive) {
-        levelWait = { id: levelId, force }
+        levelWait = { id: levelId, force, alone: aloneAs }
         return
       }
       levelWait = null
@@ -1042,7 +1048,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         if (gf) levelId = gf.id
       }
       // "Isolate floor" is a dock setting, read here so the picker, the stepper and the toggle all go through this one function
-      const alone = !!(window as any).EKO?.state?.dock?.floorAlone
+      const alone = aloneAs ?? !!(window as any).EKO?.state?.dock?.floorAlone
       const levelKey = levelId + (alone ? '|alone' : '')
       if (!force && levelKey === lastLevelId) return
       lastLevelId = levelKey
@@ -1076,6 +1082,107 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
            for the storey that is actually open. */
         if (spaceHeatActive && heatReq) void applySpaceHeat(heatReq.zones, heatReq.mode)
       }
+    }
+
+    /* The Brief's Show in the model (brief-focus.js): the asset in colour on the x-ray style, the floors above
+       its floor cut away, and its floor outlined. Each called with null puts back what the dashboard had. */
+    const assetFloor = new Map<string, string>()
+    const floorOf = async (bimId: string): Promise<string | null> => {
+      const known = assetFloor.get(bimId)
+      if (known) return known
+      const entry = await locate(bimId)
+      if (!entry) return null
+      let found = guidFloor.get(bimId) || null
+      if (!found) {
+        try {
+          for (const [id, ids] of (await indexModel(entry.model)).byFloor) if (ids.includes(entry.localId)) { found = id; break }
+        } catch { /* model not indexed yet */ }
+      }
+      if (!found || !floorCatalog.has(found)) {
+        // by height: the highest floor that starts below the element's centre
+        const y = worldBoxOf(entry).getCenter(new THREE.Vector3()).y
+        let lo = -Infinity
+        found = null
+        for (const id of floorCatalog.keys()) {
+          const span = spanOf(id)
+          if (span && span.yLo <= y && span.yLo > lo) { lo = span.yLo; found = id }
+        }
+      }
+      if (found) assetFloor.set(bimId, found)
+      return found
+    }
+    const focusAsset = async (assetIdOrBimId: string | null, colour?: string) => {
+      const store = useAppStore.getState()
+      if (!assetIdOrBimId) {
+        if (!focusPrev) return
+        const prev = focusPrev
+        focusPrev = null
+        focusColour = null
+        store.setLightingParams(prev)
+        const paint = (window as any).EKO?.state?.paint
+        if (colored) tintGhost(colored.tone)
+        if (paint) await highlightAsset(paint)
+        else await clearHighlight()
+        return
+      }
+      if (!focusPrev) focusPrev = { templateId: store.templateId, realisticMode: store.realisticMode, renderLite: store.renderLite }
+      focusColour = new THREE.Color(/^#[0-9a-f]{3,8}$/i.test(colour || '') ? colour! : '#7B6CFF')
+      if (store.templateId !== 'xray') store.setTemplate('xray')
+      const shown = await highlightAsset(assetIdOrBimId)
+      if (colored) tintGhost(colored.tone)
+      return shown
+    }
+    let cutSeq = 0
+    const cutAboveAsset = async (assetIdOrBimId: string | null) => {
+      const seq = ++cutSeq
+      if (!assetIdOrBimId) {
+        const dock = (window as any).EKO?.state?.dock
+        await isolateLevel(dock?.level || 'ALL', true)
+        return
+      }
+      const bimId = toBimId(assetIdOrBimId)
+      const floorId = bimId ? await floorOf(bimId) : null
+      // that floor and everything below it, whatever Isolate floor says
+      if (floorId && seq === cutSeq) await isolateLevel(floorId, true, false)
+    }
+    const outlineMat = new THREE.LineBasicMaterial({ color: 0x7b6cff, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false, toneMapped: false })
+    const dropOutline = () => {
+      if (!floorOutline) return
+      floorOutline.removeFromParent()
+      floorOutline.geometry.dispose()
+      floorOutline = null
+    }
+    let outlineSeq = 0
+    const outlineFloorOf = async (assetIdOrBimId: string | null) => {
+      const seq = ++outlineSeq
+      const wake = engine.world?.renderer as { needsUpdate?: boolean } | undefined
+      dropOutline()
+      if (wake) wake.needsUpdate = true
+      const bimId = assetIdOrBimId ? toBimId(assetIdOrBimId) : null
+      const floorId = bimId ? await floorOf(bimId) : null
+      if (!floorId) return
+      const box = new THREE.Box3()
+      for (const model of engine.fragments?.models?.list?.values() ?? []) {
+        const m = model as any
+        if (typeof m.getMergedBox !== 'function') continue
+        try {
+          const ids = (await indexModel(m)).byFloor.get(floorId) || []
+          if (!ids.length) continue
+          m.object.updateMatrixWorld(true)
+          const b: THREE.Box3 = await m.getMergedBox(ids)
+          if (b && !b.isEmpty()) box.union(b)
+        } catch { /* model not ready */ }
+      }
+      if (seq !== outlineSeq || box.isEmpty()) return
+      // the floor's own height, not a stair core or a mast that rises through it
+      const span = spanOf(floorId)
+      if (span) { box.min.y = span.yLo; box.max.y = Math.max(span.yHi, span.yLo + 0.5) }
+      const size = box.getSize(new THREE.Vector3())
+      floorOutline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(size.x + 0.6, size.y + 0.2, size.z + 0.6)), outlineMat)
+      floorOutline.position.copy(box.getCenter(new THREE.Vector3()))
+      floorOutline.renderOrder = 999
+      overlay.add(floorOutline)
+      if (wake) wake.needsUpdate = true
     }
 
     /* TEMPORARY, read-only: why the floor filter hides what it hides, model by model. Reached from the browser
@@ -1809,6 +1916,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       },
       lookAtView,
       isolateLevel,
+      focusAsset,
+      cutAboveAsset,
+      outlineFloorOf,
       listLayers: () => layerIds(useModelStore.getState().models).map(id => ({ id, name: id })),
       isolateLayer,
       fadeArch,
@@ -1910,6 +2020,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         modelsChanged = true
         modelsSig = sig
         missing.clear()
+        assetFloor.clear()
         indexProven = false
         barrenPasses = 0
         const alive = new Set(live)
@@ -1930,7 +2041,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (justLoaded && levelWait) {
         const wait = levelWait
         levelWait = null
-        void isolateLevel(wait.id, true)
+        void isolateLevel(wait.id, true, wait.alone)
       }
       if (justLoaded && heatReq && (window as any).EKO?.state?.pageId === 'heatmap') {
         void applySpaceHeat(heatReq.zones, heatReq.mode)
@@ -1960,6 +2071,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       miniMap.dispose()
       clearInterval(resolveTimer)
       fadeArch(false)
+      if (focusPrev) useAppStore.getState().setLightingParams(focusPrev)
+      dropOutline()
+      outlineMat.dispose()
       void clearHighlight()
       void clearSpaceHeat()
       removeGhost()

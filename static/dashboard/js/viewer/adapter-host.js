@@ -82,6 +82,19 @@
         return p || { x: 0, y: 0, visible: false };
       },
       onCameraChange: on('camera'),
+      /* E15 Show in the model: the asset in colour on the x-ray style, the floors above it cut, its floor outlined; null undoes each */
+      setFocus: function (list, colour) {
+        var h = window.EKO_HOST_ENGINE;
+        if (h && h.focusAsset) h.focusAsset(list && list.length ? list[0] : null, colour);
+      },
+      cutAbove: function (assetId) {
+        var h = window.EKO_HOST_ENGINE;
+        if (h && h.cutAboveAsset) h.cutAboveAsset(assetId || null);
+      },
+      outlineLevel: function (assetId) {
+        var h = window.EKO_HOST_ENGINE;
+        if (h && h.outlineFloorOf) h.outlineFloorOf(assetId || null);
+      },
 
       setStyle: function (mode) {
         var id = STYLE[mode] || 'photoreal';
