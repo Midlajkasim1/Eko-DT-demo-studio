@@ -16,9 +16,9 @@ window.EKO_DATA.medical = {
  "brand": {
   "name": "EKO",
   "logo": {
-   "light": "assets/brand/eko-logo-light.svg",
-   "dark": "assets/brand/eko-logo-dark.svg",
-   "mono": "assets/brand/eko-logo-mono.svg"
+   "light": "/static/dashboard/assets/brand/eko-logo-light.svg",
+   "dark": "/static/dashboard/assets/brand/eko-logo-dark.svg",
+   "mono": "/static/dashboard/assets/brand/eko-logo-mono.svg"
   },
   "partner": null
  },
