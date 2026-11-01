@@ -419,6 +419,13 @@
   const navVisible = m => !m.hidden && (E.role() !== 'partner' || m.id === 'energy' || m.id === 'esg') && (m.id !== 'exec' || !!(window.EKO_PERSONA && window.EKO_PERSONA.money(E) && E.sim));
 
   /* ------------------------------- top bar -------------------------------- */
+  /* E15: a module running on demo data says so (site data: demo.modules, "all" or module ids, "module.sub" for one view).
+     E17: on a phone or a tablet in portrait it sits in the page header, where it always fits (css/e17.css shows one of the two) */
+  function demoChip(cls){
+    const dm = (E.data.demo || {}).modules, m = E.state.module, sb = E.state.sub;
+    const on = E.state.pageId !== 'portfolio' && E.state.pageId !== 'pfsite' && (dm === 'all' || (Array.isArray(dm) && (dm.includes(m) || (sb && dm.includes(m + '.' + sb)))));
+    return on ? `<span class="demochip${cls ? ' ' + cls : ''}" data-tip="${esc(E.t('demoChipTip'))}">${esc(E.t('demoChip'))}</span>` : '';
+  }
   function topbar(){
     const site = window.EKO_DATA.portfolio.find(p => p.key === 'marsa');
     const siteName = E.lang === 'ar' ? site.nameAr : site.nameEn;
@@ -432,14 +439,11 @@
         ? `<span class="crumbbtn crumbhere" aria-current="page">${esc(E.t('pfTitle'))}</span>`
         : E.state.pageId === 'pfsite'
         ? `<button class="crumbbtn cT2" data-act="pfGo">${esc(E.t('pfTitle'))}</button><span aria-hidden="true" class="flexnone">/</span><span class="crumbbtn crumbhere" aria-current="page">${esc((() => { const s = window.EKO_EST && window.EKO_EST.site(E, E.state.pfSite); return s ? window.EKO_PF.name(E, s) : ''; })())}</span>`
-        : `${window.EKO_PF && window.EKO_PF.crumb(E) ? `<button class="crumbbtn cT2 deskonly" data-act="pfGo">${esc(E.t('pfTitle'))}</button><span aria-hidden="true" class="flexnone deskonly">/</span>` : ''}<button class="crumbbtn" data-act="dlg" data-v="switcher" aria-haspopup="menu">${esc(siteName)} ${icon('chevR',11)}</button>`}
+        : `${window.EKO_PF && window.EKO_PF.crumb(E) ? `<button class="crumbbtn cT2 deskonly" data-act="pfGo">${esc(E.t('pfTitle'))}</button><span aria-hidden="true" class="flexnone deskonly">/</span>` : ''}<button class="crumbbtn" data-act="dlg" data-v="switcher" aria-haspopup="menu" aria-label="${esc(siteName)}" data-tip="${esc(siteName)}"><span class="crumbico" aria-hidden="true">${icon('map', 16)}</span><span class="crumbname">${esc(siteName)}</span> ${icon('chevR',11)}</button>`}
       ${navDoc && E.state.pageId !== 'portfolio' && E.state.pageId !== 'pfsite' ? `<span aria-hidden="true" class="flexnone">/</span><button class="crumbbtn cT2" data-act="goMod" data-mod="${navDoc.id}" data-page="${esc(navDoc.pageId||'')}">${esc(E.t(navDoc.label))}</button>` : ''}
       ${(() => { const sb = navDoc && E.state.sub && (navDoc.subs||[]).find(x=>x.id===E.state.sub);
         return sb && E.state.pageId !== 'portfolio' && E.state.pageId !== 'pfsite' ? `<span aria-hidden="true" class="flexnone">/</span><span class="cT2">${esc(E.t(sb.label))}</span>` : ''; })()}
-      ${(() => { /* E15: a module running on demo data says so (site data: demo.modules, "all" or module ids, "module.sub" for one view) */
-        const dm = (E.data.demo || {}).modules, m = E.state.module, sb = E.state.sub;
-        const on = E.state.pageId !== 'portfolio' && E.state.pageId !== 'pfsite' && (dm === 'all' || (Array.isArray(dm) && (dm.includes(m) || (sb && dm.includes(m + '.' + sb)))));
-        return on ? `<span class="demochip" data-tip="${esc(E.t('demoChipTip'))}">${esc(E.t('demoChip'))}</span>` : ''; })()}
+      ${demoChip('')}
     </nav>
     <span class="tbdiv deskonly" aria-hidden="true"></span>
     <div class="tbgrp tbstatus" role="group" aria-label="${esc(E.t('alarms'))}">
@@ -518,7 +522,7 @@
     const strip = subs.length ? `<div class="phsubs" role="tablist">${subs.map(s => {
       const on = s.home ? !E.state.sub : E.state.sub === s.id;
       return `<button class="phsub" role="tab" aria-selected="${on}" data-on="${on ? 1 : 0}" data-lock="${!!s.locked}" data-act="${s.locked ? 'teaser' : 'phGo'}" data-mod="${mod.id}" ${s.home ? '' : `data-sub="${s.id}"`} data-page="${esc(s.pageId || mod.pageId || '')}" ${s.teaser ? `data-teaser="${s.teaser}"` : ''}>${esc(E.t(s.home ? 'phSummary' : s.label))}${s.locked ? icon('lock', 11) : ''}</button>`; }).join('')}</div>` : '';
-    return `<div id="pagehead" data-subs="${subs.length ? 1 : 0}"><div class="phrow"><h1 class="phtitle">${esc(title)}</h1><span class="grow"></span>
+    return `<div id="pagehead" data-subs="${subs.length ? 1 : 0}"><div class="phrow"><h1 class="phtitle">${esc(title)}</h1>${demoChip('phdemo')}<span class="grow"></span>
       ${landing ? `<button class="btnG btnSm" data-act="modelFs" data-tip="${esc(E.t('mModelTip'))}">${icon('box', 14)} ${esc(E.t('mModel'))}</button>` : ''}</div>${strip}</div>`;
   }
 
@@ -534,7 +538,9 @@
   }
 
   /* ------------------------------- overlays -------------------------------- */
-  function overlays(){
+  /* E17: asset tags in the overlays (the Brief, the sheets) never break at their hyphen */
+  function overlays(){ return window.EKO_HIT ? window.EKO_HIT.nb(overlays0()) : overlays0(); }
+  function overlays0(){
     const d = E.state.dlg;
     let out = '';
     if(E.state.mobMore){
@@ -896,14 +902,21 @@
     (window.DASHBOARD_ROOT||document.documentElement).setAttribute('data-hist', E.state.histAge != null ? '1' : '0');
     const live = document.getElementById('enginehost');
     if(live && live.dataset.live === '1') keptHost = live;
-    $('topbar').innerHTML = topbar();
+    const NB = h => window.EKO_HIT ? window.EKO_HIT.nb(h) : h;     /* E17: asset tags never break at their hyphen */
+    $('topbar').innerHTML = NB(topbar());
+    if(window.EKO_HIT) window.EKO_HIT.crumb();                      /* E17: the crumb shortens instead of cutting its text */
     $('ekonav').setAttribute('aria-label', E.t('ariaModules')); $('mobtabs').setAttribute('aria-label', E.t('ariaModules'));   /* D122: static labels follow the language */
     $('ekonav').setAttribute('data-born',
       E.state.born === 'boot' ? 'boot'
       : E.state.born === 'navx' ? 'x'
       : (E.state.born === 'nav' || /^nsub:/.test(E.state.born || '')) ? '1' : '0');
     $('ekonav').innerHTML = navRail();
-    $('mount').innerHTML = (stacked ? pagehead() : '') + P.renderPage(E);
+    $('mount').innerHTML = NB((stacked ? pagehead() : '') + P.renderPage(E));
+    /* E17: on a phone or a tablet the page's active sub-tab is scrolled into view when the page changes */
+    if(stacked){ const k = E.state.pageId + '/' + (E.state.sub || ''); if(render._phOn !== k){ render._phOn = k;
+      const on = $('mount').querySelector('#pagehead .phsub[data-on="1"]'), strip = on && on.parentElement;
+      if(on && strip && strip.scrollWidth > strip.clientWidth){ const sr = strip.getBoundingClientRect(), r = on.getBoundingClientRect();
+        if(r.left < sr.left) strip.scrollLeft -= sr.left - r.left + 24; else if(r.right > sr.right) strip.scrollLeft += r.right - sr.right + 24; } } }
     const fresh = document.getElementById('enginehost');
     if(fresh && keptHost) fresh.replaceWith(keptHost);
     $('mobtabs').innerHTML = mobtabs();
@@ -975,6 +988,7 @@
     E.state.born = null;
     if(window.EKO_SURF) window.EKO_SURF.afterRender();          /* R5 (D67) */
     if(window.EKO_BRIEF) window.EKO_BRIEF.after();               /* E15: the Brief's geometry after each render */
+    if(window.EKO_HIT) window.EKO_HIT.schedule();                 /* E17: the hit areas again */
     if(window.EKO_HOST_ENGINE){
       if(E.state.pageId === 'heatmap' && typeof window.EKO_HOST_ENGINE.applySpaceHeat === 'function'){
         const mode = E.state.hmMode === 'comfort' ? 'comfort' : (E.state.hmMode === 'hum' || E.state.hmMode === 'occ' ? 'hum' : 'temp');
@@ -1770,6 +1784,7 @@
   if(window.EKO_SPLIT) window.EKO_SPLIT.init(E);
   if(window.EKO_SHEET) window.EKO_SHEET.init(E);
   if(window.EKO_TIP) window.EKO_TIP.init(E);
+  if(window.EKO_HIT) window.EKO_HIT.init();                       /* E17: 24 px targets, 44 px on the touch layouts */
   if(window.EKO_FB) window.EKO_FB.init(E);
   if(window.EKO_SURF) window.EKO_SURF.init(E);
   if(window.EKO_PWA) window.EKO_PWA.init(E);

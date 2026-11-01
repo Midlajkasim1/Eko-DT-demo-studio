@@ -332,7 +332,7 @@ window.EKO_V = (function(){
 
   /* Corner caption (the marker toggle left the canvas in D70: it is the eye
      control in the alarm surfaces). */
-  const caption = E => `<div id="vpcaption">${C().esc((E.lang==='ar'?E.data.nameAr:E.data.nameEn).toUpperCase())} · ${C().esc(E.t('capLiveModel'))}</div>`;
+  const caption = E => `<div id="vpcaption">${C().esc(E.lang==='ar'?E.data.nameAr:E.data.nameEn)} · ${C().esc(E.t('cap3dModel'))}</div>`;   /* E17: "Demo Medical Centre · 3D model"; "LIVE MODEL" contradicted the Demo data badge */
 
   /* A moment on the app's one clock (the browser's): "HH:MM" today, the
      weekday within the week ("Tue 14:00"), the date beyond ("13 Sep 14:00"). */

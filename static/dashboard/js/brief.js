@@ -1244,6 +1244,7 @@ window.EKO_BRIEF = (function(){
   const SPARK14 = id => `<svg class="br14spark" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4C7DFF"/><stop offset=".55" stop-color="#7B6CFF"/><stop offset="1" stop-color="#C86BD9"/></linearGradient></defs><path fill="url(#${id})" d="M12 2c.6 4.9 3.1 7.4 8 8-4.9.6-7.4 3.1-8 8-.6-4.9-3.1-7.4-8-8 4.9-.6 7.4-3.1 8-8z"/></svg>`;
   const LOC14 = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.6" class="f"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4"/></svg>';
   const reduceMotion = () => !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const nbH = h => window.EKO_HIT ? window.EKO_HIT.nb(h) : h;   /* E17: asset tags never break at their hyphen (js/shell/hit.js) */
   function pop14(app, p, o){
     const t = (k, v) => app.t(k, v), T = events14(app, p), now = T.now, sw = T.shiftFrom;
     const seg = ['h24', 'shift', 'now', 'next'].includes(S.seg14) ? S.seg14 : 'shift';
@@ -1260,7 +1261,9 @@ window.EKO_BRIEF = (function(){
     const ai = !!(p.narrationAvailable && !writing);
     const who = t('br14.who', { p: persona ? t('per.n.' + persona) : t('cu.title'), shift: t('br14.shiftLc.' + shiftName14(sw)), t: hhmm(sw) });
     const lead = o.full ? '' : writing ? `<p class="br14hl" aria-live="polite"><span class="br14shim"></span><span class="br14shim"></span><span class="srOnly">${esc(t('br14.reading'))}</span></p>`
-      : `<p class="br14hl" aria-live="polite">${arriving ? words.map((w, i) => `<span class="br14w" style="animation-delay:${i * 55}ms">${esc(w)}</span>`).join(' ') : esc(o.headline || '')}</p>`;
+      /* E17: the reveal is one mask sweep over the sentence. Per-word spans with their own blur animation
+         stopped Chrome painting the sentence's clipped gradient text, so it read blank on a reopen. */
+      : `<p class="br14hl${arriving ? ' br14arr' : ''}" aria-live="polite"${arriving ? ` style="--arr:${words.length * 55 + 350}ms"` : ''}>${esc(o.headline || '')}</p>`;
     /* the summary rows: they wrap, never cut */
     /* E15: Show in the model, only where the model has the element or room (data.assets[].gid / roomGid); nothing is placed by guess */
     const FO = window.EKO_BFOCUS, canLoc = id => !!(FO && id && FO.locatable(app, id));
@@ -1341,7 +1344,7 @@ window.EKO_BRIEF = (function(){
     const t = (k, v) => app.t(k, v), n = newCount(app), open = !!current(app), held = !!S.held;
     const tip = held ? t('bf15.back') : n ? t('cu.ctlTipN', { n }) : t('cu.ctlTip');
     return `<button class="tbbrief tipU${held ? ' held' : ''}" data-act="cuToggle" aria-pressed="${open}" aria-haspopup="dialog" data-tip="${esc(tip)}" aria-label="${esc(tip)}">
-      <span class="aiglyph" aria-hidden="true">${icon('spark', 16)}</span><span class="tbbrlbl">${esc(t('cu.btn'))}</span>${held ? `<span class="tbbrback">${esc(t('bf15.backLbl'))}</span>` : ''}${n && !held ? `<span class="tbbrcnt" aria-hidden="true">${n}</span>` : ''}</button>`;
+      <span class="aiglyph" aria-hidden="true">${icon('spark', 16)}</span><span class="tbbrlbl">${esc(t(held ? 'bf15.back' : 'cu.btn'))}</span>${n ? `<span class="tbbrcnt" aria-hidden="true">${n}</span>` : ''}</button>`;   /* E17b: while Show in the model is open, "Back to Brief" where the word shows, else the sparkle and the count as usual */
   }
   let boardRO = null;
   const FEED_MIN = 360;
@@ -1403,7 +1406,7 @@ window.EKO_BRIEF = (function(){
          declared widths of the executive summary and the asset panel. The viewer column
          between them RESIZES while a panel slides in, and anchoring to it made the Brief
          chase the animation left and right. A move under 6 px is not worth making. */
-      const W = boardWidth(), rtl = document.documentElement.dir === 'rtl';
+      const W = boardWidth(), rtl = (window.DASHBOARD_ROOT || document.documentElement).dir === 'rtl';
       /* D159: look every element up NOW. A ResizeObserver can fire with nodes the last render
          replaced; measuring a detached summary returned 0 and threw the board across the page
          for a frame, which is the flicker the reader saw when selecting a row. */
@@ -1441,7 +1444,7 @@ window.EKO_BRIEF = (function(){
     /* D150: the budget also steps while the FEED is shorter than FEED_MIN — the feed is the Brief now */
     const fd = cd && cd.querySelector('.cufeed');   /* only the full log has one */
     const short = fd && fd.scrollHeight > fd.clientHeight + 1 && fd.clientHeight < FEED_MIN;
-    if(cd && !E.stacked() && S.fit < 3 && (cd.scrollHeight > cd.clientHeight + 1 || short)){ S.fit++; fl.innerHTML = card(E); after(); return; }
+    if(cd && !E.stacked() && S.fit < 3 && (cd.scrollHeight > cd.clientHeight + 1 || short)){ S.fit++; fl.innerHTML = nbH(card(E)); after(); return; }
     feedScroll(fl);
     tableScroll(fl);
     dragBind(fl);
@@ -1528,7 +1531,7 @@ window.EKO_BRIEF = (function(){
       let started = false;
       let raf = 0, lastH = mode === 'size' ? box.h : innerHeight - box.t - 76;
       const move = e => {
-        const dx = e.clientX - x0, dy = e.clientY - y0, rtl = document.documentElement.dir === 'rtl';
+        const dx = e.clientX - x0, dy = e.clientY - y0, rtl = (window.DASHBOARD_ROOT || document.documentElement).dir === 'rtl';
         if(!started){ if(Math.hypot(dx, dy) < 4) return; started = true; fl.dataset.dragging = mode; e.preventDefault(); }
         if(mode === 'move'){ S.box = { l: box.l - 12 + dx, t: box.t - 12 + dy, w: box.w, h: S.box && S.box.h };  }
         else { const w = Math.max(BOARD_MIN, box.w + (rtl ? -dx : dx)), h = Math.max(220, box.h + dy);
@@ -1552,7 +1555,7 @@ window.EKO_BRIEF = (function(){
         if(S.box && auto != null && Math.abs(S.box.l - auto) < 24 && Math.abs(S.box.t - 64) < 24 && !S.box.h){ S.box = null; }
         if(fl.classList.contains('brpop')){
           /* dropped back near its anchor (under the Brief button) it returns there */
-          const r2 = card.getBoundingClientRect(), rtl = document.documentElement.dir === 'rtl';
+          const r2 = card.getBoundingClientRect(), rtl = (window.DASHBOARD_ROOT || document.documentElement).dir === 'rtl';
           const near = rtl ? Math.abs(r2.left - 16) < 24 : Math.abs(innerWidth - r2.right - 16) < 24;
           if(S.box) S.box.pop14 = true;
           if(near && Math.abs(r2.top - 60) < 24){ S.box = null; delete fl.dataset.moved; fl.style.removeProperty('--brL'); fl.style.removeProperty('--brT'); }
@@ -1571,12 +1574,12 @@ window.EKO_BRIEF = (function(){
   function paint(){
     const fl = document.querySelector('.brfloat');
     if(!fl || !E) return E && E.set({});
-    S.fit = 0; delete fl.dataset.drag; fl.innerHTML = card(E); after();
+    S.fit = 0; delete fl.dataset.drag; fl.innerHTML = nbH(card(E)); after();
   }
   function refit(fl){
     S.fit = 0;
     delete fl.dataset.drag;          /* the header is about to be replaced: let it bind again */
-    fl.innerHTML = card(E);
+    fl.innerHTML = nbH(card(E));
     after();
   }
   function noAnim(fl){
