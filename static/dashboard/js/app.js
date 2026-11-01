@@ -1318,12 +1318,7 @@
     ackTgl(){ E.set({ showAcked: !E.state.showAcked }); },
     fltReset(){ E.state.alarmF.sev.clear();
       ss.del('eko-mk'); E.set({ showAcked: true, markersOn: true }); },
-    alertGo(el){
-      /* E15 port (D180): a fire alarm opens Security > Fire and a security alarm Security > Access, with the asset's panel docked beside the page; where the Security module is locked or hidden (Marsa Al Arab) the panel opens alone, as before */
-      const a = (E.data.assets || []).find(x => x.id === el.dataset.asset) || {};
-      const to = a.sys === 'fire' ? ['sec-fire', 'fire'] : a.sys === 'sec' ? ['sec-access', 'access'] : null;
-      if(to && window.EKO_SEC && !(window.EKO_ADDONS && window.EKO_ADDONS.lockFor(E, 'security', to[1]))) E.go(to[0], 'security', to[1]);
-      E.set({ born:'asset', dlg:null, assetSel: el.dataset.asset,
+    alertGo(el){ E.set({ born:'asset', dlg:null, assetSel: el.dataset.asset,
       apTab: E.state.apTab || 'alarms', mkPop: null }); },
     fltSys(el){ const s = E.state.alarmF.sys, v = el.dataset.v;
       s.has(v) ? s.delete(v) : s.add(v); render(); },
@@ -1341,6 +1336,12 @@
     },
     closeAsset(){ E.set({ assetSel: null, paint: null }); goHome(); },   /* closing the panel is back to the home view */
     apTab(el){ E.set({ apTab: el.dataset.v }); },
+    /* E15 port (D180): Full analytics opens the page that owns the asset, the panel still docked; a fire or security asset opens Security, or Systems where Security is locked (Marsa Al Arab) */
+    apFull(el){ const a = (E.data.assets || []).find(x => x.id === el.dataset.asset) || {};
+      const SYS = { hvac:'hvac', vent:'hvac', pumps:'hvac', elec:'electrical', fire:'life', sec:'security' };
+      const sec = a.sys === 'fire' ? 'fire' : a.sys === 'sec' ? 'access' : null;
+      if(sec && window.EKO_SEC && !(window.EKO_ADDONS && window.EKO_ADDONS.lockFor(E, 'security', sec))){ E.go('sec-' + sec, 'security', sec); return; }
+      E.go('systems', 'systems', SYS[a.sys] || null); },
     apHistStep(el){ apHistGo(apHistAt() + (+el.dataset.v)); },
     alAll(){ E.set({ alAll: !E.state.alAll }); },
     resetLayout(){ E.set({ rlAsk:true }); },
