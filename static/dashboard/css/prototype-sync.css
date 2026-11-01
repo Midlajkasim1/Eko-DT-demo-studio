@@ -2083,7 +2083,7 @@
 .dashboard-native-container[data-theme="light"] .tbbrback{color:#5A47C9}
 .dashboard-native-container .bfwrap{--b14glass:rgba(17,23,39,.84); --b14rowHi:rgba(255,255,255,.07); --b14line:rgba(255,255,255,.09); --b14line2:rgba(255,255,255,.16); --b14fg:var(--t1); --b14fg2:var(--t2); --b14fg3:var(--t3);
   --b14ai1:var(--ai-launch-a, #4C7DFF); --b14ai2:var(--ai-launch-b, #7B6CFF); --b14ai3:#C86BD9; --b14ai4:#4CC3F0; --b14crit:#E0787A; --b14warn:#D9A35E;
-  position:fixed; z-index:29; top:calc(52px + 10px); left:var(--bfL, auto); width:var(--bfW, 340px); display:flex; border-radius:16px; isolation:isolate; pointer-events:auto; color:var(--b14fg); font:14px/1.45 var(--fB), ui-sans-serif, system-ui, sans-serif}
+  position:fixed; z-index:29; top:calc(52px + 10px); left:var(--bfL, auto); width:var(--bfW, 340px); display:flex; border-radius:16px; isolation:isolate; color:var(--b14fg); font:14px/1.45 var(--fB), ui-sans-serif, system-ui, sans-serif}
 .dashboard-native-container .bfwrap[hidden]{display:none}
 .dashboard-native-container[data-theme="light"] .bfwrap{--b14glass:rgba(250,251,253,.9); --b14rowHi:rgba(15,23,42,.07); --b14line:rgba(15,23,42,.1); --b14line2:rgba(15,23,42,.18); --b14crit:#B84C4E; --b14warn:#9A6A1E}
 .dashboard-native-container .bfwrap::before{content:""; position:absolute; inset:-2px; border-radius:18px; z-index:-1; background:conic-gradient(from var(--ang), var(--b14ai1), var(--b14ai2), var(--b14ai3), var(--b14ai4), var(--b14ai1)); filter:blur(22px); opacity:.28; animation:ekoSpin 14s linear infinite; pointer-events:none}

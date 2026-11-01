@@ -39,7 +39,8 @@
 .dashboard-native-container .histbanner,
 .dashboard-native-container #statusband,
 .dashboard-native-container #overlays > *,
-.dashboard-native-container #mount > *:not(#vpmain) {
+.dashboard-native-container #mount > *:not(#vpmain),
+.dashboard-native-container #bfocus {
   pointer-events: auto;
 }
 /* The Assets register's model strip sits directly in #mount, so the rule
