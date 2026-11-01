@@ -32,6 +32,9 @@
       ? { esg: 'active', maintenance: 'active', security: 'active', 'systems.life': 'hidden', 'systems.security': 'hidden' }
       : { esg: 'available', maintenance: 'available', security: 'available' };
     if(D.marsa){ D.marsa.entitlements = D.marsa.entitlements || {}; D.marsa.entitlements.modules = Object.assign({}, D.marsa.entitlements.modules, states); }
+    /* every site hands over between its shifts (wall.shifts); a site without its own settings gets the prototype's, with no stand-in handovers */
+    if(D.marsa && !D.marsa.handover) D.marsa.handover = { server: { api: '/api/handover', pollSec: 30, retention: { days: null } }, prepareBeforeMin: 90, emailRelay: null, onCall: 'the duty engineer' };
+    if(D.marsa && !D.marsa.permissionDefaults) D.marsa.permissionDefaults = { canSeeTeamBrief: ['engineer', 'executive'], canReviewHandovers: ['engineer', 'executive'] };
     return states;
   })();
 
@@ -612,9 +615,18 @@
         <div class="draghandle"></div>
         <div class="accid"><span class="avatar accavatar" aria-hidden="true">${esc(E.initials() || '·')}</span><div class="col accwho"><b>${esc(E.lang==='ar' ? (u.nameAr||u.name||'') : (u.name||''))}</b><span class="accrole">${esc(E.t(roleKey))}${previewing ? ` <span class="accprev">${esc(E.t('rolePreviewTag'))}</span>` : ''}</span></div></div>
         ${demo ? `<div class="accdemobox" data-tip="${esc(E.t('demoRoleNote'))}"><span class="accdemolbl"><span class="accdemotag">${esc(E.t('menuDemo'))}</span>${esc(E.t(window.EKO_PERSONA ? 'per.viewAs' : 'demoRole'))}</span>
-          ${window.EKO_PERSONA ? window.EKO_PERSONA.menu(E) : `<div class="segbox row accsegs">${['technician','engineer','executive'].map(r => seg('rolePreview', r, E.t({ technician:'roleTechnician', engineer:'roleEngineer', executive:'roleExecutive' }[r]), E.role() === r)).join('')}</div>`}</div>` : ''}
+          ${window.EKO_PERSONA ? window.EKO_PERSONA.menu(E) : `<div class="segbox row accsegs">${['technician','engineer','executive'].map(r => seg('rolePreview', r, E.t({ technician:'roleTechnician', engineer:'roleEngineer', executive:'roleExecutive' }[r]), E.role() === r)).join('')}</div>`}
+          ${(E.data.demoUsers || []).length && window.EKO_HO && window.EKO_HO.enabled() ? `<span class="accdemolbl accdemolbl2" data-tip="${esc(E.t('demoUserTip'))}">${esc(E.t('demoUser'))}</span>
+          <div class="segbox row accsegs accsegwrap">${E.data.demoUsers.map(p => seg('previewUser', p.name, E.lang === 'ar' ? (p.nameAr || p.name) : E.person(p.name, 'bare'), u.name === p.name, E.t('demoUserTip'))).join('')}</div>
+          <span class="accdemolbl accdemolbl2" data-tip="${esc(E.t('demoClockTip'))}">${esc(E.t('demoClock'))}</span>
+          <div class="segbox row accsegs">${['now', 'next'].map(k => seg('hoClock', k, E.t('demoClock.' + k), (E.state.hoClock || 'now') === k, E.t('demoClockTip'))).join('')}</div>` : ''}</div>` : ''}
+        ${window.EKO_BRIEF && !E.state.wall ? `<button class="accitem accbrief" role="menuitem" data-act="cuOpen" data-tip="${esc(E.t('cu.openD'))}"><span class="aiglyph">${icon('spark',15)}</span><span class="grow taS">${esc(E.t('cu.title'))}</span></button>` : ''}
+        ${window.EKO_HO && !E.state.wall && window.EKO_HO.canPrepare() ? `<button class="accitem" role="menuitem" data-act="hoPrepare" data-tip="${esc(E.t('ho.prepD'))}">${icon('doc',15)}<span class="grow taS">${esc(E.t('ho.prepare'))}</span></button>` : ''}
+        ${window.EKO_HO && !E.state.wall && window.EKO_HO.enabled() && E.can('canReviewHandovers') ? `<button class="accitem" role="menuitem" data-act="hoReview" data-tip="${esc(E.t('ho.reviewD'))}">${icon('layers',15)}<span class="grow taS">${esc(E.t('ho.review'))}</span></button>` : ''}
         <div class="accfoot"><button class="btnG accsignout" role="menuitem" data-act="signOut" data-tip="${esc(E.t('signOutD'))}">${esc(E.t('signOut'))}</button></div>
       </div>`;
+    } else if(d === 'handover'){
+      out += window.EKO_HO ? window.EKO_HO.dialog(E) : '';          /* E15: prepare, read, receive, review */
     } else if(d === 'report'){
       out += window.EKO_RV.panel(E);                              /* D88/D92 quick launcher */
     } else if(d === 'rpconfirm'){
@@ -1581,7 +1593,14 @@
       l[el.dataset.v] = !l[el.dataset.v]; E.set({ hmLayers: l }); }
   };
   /* E15: the Brief's and its focus card's actions join the app's (no name is shared) */
-  [window.EKO_BRIEF, window.EKO_BFOCUS, window.EKO_E14].forEach(m => { if(m && m.ACTS) Object.keys(m.ACTS).forEach(k => { if(!ACTS[k]) ACTS[k] = m.ACTS[k]; }); });
+  [window.EKO_BRIEF, window.EKO_BFOCUS, window.EKO_E14, window.EKO_HO].forEach(m => { if(m && m.ACTS) Object.keys(m.ACTS).forEach(k => { if(!ACTS[k]) ACTS[k] = m.ACTS[k]; }); });
+  /* E15, demo builds only: preview as another person on the site (data.demoUsers), to show a handover received by the next shift */
+  ACTS.previewUser = el => { if(!(window.EKO_BUILD && window.EKO_BUILD.demo)) return;
+    const p = (E.data.demoUsers || []).find(x => x.name === el.dataset.v); if(!p) return;
+    E.data.user = Object.assign({}, E.data.user, { name: p.name, nameAr: p.nameAr, initials: p.initials, role: p.role });
+    E.state.rolePreview = null; ss.set('eko-role-preview', ''); E.state.disclose = loadDisclose();
+    if(window.EKO_NOTIF && window.EKO_NOTIF.setViewer) window.EKO_NOTIF.setViewer(p.name);
+    E.state.dlg = null; if(window.EKO_BRIEF) window.EKO_BRIEF.reset(); E.set({}); };
   E.runAct = (name, data) => { const f = ACTS[name]; if(f) f({ dataset: data || {}, value: (data || {}).v }); };   /* E15: an action by name (js/e14.js) */
   E.locExit = ACTS.locBack;   /* Escape leaves Locate-in-3D focus the way Back to Assets does (surfaces.js) */
 

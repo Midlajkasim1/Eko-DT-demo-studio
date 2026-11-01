@@ -425,5 +425,12 @@ window.EKO_R = (function(){
     return doc;
   }
 
-  return { siteTimeOpts, build, generate, period, periodOf, periodId, PERIODS, dataQuality, basisText, sourceLabel, fmt, num, mul, div, tr, MISSING, tariffText, emissionText, SOURCES, FIG, templates: T, store, audit, auditFor, title, lockedIds, hoursOf };
+  /* E15: THE delivery path: audit, then the notification with its deep link (a handover, the scheduled Brief) */
+  function deliver(E, notif, action, id){
+    if(action) audit(E, action, id || notif.type, notif.params || {});
+    if(window.EKO_NOTIF) return window.EKO_NOTIF.add(notif);
+    return null;
+  }
+
+  return { siteTimeOpts, build, generate, deliver, period, periodOf, periodId, PERIODS, dataQuality, basisText, sourceLabel, fmt, num, mul, div, tr, MISSING, tariffText, emissionText, SOURCES, FIG, templates: T, store, audit, auditFor, title, lockedIds, hoursOf };
 })();

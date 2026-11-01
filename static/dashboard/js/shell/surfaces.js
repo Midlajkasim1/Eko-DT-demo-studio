@@ -20,6 +20,7 @@ window.EKO_SURF = (function(){
 
   /* kinds: dialog (stack, keeps parent) | overlay | menu | flyout */
   const DEFS = [
+    { id:'handover', kind:'dialog',  isOpen:()=>E.state.dlg==='handover', close:()=>{ E.state.dlg=null; } },   /* E15: over the Brief, which stays open beneath it */
     { id:'brief',    kind:'overlay', isOpen:()=>!!(window.EKO_BRIEF&&window.EKO_BRIEF.isOpen(E)), close:why=>{ window.EKO_BRIEF.collapse(why); } },   /* E15: the Brief collapses to its top-bar button */
     { id:'doc',      kind:'dialog',  isOpen:()=>!!document.getElementById('docov'),             close:()=>{ const o=document.getElementById('docov'); if(o) o.remove(); } },
     { id:'wmax',     kind:'dialog',  isOpen:()=>!!document.getElementById('wmaxov'),            close:()=>{ const o=document.getElementById('wmaxov'); if(o) o.remove(); } },
