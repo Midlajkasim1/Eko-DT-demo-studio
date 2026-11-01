@@ -10,6 +10,8 @@
   <link rel="stylesheet" href="/static/dashboard/css/components.css" />
   <link rel="stylesheet" href="/static/dashboard/css/wall.css" />
   <link rel="stylesheet" href="/static/dashboard/css/prototype-sync.css" />
+  <!-- the same sheet as it was before the E17 update, unchanged: a project on the standard module set (Marsa Al Arab) takes this one, a project on the extended module set takes the one above (switched in app.js) -->
+  <link rel="stylesheet" href="/static/dashboard/css/prototype-sync.standard.css" />
   <link rel="stylesheet" href="/static/css/overlay.css" />
   <style>
     html, body { margin: 0; height: 100%; }
@@ -64,9 +66,8 @@
   <script src="/static/dashboard/js/layouts/water.js"></script>
   <script src="/static/dashboard/js/layouts/gas.js"></script>
   <script src="/static/dashboard/js/layouts/heatmap.js"></script>
-  <!-- E15 port: ESG, Maintenance, Security and life safety layouts -->
+  <!-- E15 port: ESG and Security and life safety layouts (layouts/maintenance.js is loaded above, from e15-port) -->
   <script src="/static/dashboard/js/layouts/esg.js"></script>
-  <script src="/static/dashboard/js/layouts/maintenance.js"></script>
   <script src="/static/dashboard/js/layouts/security.js"></script>
   <script src="/static/dashboard/js/layouts/demo-utilities-lite.js"></script>
   <script src="/static/dashboard/js/components/charts.js"></script>
@@ -151,6 +152,8 @@
   <script src="/static/dashboard/js/shell/morph.js"></script>
   <script src="/static/dashboard/js/shell/frame.js"></script>
   <script src="/static/dashboard/js/personas.js"></script>
+  <!-- E15 port: the prediction and the proof pages (reads prove.js and personas.js above) -->
+  <script src="/static/dashboard/js/e14.js"></script>
   <script src="/static/dashboard/js/app.js"></script>
   <script src="/static/js/data-map.js"></script>
 </body>
