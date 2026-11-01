@@ -79,8 +79,8 @@ window.EKO_SCN3 = (function(){
     if(!flag(E, 'cams') || flag(E, 'end')) return '';
     const t = E.t.bind(E), v = SC().view(E), top = SC().rankCams(E, v.devs[0]).list[0]; if(!top) return '';
     const W = window.EKO_SECW, cams = (E.data.security || {}).cameras || [];
-    return `<div class="s3corner" role="group" aria-label="${esc(t('s3.cornerAria'))}">${W ? W.videoEl(E, top, cams.indexOf(cams.find(c => c.id === top.id)), 'autoplay muted loop playsinline') : ''}
-      <span class="swvtag">${esc(top.id)} · ${esc(t('sw.demoVideo'))}</span></div>`;
+    return `<div class="s3corner" role="group" aria-label="${esc(t('s3.cornerAria17'))}">${W ? W.videoEl(E, top, cams.indexOf(cams.find(c => c.id === top.id)), 'autoplay muted loop playsinline') : ''}
+      <span class="swvtag">${esc(top.id)}</span></div>`;
   }
 
   /* ------------------------------ the side panel ------------------------------ */

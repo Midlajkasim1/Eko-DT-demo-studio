@@ -59,11 +59,11 @@ window.EKO_OPS = (function(){
   const table = (E, cols, rows, empty) => `<div class="mnttblwrap"><table class="mnttbl"><thead><tr>${cols.map(k => `<th scope="col">${esc(E.t(k))}</th>`).join('')}</tr></thead><tbody>${rows || `<tr><td colspan="${cols.length}" class="alempty">${esc(E.t(empty || 'ops.none'))}</td></tr>`}</tbody></table></div>`;
   /* charts in the ESG style (esgchart, esgax): a ranked bar list, and stacked columns over days or hours */
   const TONE = { ok: 'var(--pos)', attn: 'var(--warn)', alarm: 'var(--sevCrit)', info: 'var(--link)', mute: 'var(--t3)' };
+  /* E17 item 6: the ranked bar list is HTML rows, not a drawing in a fixed viewBox: squeezed into a narrow column, the
+     drawing's labels were drawn at 5 px. Each row: the label, the bar on its track, the value; the label wraps. */
   function hbars(E, rows, o){
-    o = o || {}; const W = o.w || 480, rowH = 26, X0 = o.x0 || 170, H = rows.length * rowH + 8, mx = Math.max(1, ...rows.map(r => r.v)) * 1.08, x = v => X0 + v / mx * (W - X0 - 52);
-    return `<svg class="esgchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.aria || '')}">${rows.map((r, i) => { const y = 4 + i * rowH;
-      return `<text x="${X0 - 8}" y="${y + 14}" class="esgax" text-anchor="end">${esc(r.label)}</text><rect x="${X0}" y="${y + 3}" width="${Math.max(1, x(r.v) - X0).toFixed(1)}" height="15" rx="2" fill="${TONE[r.tone || 'info']}" opacity=".85"><title>${esc(r.label + ': ' + fmt(r.v, o.dp || 0) + (o.unit ? ' ' + o.unit : ''))}</title></rect>
-        <text x="${(x(r.v) + 6).toFixed(1)}" y="${y + 14}" class="esgax">${esc(fmt(r.v, o.dp || 0))}</text>`; }).join('')}</svg>`;
+    o = o || {}; const mx = Math.max(1, ...rows.map(r => r.v)) * 1.08;
+    return `<div class="hblist" role="img" aria-label="${esc(o.aria || '')}">${rows.map(r => `<div class="hbrow"><span class="hblbl">${esc(r.label)}</span><span class="hbtrack"><i style="width:${(r.v / mx * 100).toFixed(1)}%;background:${TONE[r.tone || 'info']}"></i></span><b class="hbval">${esc(fmt(r.v, o.dp || 0))}</b><span class="srOnly">${esc(r.label + ': ' + fmt(r.v, o.dp || 0) + (o.unit ? ' ' + o.unit : ''))}</span></div>`).join('')}</div>`;
   }
   /* series: [{ label, tone, vals }] stacked per category */
   function cols(E, cats, series, o){

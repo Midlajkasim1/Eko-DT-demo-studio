@@ -98,7 +98,7 @@ window.EKO_OCC = (function(){
       <button class="btnG btnSm" data-act="occPlay" aria-pressed="${!!playing}">${esc(t(playing ? 'occ.pause' : 'occ.play'))}</button>
       <label class="occscrub"><span class="tLbl">${esc(t('occ.hour'))}</span><input type="range" min="0" max="23" step="1" value="${h}" data-chg="occHour" aria-label="${esc(t('occ.hourAria'))}"><b class="tMonoS">${hh(h)}</b></label>
       <span class="tCap">${esc(open ? t('occ.open') : t('occ.closed'))}</span><span class="grow"></span>
-      <span class="pwchip" data-tone="warn">${esc(t('occ.demoCounts'))}</span>
+      <span class="pwchip" tabindex="0" data-tip="${esc(t('how.spaces-occ.s'))}">${esc(t('occ.counts'))}</span>
       <button class="iconbtn icon26" data-act="occZoom" data-v="-1" aria-label="${esc(t('occ.zoomOut'))}" ${zoom <= 1 ? 'disabled' : ''}>−</button><button class="iconbtn icon26" data-act="occZoom" data-v="1" aria-label="${esc(t('occ.zoomIn'))}" ${zoom >= 4 ? 'disabled' : ''}>+</button></div>`;
     const visual = `<div data-frame="visual">${A().widget(E, t('occ.planT', { l: t('lvlName', { n: lv.slice(1) }), h: hh(h) }), t('occ.legend'), plan)}</div>`;   /* the truth line heads the Rooms now tab, so the plan fills the card */
     /* the rooms at this hour */

@@ -40,8 +40,8 @@ window.EKO_SECP = (function(){
     const t = E.t.bind(E), x = X(E), st = camState(c);
     const media = st === 'off'
       ? `<div class="spvid spoff" data-state="stale"><span>${icon('clock', 14)} ${esc(t('sp.cam.offSince', { c: clockAgo(E, c.offlineSinceMin || 0), a: age(E, c.offlineSinceMin || 0) }))}</span></div>`
-      : `<div class="spvid">${W().videoEl(E, c, i, `muted loop autoplay playsinline preload="metadata" aria-label="${esc(t('s3.cornerAria'))}"`, as)}
-         <span class="spvidtag">${esc(L(E, D(E).videoNoteEn, D(E).videoNoteAr) || t('sw.demoVideo'))}</span>${st === 'norec' ? `<span class="spnorec">${esc(t('sp.cam.notRec'))}</span>` : ''}</div>`;
+      : `<div class="spvid">${W().videoEl(E, c, i, `muted loop autoplay playsinline preload="metadata" aria-label="${esc(t('s3.cornerAria17'))}"`, as)}
+         ${st === 'norec' ? `<span class="spnorec">${esc(t('sp.cam.notRec'))}</span>` : ''}</div>`;
     return `<article class="spcam" data-st="${st}">${media}
       <div class="spcamb"><b class="tMonoS">${esc(c.id)}</b><span class="tCap">${esc([c.room, x.storeyName(c.storey), x.zoneName(c.zone)].filter(Boolean).join(' · '))}</span>
         <span class="row gap6"><button class="btnG btnSm" data-act="secCam" data-v="${esc(c.id)}">${esc(t('sec.cam.open'))}</button>${locBtn(E, { v: c.gid, st: c.storey, cam: c.id })}</span></div></article>`;
@@ -99,7 +99,7 @@ window.EKO_SECP = (function(){
       <span class="grow"></span><span class="tCap">${esc(t('sec.cam.count', { a: list.length ? pg * PER() + 1 : 0, b: Math.min(list.length, (pg + 1) * PER()), n: list.length }))}</span>
       <button class="iconbtn icon26" data-act="spCamF" data-v="pg:${pg - 1}" ${pg <= 0 ? 'disabled' : ''} aria-label="${esc(t('sec.prev'))}">${C().dicon('start', 12)}</button>
       <button class="iconbtn icon26" data-act="spCamF" data-v="pg:${pg + 1}" ${pg >= pages - 1 ? 'disabled' : ''} aria-label="${esc(t('sec.next'))}">${C().dicon('end', 12)}</button></div>`;
-    const grid = widget(E, t('sp.cam.gridT'), t('sp.cam.gridCap'), filt + `<div class="spcams" style="grid-template-columns:repeat(${COLS()},minmax(0,1fr))">${((pl, as) => pl.map(c => camTile(E, c, all.indexOf(c), as.get(c.id))).join(''))(list.slice(pg * PER(), (pg + 1) * PER()), W().clipsFor(E, list.slice(pg * PER(), (pg + 1) * PER()), COLS())) || `<p class="alempty">${esc(t('sp.cam.noneF'))}</p>`}</div>`, t('sp.src.video'));
+    const grid = widget(E, t('sp.cam.gridT'), t('sp.cam.gridCap17'), filt + `<div class="spcams" style="grid-template-columns:repeat(${COLS()},minmax(0,1fr))">${((pl, as) => pl.map(c => camTile(E, c, all.indexOf(c), as.get(c.id))).join(''))(list.slice(pg * PER(), (pg + 1) * PER()), W().clipsFor(E, list.slice(pg * PER(), (pg + 1) * PER()), COLS())) || `<p class="alempty">${esc(t('sp.cam.noneF'))}</p>`}</div>`, t('sp.src.video'));
     /* the level map and the coverage list share the level */
     const cv = d.coverage, mapSeg = `<div class="segbox row">${lvls(E).map(l => seg('spCamF', 'map:' + l, x.storeyName(l), ml === l)).join('')}</div>`;
     const zRows = zones.map(z => { const zc = all.filter(c => c.zone === z), zd = (d.doors || []).filter(r => r.zone === z), inC = zd.filter(r => r.covered).length;
@@ -140,7 +140,7 @@ window.EKO_SECP = (function(){
       <dt>${esc(t('sec.c.zone'))}</dt><dd>${esc(x.zoneName(c.zone))}</dd><dt>${esc(t('sec.c.state'))}</dt><dd>${esc(t('sp.cam.st.' + st))}</dd></dl>
       <div class="row gap6">${locBtn(E, { v: c.gid, st: c.storey, cam: c.id })}${O().linkOut(E, 'sp.cam.vms')}</div>
       <h4 class="tLbl">${esc(t('sp.cam.tlT'))}</h4>${tl}<p class="tCap">${esc(evs.length ? t('sp.cam.tlN', { n: evs.length }) : t('sp.cam.tlNone'))}</p>`;
-    return { title: c.id + ' · ' + (c.room || x.storeyName(c.storey)), body, method: t('sp.m.cam') };
+    return { title: c.id + ' · ' + (c.room || x.storeyName(c.storey)), body, method: t('sp.m.cam17') };
   }
 
   /* ========================== 3. ACCESS AND INTRUSION ========================== */

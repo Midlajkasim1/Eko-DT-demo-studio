@@ -158,7 +158,7 @@ window.EKO_SECW = (function(){
   /* the video element, or the still frame where there is no clip (as) is a grid's assignment, when there is one */
   function videoEl(E, c, i, attrs, as){
     const a = as || (engineSite(E) ? { clip: pick(E, c), why: pick(E, c) ? null : 'type' } : { clip: clipOf(E, c, i) });
-    if(!a.clip) return `<div class="spstill" role="img" aria-label="${C().esc(E.t(a.why === 'repeat' ? 'sp.clipRepeat' : 'sp.clipNone'))}"><span>${C().esc(E.t(a.why === 'repeat' ? 'sp.clipRepeat' : 'sp.clipNone'))}</span></div>`;
+    if(!a.clip) return `<div class="spstill" role="img" aria-label="${C().esc(E.t(a.why === 'repeat' ? 'sp.clipRepeat17' : 'sp.clipNone17'))}"><span>${C().esc(E.t(a.why === 'repeat' ? 'sp.clipRepeat17' : 'sp.clipNone17'))}</span></div>`;
     return `<video src="assets/video/${a.clip}.mp4" ${attrs}></video>`;
   }
   /* cameras that see the spot: line of sight through the model walls when the 3D is loaded, else distance on the plan */
@@ -186,8 +186,8 @@ window.EKO_SECW = (function(){
     const pk = procKey(e), pd = ((E.data.security || {}).procedures || {})[pk], steps = pd ? (E.lang === 'ar' ? pd.stepsAr : pd.stepsEn) : PROC[pk].map(s => t('sw.proc.' + pk + '.' + PROC[pk].indexOf(s)));
     const link = e.sys === 'fire' ? 'sw.link.fire' : e.sys === 'cctv' ? 'sw.link.vms' : e.sys === 'intrusion' ? 'p2.openIntr' : 'sw.link.access';
     const origin = E.nowMs() - e.ageMin * 60000;
-    const video = top ? `<div class="swvideo">${videoEl(E, top, X.cams().indexOf(X.cams().find(c => c.id === top.id)), `autoplay muted loop playsinline aria-label="${esc(t('sw.ws.videoAria', { c: top.id }))}"`)}
-        <span class="swvtag">${esc(top.id)} · ${esc(t('sw.demoVideo'))}</span></div>` : `<p class="alempty">${esc(t('sw.ws.noCam'))}</p>`;
+    const video = top ? `<div class="swvideo">${videoEl(E, top, X.cams().indexOf(X.cams().find(c => c.id === top.id)), `autoplay muted loop playsinline aria-label="${esc(t('sw.ws.videoAria17', { c: top.id }))}"`)}
+        <span class="swvtag">${esc(top.id)}</span></div>` : `<p class="alempty">${esc(t('sw.ws.noCam'))}</p>`;
     const camRows = see.list.map((c, i) => `<tr><td class="tMonoS">${i + 1}</td><th scope="row"><button class="statlink" data-act="secCam" data-v="${esc(c.id)}">${esc(c.id)}</button></th><td class="tMonoS">${c.dist != null ? fmt(c.dist, 1) + ' m' : t('emptyDash')}</td>
         <td>${c.clear == null ? `<span class="tCap">${esc(t('scn.los.unknown'))}</span>` : `<span class="scnlos" data-ok="${c.clear ? 1 : 0}">${esc(t(c.clear ? 'scn.los.clear' : 'scn.los.blocked', { n: c.walls || 0 }))}</span>`}</td></tr>`).join('');
     return `<div class="swws"><button class="statlink swback" data-act="secBack">${icon('chevL', 12)} ${esc(t('sw.ws.back'))}</button>

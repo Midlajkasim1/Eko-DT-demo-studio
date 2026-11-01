@@ -58,11 +58,13 @@ window.EKO_EVACP = (function(){
     /* E11: short labels that fit the strip at 1280 (the long ones head the drawers and the compare table); the people tile says who the plan moves and
        how many of the site's head count it leaves out (staff are not modelled), so the two add up to the Occupancy figure for the hour */
     const HD = (p.snapshotRef || {}).head, nPpl = (p.snapshotRef || {}).people ? p.snapshotRef.people.length : T.evacuated;
+    /* E17b: a tile with nothing to show says for when (the people of the hour the plan uses, as the line under the tabs states), not a bare "none" */
+    const noneAt = esc(t('evx.noneAt17b', { h: E.clockLabel(s.at === 'replay' ? M().timeOf(E, 'replay') : E.sim.now) }));
     const heroes = [O().hero(E, t('evx.ks.out'), O().door(E, esc(hm(E, K.out)), 'evxPlan', 'clear'), '', HD ? t('evx.k.outCap3', { p: nPpl, s: HD.staff }) : t('evx.k.outCap', { n: T.evacuated - T.stranded })),
-      O().hero(E, t('evx.ks.tr'), K.tr == null ? esc(t('evx.noneVal')) : O().door(E, esc(hm(E, K.tr)), 'evxPlan', 'tr'), '', K.tr == null && !K.ext ? t('evx.k.trNone') : K.ext ? t('evx.k.trExt', { n: K.nTr - K.ext, v: K.vehicles, x: K.ext }) : t('evx.k.trCap', { n: K.nTr, v: K.vehicles })),
+      O().hero(E, t('evx.ks.tr'), K.tr == null ? noneAt : O().door(E, esc(hm(E, K.tr)), 'evxPlan', 'tr'), '', K.tr == null && !K.ext ? t('evx.k.trNone') : K.ext ? t('evx.k.trExt', { n: K.nTr - K.ext, v: K.vehicles, x: K.ext }) : t('evx.k.trCap', { n: K.nTr, v: K.vehicles })),
       /* E7: patients waiting for an external transfer: the tile counts them instead of a time */
       CO.waitingExternal ? O().hero(E, t('evx.ks.crit'), O().door(E, esc(String(CO.waitingExternal)), 'evxPlan', 'crit'), t('evx.u.waiting'), t('evx.k.critExt'), t('evx.ext'), 'warn')
-        : O().hero(E, t('evx.ks.crit'), crit == null ? esc(t('evx.noneVal')) : O().door(E, esc(hm(E, crit)), 'evxPlan', 'crit'), '', crit == null ? t('evx.k.critNone') : t('evx.k.critCap')),
+        : O().hero(E, t('evx.ks.crit'), crit == null ? noneAt : O().door(E, esc(hm(E, crit)), 'evxPlan', 'crit'), '', crit == null ? t('evx.k.critNone') : t('evx.k.critCap')),
       O().hero(E, t('evx.ks.bn'), O().door(E, esc(bnShort(E, bn)), 'evxPlan', 'transport'), '', bn ? t('evx.k.bnCap', { r: bnLine(E, bn), w: fmt(bn.total_wait_minutes, 0) }) : t('evx.bnl.none')),
       /* E9: five tiles; patients who cannot leave by the plan take the fifth place only when there are any */
       T.stranded ? O().hero(E, t('evx.k.stranded'), O().door(E, String(T.stranded), 'evxPlan', 'stranded'), '', t('evx.k.strandedCap', { x: T.needs_external_transfer }), t('sec.flag'), 'crit')

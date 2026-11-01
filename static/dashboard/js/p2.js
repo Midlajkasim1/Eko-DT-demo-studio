@@ -77,7 +77,9 @@ window.EKO_P2 = (function(){
       ...(dh.offline != null ? [hero(E, t('p2.d.offline'), fmt(dh.offline, 0), '', t('p2.d.offlineCap'))] : []),   /* E5: devices that do not answer (the engine's data states) */
       hero(E, t('p2.d.flat'), dh.flat != null ? fmt(dh.flat, 0) + ' · ' + fmt(dh.oor, 0) : t('emptyDash'), '', t('p2.d.flatCap')),
       hero(E, t('p2.d.never'), dh.never != null ? fmt(dh.never, 0) : t('emptyDash'), '', t('p2.d.neverCap'))];
-    const rows = (dh.integrations || []).map(i => `<tr><th scope="row">${esc(i.name)}</th><td><span class="p2st" data-st="${i.state === 'live' ? 'armed' : i.state === 'offline' ? 'alarm' : 'ready'}">${esc(t('p2.d.st.' + i.state))}</span></td>
+    /* E17: the integration's name without "(demo)": the site's one Demo data badge says it (the name stays the engine's key) */
+    const ign = n => String(n || '').replace(/\s*\(demo\)$/i, '');
+    const rows = (dh.integrations || []).map(i => `<tr><th scope="row">${esc(ign(i.name))}</th><td><span class="p2st" data-st="${i.state === 'live' ? 'armed' : i.state === 'offline' ? 'alarm' : 'ready'}">${esc(t('p2.d.st.' + i.state))}</span></td>
       <td class="tMonoS">${i.lastMin != null ? esc(E.fmtAge(i.lastMin / 60)) : esc(i.hb || t('emptyDash'))}</td><td><span class="p2band" data-b="${band(i.healthPct)}">${i.healthPct != null ? fmt(i.healthPct, 0) + '%' : t('emptyDash')}</span></td>
       <td>${i.log ? `<span class="p2log">${i.log.map(v => `<i data-b="${band(v * 100)}"></i>`).join('')}</span>` : ''}</td></tr>`).join('');
     return wrap('sys-data', heroes, widget(E, t('p2.d.intT'), t('p2.d.intCap'), table(E, ['p2.c.integration', 'sec.c.state', 'p2.c.last', 'p2.c.health', 'p2.c.log24'], rows)) + `<p class="tCap">${esc(t('p2.d.rule'))}</p>`);
@@ -139,7 +141,7 @@ window.EKO_P2 = (function(){
       return { text: t(al2 ? 'p2.in.hlAlarm' : 'p2.in.hl', { a, n, d: n - a - al2, b, x: al2 }), tone: al2 ? 'alarm' : b ? 'attn' : 'ok' }; },
     'sys-data': E => { const t = E.t.bind(E), dh = E.data.dataHealth; if(!dh || !dh.points) return null;
       const ig = dh.integrations || [], bad = ig.filter(i => i.state !== 'live');
-      return { text: t(bad.length ? 'p2.d.hlBad' : 'p2.d.hl', { p: fmt(dh.online / dh.points * 100, 1), s: fmt(dh.stale || 0, 0), n: bad.length, l: bad.map(i => i.name).join(E.lang === 'ar' ? '، ' : ', ') }), tone: bad.length ? 'attn' : 'ok' }; },
+      return { text: t(bad.length ? 'p2.d.hlBad' : 'p2.d.hl', { p: fmt(dh.online / dh.points * 100, 1), s: fmt(dh.stale || 0, 0), n: bad.length, l: bad.map(i => String(i.name || '').replace(/\s*\(demo\)$/i, '')).join(E.lang === 'ar' ? '، ' : ', ') }), tone: bad.length ? 'attn' : 'ok' }; },
     'sys-other': E => { const t = E.t.bind(E), o = E.data.otherSystems; if(!o) return null;
       const lo = (o.lifts || []).filter(l => l.state !== 'in service'), go = (o.gases || []).filter(g => g.state !== 'normal');
       return { text: t(lo.length || go.length ? 'p2.o.hlBad' : 'p2.o.hl', { l: lo.length, n: (o.lifts || []).length, g: go.length, m: (o.gases || []).length }), tone: lo.length || go.length ? 'attn' : 'ok' }; },
