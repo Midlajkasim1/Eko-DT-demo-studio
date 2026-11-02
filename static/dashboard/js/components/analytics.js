@@ -724,10 +724,11 @@ window.EKO_A = (function(){
     return Math.max(0, Math.min(400, n == null || !isFinite(Number(n)) ? 80 : Math.round(Number(n))));
   }
   function occOf(z, zones){
-    const idOf = x => (x.bimIds && x.bimIds[0]) || x.bimId || x.nameEn;
-    const weights = zones.map(x => occWeight(idOf(x)));
+    const list = zones || [z];
+    const idOf = x => (x.bimIds && x.bimIds[0]) || x.bimId || x.gid || x.nameEn;
+    const weights = list.map(x => occWeight(idOf(x)));
     const sum = weights.reduce((n, w) => n + w, 0) || 1;
-    const i = Math.max(0, zones.indexOf(z));
+    const i = Math.max(0, list.indexOf(z));
     const count = Math.round(occPeople() * weights[i] / sum);
     const cap = Math.max(4, Math.round(6 + weights[i] * 14));
     return { count: Math.max(0, count), ratio: Math.min(1, count / cap) };
@@ -736,7 +737,7 @@ window.EKO_A = (function(){
     const kind = mode === 'comfort' ? 'iaq' : 'is';
     return d.zones.filter(z => {
       if(s.hmFloor !== 'All' && z.floor !== s.hmFloor) return false;
-      if(mode === 'occ') return !!(z.bimId || (z.bimIds && z.bimIds.length));
+      if(mode === 'occ') return !!(z.bimId || z.gid || (z.bimIds && z.bimIds.length));   /* the sample engine's zones name their room gid */
       return z.sample || z.kind === kind;
     });
   }
@@ -838,7 +839,7 @@ window.EKO_A = (function(){
       ? E.t('hmCo2Foot', { m: co2Mean == null ? '—' : Math.round(co2Mean) })
       : mode === 'hum' ? E.t('hmOccFoot')
       : E.t('hmTempFoot', { m: siteMean == null ? '—' : fmt(siteMean, 1) });
-    const hoursCard = mode === 'occ' || !hourRows.length ? '' : `<div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('hmByHour'))}</span>
+    const hoursCard = mode !== 'occ' && hourRows.length ? `<div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('hmByHour'))}</span>
         <span class="alcardm">${esc(E.t('hmByHourCap'))}</span>${chrome(E, E.t('hmByHour'), E.t('hmByHourCap'))}</div>
         ${matrix}<div class="alfoot">${esc(E.t('hmByHourFoot'))}</div></div>` : '';
     return C().modShell(E, E.t('subHeat'), '', '',

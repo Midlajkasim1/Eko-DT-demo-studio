@@ -275,6 +275,12 @@ export interface HeatmapSetup {
   people?: number
   /** How fast those people walk. 1 is a stroll. Absent is 1. */
   speed?: number
+  /**
+   * Room-name words where people walk, matched inside the space name.
+   * Absent is corridor, circulation, public area, lobby, waiting, and lounge.
+   * An empty list means nobody walks.
+   */
+  walkRooms?: string[]
 }
 
 /** Per-project FIN settings live here. A field a project does not set falls back to the

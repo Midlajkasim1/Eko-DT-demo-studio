@@ -1385,7 +1385,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
     }
     let crowdMesh: THREE.InstancedMesh | null = null
-    let crowd: { minX: number; maxX: number; minZ: number; maxZ: number; x: number; z: number; vx: number; vz: number; y: number }[] = []
+    let crowd: { minX: number; maxX: number; minZ: number; maxZ: number; x: number; z: number; vx: number; vz: number; y: number; still: boolean }[] = []
     const crowdDummy = new THREE.Object3D()
     const clearCrowd = () => {
       if (crowdMesh) {
@@ -1400,6 +1400,15 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const n = useProjectStore.getState().currentProject?.apiSettings?.heatmap?.speed
       const s = n == null || !Number.isFinite(Number(n)) ? 1 : Number(n)
       return Math.max(0.4, Math.min(2, s))
+    }
+    const guidWalks = (guid: string) => {
+      const list = useProjectStore.getState().currentProject?.apiSettings?.heatmap?.walkRooms
+      const words = (Array.isArray(list) ? list : ['corridor', 'circulat', 'public area', 'lobby', 'waiting', 'lounge'])
+        .map(w => w.trim().toLowerCase()).filter(Boolean)
+      const name = (useProjectStore.getState().currentProject?.assetLinks || [])
+        .find(l => l.kind === 'space' && l.guid === guid)?.equip || ''
+      const folded = name.toLowerCase()
+      return words.some(word => folded.includes(word))
     }
     const placeCrowd = (floorIds: string[], wanted: Set<string>, people: number) => {
       clearCrowd()
@@ -1444,7 +1453,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           const z = box.min.z + Math.random() * Math.max(0.2, box.max.z - box.min.z)
           const y = box.min.y + Math.min(1.1, Math.max(0.4, (box.max.y - box.min.y) * 0.35))
           const ang = Math.random() * Math.PI * 2
-          crowd.push({ minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z, x, z, vx: Math.cos(ang), vz: Math.sin(ang), y })
+          const still = !guidWalks(sp.id)
+          crowd.push({ minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z, x, z, vx: Math.cos(ang), vz: Math.sin(ang), y, still })
           crowdDummy.position.set(x, y, z)
           crowdDummy.updateMatrix()
           mesh.setMatrixAt(idx, crowdDummy.matrix)
@@ -1461,22 +1471,36 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     stepCrowd = () => {
       if (!crowdMesh || !crowd.length) return
       const step = 0.016 * occSpeed()
+      const col = new THREE.Color()
       for (let i = 0; i < crowd.length; i++) {
         const p = crowd[i]
-        if (Math.random() < 0.02) {
-          const ang = Math.random() * Math.PI * 2
-          p.vx = Math.cos(ang)
-          p.vz = Math.sin(ang)
+        /* Patient rooms and other unticked names stay where they were placed. */
+        if (!p.still) {
+          if (Math.random() < 0.02) {
+            const ang = Math.random() * Math.PI * 2
+            p.vx = Math.cos(ang)
+            p.vz = Math.sin(ang)
+          }
+          p.x += p.vx * step
+          p.z += p.vz * step
+          if (p.x < p.minX || p.x > p.maxX) { p.vx *= -1; p.x = Math.max(p.minX, Math.min(p.x, p.maxX)) }
+          if (p.z < p.minZ || p.z > p.maxZ) { p.vz *= -1; p.z = Math.max(p.minZ, Math.min(p.z, p.maxZ)) }
         }
-        p.x += p.vx * step
-        p.z += p.vz * step
-        if (p.x < p.minX || p.x > p.maxX) { p.vx *= -1; p.x = Math.max(p.minX, Math.min(p.x, p.maxX)) }
-        if (p.z < p.minZ || p.z > p.maxZ) { p.vz *= -1; p.z = Math.max(p.minZ, Math.min(p.z, p.maxZ)) }
+        let near = 0
+        for (let j = 0; j < crowd.length; j++) {
+          const dx = crowd[j].x - p.x
+          const dz = crowd[j].z - p.z
+          if (dx * dx + dz * dz < 16) near++
+        }
+        const hex = near <= 2 ? 0x3b82f6 : near <= 4 ? 0x22c55e : near <= 7 ? 0xeab308 : 0xef4444
+        col.setHex(hex)
         crowdDummy.position.set(p.x, p.y, p.z)
         crowdDummy.updateMatrix()
         crowdMesh.setMatrixAt(i, crowdDummy.matrix)
+        crowdMesh.setColorAt(i, col)
       }
       crowdMesh.instanceMatrix.needsUpdate = true
+      if (crowdMesh.instanceColor) crowdMesh.instanceColor.needsUpdate = true
     }
     const clearSpaceHeat = async () => {
       heatSeq++
@@ -1643,6 +1667,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const n = useProjectStore.getState().currentProject?.apiSettings?.heatmap?.people
         return Math.max(0, Math.min(400, n == null || !Number.isFinite(Number(n)) ? 80 : Math.round(Number(n))))
       }
+      const walkSig = () => {
+        const list = useProjectStore.getState().currentProject?.apiSettings?.heatmap?.walkRooms
+        const words = Array.isArray(list) ? list : ['corridor', 'circulat', 'public area', 'lobby', 'waiting', 'lounge']
+        return words.map(w => w.trim().toLowerCase()).filter(Boolean).join(',')
+      }
       const jobs: { bimId: string; t: number }[] = []
       for (const z of zones || []) {
         if (md === 'occ') {
@@ -1654,7 +1683,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         if (t == null) continue
         for (const bimId of idsOf(z)) jobs.push({ bimId, t })
       }
-      const valueSig = (inside ? 'in|' : 'out|') + md + '|' + (md === 'occ' ? 'p' + occPeople() + '|' : '') + jobs.map(j => `${j.bimId}:${round1(j.t)}`).join(';')
+      const valueSig = (inside ? 'in|' : 'out|') + md + '|' + (md === 'occ' ? 'p' + occPeople() + '|' + walkSig() + '|' : '') + jobs.map(j => `${j.bimId}:${round1(j.t)}`).join(';')
       if (valueSig !== heatSig) {
         dropHeatSheets()
         heatSig = valueSig
@@ -1695,36 +1724,29 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         if (seq !== heatSeq) return
         await locateMany([...guids])
         if (seq !== heatSeq) return
+        /* Occupancy colours the people, not the room, the same way the medical twin does. */
+        if (md === 'occ') {
+          for (const id of guids) kept.guids.add(id)
+          if (seq === heatSeq) {
+            kept.done = true
+            placeCrowd(order, wanted, occPeople())
+            syncGhost()
+            if (wake) wake.needsUpdate = true
+          }
+          continue
+        }
         type Room = { model: any; geoms: THREE.BufferGeometry[]; x: number; y: number; z: number; hx: number; hy: number; hz: number; t: number; guid: string; area: number }
         const rooms: Room[] = []
-        const occW = new Map<string, number>()
-        let occSum = 0
-        if (md === 'occ') {
-          for (const id of guids) {
-            let h = 2166136261
-            for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619)
-            const w = 0.35 + ((h >>> 0) % 1000) / 1000 * 1.3
-            occW.set(id, w)
-            occSum += w
-          }
-        }
         for (const job of jobs) {
           if (!guids.has(job.bimId) || kept.guids.has(job.bimId)) continue
           const entry = located.get(job.bimId)
           if (!entry?.localBox || entry.localBox.isEmpty()) continue
           const size = entry.localBox.getSize(new THREE.Vector3())
           const c = entry.localBox.getCenter(new THREE.Vector3())
-          let t = job.t
-          if (md === 'occ') {
-            const w = occW.get(job.bimId) || 1
-            const count = occSum > 0 ? Math.round(occPeople() * w / occSum) : 0
-            const cap = Math.max(4, Math.round(6 + w * 14))
-            t = Math.min(1, Math.max(0, count) / cap)
-          }
           rooms.push({
             model: entry.model, geoms: [],
             x: c.x, y: c.y, z: c.z, hx: size.x / 2, hy: size.y / 2, hz: size.z / 2,
-            t, guid: job.bimId, area: Math.abs(size.x * size.z),
+            t: job.t, guid: job.bimId, area: Math.abs(size.x * size.z),
           })
         }
         await solidsFor(rooms.map(r => { const e = located.get(r.guid)!; return { guid: r.guid, model: e.model, localId: e.localId, box: e.localBox } }))
@@ -1766,7 +1788,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           for (const room of samples) {
             if (seq !== heatSeq) return
             for (const geom of room.geoms) {
-              const mesh = paintRoom(geom, room, graded, sigma, low, high, md === 'occ')
+              const mesh = paintRoom(geom, room, graded, sigma, low, high)
               mesh.visible = true
               root.add(mesh)
               heatSheets.push(mesh)
@@ -1785,7 +1807,6 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         syncGhost()
         if (wake) wake.needsUpdate = true
         if (seq === heatSeq) kept.done = true
-        if (seq === heatSeq && md === 'occ') placeCrowd(order, wanted, occPeople())
       }
       return
     }

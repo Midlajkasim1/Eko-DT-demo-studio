@@ -110,8 +110,41 @@ function HeatmapPane({
         <span>{(current.speed ?? 1).toFixed(1)}</span>
       </label>
       <p className="ds-hint">
-        The Occupancy tab shares these people across the rooms on the floors you are viewing. A fuller room goes from blue to amber to red. Speed is how fast they walk.
+        The Occupancy tab puts these people in the rooms you are viewing. The colour is on the dots: blue when they are apart, then green, amber, and red as they bunch up. The room itself is not coloured. People in a ticked place, such as a corridor or lobby, walk. People in other rooms, such as patient rooms, stand still. Speed is how fast the walking ones move.
       </p>
+      <p className="ds-hint">People walk in rooms whose name contains one of these words. Corridor covers CORRIDOR. Leave the extra line blank unless a room uses another word, such as atrium.</p>
+      {['Corridor', 'Circulation', 'Public area', 'Lobby', 'Waiting', 'Lounge'].map(word => {
+        const on = (current.walkRooms ?? ['Corridor', 'Circulation', 'Public area', 'Lobby', 'Waiting', 'Lounge']).some(w => w.toLowerCase() === word.toLowerCase())
+        return (
+          <label key={word} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={on}
+              onChange={() => {
+                const base = current.walkRooms ?? ['Corridor', 'Circulation', 'Public area', 'Lobby', 'Waiting', 'Lounge']
+                const next = on ? base.filter(w => w.toLowerCase() !== word.toLowerCase()) : [...base, word]
+                patch({ walkRooms: next })
+              }}
+            />
+            {word}
+          </label>
+        )
+      })}
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0 16px', fontSize: 13 }}>
+        Also
+        <input
+          type="text"
+          placeholder="atrium, concourse"
+          value={(current.walkRooms ?? []).filter(w => !['corridor', 'circulation', 'public area', 'lobby', 'waiting', 'lounge'].includes(w.toLowerCase())).join(', ')}
+          onChange={e => {
+            const known = (current.walkRooms ?? ['Corridor', 'Circulation', 'Public area', 'Lobby', 'Waiting', 'Lounge'])
+              .filter(w => ['corridor', 'circulation', 'public area', 'lobby', 'waiting', 'lounge'].includes(w.toLowerCase()))
+            const extra = e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+            patch({ walkRooms: [...known, ...extra] })
+          }}
+          style={{ flex: 1, padding: '4px 8px', borderRadius: 6, background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+        />
+      </label>
 
       <h3 className="ds-section-title" style={{ marginTop: 24 }}>View</h3>
       <div className="al-filters" style={{ marginBottom: 12 }}>
