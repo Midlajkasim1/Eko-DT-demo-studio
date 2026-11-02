@@ -2,12 +2,14 @@ import * as THREE from 'three'
 import {
   HvacPoint, HvacAnchor,
   COIL_CLOSED, COIL_OPEN, COIL_IDLE, FAN_ON, FAN_OFF, FILTER_CLEAN, FILTER_DIRTY, NO_DATA,
-  clean, numberOf, fractionOf, findPoint, shown, stateOf, dirtyOf, setDamper,
+  numberOf, fractionOf, shown, stateOf, dirtyOf, setDamper,
   resolveFrame, makeHvacCtx,
   buildCoil, buildValve, buildCentrifugalFan, buildFanOpening,
   buildDamper, buildPanelFilter, buildBagFilter, buildSensorProbe,
 } from '@/lib/hvacGeometry'
 import { createAhuSchematic } from '@/lib/ahuSchematic'
+import { pick, sensor, statusOf, part, filterOf } from '@/lib/ekoPointRules'
+import type { PointRules } from '@/lib/ekoPointRules'
 
 /**
  * The Eko Hospital's AHU (reference: AHU_02's FIN graphic): two stacked horizontal decks joined by a vertical mixing junction.
@@ -21,9 +23,10 @@ import { createAhuSchematic } from '@/lib/ahuSchematic'
  * The geometry is fitted to the selected element's oriented box (the same resolveFrame the other schematics use) and does not
  * depend on any FIN reading.
  *
- * FIN POINTS: the Hospital AHU's point names are not confirmed yet. EKO_AHU_POINT_MAP is therefore empty on purpose: until a name
- * is verified against the real AHU point list and added there, nothing is read, every part keeps the no-data grey and no label is
- * shown. Never put a screenshot label or a Marsa point name in it unverified.
+ * FIN POINTS: read the way readFcuPoints reads them (ekoPointRules.ts): each reading has rules on the point's folded name, so FA_DAMPER,
+ * fa-damper and FaDamper are one name; a set-point (...SP), a command or a trip is never taken for the measured value. The rules say what
+ * a point IS, not a fixed spelling, so they are checked against the Hospital's real point list rather than assumed: a point that matches
+ * nothing leaves its part grey and its label "—". Nothing is ever filled in.
  */
 
 export type EkoAhuPoint = HvacPoint
@@ -33,13 +36,29 @@ export type EkoAhuKey =
   | 'preFilter' | 'bagFilter' | 'coolingCoil'
   | 'oaTemp' | 'oaHum' | 'maTemp' | 'raTemp' | 'raHum' | 'raCo2' | 'saTemp' | 'saHum' | 'saPressure'
 
-/** Folded FIN point names (lower case, letters and digits only) that are verified for each key. Empty = not confirmed. */
-export type EkoAhuPointMap = Record<EkoAhuKey, readonly string[]>
+/** What each reading looks for in the asset's points: flexible on spelling, never a set-point, command or trip */
+export type EkoAhuPointRules = PointRules<EkoAhuKey>
 
-export const EKO_AHU_POINT_MAP: EkoAhuPointMap = {
-  oaDamper: [], maDamper: [], eaDamper: [], raFanStatus: [], saFanStatus: [],
-  preFilter: [], bagFilter: [], coolingCoil: [],
-  oaTemp: [], oaHum: [], maTemp: [], raTemp: [], raHum: [], raCo2: [], saTemp: [], saHum: [], saPressure: [],
+const RA_FAN = part([], ['rafan', 'returnfan'])
+const SA_FAN = part([], ['safan', 'supplyfan'])
+export const EKO_AHU_POINT_RULES: EkoAhuPointRules = {
+  oaDamper: [sensor('oadamper')],
+  maDamper: [sensor('madamper')],
+  eaDamper: [sensor('eadamper')],
+  raFanStatus: [statusOf(RA_FAN)],
+  saFanStatus: [statusOf(SA_FAN)],
+  preFilter: [filterOf('prefilter')],
+  bagFilter: [filterOf('bagfilter'), k => k.includes('bag') && k.includes('filter') && !k.includes('set')],
+  coolingCoil: [sensor('coolingcoil'), sensor('coolingvalvepos'), k => k.includes('coolingvalve') && k.includes('pos') && !k.includes('cmd')],
+  oaTemp: [sensor('oatemp')],
+  oaHum: [sensor('oahum')],
+  maTemp: [sensor('matemp')],
+  raTemp: [sensor('ratemp')],
+  raHum: [sensor('rahum')],
+  raCo2: [sensor('raco2'), k => sensor('co2')(k) && k.includes('ra')],
+  saTemp: [sensor('satemp')],
+  saHum: [sensor('sahum')],
+  saPressure: [sensor('sapressure'), sensor('sadp')],
 }
 
 export type EkoAhuReading = Record<EkoAhuKey, string> & {
@@ -72,12 +91,8 @@ function openOf(raw: string | null): number | null {
   return s == null ? null : s ? 1 : 0
 }
 
-export function readEkoAhuPoints(points: EkoAhuPoint[], map: EkoAhuPointMap = EKO_AHU_POINT_MAP): EkoAhuReading {
-  const raw = (key: EkoAhuKey): string | null => {
-    const names = map[key]
-    if (!names.length) return null
-    return clean(findPoint(points, k => names.includes(k))?.currentValue)
-  }
+export function readEkoAhuPoints(points: EkoAhuPoint[], rules: EkoAhuPointRules = EKO_AHU_POINT_RULES): EkoAhuReading {
+  const raw = (key: EkoAhuKey): string | null => pick(points, rules[key])
   const oa = raw('oaDamper'), ma = raw('maDamper'), ea = raw('eaDamper')
   const pre = raw('preFilter'), bag = raw('bagFilter'), coil = raw('coolingCoil')
   const raFan = raw('raFanStatus'), saFan = raw('saFanStatus')
@@ -221,11 +236,13 @@ export function createEkoAhuSchematic(
     lowerLength: 2 * hx, upperLength: UPPER_LENGTH * 2 * hx, junctionX: junctionX * hx, probes: probeCount,
   }
 
-  // Labels: the graphic's names, not FIN point names. Every one is optional: shown only while a verified point sends a value.
+  // Labels: the graphic's names, not FIN point names. The parts always show (a value, or "—"); the probes show only while FIN sends one.
   const top = hy * 0.98
   const mid = hy * 0.04
+  // The parts show "—" when FIN sends nothing (the no-data convention of the FCU and the original AHU); only the probes are optional
+  const PROBES = new Set<EkoAhuKey>(['oaTemp', 'oaHum', 'maTemp', 'raTemp', 'raHum', 'raCo2', 'saTemp', 'saHum', 'saPressure'])
   const at = (key: EkoAhuKey, title: string, x: number, y: number, z: number, side: HvacAnchor['side']): HvacAnchor =>
-    ({ key, title, position: new THREE.Vector3(x * hx, y, z), side, optional: true })
+    ({ key, title, position: new THREE.Vector3(x * hx, y, z), side, optional: PROBES.has(key) })
   const anchors: HvacAnchor[] = [
     // upper deck
     at('eaDamper',    'EA DAMPER',    L.eaDamper,    top,  0,  'above'),

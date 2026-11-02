@@ -2,10 +2,12 @@ import * as THREE from 'three'
 import {
   HvacPoint, HvacAnchor,
   FAN_ON, FAN_OFF, NO_DATA,
-  clean, fractionOf, findPoint, shown, stateOf, setDamper,
+  fractionOf, shown, stateOf, setDamper,
   resolveFrame, makeHvacCtx,
   buildCentrifugalFan, buildFanOpening, buildDamper, buildSensorProbe,
 } from '@/lib/hvacGeometry'
+import { pick, sensor, statusOf, exact, part } from '@/lib/ekoPointRules'
+import type { PointRules } from '@/lib/ekoPointRules'
 
 /**
  * The Eko Hospital's VAV (reference: VAV_06's FIN graphic): a fan-powered terminal unit.
@@ -17,23 +19,24 @@ import {
  * the Eko Hospital project (projectVavSchematic). Everything stays inside the selected element's oriented box (the same
  * resolveFrame the other schematics use) and does not depend on any FIN reading.
  *
- * FIN POINTS: only ZoneTemp is mapped, because FIN's own chart legend in the reference prints it (ZoneTemp, and ZoneTempSp for the
- * set-point). The graphic's other labels (DAMPERPOS, ZONEHUMIDITY, STATUS) are not confirmed FIN names and stay unmapped until the
- * real VAV point list is supplied: those parts keep the no-data grey and show no label. Never add a name here unverified.
+ * FIN POINTS: read the way readFcuPoints reads them (ekoPointRules.ts): each reading has rules on the point's folded name, so ZONE_TEMP,
+ * zone-temp and ZoneTemp are one name; a set-point (ZoneTempSp) is never taken for the zone temperature. The status label is exact
+ * ("status") or a fan status, because a bare "status" is too short to match by part. A point that matches nothing leaves its part grey
+ * and its label "—". Nothing is ever filled in.
  */
 
 export type EkoVavPoint = HvacPoint
 
 export type EkoVavKey = 'damperPos' | 'zoneHum' | 'zoneTemp' | 'fanStatus'
 
-/** Folded FIN point names (lower case, letters and digits only) verified for each key. Empty = not confirmed. */
-export type EkoVavPointMap = Record<EkoVavKey, readonly string[]>
+/** What each reading looks for in the asset's points: flexible on spelling, never a set-point, command or trip */
+export type EkoVavPointRules = PointRules<EkoVavKey>
 
-export const EKO_VAV_POINT_MAP: EkoVavPointMap = {
-  damperPos: [],
-  zoneHum: [],
-  zoneTemp: ['zonetemp'],
-  fanStatus: [],
+export const EKO_VAV_POINT_RULES: EkoVavPointRules = {
+  damperPos: [sensor('damper', 'pos')],
+  zoneHum: [sensor('zonehum')],
+  zoneTemp: [sensor('zonetemp')],
+  fanStatus: [exact('status'), statusOf(part([], ['fan']))],
 }
 
 export type EkoVavReading = Record<EkoVavKey, string> & {
@@ -50,12 +53,8 @@ export type EkoVavSchematic = {
   dispose: () => void
 }
 
-export function readEkoVavPoints(points: EkoVavPoint[], map: EkoVavPointMap = EKO_VAV_POINT_MAP): EkoVavReading {
-  const raw = (key: EkoVavKey): string | null => {
-    const names = map[key]
-    if (!names.length) return null
-    return clean(findPoint(points, k => names.includes(k))?.currentValue)
-  }
+export function readEkoVavPoints(points: EkoVavPoint[], rules: EkoVavPointRules = EKO_VAV_POINT_RULES): EkoVavReading {
+  const raw = (key: EkoVavKey): string | null => pick(points, rules[key])
   const damper = raw('damperPos'), status = raw('fanStatus')
   return {
     damperOpen: damper == null ? null : fractionOf(damper),
@@ -155,10 +154,11 @@ export function createEkoVavSchematic(
   buildSensorProbe(ctx, group, tempX, y0 + rt * 1.3, 0, r * 2, TEMP)
   group.userData.ekoVavLayout = { probes: 2, inletX: inletX, fanX, riserX, y0 }
 
-  // Labels: the graphic's names, not FIN point names. Every one is optional: shown only while a verified point sends a value.
+  // Labels: the graphic's names, not FIN point names. Damper, zone temperature and fan status always show (a value, or "—"); the humidity probe only while FIN sends one.
   const top = hy * 0.98
+  // Damper, zone temperature and fan status show "—" when FIN sends nothing (the FCU's convention); only the humidity probe is optional
   const at = (key: EkoVavKey, title: string, x: number, y: number, z: number, side: HvacAnchor['side']): HvacAnchor =>
-    ({ key, title, position: new THREE.Vector3(x, y, z), side, optional: true })
+    ({ key, title, position: new THREE.Vector3(x, y, z), side, optional: key === 'zoneHum' })
   const anchors: HvacAnchor[] = [
     at('damperPos', 'DAMPERPOS',    -hx * 0.40, top,     0,  'above'),
     at('zoneHum',   'ZONEHUMIDITY',  humX,      top,     zH, 'above'),
