@@ -444,7 +444,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     const drawGhost = () => {
       labels.setVisible(!!(ghost && ghost.group.visible && active && labelsOn()))
-      const hasHeat = heatRoots.size > 0 || alarmGlow.size > 0
+      const hasHeat = heatRoots.size > 0 || alarmGlow.size > 0 || !!crowdMesh
       if ((!ghost || !ghost.group.visible) && !hasHeat && !floorOutline) return
       // The selected equipment's internals, while its highlight is on screen
       const shown = ghost && ghost.group.visible ? active : null
@@ -484,6 +484,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       renderer.shadowMap.autoUpdate = false
       const heatGroups: THREE.Object3D[] = []
       heatRoots.forEach(root => { if (root.children.length) heatGroups.push(root) })
+      // Occupancy colours no room, so its people are drawn in the heat pass, behind the building
+      if (crowdMesh) heatGroups.push(crowdMesh)
       const seeThrough: THREE.Object3D[] = []
       if (ghost?.group) seeThrough.push(ghost.group)
       if (floorOutline) seeThrough.push(floorOutline)
