@@ -3724,6 +3724,10 @@
   background:linear-gradient(90deg, #6BCB77, #C45C26)
 }
 
+.dashboard-native-container .hmgrad[data-mode="occ"] {
+  background:linear-gradient(90deg, #60a5fa, #fbbf24, #ef4444)
+}
+
 .dashboard-native-container .hmrank {
   display:flex;
   align-items:center;

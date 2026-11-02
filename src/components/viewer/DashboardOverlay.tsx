@@ -551,6 +551,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         renderer.autoClear = autoClear
       }
     }
+    let stepCrowd = () => {}
     const syncGhost = () => {
       if (ghost) {
         ghost.group.matrix.copy(ghost.model.object.matrixWorld)
@@ -571,6 +572,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         rec.group.visible = rec.model.object.visible !== false && colored?.bimId !== bimId
           && !levelHidden.get(rec.model)?.has(rec.localId) && !isHidden(rec.model, rec.localId)
       })
+      stepCrowd()
     }
     const mountInternals = (group: THREE.Group, entry: Located, internals: Internals, bimId: string) => {
       const schematic = SCHEMATICS[internals.type](entry.localBox, entry.model.object.matrixWorld, group)
@@ -1265,6 +1267,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       hum: [0xE6C35C, 0x0E7C74],
       comfort: [0x6BCB77, 0xC45C26],
     }
+    /* Empty blue, busy amber, full red. Same three stops as the medical twin. */
+    const occBlue = new THREE.Color(0x60a5fa)
+    const occAmber = new THREE.Color(0xfbbf24)
+    const occRed = new THREE.Color(0xef4444)
     const heatT = (mode: string, v: number | null) => {
       if (v == null || !isFinite(v)) return null
       const t = mode === 'comfort' ? (v - 600) / 600 : mode === 'hum' ? (v - 40) / 40 : (v - 21) / 4
@@ -1378,6 +1384,100 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         for (const mesh of rec.meshes) mesh.visible = on
       }
     }
+    let crowdMesh: THREE.InstancedMesh | null = null
+    let crowd: { minX: number; maxX: number; minZ: number; maxZ: number; x: number; z: number; vx: number; vz: number; y: number }[] = []
+    const crowdDummy = new THREE.Object3D()
+    const clearCrowd = () => {
+      if (crowdMesh) {
+        overlay.remove(crowdMesh)
+        crowdMesh.geometry.dispose()
+        ;(crowdMesh.material as THREE.Material).dispose()
+        crowdMesh = null
+      }
+      crowd = []
+    }
+    const occSpeed = () => {
+      const n = useProjectStore.getState().currentProject?.apiSettings?.heatmap?.speed
+      const s = n == null || !Number.isFinite(Number(n)) ? 1 : Number(n)
+      return Math.max(0.4, Math.min(2, s))
+    }
+    const placeCrowd = (floorIds: string[], wanted: Set<string>, people: number) => {
+      clearCrowd()
+      const ids: string[] = []
+      for (const floorId of floorIds) {
+        const set = floorRooms.get(floorId)?.guids
+        if (!set) continue
+        for (const g of set) if (wanted.has(g) && located.has(g)) ids.push(g)
+      }
+      if (!ids.length || people <= 0) return
+      const weights = ids.map(id => {
+        let h = 2166136261
+        for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619)
+        return 0.35 + ((h >>> 0) % 1000) / 1000 * 1.3
+      })
+      const sum = weights.reduce((n, w) => n + w, 0) || 1
+      let total = 0
+      const plan = ids.map((id, i) => {
+        const count = Math.max(0, Math.round(people * weights[i] / sum))
+        total += count
+        const cap = Math.max(4, Math.round(6 + weights[i] * 14))
+        return { id, count, ratio: Math.min(1, count / cap) }
+      }).filter(p => p.count > 0)
+      if (!total) return
+      const geo = new THREE.SphereGeometry(0.22, 6, 6)
+      const mat = new THREE.MeshBasicMaterial({ vertexColors: true })
+      const mesh = new THREE.InstancedMesh(geo, mat, total)
+      mesh.frustumCulled = false
+      mesh.renderOrder = 3
+      const col = new THREE.Color()
+      let idx = 0
+      for (const sp of plan) {
+        const entry = located.get(sp.id)
+        if (!entry?.localBox) continue
+        entry.model.object.updateMatrixWorld(true)
+        const box = entry.localBox.clone().applyMatrix4(entry.model.object.matrixWorld)
+        const a = sp.ratio < 0.5 ? occBlue : occAmber
+        const b = sp.ratio < 0.5 ? occAmber : occRed
+        col.copy(a).lerp(b, sp.ratio < 0.5 ? sp.ratio * 2 : (sp.ratio - 0.5) * 2)
+        for (let i = 0; i < sp.count; i++) {
+          const x = box.min.x + Math.random() * Math.max(0.2, box.max.x - box.min.x)
+          const z = box.min.z + Math.random() * Math.max(0.2, box.max.z - box.min.z)
+          const y = box.min.y + Math.min(1.1, Math.max(0.4, (box.max.y - box.min.y) * 0.35))
+          const ang = Math.random() * Math.PI * 2
+          crowd.push({ minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z, x, z, vx: Math.cos(ang), vz: Math.sin(ang), y })
+          crowdDummy.position.set(x, y, z)
+          crowdDummy.updateMatrix()
+          mesh.setMatrixAt(idx, crowdDummy.matrix)
+          mesh.setColorAt(idx, col)
+          idx++
+        }
+      }
+      mesh.count = idx
+      mesh.instanceMatrix.needsUpdate = true
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
+      overlay.add(mesh)
+      crowdMesh = mesh
+    }
+    stepCrowd = () => {
+      if (!crowdMesh || !crowd.length) return
+      const step = 0.016 * occSpeed()
+      for (let i = 0; i < crowd.length; i++) {
+        const p = crowd[i]
+        if (Math.random() < 0.02) {
+          const ang = Math.random() * Math.PI * 2
+          p.vx = Math.cos(ang)
+          p.vz = Math.sin(ang)
+        }
+        p.x += p.vx * step
+        p.z += p.vz * step
+        if (p.x < p.minX || p.x > p.maxX) { p.vx *= -1; p.x = Math.max(p.minX, Math.min(p.x, p.maxX)) }
+        if (p.z < p.minZ || p.z > p.maxZ) { p.vz *= -1; p.z = Math.max(p.minZ, Math.min(p.z, p.maxZ)) }
+        crowdDummy.position.set(p.x, p.y, p.z)
+        crowdDummy.updateMatrix()
+        crowdMesh.setMatrixAt(i, crowdDummy.matrix)
+      }
+      crowdMesh.instanceMatrix.needsUpdate = true
+    }
     const clearSpaceHeat = async () => {
       heatSeq++
       heatReq = null
@@ -1386,6 +1486,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       syncHeatClip()
       applySpacesGate()
       showHeatFloors(new Set())
+      clearCrowd()
       heatRoots.forEach(root => { root.visible = false })
       heatByBim.forEach(rec => {
         unwatchClipping(rec.mat)
@@ -1481,6 +1582,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       sigma: number,
       low: THREE.Color,
       high: THREE.Color,
+      occRamp = false,
     ) => {
       const g = subdivideHeat(geom, Math.max(sigma * 0.45, 0.4))
       const pos = g.getAttribute('position') as THREE.BufferAttribute
@@ -1506,7 +1608,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           tsum += w * s.t
         }
         const t = wsum > 0 ? tsum / wsum : own.t
-        tmp.copy(low).lerp(high, t)
+        if (occRamp) {
+          const a = t < 0.5 ? occBlue : occAmber
+          const b = t < 0.5 ? occAmber : occRed
+          tmp.copy(a).lerp(b, t < 0.5 ? t * 2 : (t - 0.5) * 2)
+        } else tmp.copy(low).lerp(high, t)
         const o = i * 4
         colors[o] = tmp.r
         colors[o + 1] = tmp.g
@@ -1529,18 +1635,26 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       applySpacesGate()
       const inside = heatInsideOf()
       heatInsideWalls = inside
-      const md = mode === 'comfort' || mode === 'hum' ? mode : 'temp'
+      const md = mode === 'comfort' || mode === 'hum' || mode === 'occ' ? mode : 'temp'
       const levelId = ((window as any).EKO?.state?.dock?.level as string) || 'ALL'
       const idsOf = (z: { bimId?: string; bimIds?: string[] }) =>
         (z.bimIds && z.bimIds.length ? z.bimIds : (z.bimId ? [z.bimId] : [])).filter(id => isGuid(id))
+      const occPeople = () => {
+        const n = useProjectStore.getState().currentProject?.apiSettings?.heatmap?.people
+        return Math.max(0, Math.min(400, n == null || !Number.isFinite(Number(n)) ? 80 : Math.round(Number(n))))
+      }
       const jobs: { bimId: string; t: number }[] = []
       for (const z of zones || []) {
+        if (md === 'occ') {
+          for (const bimId of idsOf(z)) jobs.push({ bimId, t: 0 })
+          continue
+        }
         const raw = md === 'comfort' ? z.co2 : md === 'hum' ? z.rh : z.tempC
         const t = heatT(md, raw == null ? null : Number(raw))
         if (t == null) continue
         for (const bimId of idsOf(z)) jobs.push({ bimId, t })
       }
-      const valueSig = (inside ? 'in|' : 'out|') + md + '|' + jobs.map(j => `${j.bimId}:${round1(j.t)}`).join(';')
+      const valueSig = (inside ? 'in|' : 'out|') + md + '|' + (md === 'occ' ? 'p' + occPeople() + '|' : '') + jobs.map(j => `${j.bimId}:${round1(j.t)}`).join(';')
       if (valueSig !== heatSig) {
         dropHeatSheets()
         heatSig = valueSig
@@ -1558,7 +1672,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       showHeatFloors(show)
       const missing = order.filter(id => !heatFloorSheets.get(id)?.done)
       const wake = engine.world?.renderer as { needsUpdate?: boolean } | undefined
+      if (md !== 'occ') clearCrowd()
       if (!missing.length) {
+        if (md === 'occ') placeCrowd(order, wanted, occPeople())
         syncGhost()
         if (wake) wake.needsUpdate = true
         return
@@ -1581,16 +1697,34 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         if (seq !== heatSeq) return
         type Room = { model: any; geoms: THREE.BufferGeometry[]; x: number; y: number; z: number; hx: number; hy: number; hz: number; t: number; guid: string; area: number }
         const rooms: Room[] = []
+        const occW = new Map<string, number>()
+        let occSum = 0
+        if (md === 'occ') {
+          for (const id of guids) {
+            let h = 2166136261
+            for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619)
+            const w = 0.35 + ((h >>> 0) % 1000) / 1000 * 1.3
+            occW.set(id, w)
+            occSum += w
+          }
+        }
         for (const job of jobs) {
           if (!guids.has(job.bimId) || kept.guids.has(job.bimId)) continue
           const entry = located.get(job.bimId)
           if (!entry?.localBox || entry.localBox.isEmpty()) continue
           const size = entry.localBox.getSize(new THREE.Vector3())
           const c = entry.localBox.getCenter(new THREE.Vector3())
+          let t = job.t
+          if (md === 'occ') {
+            const w = occW.get(job.bimId) || 1
+            const count = occSum > 0 ? Math.round(occPeople() * w / occSum) : 0
+            const cap = Math.max(4, Math.round(6 + w * 14))
+            t = Math.min(1, Math.max(0, count) / cap)
+          }
           rooms.push({
             model: entry.model, geoms: [],
             x: c.x, y: c.y, z: c.z, hx: size.x / 2, hy: size.y / 2, hz: size.z / 2,
-            t: job.t, guid: job.bimId, area: Math.abs(size.x * size.z),
+            t, guid: job.bimId, area: Math.abs(size.x * size.z),
           })
         }
         await solidsFor(rooms.map(r => { const e = located.get(r.guid)!; return { guid: r.guid, model: e.model, localId: e.localId, box: e.localBox } }))
@@ -1632,7 +1766,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           for (const room of samples) {
             if (seq !== heatSeq) return
             for (const geom of room.geoms) {
-              const mesh = paintRoom(geom, room, graded, sigma, low, high)
+              const mesh = paintRoom(geom, room, graded, sigma, low, high, md === 'occ')
               mesh.visible = true
               root.add(mesh)
               heatSheets.push(mesh)
@@ -1651,6 +1785,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         syncGhost()
         if (wake) wake.needsUpdate = true
         if (seq === heatSeq) kept.done = true
+        if (seq === heatSeq && md === 'occ') placeCrowd(order, wanted, occPeople())
       }
       return
     }

@@ -34,7 +34,7 @@ import { PBR_MATERIAL_MAPPINGS } from '../constants/pbrMaterials'
 import { RENDER_DEFAULTS, studioAdjustOf, type RenderSettings, type ToneMappingId } from '../constants/renderSettings'
 import { applyStudioAdjust, DASHBOARD_DARK_SKY, getTemplateScene, type TemplateScene } from '../constants/viewTemplates'
 import { paintStudioModel } from '../constants/studioPalette'
-import { azimuthDragSign } from './cameraUtils'
+import { orbitDragSign } from './cameraUtils'
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { N8AOPass } from 'n8ao'
 
@@ -1354,18 +1354,28 @@ export async function initFragmentsEngine(
 
   world.camera.controls.setLookAt(50, 30, 50, 0, 0, 0)
 
-  // Near straight down, the same right-drag that slides a side view to the right
-  // spins the plan so the far side goes left. The sign is chosen when the drag starts.
+  // A drag turns the plan so the part under the pointer follows it (orbitDragSign). The sign is chosen when
+  // the drag starts, from where the pointer went down; the capture listener runs before camera-controls' own.
   {
-    const controls = world.camera.controls as {
+    const controls = world.camera.controls as unknown as {
       azimuthRotateSpeed: number
       polarAngle: number
+      getTarget: (out: THREE.Vector3) => THREE.Vector3
       addEventListener: (type: string, fn: () => void) => void
     }
     const baseAzimuth = Math.abs(controls.azimuthRotateSpeed || 1)
+    let downY: number | null = null
+    viewCanvas.addEventListener('pointerdown', (e: PointerEvent) => { downY = e.clientY }, { capture: true })
+    const centre = new THREE.Vector3()
+    const pointerAboveCentre = () => {
+      const rect = viewCanvas.getBoundingClientRect()
+      if (downY == null || rect.height < 1) return false
+      controls.getTarget(centre).project(world.camera.three)
+      return 1 - 2 * (downY - rect.top) / rect.height > centre.y
+    }
     controls.addEventListener('controlstart', () => {
       if (!controls.azimuthRotateSpeed) return
-      controls.azimuthRotateSpeed = azimuthDragSign(controls.polarAngle) * baseAzimuth
+      controls.azimuthRotateSpeed = orbitDragSign(controls.polarAngle, pointerAboveCentre()) * baseAzimuth
     })
   }
 

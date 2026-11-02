@@ -1038,7 +1038,7 @@
     if(window.EKO_HIT) window.EKO_HIT.schedule();                 /* E17: the hit areas again */
     if(window.EKO_HOST_ENGINE){
       if(E.state.pageId === 'heatmap' && typeof window.EKO_HOST_ENGINE.applySpaceHeat === 'function'){
-        const mode = E.state.hmMode === 'comfort' ? 'comfort' : (E.state.hmMode === 'hum' || E.state.hmMode === 'occ' ? 'hum' : 'temp');
+        const mode = E.state.hmMode === 'comfort' ? 'comfort' : E.state.hmMode === 'hum' ? 'hum' : E.state.hmMode === 'occ' ? 'occ' : 'temp';
         /* E15: the sample engine's zones name their room gid and their readings rhPct and co2Ppm; the Studio reads bimId, rh and co2 */
         const zones = ((E.data.heat && E.data.heat.zones) || []).map(z => z.gid && !z.bimId ? Object.assign({}, z, { bimId: z.gid, rh: z.rh ?? z.rhPct, co2: z.co2 ?? z.co2Ppm }) : z);
         window.EKO_HOST_ENGINE.applySpaceHeat(zones, mode);

@@ -271,6 +271,10 @@ export interface HeatmapSetup {
    * Marsa has no space links, so its rooms are never filled. A real FIN reading is kept.
    */
   sampleSpaces?: boolean
+  /** People drawn on the occupancy tab. Absent is 80. Capped at 400. */
+  people?: number
+  /** How fast those people walk. 1 is a stroll. Absent is 1. */
+  speed?: number
 }
 
 /** Per-project FIN settings live here. A field a project does not set falls back to the

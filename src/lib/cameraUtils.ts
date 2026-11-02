@@ -13,6 +13,19 @@ export function azimuthDragSign(polarAngle: number): number {
   return polarAngle < TOP_VIEW_RAD || polarAngle > Math.PI - TOP_VIEW_RAD ? -1 : 1
 }
 
+/** Radians from straight up or straight down in which the plan's far side fills much of the screen. */
+const STEEP_VIEW_RAD = 1.05
+
+/** A drag on the model: the part under the pointer follows it. A turntable carries the near side of the plan
+ *  with the drag and the far side against it; looking down, the far side is above the orbit centre on screen,
+ *  looking up it is below. Side views keep the turntable. */
+export function orbitDragSign(polarAngle: number, pointerAboveCentre: boolean): number {
+  if (!Number.isFinite(polarAngle)) return 1
+  if (polarAngle < STEEP_VIEW_RAD) return pointerAboveCentre ? -1 : 1
+  if (polarAngle > Math.PI - STEEP_VIEW_RAD) return pointerAboveCentre ? 1 : -1
+  return 1
+}
+
 /**
  * Universally unifies the "Home" and "Reset Camera" logic.
  * 1. Flies to the user's saved project camera if it exists.

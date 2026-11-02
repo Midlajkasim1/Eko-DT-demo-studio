@@ -85,6 +85,34 @@ function HeatmapPane({
         Linked rooms share seven sample sensors, S-01 to S-07. Rooms on one sensor use the same temperature, humidity, and CO2, so the view does not colour every room on its own. You do not rename the rooms. A real FIN reading is kept. Marsa has no linked rooms, so its heatmap stays on the FIN feed. Turn this off to draw only rooms you name IS-01 or IAQ-02.
       </p>
 
+      <h3 className="ds-section-title" style={{ marginTop: 24 }}>Occupancy</h3>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
+        People
+        <input
+          type="number"
+          min={0}
+          max={400}
+          value={current.people ?? 80}
+          onChange={e => patch({ people: Math.max(0, Math.min(400, Math.round(Number(e.target.value) || 0))) })}
+          style={{ width: 72, padding: '4px 8px', borderRadius: 6, background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+        />
+      </label>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
+        Speed
+        <input
+          type="range"
+          min={0.4}
+          max={2}
+          step={0.1}
+          value={current.speed ?? 1}
+          onChange={e => patch({ speed: Number(e.target.value) })}
+        />
+        <span>{(current.speed ?? 1).toFixed(1)}</span>
+      </label>
+      <p className="ds-hint">
+        The Occupancy tab shares these people across the rooms on the floors you are viewing. A fuller room goes from blue to amber to red. Speed is how fast they walk.
+      </p>
+
       <h3 className="ds-section-title" style={{ marginTop: 24 }}>View</h3>
       <div className="al-filters" style={{ marginBottom: 12 }}>
         <button type="button" className={`ds-toggle-btn ${current.camera !== 'inside' ? 'active' : ''}`} onClick={() => patch({ camera: 'top' })}>Top view</button>
