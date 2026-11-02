@@ -5,7 +5,7 @@ import * as OBC from '@thatopen/components'
 import { useProjectStore } from '@/store/useProjectStore'
 import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
-import { foldName, indexLinks, indexSpaceLinks, isGuid } from '@/lib/assetLinks'
+import { defaultType, foldName, indexLinks, indexSpaceLinks, isGuid } from '@/lib/assetLinks'
 import type { AssetLink } from '@/types'
 import { resetCameraToHome } from '@/lib/cameraUtils'
 import { frameSphereInView } from '@/lib/viewFraming'
@@ -329,7 +329,17 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const rec = linkFor(asked)
       if (rec && SCHEMATICS[rec.type]) return { assetId: normAssetId(asked), type: rec.type }
       const hit = links().list.find(m => m.guid === bimId && SCHEMATICS[m.type])
-      return hit ? { assetId: hit.equip, type: hit.type } : null
+      if (hit) return { assetId: hit.equip, type: hit.type }
+      if (!hospitalHvac()) return null
+      /* Eko Hospital: a link saved with the type of the name's first letters ("HOSPITAL" for HOSPITAL_AHU_01) still draws the AHU or
+         FCU its name says it is, as a link made now would be typed */
+      const names = [rec?.equip, isGuid(asked) ? null : asked, ...links().list.filter(m => m.guid === bimId).map(m => m.equip)]
+      for (const name of names) {
+        if (!name) continue
+        const type = defaultType({ name: normAssetId(name) }, true)
+        if (SCHEMATICS[type]) return { assetId: normAssetId(name), type }
+      }
+      return null
     }
     const pointsFor = (assetId: string, bimId: string) => {
       const want = fold(assetId)

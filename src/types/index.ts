@@ -258,9 +258,6 @@ export interface ProjectApiSettings {
   /** Show the prototype's demo figures (Marsa Al Arab fixture) in the dashboard. Off: only FIN
    *  readings and this project's own settings are shown. */
   dashboardDemo?: boolean
-  /** Eko Hospital's AHU/FCU graphics: live point labels, the AHU's six sensors, the FCU's filter and humidity probe.
-   *  An explicit opt-in per project: absent or false is every other project, which keeps the viewer it had. */
-  hospitalHvacGraphics?: boolean
   /** Reporting basis. A cost or CO₂ figure whose rate is not set is reported as unavailable. */
   energyTariff?: number
   gasTariff?: number

@@ -504,16 +504,6 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 <p className="ds-hint">Off: the dashboard shows only this project's FIN readings and settings, and modules with no FIN source (anomalies, forecast, benchmark) are hidden.</p>
               </div>
 
-              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Hospital HVAC Graphics</h3>
-              <div className="ds-field">
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={settings.hospitalHvacGraphics === true} style={{ width: 'auto' }}
-                    onChange={e => update('hospitalHvacGraphics', e.target.checked || undefined)} />
-                  Eko Hospital AHU and FCU graphics
-                </label>
-                <p className="ds-hint">On: the selected AHU shows its live point labels and sensors, the FCU its filter and humidity probe, and equipment named like HOSPITAL_AHU_01 is typed by that word. Leave off for every other project.</p>
-              </div>
-
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Weather API</h3>
               <div className="ds-field">
                 <label>OpenWeatherMap API Key</label>
