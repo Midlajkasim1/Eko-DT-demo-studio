@@ -197,21 +197,21 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
 
     /* Which saved rooms the model files on this storey. One storey, not every room. */
     const guidFloor = new Map<string, string>()
-    const floorRooms = new Map<string, Set<string>>()
+    /* A floor with none of the rooms is kept too, or every repaint reads all its elements again */
+    const floorRooms = new Map<string, { want: string; guids: Set<string> }>()
     const guidsForFloor = async (levelId: string, wanted: Set<string>) => {
       const out = new Set<string>()
       if (!levelId || levelId === 'ALL' || !wanted.size || !engine?.fragments?.models?.list) return out
+      const want = [...wanted].sort().join(',')
       const cached = floorRooms.get(levelId)
-      if (cached) {
-        for (const g of cached) if (wanted.has(g)) out.add(g)
-        return out
-      }
+      if (cached && cached.want === want) return new Set(cached.guids)
       const models = [...engine.fragments.models.list.values()]
       models.sort((a, b) => {
         const rec = (m: any) => useModelStore.getState().models.find(r => r.modelId === m.modelId)
         const space = (m: any) => rec(m) && classifyLoaded(rec(m)!).group === 'spaces' ? 0 : 1
         return space(a) - space(b)
       })
+      let read = false
       for (const model of models) {
         const m = model as any
         if (typeof m.getRelations !== 'function' || typeof m.getGuidsByLocalIds !== 'function') continue
@@ -219,19 +219,22 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         if (!storeys.length) continue
         const rels = relationData(await m.getRelations(storeys.map(s => s.localId)))
         const ids: number[] = []
-        for (const s of storeys) for (const id of rels.get(s.localId)?.ContainsElements || []) ids.push(id)
+        /* Elements are contained in a storey (IfcRelContainedInSpatialStructure); rooms are usually aggregated to it (IfcRelAggregates) */
+        for (const s of storeys) {
+          const rel = rels.get(s.localId)
+          for (const id of [...(rel?.ContainsElements || []), ...(rel?.IsDecomposedBy || [])]) ids.push(id)
+        }
         if (!ids.length) continue
+        read = true
         const guids: Array<string | null> = await m.getGuidsByLocalIds(ids)
         guids.forEach(g => {
           if (!g || !wanted.has(g)) return
           out.add(g)
           guidFloor.set(g, levelId)
         })
-        if (out.size) {
-          floorRooms.set(levelId, new Set(out))
-          break
-        }
+        if (out.size) break
       }
+      if (out.size || read) floorRooms.set(levelId, { want, guids: new Set(out) })
       return out
     }
 
@@ -439,7 +442,6 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ghost.group.traverse((o: any) => o.geometry?.dispose())
       ghost = null
     }
-    let heatMoving = false
     const drawGhost = () => {
       labels.setVisible(!!(ghost && ghost.group.visible && active && labelsOn()))
       const hasHeat = heatRoots.size > 0 || alarmGlow.size > 0
@@ -489,12 +491,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const heatDrawn = heatGroups.some(g => g.visible)
       const ghostDrawn = seeThrough.some(g => g.visible)
       try {
-        /* While the camera is moving, draw the colour on its own. At rest the
-           building covers it the same way a floor pick does, ceiling included. */
-        if (heatDrawn && heatMoving) {
-          renderer.clearDepth()
-          renderer.render(overlay, camera)
-        } else if (heatDrawn && engine.world?.scene?.three) {
+        /* The building covers the colour the same way a floor pick does, ceiling included, also while the camera moves */
+        if (heatDrawn && engine.world?.scene?.three) {
           const scene = engine.world.scene.three
           const hidden: THREE.Object3D[] = []
           const prevOverride = scene.overrideMaterial
@@ -502,6 +500,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           const savedSee = seeThrough.map(g => g.visible)
           seeThrough.forEach(g => { g.visible = false })
           try {
+            /* The rooms being coloured do not cover their own colour */
+            heatRoots.forEach((_root, model) => {
+              const obj = model?.object
+              if (obj?.visible) { obj.visible = false; hidden.push(obj) }
+            })
             scene.traverse((obj: any) => {
               if (!obj.visible) return
               if (obj.name === 'ShadowCatcherPlane' || obj.name === 'eko-slices') {
@@ -1277,8 +1280,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       heatRoots.set(model, root)
       return root
     }
-    /* A flat grid at the top of the room, only when the space has no mesh.
-       A solid box is what made the floor look like coloured crates. */
+    /* A flat grid at the top of the room: the glow's stand-in when the item has no mesh */
     const plateFrom = (localBox: THREE.Box3) => {
       const size = localBox.getSize(new THREE.Vector3())
       const center = localBox.getCenter(new THREE.Vector3())
@@ -1287,6 +1289,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       geom.translate(center.x, center.y + size.y / 2, center.z)
       return geom
     }
+    const partMatrix = (g: any) => g.transform instanceof THREE.Matrix4 ? g.transform
+      : new THREE.Matrix4().fromArray(g.transform?.elements ?? g.transform ?? new THREE.Matrix4().elements)
     const geomsFor = async (bimId: string, entry: Located) => {
       const hit = heatGeoms.get(bimId)
       if (hit) return hit
@@ -1299,15 +1303,49 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           const geom = new THREE.BufferGeometry()
           geom.setAttribute('position', new THREE.Float32BufferAttribute(g.positions, 3))
           geom.setIndex(Array.from(g.indices as ArrayLike<number>))
-          const t = g.transform instanceof THREE.Matrix4 ? g.transform
-            : new THREE.Matrix4().fromArray(g.transform?.elements ?? g.transform ?? new THREE.Matrix4().elements)
-          geom.applyMatrix4(t)
+          geom.applyMatrix4(partMatrix(g))
           geoms.push(geom)
         }
       }
       if (!geoms.length && entry.localBox && !entry.localBox.isEmpty()) geoms.push(plateFrom(entry.localBox))
       heatGeoms.set(bimId, geoms)
       return geoms
+    }
+    /* The heat map colours each room as its space's own solid, the shape the model has; its box is the fallback */
+    const heatSolids = new Map<string, THREE.BufferGeometry>()
+    const solidFrom = (parts: any[], box: THREE.Box3) => {
+      const pos: number[] = []
+      const v = new THREE.Vector3()
+      for (const g of parts || []) {
+        if (!g?.positions || !g.indices) continue
+        const t = partMatrix(g), p = g.positions as ArrayLike<number>, idx = g.indices as ArrayLike<number>
+        for (let i = 0; i < idx.length; i++) {
+          v.set(p[idx[i] * 3], p[idx[i] * 3 + 1], p[idx[i] * 3 + 2]).applyMatrix4(t)
+          pos.push(v.x, v.y, v.z)
+        }
+      }
+      if (pos.length >= 9) {
+        const geom = new THREE.BufferGeometry()
+        geom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+        return geom
+      }
+      const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3())
+      return new THREE.BoxGeometry(Math.max(size.x, 0.2), Math.max(size.y, 0.2), Math.max(size.z, 0.2)).translate(c.x, c.y, c.z)
+    }
+    /* One geometry read per model for all of a floor's rooms */
+    const solidsFor = async (list: { guid: string; model: any; localId: number; box: THREE.Box3 }[]) => {
+      const byModel = new Map<any, typeof list>()
+      for (const r of list) {
+        if (heatSolids.has(r.guid)) continue
+        const l = byModel.get(r.model) || []
+        l.push(r)
+        byModel.set(r.model, l)
+      }
+      for (const [model, rs] of byModel) {
+        let res: any[][] = []
+        try { res = await model.getItemsGeometry(rs.map(r => r.localId)) } catch { res = [] }
+        rs.forEach((r, i) => heatSolids.set(r.guid, solidFrom(res && res.length === rs.length ? res[i] : [], r.box)))
+      }
     }
     const heatFloorSheets = new Map<string, { meshes: THREE.Mesh[]; guids: Set<string>; done: boolean }>()
     const dropHeatSheets = () => {
@@ -1402,17 +1440,16 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     /* The space keeps its real height. Colour is one field shared by every
        room, and the shell stays translucent so the model shows through it. */
-    const heatPlateMat = () => {
+    /* See-through (a room's faces do not hide one another) and with no depth pull: the solid already sits inside the room,
+       and a pull grows with the slope, so its walls seen from above came through a closed ceiling as lines */
+    const heatRoomMat = () => {
       const mat = new THREE.ShaderMaterial({
         transparent: true,
-        depthWrite: true,
+        depthWrite: false,
         depthTest: true,
         side: THREE.DoubleSide,
         toneMapped: false,
         clipping: true,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
         vertexShader: `
           #include <clipping_planes_pars_vertex>
           attribute vec4 color;
@@ -1436,24 +1473,23 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       watchClipping(mat)
       return mat
     }
-    const paintRoomPlate = (
+    /* The room's solid, a few centimetres inside its walls, floor and ceiling, so it never shares a surface with them */
+    const paintRoom = (
       geom: THREE.BufferGeometry,
       own: { x: number; y: number; z: number; t: number; hx: number; hy: number; hz: number },
       samples: { x: number; z: number; t: number }[],
       sigma: number,
       low: THREE.Color,
       high: THREE.Color,
-      inset: boolean,
     ) => {
       const g = subdivideHeat(geom, Math.max(sigma * 0.45, 0.4))
       const pos = g.getAttribute('position') as THREE.BufferAttribute
       const sx = own.hx > 0.08 ? Math.max((own.hx - 0.05) / own.hx, 0.85) : 1
       const sz = own.hz > 0.08 ? Math.max((own.hz - 0.05) / own.hz, 0.85) : 1
-      const sy = inset && own.hy > 0.05 ? Math.max(1 - Math.min(0.45, own.hy * 0.45) / own.hy, 0.55) : 1
-      const drop = inset ? (1 - sy) * own.hy * 0.85 : 0
+      const sy = own.hy > 0.06 ? (own.hy - 0.03) / own.hy : 1
       for (let i = 0; i < pos.count; i++) {
         pos.setX(i, own.x + (pos.getX(i) - own.x) * sx)
-        pos.setY(i, own.y + (pos.getY(i) - own.y) * sy - drop)
+        pos.setY(i, own.y + (pos.getY(i) - own.y) * sy)
         pos.setZ(i, own.z + (pos.getZ(i) - own.z) * sz)
       }
       pos.needsUpdate = true
@@ -1480,7 +1516,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       g.setAttribute('color', new THREE.BufferAttribute(colors, 4))
       g.computeBoundingBox()
       g.computeBoundingSphere()
-      const mesh = new THREE.Mesh(g, heatPlateMat())
+      const mesh = new THREE.Mesh(g, heatRoomMat())
       mesh.frustumCulled = false
       mesh.renderOrder = 2
       return mesh
@@ -1531,6 +1567,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const low = new THREE.Color(stops[0])
       const high = new THREE.Color(stops[1])
       const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+      let batchFrom = performance.now()
       for (const floorId of missing) {
         if (seq !== heatSeq) return
         let kept = heatFloorSheets.get(floorId)
@@ -1551,11 +1588,14 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           const size = entry.localBox.getSize(new THREE.Vector3())
           const c = entry.localBox.getCenter(new THREE.Vector3())
           rooms.push({
-            model: entry.model, geoms: [plateFrom(entry.localBox)],
+            model: entry.model, geoms: [],
             x: c.x, y: c.y, z: c.z, hx: size.x / 2, hy: size.y / 2, hz: size.z / 2,
             t: job.t, guid: job.bimId, area: Math.abs(size.x * size.z),
           })
         }
+        await solidsFor(rooms.map(r => { const e = located.get(r.guid)!; return { guid: r.guid, model: e.model, localId: e.localId, box: e.localBox } }))
+        if (seq !== heatSeq) return
+        for (const room of rooms) room.geoms = [heatSolids.get(room.guid) || solidFrom([], located.get(room.guid)!.localBox)]
         const areas = rooms.map(r => r.area).filter(a => a > 1).sort((a, b) => a - b)
         const typical = areas.length ? areas[Math.floor(areas.length / 2)] : 0
         const paint = typical > 0 ? rooms.filter(r => r.area <= typical * 16) : rooms
@@ -1592,18 +1632,24 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           for (const room of samples) {
             if (seq !== heatSeq) return
             for (const geom of room.geoms) {
-              const mesh = paintRoomPlate(geom, room, graded, sigma, low, high, inside)
+              const mesh = paintRoom(geom, room, graded, sigma, low, high)
               mesh.visible = true
               root.add(mesh)
               heatSheets.push(mesh)
               kept.meshes.push(mesh)
             }
             kept.guids.add(room.guid)
-            syncGhost()
-            if (wake) wake.needsUpdate = true
-            await nextFrame()
+            /* One redraw per batch of rooms, not per room: each redraw draws the whole building twice */
+            if (performance.now() - batchFrom > 12) {
+              syncGhost()
+              if (wake) wake.needsUpdate = true
+              await nextFrame()
+              batchFrom = performance.now()
+            }
           }
         }
+        syncGhost()
+        if (wake) wake.needsUpdate = true
         if (seq === heatSeq) kept.done = true
       }
       return
@@ -1988,14 +2034,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       setLookAt?: Function
       updateCameraUp?: Function
     } | undefined
-    const onHeatMove = () => { heatMoving = true }
-    const onHeatRest = () => { heatMoving = false }
     const onHeatCamera = (e: Event) => {
       lookAtView((e as CustomEvent).detail)
     }
     controls?.addEventListener('update', onCameraUpdate)
-    controls?.addEventListener('controlstart', onHeatMove)
-    controls?.addEventListener('rest', onHeatRest)
     window.addEventListener('eko-heat-camera', onHeatCamera)
     engine.world?.renderer?.onBeforeUpdate?.add(syncGhost)
     engine.world?.renderer?.onAfterUpdate?.add(afterFrame)
@@ -2023,6 +2065,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         modelsSig = sig
         missing.clear()
         assetFloor.clear()
+        floorRooms.clear()
+        heatSolids.clear()
         indexProven = false
         barrenPasses = 0
         const alive = new Set(live)
@@ -2068,8 +2112,6 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         }
       } catch { /* viewer keeps its canvas */ }
       controls?.removeEventListener('update', onCameraUpdate)
-      controls?.removeEventListener('controlstart', onHeatMove)
-      controls?.removeEventListener('rest', onHeatRest)
       window.removeEventListener('eko-heat-camera', onHeatCamera)
       engine.world?.renderer?.onBeforeUpdate?.remove(syncGhost)
       engine.world?.renderer?.onAfterUpdate?.remove(afterFrame)
