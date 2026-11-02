@@ -27,6 +27,7 @@ import { createMauSchematic } from '@/lib/mauSchematic'
 import { createEcoSchematic } from '@/lib/ecoSchematic'
 import { createHvacLabels } from '@/lib/hvacLabels'
 import type { HvacSchematic } from '@/lib/hvacGeometry'
+import { hospitalHvacEnabled, isLiveSchematic } from '@/lib/hospitalHvac'
 import { useFinStore } from '@/store/useFinStore'
 import type { ProjectApiSettings } from '@/types'
 import { dashboardProjectInfo } from '@/lib/finSettings'
@@ -43,18 +44,18 @@ interface DashboardOverlayProps {
 }
 
 /* Equipment type (from the project's asset links) -> the internals drawn inside its casing on selection */
-const SCHEMATICS: Record<string, (localBox: THREE.Box3, modelMatrix: THREE.Matrix4, casing?: THREE.Object3D) => HvacSchematic | null> = {
-  FCU:  createFcuSchematic,
-  AHU:  createAhuSchematic,
-  MAHU: createMauSchematic,
-  ECO:  createEcoSchematic,
-  FAHU: createFahuSchematic,
+const SCHEMATICS: Record<string, (localBox: THREE.Box3, modelMatrix: THREE.Matrix4, casing: THREE.Object3D, hospitalHvac: boolean) => HvacSchematic | null> = {
+  FCU:  (box, matrix, casing, hospitalHvac) => createFcuSchematic(box, matrix, casing, { hospitalHvac }),
+  AHU:  (box, matrix, casing, hospitalHvac) => createAhuSchematic(box, matrix, casing, { hospitalHvac }),
+  MAHU: (box, matrix, casing) => createMauSchematic(box, matrix, casing),
+  ECO:  (box, matrix, casing) => createEcoSchematic(box, matrix, casing),
+  FAHU: (box, matrix, casing) => createFahuSchematic(box, matrix, casing),
 }
 
-/* Types whose internals are driven by live FIN points (fan, coil, damper, filter, UV state).
-   A point FIN does not send shows the no-data grey, never a guessed off/clean.
-   AHU stays at its default look: its reader still treats a missing point as off/clean. */
-const LIVE_SCHEMATICS = new Set(['MAHU', 'ECO', 'FCU', 'FAHU'])
+/* Types whose internals are driven by live FIN points (fan, coil, damper, filter, UV state) are listed in isLiveSchematic.
+   A point FIN does not send shows the no-data grey, never a guessed off/clean. The AHU is live, and the AHU and FCU carry
+   the Hospital's extra sensors, only in a project that turned Hospital HVAC graphics on (hospitalHvacEnabled): every
+   other project draws them as it always did. */
 
 function loadScripts(scripts: HTMLScriptElement[], signal: { mounted: boolean }) {
   return scripts.reduce<Promise<void>>((prev, s) => prev.then(() => new Promise((resolve) => {
@@ -318,7 +319,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     // Items hidden by the Levels filter, per model
     const levelHidden = new WeakMap<object, Set<number>>()
     type Internals = { assetId: string; type: string }
-    let active: (Internals & { schematic: HvacSchematic; bimId: string; last: number; synced: number }) | null = null
+    /* Read from the open project on use: a project that is switched or saved while something is selected is rebuilt by the
+       dashboard effect's cleanup, so a selection never mixes two projects' settings. */
+    const hospitalHvac = () => hospitalHvacEnabled(useProjectStore.getState().currentProject)
+    let active: (Internals & { schematic: HvacSchematic; bimId: string; last: number; synced: number; live: boolean }) | null = null
     /* The asset whose internals to draw: the asked one if its type has a
        schematic, else any linked asset on the same element that has one. */
     const internalsFor = (asked: string, bimId: string): Internals | null => {
@@ -331,7 +335,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const want = fold(assetId)
       const lists: any[] = []
       // The dashboard's data layer re-reads equipment every 30 s; the FIN store only once after sign-in, so it is the fallback
-      const dash = (window as any).DashboardData?.equipment
+      // DashboardData outlives the dashboard that started it until the next one rebinds it: a feed that belongs to another FIN project is not this one's
+      const feed = (window as any).DashboardData
+      const feedProject = String(feed?.config?.project ?? '').trim().toLowerCase()
+      const openProject = String(useProjectStore.getState().currentProject?.apiSettings?.finProjectName ?? '').trim().toLowerCase()
+      const dash = feedProject && openProject && feedProject !== openProject ? null : feed?.equipment
       if (Array.isArray(dash)) lists.push(dash)
       else if (Array.isArray(dash?.equipment)) lists.push(dash.equipment)
       const fin = useFinStore.getState().equipment
@@ -370,7 +378,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const dt = Math.min(0.05, (now - shown.last) / 1000)
         shown.last = now
         shown.schematic.tick(dt)
-        if (LIVE_SCHEMATICS.has(shown.type) && now - shown.synced > 400) {
+        if (shown.live && now - shown.synced > 400) {
           shown.synced = now
           labels.setReading(shown.schematic.apply(pointsFor(shown.assetId, shown.bimId)))
         }
@@ -379,7 +387,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const camera = engine.world?.camera?.three
       if (!renderer || !camera) return
       if (shown) {
-        if (LIVE_SCHEMATICS.has(shown.type) && labelsOn()) labels.update(camera, renderer.domElement.getBoundingClientRect())
+        if (shown.live && labelsOn()) labels.update(camera, renderer.domElement.getBoundingClientRect())
         shown.schematic.group.getWorldPosition(fcuAt)
         fcuCam.copy(camera.position).sub(fcuAt)
         if (fcuCam.lengthSq() < 1e-8) fcuCam.set(0, 0.4, 1)
@@ -483,15 +491,17 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       })
     }
     const mountInternals = (group: THREE.Group, entry: Located, internals: Internals, bimId: string) => {
-      const schematic = SCHEMATICS[internals.type](entry.localBox, entry.model.object.matrixWorld, group)
+      const hospital = hospitalHvac()
+      const schematic = SCHEMATICS[internals.type](entry.localBox, entry.model.object.matrixWorld, group, hospital)
       if (!schematic) return
       group.add(schematic.group)
       group.traverse((o) => {
         if (o.userData?.ekoGhostDepth) o.visible = false
       })
       ghostFill.uniforms.uOpacity.value = 0.22
-      active = { ...internals, schematic, bimId, last: performance.now(), synced: 0 }
-      if (LIVE_SCHEMATICS.has(internals.type)) labels.show(schematic, schematic.apply(pointsFor(internals.assetId, bimId)))
+      const live = isLiveSchematic(internals.type, hospital)
+      active = { ...internals, schematic, bimId, last: performance.now(), synced: 0, live }
+      if (live) labels.show(schematic, schematic.apply(pointsFor(internals.assetId, bimId)))
     }
     const buildGhost = async (entry: Located, bimId: string, seq: number, internals: Internals | null) => {
       let meshes: any[][] = []
@@ -638,7 +648,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const internals = bimId ? internalsFor(assetIdOrBimId, bimId) : null
       if (colored && colored.bimId === bimId && ghost) {
         syncColour()
-        if (active && internals && LIVE_SCHEMATICS.has(internals.type)) labels.setReading(active.schematic.apply(pointsFor(internals.assetId, bimId)))
+        if (active && internals && active.live) labels.setReading(active.schematic.apply(pointsFor(internals.assetId, bimId)))
         return true
       }
       colored = null

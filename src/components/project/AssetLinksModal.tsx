@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useProjectStore } from '@/store/useProjectStore'
+import { hospitalHvacEnabled } from '@/lib/hospitalHvac'
 import { useFinStore } from '@/store/useFinStore'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import type { AssetLink } from '@/types'
@@ -60,6 +61,7 @@ export function AssetLinksModal({ visible, onClose, engineRef }: AssetLinksModal
       key={currentProject.projectId}
       initial={currentProject.assetLinks ?? []}
       projectName={currentProject.name}
+      nameWords={hospitalHvacEnabled(currentProject)}
       onClose={onClose}
       engineRef={engineRef}
     />
@@ -69,11 +71,13 @@ export function AssetLinksModal({ visible, onClose, engineRef }: AssetLinksModal
 interface AssetLinksDialogProps {
   initial: AssetLink[]
   projectName: string
+  /** Hospital HVAC graphics on: a unit FIN gives no type is typed by the whole word in its name (AHU, FCU) */
+  nameWords: boolean
   onClose: () => void
   engineRef: React.MutableRefObject<FragmentsEngine | null>
 }
 
-function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLinksDialogProps) {
+function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef }: AssetLinksDialogProps) {
   const equipment = useFinStore(s => s.equipment)
   const finConnected = useFinStore(s => s.isConnected)
 
@@ -198,9 +202,9 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
 
   const suggestions = useMemo(() => {
     const out = new Map<string, Suggestion[]>()
-    if (prepared.length) for (const eq of finList) out.set(foldName(eq.name), suggest(eq, prepared))
+    if (prepared.length) for (const eq of finList) out.set(foldName(eq.name), suggest(eq, prepared, 3, 0.5, nameWords))
     return out
-  }, [finList, prepared])
+  }, [finList, prepared, nameWords])
 
   const rows = useMemo<Row[]>(() => {
     const finKeys = new Set(finList.map(eq => foldName(eq.name)))
@@ -280,7 +284,7 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     const next: AssetLink = {
       equip: name,
       guid,
-      type: row.link?.type || defaultType(row.eq ?? { name }),
+      type: row.link?.type || defaultType(row.eq ?? { name }, nameWords),
       ...(finId ? { finId } : {}),
       ...(el ? { element: el.name || el.objectType } : {}),
     }
@@ -349,7 +353,7 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
       return {
         equip: eq.name,
         guid: s.guid,
-        type: defaultType(eq),
+        type: defaultType(eq, nameWords),
         ...(eq.finId ? { finId: eq.finId } : {}),
         ...(el ? { element: el.name || el.objectType } : {}),
       }
@@ -359,7 +363,7 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
   }
 
   const doImport = () => {
-    const parsed = parseLinks(importText ?? '')
+    const parsed = parseLinks(importText ?? '', nameWords)
     if (!parsed.links) {
       setError(parsed.error ?? 'Nothing to import.')
       return
@@ -628,7 +632,7 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
                       <td>
                         {row.link
                           ? <input className="al-type" list="al-types" value={row.link.type} onChange={e => setType(row, e.target.value)} />
-                          : <span className="al-sub">{row.eq ? defaultType(row.eq) : ''}</span>}
+                          : <span className="al-sub">{row.eq ? defaultType(row.eq, nameWords) :''}</span>}
                       </td>
                       <td>
                         {row.link ? (

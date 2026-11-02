@@ -23,6 +23,8 @@
      Without an injected project (the standalone prototype) everything stays as it was. */
   var injected = window.INJECTED_PROJECT_CONFIG || null;
   var realMode = !!(injected && injected.site) && injected.demo !== true;
+  /* Set only by a project's own saved setting (DashboardOverlay injects it); absent is off */
+  var hospitalHvac = !!(injected && injected.hospitalHvac === true);
   var fixtureSite = (function () {
     var site = window.EKO_DATA && window.EKO_DATA.marsa, info = siteInfo();
     return !info || (!!info.finProject && !!site && info.finProject === site.finProject);
@@ -1502,6 +1504,12 @@
     if (id.indexOf("FAHU") === 0 || type.indexOf("FAHU") !== -1) kind = "fahu";
     else if (id.indexOf("AHU") === 0 || type.indexOf("AHU") !== -1) kind = "ahu";
     else if (id.indexOf("FCU") === 0 || type.indexOf("FCU") !== -1) kind = "fcu";
+    // The type as a whole word inside the name ("HOSPITAL_AHU_01"), for a unit FIN gives no type. Only a project that
+    // turned the Hospital HVAC graphics on: every other project classifies by the prefix and FIN type alone, as before.
+    else if (hospitalHvac) {
+      var word = (" " + id.replace(/[^A-Z0-9]+/g, " ") + " ").match(/ (FAHU|AHU|FCU) /);
+      if (word) kind = word[1].toLowerCase();
+    }
     var specs = [];
     if (kind === "fcu") {
       specs = [

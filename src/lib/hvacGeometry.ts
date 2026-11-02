@@ -24,6 +24,13 @@ export interface HvacAnchor {
   title:    string
   position: THREE.Vector3
   side:     'above' | 'below'
+  /** A point not every unit has: its label is shown only while FIN sends a value, so a unit without it looks as before */
+  optional?: boolean
+}
+
+/** What a project switches on for the schematics it draws. Absent: the schematic as it was before the Hospital graphics. */
+export interface HvacSchematicOptions {
+  hospitalHvac?: boolean
 }
 
 /** What the viewer needs from any equipment schematic. */

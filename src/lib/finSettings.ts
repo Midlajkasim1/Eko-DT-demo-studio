@@ -173,6 +173,8 @@ export function dashboardProjectInfo(meta: { projectId: string; name: string; ap
   return {
     projectId: meta.projectId,
     demo: s.dashboardDemo === true,
+    /* Hospital HVAC graphics: only a project that set it (hospitalHvac.ts); the dashboard's equipment mapping reads this too */
+    hospitalHvac: s.hospitalHvacGraphics === true,
     /* the project's own boards; null = the built-in board keys, where the project maps them */
     powerBoards: Array.isArray(s.finPowerBoards) && s.finPowerBoards.length ? s.finPowerBoards : null,
     site: {
