@@ -22,7 +22,7 @@ import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
 import { createFcuSchematic } from '@/lib/fcuSchematic'
 import { createAhuSchematic } from '@/lib/ahuSchematic'
-import { createFahuSchematic } from '@/lib/fahuSchematic'
+import { fahuSchematicFor } from '@/lib/ekoFahuSchematic'
 import { createMauSchematic } from '@/lib/mauSchematic'
 import { createEcoSchematic } from '@/lib/ecoSchematic'
 import { createHvacLabels } from '@/lib/hvacLabels'
@@ -49,7 +49,8 @@ const SCHEMATICS: Record<string, (localBox: THREE.Box3, modelMatrix: THREE.Matri
   AHU:  (box, matrix, casing, hospitalHvac) => createAhuSchematic(box, matrix, casing, { hospitalHvac }),
   MAHU: (box, matrix, casing) => createMauSchematic(box, matrix, casing),
   ECO:  (box, matrix, casing) => createEcoSchematic(box, matrix, casing),
-  FAHU: (box, matrix, casing) => createFahuSchematic(box, matrix, casing),
+  // The Eko Hospital's FAHU has its own design; every other project keeps Marsa's createFahuSchematic, called as before
+  FAHU: (box, matrix, casing, hospitalHvac) => fahuSchematicFor(hospitalHvac)(box, matrix, casing),
 }
 
 /* Types whose internals are driven by live FIN points (fan, coil, damper, filter, UV state) are listed in isLiveSchematic.
