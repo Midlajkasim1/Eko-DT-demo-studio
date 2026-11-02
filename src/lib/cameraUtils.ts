@@ -16,9 +16,11 @@ export function azimuthDragSign(polarAngle: number): number {
 /** Radians from straight up or straight down in which the plan's far side fills much of the screen. */
 const STEEP_VIEW_RAD = 1.05
 
-/** A drag on the model: the part under the pointer follows it. A turntable carries the near side of the plan
- *  with the drag and the far side against it; looking down, the far side is above the orbit centre on screen,
- *  looking up it is below. Side views keep the turntable. */
+/** A drag on the model: the part under the pointer follows it.
+ *  camera-controls: a rightward drag has deltaX < 0, so theta falls when this returns +1.
+ *  Checked, phi 0.14, theta 0 then -0.05: the top of the plan moves left, the bottom moves right.
+ *  A grab above the centre therefore needs -1. The engine still measures the first movement
+ *  and flips this if the point under the pointer went the other way. */
 export function orbitDragSign(polarAngle: number, pointerAboveCentre: boolean): number {
   if (!Number.isFinite(polarAngle)) return 1
   if (polarAngle < STEEP_VIEW_RAD) return pointerAboveCentre ? -1 : 1
@@ -79,4 +81,58 @@ export function resetCameraToHome(engine: FragmentsEngine | null) {
     center.x, center.y, center.z,
     true
   )
+}
+
+const SKIP_PLAN = new Set(['SkyDome', 'CloudsDome'])
+
+/** Bounds of the loaded fragments models. The sky dome is not part of the building. */
+function loadedModelBox(engine: FragmentsEngine): THREE.Box3 {
+  const box = new THREE.Box3()
+  const models = engine.fragments?.models?.list
+  if (models && models.size) {
+    for (const model of models.values()) {
+      const obj = (model as { object?: THREE.Object3D }).object || (model as unknown as THREE.Object3D)
+      if (obj && typeof obj.traverse === 'function') box.expandByObject(obj)
+    }
+  }
+  if (box.isEmpty()) {
+    engine.world.scene.three.traverse((obj: THREE.Object3D) => {
+      const mesh = obj as THREE.Mesh
+      if (mesh.isMesh && !SKIP_PLAN.has(mesh.name)) box.expandByObject(mesh)
+    })
+  }
+  return box
+}
+
+/**
+ * Look down on the loaded model, the same top face as the orientation cube.
+ * A true vertical look leaves orbit with no heading, so the camera sits 0.14
+ * toward +z: direction (0, 1, 0.14) normalises to about (0, 0.990, 0.139).
+ * The view looks toward −y and −z, and world up (0, 1, 0) puts the −z side
+ * of the plan at the top of the screen. Returns false when nothing is loaded.
+ */
+export function frameModelFromAbove(engine: FragmentsEngine | null): boolean {
+  if (!engine?.world?.camera?.controls) return false
+  const box = loadedModelBox(engine)
+  if (box.isEmpty()) return false
+  const size = box.getSize(new THREE.Vector3())
+  const center = box.getCenter(new THREE.Vector3())
+  const cam = engine.world.camera.three as THREE.PerspectiveCamera
+  const fov = THREE.MathUtils.degToRad(cam.fov || 50)
+  const aspect = Math.max(cam.aspect || 1, 0.25)
+  const distV = (size.z / 2) / Math.tan(fov / 2)
+  const distH = (size.x / 2) / (Math.tan(fov / 2) * aspect)
+  const dist = Math.max(distV, distH, 8) * 1.15
+  const dir = new THREE.Vector3(0, 1, 0.14).normalize()
+  cam.up.set(0, 1, 0)
+  const controls = engine.world.camera.controls as { setLookAt: Function; updateCameraUp?: Function }
+  controls.updateCameraUp?.()
+  controls.setLookAt(
+    center.x + dir.x * dist,
+    center.y + dir.y * dist,
+    center.z + dir.z * dist,
+    center.x, center.y, center.z,
+    true
+  )
+  return true
 }

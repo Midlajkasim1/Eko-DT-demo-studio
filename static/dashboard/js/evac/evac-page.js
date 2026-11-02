@@ -210,14 +210,23 @@ window.EKO_EVACP = (function(){
     /* E12: 10x by default (30x and 60x to choose): at 60x most people are out within seconds and no flow can be seen */
     E.state.evxReplay = true; if(![10, 30, 60].includes(E.state.evxSpeed)) E.state.evxSpeed = 10;
     anim = { raf: 0, prevLevel: prev, sec: 0, t0: performance.now(), lastPanel: 0, lv: pageLv(E) };
-    E.state.dock.level = anim.lv;
+    const mock = !(E.engine && E.engine.setRoutes);
+    if(!mock) E.state.dock.level = anim.lv;
     E.state.pfTab = Object.assign({}, E.state.pfTab || {}, { 'sec-evac': 'model' });   /* E9: the live figures are in the On the model tab */
     if(E.state.pageId !== 'sec-evac') E.go('sec-evac', 'security', 'evac'); else E.set({});
     /* the level on the model: its routes (E10: the walked paths, wider where more people use them), its exits, stairs and lifts */
-    const showLevel = (E2, eng, lv) => { E2.state.dock.level = lv; if(eng.isolateLevel) eng.isolateLevel(lv); if(eng.setRoutes) eng.setRoutes(routeSegs(p, lv)); if(eng.setLabels) eng.setLabels(markers(E2, lv)); if(eng.frameLevel) eng.frameLevel(lv); };
+    const showLevel = (E2, eng, lv) => { if(!(eng && eng.setRoutes)) return; E2.state.dock.level = lv; if(eng.isolateLevel) eng.isolateLevel(lv); eng.setRoutes(routeSegs(p, lv)); if(eng.setLabels) eng.setLabels(markers(E2, lv)); if(eng.frameLevel) eng.frameLevel(lv); };
     const TRAIL = [1.25, 2.5, 3.75, 5];   /* the trail: where a walking dot was over the last 5 seconds of the plan */
     const frame = () => { const E2 = window.EKO, eng = E2.engine, vp = document.getElementById('vpmain'), host = document.getElementById('enginehost');
       if(!anim) return; anim.raf = requestAnimationFrame(frame);
+      if(mock){
+        const speed = E2.state.evxSpeed || 10, sec = Math.min(end, (performance.now() - anim.t0) / 1000 * speed);
+        anim.sec = sec;
+        const t = E2.t.bind(E2), ck = clockTxt(E2, sec, end); const ce = document.getElementById('evxclock'); if(ce) ce.textContent = ck;
+        const live = document.getElementById('evxlive'), now = performance.now();
+        if(live && (now - anim.lastPanel > 100 || sec >= end)){ anim.lastPanel = now; if(!anim.doneDrawn) live.innerHTML = liveHtml(E2, p, sec, end); if(sec >= end) anim.doneDrawn = true; }
+        return;
+      }
       if(!eng || !eng.ready || !eng.ready() || !vp || !host) return;
       if(!anim.started){ anim.started = true; anim.t0 = performance.now(); showLevel(E2, eng, anim.lv); }
       /* E12: a level picked while the replay plays: the replay goes on, on that level */

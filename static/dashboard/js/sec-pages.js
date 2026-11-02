@@ -46,13 +46,18 @@ window.EKO_SECP = (function(){
       <div class="spcamb"><b class="tMonoS">${esc(c.id)}</b><span class="tCap">${esc([c.room, x.storeyName(c.storey), x.zoneName(c.zone)].filter(Boolean).join(' · '))}</span>
         <span class="row gap6"><button class="btnG btnSm" data-act="secCam" data-v="${esc(c.id)}">${esc(t('sec.cam.open'))}</button>${locBtn(E, { v: c.gid, st: c.storey, cam: c.id })}</span></div></article>`;
   }
+  /* The hospital plan drawing. Mock pages crop it. It is not the Studio model. */
+  function planImg(E){
+    const imgs = ((E.data.viewer || {}).scene || {}).images || {};
+    return E.data.planImage || imgs.minimal || imgs.photo || '';
+  }
   /* E9: a level's plan (the scene image cropped to the level's box) with the page's own marks on it */
   function levelPlan(E, lv, inner, aria, box){
     const d = D(E), cv = d.coverage || {}, b = box || (cv.levelBox || {})[lv]; if(!b) return '';
     const SW = cv.sceneW || 1640, SH = cv.sceneH || 1260, vb = [b[0] / 100 * SW, b[1] / 100 * SH, b[2] / 100 * SW, b[3] / 100 * SH].map(v => v.toFixed(0)).join(' ');
     /* E9: clipped to the level's box, so the neighbouring level on the scene never shows beside it */
     const cid = 'lpc' + lv + Math.round(b[0] * 10) + Math.round(b[1] * 10), vbn = vb.split(' ');
-    return `<svg class="spmap" viewBox="${vb}" role="img" aria-label="${esc(aria)}"><defs><clipPath id="${cid}"><rect x="${vbn[0]}" y="${vbn[1]}" width="${vbn[2]}" height="${vbn[3]}"/></clipPath></defs><g clip-path="url(#${cid})"><image href="${esc(((E.data.viewer || {}).scene || {}).images ? E.data.viewer.scene.images.minimal : '')}" x="0" y="0" width="${SW}" height="${SH}"/>${inner(SW, SH)}</g></svg>`;
+    return `<svg class="spmap" viewBox="${vb}" role="img" aria-label="${esc(aria)}"><defs><clipPath id="${cid}"><rect x="${vbn[0]}" y="${vbn[1]}" width="${vbn[2]}" height="${vbn[3]}"/></clipPath></defs><g clip-path="url(#${cid})"><image href="${esc(planImg(E))}" x="0" y="0" width="${SW}" height="${SH}"/>${inner(SW, SH)}</g></svg>`;
   }
   /* model metres to plan percent, per level: an affine fit on the detectors, which carry both (least squares) */
   const xfCache = new WeakMap();
@@ -73,7 +78,7 @@ window.EKO_SECP = (function(){
     const vb = [b[0] / 100 * SW, b[1] / 100 * SH, b[2] / 100 * SW, b[3] / 100 * SH].map(v => v.toFixed(0)).join(' ');
     const vbn = vb.split(' ');
     return `<svg class="spmap" viewBox="${vb}" role="img" aria-label="${esc(t('sp.cam.mapAria', { l: X(E).storeyName(lv) }))}"><defs><clipPath id="cmc${lv}"><rect x="${vbn[0]}" y="${vbn[1]}" width="${vbn[2]}" height="${vbn[3]}"/></clipPath></defs><g clip-path="url(#cmc${lv})">
-      <image href="${esc(((E.data.viewer || {}).scene || {}).images ? E.data.viewer.scene.images.minimal : '')}" x="0" y="0" width="${SW}" height="${SH}"/>
+      <image href="${esc(planImg(E))}" x="0" y="0" width="${SW}" height="${SH}"/>
       ${cams.filter(c => c.online !== false && c.cone && c.room).map(c => `<polygon points="${c.cone.map(px).join(' ')}" class="spcone"><title>${esc(c.id)}</title></polygon>`).join('')}
       ${drs.map(r => `<circle cx="${(r.x / 100 * SW).toFixed(1)}" cy="${(r.y / 100 * SH).toFixed(1)}" r="${r.covered ? 4 : 6}" class="spdoor" data-cov="${r.covered ? 1 : 0}"><title>${esc(r.id + (r.covered ? '' : ', ' + t('sp.cam.outCone')))}</title></circle>`).join('')}
       ${cams.map(c => `<circle cx="${(c.x / 100 * SW).toFixed(1)}" cy="${(c.y / 100 * SH).toFixed(1)}" r="5" class="spcamdot" data-st="${camState(c)}"${c.room ? '' : ' data-ext="1"'}><title>${esc(c.id + (c.room ? '' : ', ' + t('sp.cam.extTip')))}</title></circle>`).join('')}</g></svg>
@@ -363,6 +368,8 @@ window.EKO_SECP = (function(){
     spAccLv(el){ window.EKO.set({ spAccLv: el.dataset.v }); },
     /* rule 4: the item's level isolated, the camera flies to it; a fire zone as a volume, a camera with its cone */
     spLocate(el){ const E = window.EKO, d = el.dataset; if(E.engine && E.engine.setLabels) E.engine.setLabels(null); E.state.dlg = null; E.state.opsDrill = null; E.state.secDlg = null; E.state.evac3d = null;
+      /* The Studio host has no simulation scene. Locate stays on the mock plan and does not move the model. */
+      if(!(E.engine && E.engine.setMode)){ E.set({}); return; }
       if(d.st && E.state.dock) E.state.dock.level = d.st;
       E.go('sec', 'security', null);
       let n = 0; const go = () => { const eng = E.engine; if(!(eng && eng.ready && eng.ready())){ if(n++ < 60) setTimeout(go, 100); return; }

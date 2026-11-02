@@ -2380,6 +2380,9 @@
     Object.keys(seen).forEach(function (f) { if (f && order.indexOf(f) < 0) floors.push(f); });
     site.heat.zones = zones;
     site.heat.floors = floors;
+    var spaceNames = {};
+    linkedSpaces.forEach(function (l) { if (l && l.guid) spaceNames[l.guid] = l.name || ''; });
+    site.heat.spaceNames = spaceNames;
     zones.forEach(function (z) { ensureHistory(z.tempId); ensureHistory(z.rhId); ensureHistory(z.co2Id); });
     applyShown();
   }

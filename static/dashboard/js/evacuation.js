@@ -48,8 +48,9 @@ window.EKO_EVAC = (function(){
     const ICON = { exit: 'M-4 -5 h6 v10 h-6 z M2 0 h4 M4 -2 l2 2 l-2 2', stair: 'M-5 5 h3 v-3 h3 v-3 h3 v-3 h2', lift: 'M-4 -5 h8 v10 h-8 z M-1.5 -1 l1.5 -2 l1.5 2 M-1.5 1 l1.5 2 l1.5 -2' };
     const marks = MK.map(m => { const q = P(m.at), s = Math.max(1.6, sc / 5);
       return `<g class="evmk" data-kind="${m.kind}" transform="translate(${q[0].toFixed(1)} ${q[1].toFixed(1)}) scale(${s.toFixed(2)})"><title>${esc(m.title)}</title><rect x="-8" y="-8" width="16" height="16" rx="3"/><path d="${ICON[m.kind]}"/><text x="11" y="4">${esc(m.text)}</text></g>`; }).join('');
+    const img = E.data.planImage || ((E.data.viewer.scene || {}).images || {}).photo || '';
     return `<svg class="evplan" viewBox="${cx.toFixed(0)} ${cy.toFixed(0)} ${cw.toFixed(0)} ${ch.toFixed(0)}" role="img" aria-label="${esc(t('evac.planAria'))}">
-      <image href="${esc(E.data.viewer.scene.images.photo)}" x="0" y="0" width="${IMG.w}" height="${IMG.h}"/>${MK.length ? '' : stairs}${routes}${dots}${marks}</svg>`;
+      <image href="${esc(img)}" x="0" y="0" width="${IMG.w}" height="${IMG.h}"/>${MK.length ? '' : stairs}${routes}${dots}${marks}</svg>`;
   }
 
   /* the fire zone state on the same level, and the event timeline (the demo scenario's when it plays) */
@@ -111,10 +112,12 @@ window.EKO_EVAC = (function(){
          the same routes one click away. The bed status has its own tab. */
       const lvSegOnly = `<div class="segbox row evlv">${levels.map(l => `<button class="seg" data-act="evacLv" data-v="${l}" data-on="${l === lv}" aria-pressed="${l === lv}">${esc(t('lvlName', { n: l.slice(1) }))}</button>`).join('')}</div>`;
       const routeLegend = `<span class="evleg"><span><i class="evlgw" aria-hidden="true"></i>${esc(t('evx.lg.walked'))}</span><span><i class="evlga" aria-hidden="true"></i>${esc(t('evx.lg.assumed'))}</span><span class="evlgend">${esc(t('evx.lg.ends'))}</span></span>`;
-      const playing = window.EKO_EVACP.replaying(E), view = playing ? 'model' : (E.state.evxView || 'model');
+      /* The Studio model is not the evacuation's model. Without setRoutes the picture is the plan. */
+      const onModel = !!(E.engine && E.engine.setRoutes);
+      const playing = window.EKO_EVACP.replaying(E), view = (playing && onModel) ? 'model' : (E.state.evxView || (onModel ? 'model' : 'plan'));
       const vseg = `<div class="row gap8 evxvbar"><div class="segbox row" role="group" aria-label="${esc(t('evx.view'))}">${['model', 'plan'].map(k => `<button class="seg" data-act="evxView" data-v="${k}" data-on="${view === k}" aria-pressed="${view === k}">${esc(t('evx.view.' + k))}</button>`).join('')}</div>${view === 'plan' ? lvSeg : lvSegOnly}<span class="grow"></span><span class="evxlegs">${view === 'plan' ? legend : routeLegend}</span></div>`;
       const visual = view === 'model' ? vseg + window.EKO_EVACP.replayVisual(E) : vseg + `<div class="evxplanwrap">${plan(ev, lv)}</div>` + exitLine;
-      if(view === 'model' && !playing && window.EKO_EVACP.showRoutes) window.EKO_EVACP.showRoutes(E, lv);
+      if(view === 'model' && !playing && onModel && window.EKO_EVACP.showRoutes) window.EKO_EVACP.showRoutes(E, lv);
       const assumedT = ((E.data.security.evacGraph || {}).assumed || { kept: [] }).kept;
       const assumedW = widget(t('evx.asmT'), t('evx.asmCap', { n: assumedT.length }), O2().table(E, ['evx.c.space', 'evx.c.joined', 'evx.c.m'], assumedT.map(x => `<tr><th scope="row" class="tCap">${esc(x.a)}</th><td class="tCap">${esc(x.b)}</td><td class="tMonoS">${x.m}</td></tr>`).join(''), 'evx.asmNone'));
       return `<div class="pwarea secpage evxpage" data-pg="sec-evac">${X9.hl}<div class="pwhero evxstrip" style="grid-template-columns:repeat(${X9.heroes.length},1fr)">${X9.heroes.join('')}</div><div data-frame="top">${X9.ctl}</div>`
@@ -213,7 +216,10 @@ window.EKO_EVAC = (function(){
     evacLv(el){ window.EKO.set({ evacLv: el.dataset.v, evacBed: null }); },
     /* the level in 3D: isolated, its beds as markers, its routes drawn on the model */
     evxView(el){ window.EKO.set({ evxView: el.dataset.v }); },
-    evac3d(el){ const E2 = window.EKO, lv = el.dataset.v, ev = (E2.data.security || {}).evac || {}; E2.state.evac3d = lv; if(E2.state.dock) E2.state.dock.level = lv; E2.go('sec', 'security', null);
+    evac3d(el){ const E2 = window.EKO, lv = el.dataset.v, ev = (E2.data.security || {}).evac || {};
+      /* The Studio host has no route drawing. Stay on the plan; do not fly the loaded model. */
+      if(!(E2.engine && E2.engine.setRoutes)){ E2.set({ evxView: 'plan' }); return; }
+      E2.state.evac3d = lv; if(E2.state.dock) E2.state.dock.level = lv; E2.go('sec', 'security', null);
       let k = 0; const go = () => { const eng = E2.engine; if(!(eng && eng.ready && eng.ready())){ if(k++ < 60) setTimeout(go, 100); return; }
         if(eng.setRoutes) eng.setRoutes(window.EKO_EVACP && window.EKO_EVACP.pageSegs ? window.EKO_EVACP.pageSegs(E2, lv) : (ev.routes || []).filter(r => r.level === lv).map(r => ({ pts: r.pts, level: r.level })));   /* E10: the plan's walked routes */
         const g = (ev.beds || []).filter(b => b.floor === lv).map(b => b.roomGid).filter(Boolean); if(g.length && eng.flyToGids) eng.flyToGids(g); E2.set({}); };

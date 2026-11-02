@@ -15,6 +15,22 @@
                set(k,v){ try{sessionStorage.setItem(k,v)}catch(e){} },
                del(k){ try{sessionStorage.removeItem(k)}catch(e){} } };
 
+  /* A pack path (assets/scene/...) served from the Studio dashboard. */
+  function dashAsset(p){
+    if(!p) return '';
+    return p.charAt(0) === '/' ? p : '/static/dashboard/' + String(p).replace(/^\.\//, '');
+  }
+  /* The mock floor drawing. The Studio viewer stays the host; only the picture the
+     mock pages crop (fire, access, cameras, evacuation) is replaced. */
+  function useMockPlan(site, images){
+    if(!site || !images) return;
+    const photo = dashAsset(images.photo);
+    if(!photo) return;
+    const imgs = { photo: photo, real: dashAsset(images.real || images.photo), minimal: dashAsset(images.minimal || images.photo), xray: dashAsset(images.xray || images.photo) };
+    site.planImage = photo;
+    const host = site.viewer || {};
+    site.viewer = Object.assign({}, host, { scene: Object.assign({}, host.scene, { images: imgs }) });
+  }
   /* E15: the project's module set and sample data (Project settings > Modules, Sample data) */
   const MODULE_STATES = (function projectSetup(){
     const cfg = window.INJECTED_PROJECT_CONFIG || {}, D = window.EKO_DATA || {};
@@ -25,7 +41,9 @@
     const want = cfg.sampleData;
     if(want && D[want] && D.marsa && D[want] !== D.marsa){   // the sample site's data takes the place the dashboard reads, with the Studio viewer
       const site = D[want], row = (D.portfolio || []).find(p => p.key === 'marsa');
+      const mockImages = site.viewer && site.viewer.scene && site.viewer.scene.images;
       site.viewer = D.marsa.viewer;
+      useMockPlan(site, mockImages);   // fire, access and the other mock plans keep this drawing
       delete site.overviewPage;   // its own Overview is not ported yet
       { const nm = (cfg.site || {}).displayName || (cfg.site || {}).name; if(nm){ site.nameEn = nm; site.nameAr = nm; } }   // the Studio project's name, before the first render (data-map.js applies the same name later)
       if(row){ row.nameEn = site.nameEn; row.nameAr = site.nameAr; }   // the top bar names the site from this row
@@ -359,6 +377,72 @@
      only ever talks to the viewer-api surface. */
   if(window.EKO_SIM && window.EKO_SIM.boot) window.EKO_SIM.boot(E);   /* E15: the sample data's simulation engine writes its figures first */
   if(E.data.entitlements && E.data.entitlements.modules) Object.assign(E.data.entitlements.modules, MODULE_STATES);   /* the module set wins over the engine */
+  /* Extended module set, Demo off: ESG and Security & life safety still show the medical mocks.
+     The plan and the life-safety fixture are ready for the first paint. ESG figures are filled
+     in afterwards from the medical engine. Overview, alarms and the Studio model stay this project's. */
+  (function lifeSafetyMocks(){
+    const cfg = window.INJECTED_PROJECT_CONFIG || {};
+    if(cfg.modules !== 'extended' || (E.data && E.data.sim === 'medical')) return;
+    const med = window.EKO_DATA && window.EKO_DATA.medical;
+    if(!med) return;
+    useMockPlan(E.data, med.viewer && med.viewer.scene && med.viewer.scene.images);
+    try { if(med.security) E.data.security = JSON.parse(JSON.stringify(med.security)); } catch(e) {}
+    if(!window.EKO_SIM || !window.EKO_SIM.create || !window.EKO_SIMESG || !window.EKO_SIM_CFG || !window.EKO_SIM_CFG.medical) return;
+    const token = (window.__ekoMockToken = (window.__ekoMockToken || 0) + 1);
+    const CO2 = ['co2KgPerKwh', 'co2FactorId', 'co2FactorDate', 'co2FactorInForceFrom', 'co2FactorUnit', 'co2FactorVersions', 'co2FactorSourceEn', 'co2FactorSourceAr', 'co2FactorNote'];
+    let zones = [], beds = [];
+    try { zones = JSON.parse(JSON.stringify(((med.heat || {}).zones) || [])); } catch(e) { zones = []; }
+    try { beds = (((med.security || {}).evac || {}).beds || []).map(function(b){ return { id: b.id, floor: b.floor, roomGid: b.roomGid }; }); } catch(e) { beds = []; }
+    const applyEsg = function(esg, basis){
+      if(window.__ekoMockToken !== token) return;
+      if(esg) E.data.esg = esg;
+      /* A visit before these figures arrive stores an empty pack list. Drop that so the stand-in baseline can load. */
+      try {
+        const key = 'eko-esg-packs-v1:' + ((E.data && E.data.key) || 'marsa');
+        const cur = localStorage.getItem(key);
+        if(cur == null || cur === '[]') localStorage.removeItem(key);
+      } catch(e) {}
+      if(basis){
+        E.data.basis = E.data.basis || {};
+        CO2.forEach(function(k){ if(basis[k] != null) E.data.basis[k] = basis[k]; });
+      }
+      try { E.set({}); } catch(e) {}
+    };
+    /* The month history is a few seconds of arithmetic. It runs off the page thread so Overview stays usable. */
+    const onPage = function(){
+      if(window.__ekoMockToken !== token) return;
+      try {
+        const eng = window.EKO_SIM.create(window.EKO_SIM_CFG.medical, { security: { evac: { beds: beds } } }, Date.now());
+        applyEsg(window.EKO_SIMESG.esg(eng, { heat: { zones: zones } }), window.EKO_SIMESG.basis(window.EKO_SIM_CFG.medical));
+      } catch(e) {}
+    };
+    let worker = null, got = false;
+    const fallback = function(){ if(got || window.__ekoMockToken !== token) return; got = true; onPage(); };
+    try {
+      if(window.__ekoMockWorker) window.__ekoMockWorker.terminate();
+      const src = [
+        'self.window = self;',
+        'importScripts("/static/dashboard/js/sim/medical-config.js","/static/dashboard/js/sim/medical-engine.js","/static/dashboard/js/sim/medical-esg.js");',
+        'onmessage = function(ev){',
+        '  var d = ev.data || {};',
+        '  var eng = self.EKO_SIM.create(self.EKO_SIM_CFG.medical, { security: { evac: { beds: d.beds || [] } } }, Date.now());',
+        '  postMessage({ esg: self.EKO_SIMESG.esg(eng, { heat: { zones: d.zones || [] } }), basis: self.EKO_SIMESG.basis(self.EKO_SIM_CFG.medical) });',
+        '};'
+      ].join('\n');
+      const blob = new Blob([src], { type: 'text/javascript' });
+      worker = new Worker(URL.createObjectURL(blob));
+      window.__ekoMockWorker = worker;
+      worker.onmessage = function(ev){
+        if(got || window.__ekoMockToken !== token) return;
+        got = true;
+        const d = ev.data || {};
+        applyEsg(d.esg, d.basis);
+        try { worker.terminate(); } catch(e) {}
+      };
+      worker.onerror = function(){ try { worker.terminate(); } catch(e) {} fallback(); };
+      worker.postMessage({ zones: zones, beds: beds });
+    } catch(e) { try { if(worker) worker.terminate(); } catch(e2) {} setTimeout(fallback, 0); }
+  })();
   /* E15: a fixture instant moved to the load minute (basis.asOfAt); an alarm with raisedAt gets its age and times from it */
   (function oneClock(){
     const cap = Date.parse((E.data.basis || {}).asOfAt || '');
@@ -1184,6 +1268,19 @@
     /* D94: page-header sub tabs; model mode; the ask dialog on the stacked shell */
     phGo(el){ E.go(el.dataset.page || 'stub', el.dataset.mod, el.dataset.sub || null); },
     modelFs(){ E.set({ modelFs: !E.state.modelFs, born: E.state.modelFs ? null : 'dlg', mkPop:null }); },
+    /* Plan looks down on the loaded model. 3D puts the previous camera back. */
+    e3dMode(el){
+      const mode = el.dataset.v === 'plan' ? 'plan' : '3d';
+      const h = window.EKO_HOST_ENGINE;
+      if(h && h.setViewMode) h.setViewMode(mode);
+      E.set({ e3dMode: mode });
+    },
+    e3dFurn(){
+      const on = E.state.e3dFurn === false;
+      const h = window.EKO_HOST_ENGINE;
+      if(h && h.setFurnitureVisible) h.setFurnitureVisible(on);
+      E.set({ e3dFurn: on });
+    },
     nfPage(){ E.go('notifications', 'overview', null); },
     bvaRange(el){ E.set({ bvaRange: el.dataset.v }); },
     pwTrendRange(el){ if(window.EKO_TIP) window.EKO_TIP.hide(); E.set({ pwTrendRange: el.dataset.v }); },

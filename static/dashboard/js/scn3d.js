@@ -37,6 +37,7 @@ window.EKO_SCN3 = (function(){
   let last = {};
   function sync(E){
     const eng = E.engine; if(!eng || !SC().on(E)) return;
+    if(!eng.setMode) return;   /* the Studio model is not this replay; the bar and the pages stay */
     const s = SD(E), v = SC().view(E), z = zoneOf(E), key = k => JSON.stringify(k);
     if(E.state.dock.level !== s.level && eng.isolateLevel){ E.state.dock.level = s.level; eng.isolateLevel(s.level); }
     /* D182 polish: the whole level in a three quarter view; at the beds step the camera moves in on the beds and routes; at the end, the level again */
@@ -61,7 +62,7 @@ window.EKO_SCN3 = (function(){
   function clear(E){
     const eng = E && E.engine; last = {};
     if(!eng) return;
-    if(eng.setZoneVolume) eng.setZoneVolume(null); if(eng.highlightGid) eng.highlightGid(null); if(eng.setCones){ eng.setCones(null); eng._conesKey = ''; }
+    if(eng.setZoneVolume) eng.setZoneVolume(null); if(eng.setMode && eng.highlightGid) eng.highlightGid(null); if(eng.setCones){ eng.setCones(null); eng._conesKey = ''; }
     if(eng.setRoutes) eng.setRoutes(null); if(eng.setLabels) eng.setLabels(null);
     const miss = (SD(E) || { outputs: [] }).outputs.find(o => o.missing); if(miss && miss.asset && eng.setAssetColor) eng.setAssetColor(miss.asset, null);
   }

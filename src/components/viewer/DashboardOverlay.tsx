@@ -9,7 +9,7 @@ import type { RenderSettings } from '@/constants/renderSettings'
 import { useModelStore } from '@/store/useModelStore'
 import { foldName, indexLinks, indexSpaceLinks, isGuid } from '@/lib/assetLinks'
 import type { AssetLink } from '@/types'
-import { resetCameraToHome } from '@/lib/cameraUtils'
+import { frameModelFromAbove, resetCameraToHome } from '@/lib/cameraUtils'
 import { frameSphereInView } from '@/lib/viewFraming'
 import { startPeekFramer } from '@/lib/peekFrame'
 import { createMiniMap } from '@/lib/miniMap'
@@ -2145,7 +2145,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
     }
 
-    const lookAtView = (view?: { position?: number[]; target?: number[] }) => {
+    const applyPose = (view: { position?: number[]; target?: number[] } | null | undefined, smooth: boolean) => {
       const camCtl = engine.world?.camera?.controls as { setLookAt?: Function; updateCameraUp?: Function } | undefined
       const pos = view?.position
       const tgt = view?.target
@@ -2164,8 +2164,109 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const position = target.clone().add(offset)
       cam?.up.set(0, 1, 0)
       camCtl.updateCameraUp?.()
-      camCtl.setLookAt(position.x, position.y, position.z, target.x, target.y, target.z, true)
+      camCtl.setLookAt(position.x, position.y, position.z, target.x, target.y, target.z, smooth)
+      const wake = engine.world?.renderer as { needsUpdate?: boolean } | undefined
+      if (wake) wake.needsUpdate = true
       return true
+    }
+    const lookAtView = (view?: { position?: number[]; target?: number[] }) => applyPose(view, true)
+
+    /* Furniture on whatever models are loaded. Furnishing classes, plus proxies in
+       interior and equipment files (the pack's furniture group). Hidden through
+       the coordinator so the floor picker and the tree keep their own hides. */
+    const FURN_CLASS = [/^IFCFURNISHINGELEMENT$/i, /^IFCFURNITURE$/i, /^IFCSYSTEMFURNITUREELEMENT$/i]
+    const FURN_PROXY = [/^IFCBUILDINGELEMENTPROXY$/i]
+    let furnitureOn = true
+    let furnitureSeq = 0
+    const furnitureIds = new Map<string, number[]>()
+    const applyFurniture = async (on: boolean) => {
+      furnitureOn = on
+      const seq = ++furnitureSeq
+      const list = engine.fragments?.models?.list
+      if (!list) return
+      for (const [id, model] of list) {
+        if (seq !== furnitureSeq) return
+        let ids = furnitureIds.get(id)
+        if (!ids) {
+          const rec = useModelStore.getState().models.find(m => m.modelId === id)
+          const name = (rec?.originalFileName || id).toLowerCase()
+          const classes = /interior|equipment/.test(name) ? [...FURN_CLASS, ...FURN_PROXY] : FURN_CLASS
+          try {
+            const found = await (model as { getItemsOfCategories?: (c: RegExp[]) => Promise<Record<string, number[]>> }).getItemsOfCategories?.(classes)
+            ids = Object.values(found ?? {}).flat()
+          } catch { ids = [] }
+          furnitureIds.set(id, ids)
+        }
+        if (seq !== furnitureSeq) return
+        try { await setHidden(model as { setVisible: (ids: number[] | undefined, visible: boolean) => Promise<void> }, 'furniture', on ? [] : ids) } catch { /* worker busy */ }
+      }
+      if (seq !== furnitureSeq) return
+      void engine.fragments.update(true)
+      const wake = engine.world?.renderer as { needsUpdate?: boolean } | undefined
+      if (wake) wake.needsUpdate = true
+    }
+
+    /* Plan looks down on the loaded model. The pose from before Plan is put back
+       for 3D. Home, and leaving a page, drop Plan and use the project camera. */
+    let planOn = false
+    let planHeld = false
+    let planFramed = false
+    let planSaved: { position: number[]; target: number[] } | null = null
+    const readPose = () => {
+      const cam = engine.world?.camera?.controls as { getPosition?: (out: THREE.Vector3) => void; getTarget?: (out: THREE.Vector3) => void } | undefined
+      if (!cam?.getPosition || !cam?.getTarget) return null
+      const position = new THREE.Vector3()
+      const target = new THREE.Vector3()
+      cam.getPosition(position)
+      cam.getTarget(target)
+      return {
+        position: [position.x, position.y, position.z],
+        target: [target.x, target.y, target.z],
+      }
+    }
+    const showPlan = () => {
+      planHeld = false
+      planFramed = frameModelFromAbove(engine)
+      const wake = engine.world?.renderer as { needsUpdate?: boolean } | undefined
+      if (wake) wake.needsUpdate = true
+    }
+    const setViewMode = (mode: string) => {
+      const on = mode === 'plan'
+      if (on) {
+        if (!planOn) planSaved = readPose()
+        planOn = true
+        showPlan()
+        return
+      }
+      if (!planOn) return
+      planOn = false
+      planHeld = false
+      planFramed = false
+      const saved = planSaved
+      planSaved = null
+      if (saved) applyPose(saved, true)
+      else resetCameraToHome(engine)
+    }
+    const leavePlan = () => {
+      if (!planOn && !planSaved) return
+      planOn = false
+      planHeld = false
+      planFramed = false
+      planSaved = null
+      const eko = (window as any).EKO
+      if (eko?.state?.e3dMode === 'plan') {
+        eko.state.e3dMode = '3d'
+        queueMicrotask(() => { if (eko.state?.e3dMode === '3d') eko.set?.({ e3dMode: '3d' }) })
+      }
+    }
+    /* The dashboard closing puts the 3D pose back. Opening it looks down again
+       while Plan is still the selected mode. */
+    const setDashboardOpen = (open: boolean) => {
+      if (!planOn || !planSaved) return
+      if (open) { if (planHeld) showPlan(); return }
+      if (planHeld) return
+      applyPose(planSaved, false)
+      planHeld = true
     }
 
     ;(window as any).EKO_HOST_ENGINE = {
@@ -2176,7 +2277,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       flyToAsset,
       highlightAsset,
       clearHighlight,
-      resetView: () => resetCameraToHome(engine),
+      resetView: () => { leavePlan(); resetCameraToHome(engine) },
+      setViewMode,
+      setDashboardOpen,
       bimIdFor,
       isAlarmed,
       listMapped: () => links().list.map(m => ({ id: m.equip, bimId: m.guid })),
@@ -2247,7 +2350,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       clearSection: () => sliceTool()?.clear(),
       attachMiniMap: (el: HTMLElement | null) => miniMap.attach(el),
       setMiniMap: (on: boolean) => miniMap.setEnabled(on),
+      setFurnitureVisible: (on: boolean) => { void applyFurniture(on !== false) },
     }
+    const dashState = (window as any).EKO?.state
+    if (dashState?.e3dFurn === false) void applyFurniture(false)
+    if (dashState?.e3dMode === 'plan') setViewMode('plan')
     // The dashboard may have rendered before the bridge existed: redraw so the
     // equipment markers (which need bimIdFor) appear.
     try { (window as any).EKO?.set?.({}) } catch {}
@@ -2292,9 +2399,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const live = [...(engine.fragments?.models?.list?.values() ?? [])]
       const sig = live.map(keyOf).join('|')   // object identity: a reload of the same file counts as a change
       let modelsChanged = false
+      const prevSig = modelsSig
       if (sig !== modelsSig) {
         modelsChanged = true
         modelsSig = sig
+        furnitureIds.clear()
+        if (!furnitureOn) void applyFurniture(false)
         missing.clear()
         assetFloor.clear()
         floorRooms.clear()
@@ -2314,8 +2424,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const layer = (window as any).EKO?.state?.dock?.layer
         if (layer && layer !== 'all') isolateLayer(layer)
       }
-      // A control room opened from its own URL goes home once its models load
-      if (modelsChanged && live.length && document.querySelector('.dashboard-native-container[data-wall="1"]')) resetCameraToHome(engine)
+      // A control room opened from its own URL goes home once its models load.
+      // Plan keeps the top-down camera of the loaded model.
+      if (modelsChanged && live.length && !planOn && document.querySelector('.dashboard-native-container[data-wall="1"]')) resetCameraToHome(engine)
+      if (modelsChanged && planOn && (prevSig || !planFramed)) planFramed = frameModelFromAbove(engine)
       if (justLoaded && levelWait) {
         const wait = levelWait
         levelWait = null
@@ -2333,6 +2445,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const stopPeek = startPeekFramer(engine)
 
     return () => {
+      if (planSaved) applyPose(planSaved, false)
       stopPeek()
       try {
         document.querySelectorAll('.wmodelhit').forEach((el) => el.remove())
@@ -2383,6 +2496,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       delete (window as any).EKO_FLOOR_FILTER_REPORT
     }
   }, [engineReady])
+
+  useEffect(() => {
+    const host = (window as any).EKO_HOST_ENGINE as { setDashboardOpen?: (open: boolean) => void } | undefined
+    host?.setDashboardOpen?.(visible)
+  }, [visible, engineReady])
 
   useEffect(() => {
     if (!visible) return
@@ -2489,9 +2607,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         // The backend serves this project before the dashboard's first poll is trusted
         void useFinStore.getState().syncProjectSettings()
 
-        // A script marked data-sample-data belongs to one sample data set: load it only for a project using that set
-        const sampleData = (window as any).INJECTED_PROJECT_CONFIG?.sampleData || null
-        const scripts = Array.from(doc.querySelectorAll('script')).filter(s => !s.dataset.sampleData || s.dataset.sampleData === sampleData)
+        // A script marked data-sample-data belongs to one sample data set. The medical set also
+        // loads for the extended module set, so ESG and Security & life safety can show their mocks.
+        const injected = (window as any).INJECTED_PROJECT_CONFIG || {}
+        const sampleData = injected.sampleData || null
+        const medicalMocks = sampleData === 'medical' || injected.modules === 'extended'
+        const scripts = Array.from(doc.querySelectorAll('script')).filter(s => !s.dataset.sampleData || s.dataset.sampleData === sampleData || (s.dataset.sampleData === 'medical' && medicalMocks))
         return loadScripts(scripts, signal)
       })
 

@@ -20,6 +20,8 @@
   background: transparent;
   pointer-events: none;
 }
+/* 3D / Plan / Furniture sits on the model. The canvas behind stays the hit target. */
+.dashboard-native-container .e3dsw { pointer-events: auto; }
 .dashboard-native-container .v3tint,
 .dashboard-native-container .v3glow {
   display: none;

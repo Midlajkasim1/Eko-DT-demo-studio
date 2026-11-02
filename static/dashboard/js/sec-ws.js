@@ -154,12 +154,15 @@ window.EKO_SECW = (function(){
       seq.push(clip); out.set(c.id, { clip, why }); });
     return out;
   }
-  const clipSrc = (E, c, i) => { const v = engineSite(E) ? pick(E, c) : clipOf(E, c, i); return v ? 'assets/video/' + v + '.mp4' : ''; };
-  /* the video element, or the still frame where there is no clip (as) is a grid's assignment, when there is one */
+  const clipSrc = (E, c, i) => { const v = engineSite(E) ? pick(E, c) : clipOf(E, c, i); return v ? '/static/dashboard/assets/video/' + v + '.mp4' : ''; };
+  const stillEl = (E, a) => `<div class="spstill" role="img" aria-label="${C().esc(E.t(a.why === 'repeat' ? 'sp.clipRepeat17' : 'sp.clipNone17'))}"><span>${C().esc(E.t(a.why === 'repeat' ? 'sp.clipRepeat17' : 'sp.clipNone17'))}</span></div>`;
+  /* the video element, or the still frame where there is no clip (as) is a grid's assignment, when there is one.
+     The handover clips are empty files, so a failed video shows that still instead of a blank tile. */
   function videoEl(E, c, i, attrs, as){
     const a = as || (engineSite(E) ? { clip: pick(E, c), why: pick(E, c) ? null : 'type' } : { clip: clipOf(E, c, i) });
-    if(!a.clip) return `<div class="spstill" role="img" aria-label="${C().esc(E.t(a.why === 'repeat' ? 'sp.clipRepeat17' : 'sp.clipNone17'))}"><span>${C().esc(E.t(a.why === 'repeat' ? 'sp.clipRepeat17' : 'sp.clipNone17'))}</span></div>`;
-    return `<video src="assets/video/${a.clip}.mp4" ${attrs}></video>`;
+    if(!a.clip) return stillEl(E, a);
+    const src = '/static/dashboard/assets/video/' + a.clip + '.mp4';
+    return `<video src="${C().esc(src)}" ${attrs} onerror="this.hidden=true;var n=this.nextElementSibling;if(n)n.hidden=false"></video><span hidden>${stillEl(E, a)}</span>`;
   }
   /* cameras that see the spot: line of sight through the model walls when the 3D is loaded, else distance on the plan */
   function seeing(E, e){

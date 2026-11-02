@@ -1429,8 +1429,12 @@ export async function initFragmentsEngine(
 
   world.camera.controls.setLookAt(50, 30, 50, 0, 0, 0)
 
-  // A drag turns the plan so the part under the pointer follows it (orbitDragSign). The sign is chosen when
-  // the drag starts, from where the pointer went down; the capture listener runs before camera-controls' own.
+  // A drag must carry the point under the pointer with the pointer. camera-controls
+  // reports a rightward drag as a negative delta, so theta decreases when
+  // azimuthRotateSpeed is positive. Checked with a perspective camera, phi 0.14:
+  // that decrease moves the top of the plan left. The guess below matches that.
+  // The first real movement then measures the point under the pointer and flips
+  // the speed if that point went the other way. The guess alone kept the top view wrong.
   {
     const controls = world.camera.controls as unknown as {
       azimuthRotateSpeed: number
@@ -1439,18 +1443,69 @@ export async function initFragmentsEngine(
       addEventListener: (type: string, fn: () => void) => void
     }
     const baseAzimuth = Math.abs(controls.azimuthRotateSpeed || 1)
-    let downY: number | null = null
-    viewCanvas.addEventListener('pointerdown', (e: PointerEvent) => { downY = e.clientY }, { capture: true })
     const centre = new THREE.Vector3()
+    const grab = new THREE.Vector3()
+    const viewDir = new THREE.Vector3()
+    const raycaster = new THREE.Raycaster()
+    const ndc = new THREE.Vector2()
+    const plane = new THREE.Plane()
+    let downX = 0
+    let downY: number | null = null
+    let grabScreenX = 0
+    let grabValid = false
+    let checked = false
+    const screenXOf = (point: THREE.Vector3) => {
+      const rect = viewCanvas.getBoundingClientRect()
+      const projected = point.clone().project(world.camera.three)
+      return (projected.x * 0.5 + 0.5) * rect.width + rect.left
+    }
     const pointerAboveCentre = () => {
       const rect = viewCanvas.getBoundingClientRect()
       if (downY == null || rect.height < 1) return false
-      controls.getTarget(centre).project(world.camera.three)
+      try {
+        world.camera.three.updateMatrixWorld()
+        controls.getTarget(centre)
+        centre.project(world.camera.three)
+      } catch { return false }
       return 1 - 2 * (downY - rect.top) / rect.height > centre.y
     }
-    controls.addEventListener('controlstart', () => {
-      if (!controls.azimuthRotateSpeed) return
+    const applyGuess = () => {
+      if (!controls.azimuthRotateSpeed && controls.azimuthRotateSpeed !== 0) return
       controls.azimuthRotateSpeed = orbitDragSign(controls.polarAngle, pointerAboveCentre()) * baseAzimuth
+    }
+    viewCanvas.addEventListener('pointerdown', (e: PointerEvent) => {
+      downX = e.clientX
+      downY = e.clientY
+      checked = false
+      grabValid = false
+      if (e.button !== 0) return
+      const cam = world.camera.three
+      cam.updateMatrixWorld()
+      const rect = viewCanvas.getBoundingClientRect()
+      if (rect.width < 1 || rect.height < 1) return
+      ndc.set(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      )
+      raycaster.setFromCamera(ndc, cam)
+      controls.getTarget(centre)
+      cam.getWorldDirection(viewDir)
+      plane.setFromNormalAndCoplanarPoint(viewDir, centre)
+      if (raycaster.ray.intersectPlane(plane, grab)) {
+        grabValid = true
+        grabScreenX = screenXOf(grab)
+      }
+    }, { capture: true })
+    controls.addEventListener('controlstart', applyGuess)
+    // After camera-controls has applied this move. Registered later, so it runs second.
+    viewCanvas.addEventListener('pointermove', (e: PointerEvent) => {
+      if (!grabValid || checked || (e.buttons & 1) === 0) return
+      const dx = e.clientX - downX
+      if (Math.abs(dx) < 6) return
+      world.camera.three.updateMatrixWorld()
+      const moved = screenXOf(grab) - grabScreenX
+      if (dx * moved < -0.5) controls.azimuthRotateSpeed = -controls.azimuthRotateSpeed
+      checked = true
     })
   }
 
