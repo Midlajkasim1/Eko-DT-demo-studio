@@ -1268,7 +1268,8 @@
     /* D94: page-header sub tabs; model mode; the ask dialog on the stacked shell */
     phGo(el){ E.go(el.dataset.page || 'stub', el.dataset.mod, el.dataset.sub || null); },
     modelFs(){ E.set({ modelFs: !E.state.modelFs, born: E.state.modelFs ? null : 'dlg', mkPop:null }); },
-    /* Plan looks down on the loaded model. 3D puts the previous camera back. */
+    /* Plan looks down on the loaded model. 3D on the heatmap shows its saved view.
+       Every other page puts the previous camera back. */
     e3dMode(el){
       const mode = el.dataset.v === 'plan' ? 'plan' : '3d';
       const h = window.EKO_HOST_ENGINE;
@@ -1756,6 +1757,11 @@
     hmFloor(el){ E.set({ hmFloor: el.dataset.v }); },
     hmSel(el){ E.set({ hmSel: E.state.hmSel === el.dataset.v ? null : el.dataset.v }); },
     hmOutline(){ E.set({ hmOutline: !E.state.hmOutline }); },
+    hmStill(){
+      const heat = (window.INJECTED_PROJECT_CONFIG || {}).heatmap || {};
+      const host = window.EKO_HOST_ENGINE;
+      if(host && host.setOccupancyStill) host.setOccupancyStill(heat.stillRooms === false);
+    },
     hmLayer(el){ const l = { ...E.state.hmLayers };
       l[el.dataset.v] = !l[el.dataset.v]; E.set({ hmLayers: l }); }
   };

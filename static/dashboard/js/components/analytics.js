@@ -889,6 +889,7 @@ window.EKO_A = (function(){
       });
     }).join('');
     const legend = mode === 'occ' ? E.t('hmLegendOcc') : mode === 'comfort' ? E.t('hmLegend') : mode === 'hum' ? E.t('hmLegendHum') : E.t('hmLegendTemp');
+    const stillOn = ((window.INJECTED_PROJECT_CONFIG || {}).heatmap || {}).stillRooms !== false;
     const range = s.hmRange === 'week' || s.hmRange === 'month' ? s.hmRange : 'today';
     const seg = (lbl, v) => `<button class="seg" data-on="${range===v}" data-act="hmRange" data-v="${v}">${esc(lbl)}</button>`;
     const rangeLabel = range === 'week' ? E.t('rangeWeekly') : range === 'month' ? E.t('rangeMonthly') : E.t('tlLive');
@@ -905,6 +906,7 @@ window.EKO_A = (function(){
         <span class="hmgrad" data-mode="${mode}"></span>
         <span class="tCap">${esc(E.t('hmLegendCap'))}</span>`}
         <span class="segbox row msA">${seg(E.t('rangeToday'),'today')}${seg(E.t('rangeWeekly'),'week')}${seg(E.t('rangeMonthly'),'month')}</span>
+        ${mode === 'occ' ? `<button class="chip" data-on="${stillOn}" data-act="hmStill">${esc(E.t(stillOn ? 'hmStillRooms' : 'hmAllWalk'))}</button>` : ''}
         <button class="chip" data-on="${s.hmPlay?'true':'false'}" data-act="hmPlay">${esc(s.hmPlay?E.t('pauseW'):E.t('playW'))}</button>
         <span class="tMonoS" style="color:var(--posTx)">${esc(s.hmPlay && s.hmStepLabel ? s.hmStepLabel : rangeLabel)}</span>
       </div>`;

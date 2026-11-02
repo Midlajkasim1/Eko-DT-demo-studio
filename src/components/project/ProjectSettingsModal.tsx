@@ -80,6 +80,21 @@ function HeatmapPane({
 
       <h3 className="ds-section-title" style={{ marginTop: 24 }}>Occupancy</h3>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
+        <input
+          type="checkbox"
+          checked={current.stillRooms !== false}
+          onChange={e => {
+            if (e.target.checked) {
+              const next = { ...current }
+              delete next.stillRooms
+              onChange(next)
+            } else patch({ stillRooms: false })
+          }}
+        />
+        Stand still in rooms
+      </label>
+      <p className="ds-hint">On, people stand still. They walk only in a room whose name contains a word below, and they stay inside that room. Off, everyone walks, still inside their own room.</p>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
         People
         <input
           type="number"

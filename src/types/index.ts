@@ -276,9 +276,14 @@ export interface HeatmapSetup {
   /** How fast those people walk. 1 is a stroll. Absent is 1. */
   speed?: number
   /**
-   * Room-name words where people walk, matched inside the space name.
+   * People stand still except in rooms whose name matches walkRooms.
+   * Absent is on. Set false and everyone walks, still inside their own room.
+   */
+  stillRooms?: boolean
+  /**
+   * Room-name words where people walk, matched inside the room label.
    * Absent is corridor, circulation, public area, lobby, waiting, and lounge.
-   * An empty list means nobody walks.
+   * An empty list means nobody walks while stillRooms is on.
    */
   walkRooms?: string[]
 }

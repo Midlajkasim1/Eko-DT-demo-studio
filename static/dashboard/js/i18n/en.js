@@ -690,6 +690,8 @@ window.EKO_I18N.en = {
   "hmOccNormal": "Normal",
   "hmOccHigh": "High",
   "hmOccCritical": "Critical",
+  "hmStillRooms": "Still in rooms",
+  "hmAllWalk": "Everyone walks",
   "hmRankPeopleCap": "people · busiest first",
   "hmTempFoot": "TEMPERATURE: IS zone temp · setpoint 21 °C · site mean {m} °C",
   "hmOccFoot": "HUMIDITY: IS zone humidity · setpoint 60%",

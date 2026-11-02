@@ -743,6 +743,8 @@ window.EKO_I18N.ar = {
   "hmOccNormal": "عادي",
   "hmOccHigh": "مرتفع",
   "hmOccCritical": "حرج",
+  "hmStillRooms": "ثابت في الغرف",
+  "hmAllWalk": "الجميع يتحركون",
   "hmRankPeopleCap": "أشخاص · الأكثر ازدحاماً أولاً",
   "hmTempFoot": "الحرارة: درجة المنطقة من IS · نقطة الضبط 21 °C · متوسط الموقع {m} °C",
   "hmOccFoot": "الرطوبة: رطوبة المنطقة من IS · نقطة الضبط 60%",

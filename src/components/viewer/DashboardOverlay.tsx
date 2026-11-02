@@ -484,8 +484,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       renderer.shadowMap.autoUpdate = false
       const heatGroups: THREE.Object3D[] = []
       heatRoots.forEach(root => { if (root.children.length) heatGroups.push(root) })
-      // Occupancy colours no room, so its people are drawn in the heat pass, behind the building
+      // Occupancy colours no room, so its people and their glow are drawn in the heat pass, behind the building
       if (crowdMesh) heatGroups.push(crowdMesh)
+      if (crowdGlowMesh) heatGroups.push(crowdGlowMesh)
       const seeThrough: THREE.Object3D[] = []
       if (ghost?.group) seeThrough.push(ghost.group)
       if (floorOutline) seeThrough.push(floorOutline)
@@ -1391,50 +1392,42 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
     }
     let crowdMesh: THREE.InstancedMesh | null = null
+    let crowdGlowMesh: THREE.InstancedMesh | null = null
     /* band: how crowded it is around a person, 0 low, 1 normal, 2 high, 3 critical */
-    let crowd: { minX: number; maxX: number; minZ: number; maxZ: number; x: number; z: number; vx: number; vz: number; y: number; still: boolean; band: number }[] = []
+    type CrowdFoot = { originX: number; originZ: number; step: number; cols: number; rows: number; on: Uint8Array; cells: number[] }
+    let crowd: { minX: number; maxX: number; minZ: number; maxZ: number; x: number; z: number; vx: number; vz: number; y: number; still: boolean; band: number; foot: CrowdFoot | null }[] = []
     const crowdDummy = new THREE.Object3D()
-    /* The medical twin's glow: a soft blob around each person in the colour of its band, drawn over the 3D view */
-    const CROWD_GLOW: [string, number][] = [['59,130,246', 0.45], ['34,197,94', 0.5], ['234,179,8', 0.6], ['239,68,68', 0.7]]
-    let crowdGlow: HTMLCanvasElement | null = null
-    const glowAt = new THREE.Vector3()
-    const drawCrowdGlow = () => {
-      const view = engine.world?.renderer?.three?.domElement as HTMLCanvasElement | undefined
-      const cam = engine.world?.camera?.three
-      const ctx = crowdGlow?.getContext('2d')
-      if (!crowdMesh || !crowd.length || !view || !cam) {
-        if (crowdGlow && ctx) ctx.clearRect(0, 0, crowdGlow.width, crowdGlow.height)
-        return
-      }
-      if (!crowdGlow) {
-        crowdGlow = document.createElement('canvas')
-        Object.assign(crowdGlow.style, { position: 'absolute', pointerEvents: 'none' })
-        view.insertAdjacentElement('afterend', crowdGlow)
-      }
-      const w = view.clientWidth
-      const h = view.clientHeight
-      Object.assign(crowdGlow.style, { left: `${view.offsetLeft}px`, top: `${view.offsetTop}px`, width: `${w}px`, height: `${h}px` })
-      if (crowdGlow.width !== w || crowdGlow.height !== h) { crowdGlow.width = w; crowdGlow.height = h }
-      const g = crowdGlow.getContext('2d')
-      if (!g) return
-      g.clearRect(0, 0, w, h)
-      const radius = Math.max(30, w * 0.05)
-      for (const p of crowd) {
-        glowAt.set(p.x, p.y, p.z).project(cam)
-        if (glowAt.z > 1 || glowAt.z < -1) continue
-        const sx = (glowAt.x + 1) / 2 * w
-        const sy = (1 - glowAt.y) / 2 * h
-        if (sx < -radius || sy < -radius || sx > w + radius || sy > h + radius) continue
-        const [rgb, alpha] = CROWD_GLOW[p.band] || CROWD_GLOW[0]
-        // Nearly clear at the centre, so the white person stays white inside its glow
-        const grad = g.createRadialGradient(sx, sy, 0, sx, sy, radius)
-        grad.addColorStop(0, `rgba(${rgb},${alpha * 0.15})`)
-        grad.addColorStop(0.18, `rgba(${rgb},${alpha})`)
-        grad.addColorStop(1, `rgba(${rgb},0)`)
-        g.fillStyle = grad
-        g.fillRect(sx - radius, sy - radius, radius * 2, radius * 2)
-      }
-    }
+    const glowDummy = new THREE.Object3D()
+    /* About 1.15 m around a person. A screen-sized blob stayed huge when the camera moved back and painted over the ceiling. */
+    const GLOW_RADIUS = 1.15
+    const GLOW_COLOR = [0x3b82f6, 0x22c55e, 0xeab308, 0xef4444].map(hex => new THREE.Color(hex))
+    const glowGeo = new THREE.PlaneGeometry(GLOW_RADIUS * 2, GLOW_RADIUS * 2)
+    glowGeo.rotateX(-Math.PI / 2)
+    const glowTex = (() => {
+      const c = document.createElement('canvas')
+      c.width = c.height = 128
+      const g = c.getContext('2d')
+      if (!g) return null
+      const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64)
+      grd.addColorStop(0, 'rgba(255,255,255,0)')
+      grd.addColorStop(0.22, 'rgba(255,255,255,0.25)')
+      grd.addColorStop(0.48, 'rgba(255,255,255,1)')
+      grd.addColorStop(1, 'rgba(255,255,255,0)')
+      g.fillStyle = grd
+      g.fillRect(0, 0, 128, 128)
+      const tex = new THREE.CanvasTexture(c)
+      tex.colorSpace = THREE.NoColorSpace
+      tex.needsUpdate = true
+      return tex
+    })()
+    const glowMat = new THREE.MeshBasicMaterial({
+      map: glowTex || undefined,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      toneMapped: false,
+      vertexColors: true,
+    })
     const clearCrowd = () => {
       if (crowdMesh) {
         overlay.remove(crowdMesh)
@@ -1442,22 +1435,95 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         ;(crowdMesh.material as THREE.Material).dispose()
         crowdMesh = null
       }
+      if (crowdGlowMesh) {
+        overlay.remove(crowdGlowMesh)
+        crowdGlowMesh.geometry.dispose()
+        crowdGlowMesh = null
+      }
       crowd = []
-      drawCrowdGlow()
     }
     const occSpeed = () => {
       const n = useProjectStore.getState().currentProject?.apiSettings?.heatmap?.speed
       const s = n == null || !Number.isFinite(Number(n)) ? 1 : Number(n)
       return Math.max(0.4, Math.min(2, s))
     }
+    const WALK_WORDS = ['corridor', 'circulation', 'public area', 'lobby', 'waiting', 'lounge']
     const guidWalks = (guid: string) => {
-      const list = useProjectStore.getState().currentProject?.apiSettings?.heatmap?.walkRooms
-      const words = (Array.isArray(list) ? list : ['corridor', 'circulat', 'public area', 'lobby', 'waiting', 'lounge'])
-        .map(w => w.trim().toLowerCase()).filter(Boolean)
-      const name = (useProjectStore.getState().currentProject?.assetLinks || [])
-        .find(l => l.kind === 'space' && l.guid === guid)?.equip || ''
-      const folded = name.toLowerCase()
+      const heat = useProjectStore.getState().currentProject?.apiSettings?.heatmap
+      if (heat?.stillRooms === false) return true
+      const list = heat?.walkRooms
+      const words = (Array.isArray(list) ? list : WALK_WORDS).map(w => w.trim().toLowerCase()).filter(Boolean)
+      const link = (useProjectStore.getState().currentProject?.assetLinks || [])
+        .find(l => l.kind === 'space' && l.guid === guid)
+      /* The room label is the model name. The heatmap name is often a sensor (S-01) and would make every room walk or none. */
+      const folded = `${link?.element || ''} ${link?.equip || ''}`.toLowerCase()
       return words.some(word => folded.includes(word))
+    }
+    const pointInTri = (px: number, pz: number, ax: number, az: number, bx: number, bz: number, cx: number, cz: number) => {
+      const v0x = cx - ax, v0z = cz - az, v1x = bx - ax, v1z = bz - az, v2x = px - ax, v2z = pz - az
+      const dot00 = v0x * v0x + v0z * v0z, dot01 = v0x * v1x + v0z * v1z, dot02 = v0x * v2x + v0z * v2z
+      const dot11 = v1x * v1x + v1z * v1z, dot12 = v1x * v2x + v1z * v2z
+      const den = dot00 * dot11 - dot01 * dot01
+      if (den <= 1e-12) return false
+      const inv = 1 / den
+      const u = (dot11 * dot02 - dot01 * dot12) * inv
+      const v = (dot00 * dot12 - dot01 * dot02) * inv
+      return u >= -0.001 && v >= -0.001 && u + v <= 1.001
+    }
+    /* Cells the space mesh covers, so a corridor's box cannot carry people through the rooms beside it. */
+    const footprintFrom = (geom: THREE.BufferGeometry, toWorld: THREE.Matrix4): { foot: CrowdFoot; area: number } | null => {
+      const pos = geom.getAttribute('position') as THREE.BufferAttribute | undefined
+      const index = geom.getIndex()
+      const corners = index ? index.count : pos?.count
+      if (!pos || !corners || corners < 3 || corners > 9000) return null
+      const step = 0.5
+      const v = new THREE.Vector3()
+      const pts: number[] = []
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity
+      for (let i = 0; i < corners; i++) {
+        const vi = index ? index.getX(i) : i
+        v.set(pos.getX(vi), pos.getY(vi), pos.getZ(vi)).applyMatrix4(toWorld)
+        pts.push(v.x, v.z)
+        if (v.x < minX) minX = v.x
+        if (v.x > maxX) maxX = v.x
+        if (v.z < minZ) minZ = v.z
+        if (v.z > maxZ) maxZ = v.z
+      }
+      if (!isFinite(minX) || maxX - minX < 0.2 || maxZ - minZ < 0.2) return null
+      const cols = Math.ceil((maxX - minX) / step) + 1
+      const rows = Math.ceil((maxZ - minZ) / step) + 1
+      if (cols < 1 || rows < 1 || cols * rows > 16000) return null
+      const on = new Uint8Array(cols * rows)
+      const cells: number[] = []
+      const mark = (x: number, z: number) => {
+        const ix = Math.floor((x - minX) / step)
+        const iz = Math.floor((z - minZ) / step)
+        if (ix < 0 || iz < 0 || ix >= cols || iz >= rows) return
+        const k = iz * cols + ix
+        if (!on[k]) { on[k] = 1; cells.push(k) }
+      }
+      for (let i = 0; i + 5 < pts.length; i += 6) {
+        const ax = pts[i], az = pts[i + 1], bx = pts[i + 2], bz = pts[i + 3], cx = pts[i + 4], cz = pts[i + 5]
+        const ix0 = Math.max(0, Math.floor((Math.min(ax, bx, cx) - minX) / step))
+        const ix1 = Math.min(cols - 1, Math.floor((Math.max(ax, bx, cx) - minX) / step))
+        const iz0 = Math.max(0, Math.floor((Math.min(az, bz, cz) - minZ) / step))
+        const iz1 = Math.min(rows - 1, Math.floor((Math.max(az, bz, cz) - minZ) / step))
+        for (let iz = iz0; iz <= iz1; iz++) {
+          const z = minZ + (iz + 0.5) * step
+          for (let ix = ix0; ix <= ix1; ix++) {
+            const x = minX + (ix + 0.5) * step
+            if (pointInTri(x, z, ax, az, bx, bz, cx, cz)) mark(x, z)
+          }
+        }
+      }
+      if (!cells.length) return null
+      return { foot: { originX: minX, originZ: minZ, step, cols, rows, on, cells }, area: cells.length * step * step }
+    }
+    const onFoot = (foot: CrowdFoot, x: number, z: number) => {
+      const ix = Math.floor((x - foot.originX) / foot.step)
+      const iz = Math.floor((z - foot.originZ) / foot.step)
+      if (ix < 0 || iz < 0 || ix >= foot.cols || iz >= foot.rows) return false
+      return foot.on[iz * foot.cols + ix] === 1
     }
     const occWeight = (id: string) => {
       let h = 2166136261
@@ -1466,7 +1532,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     /* Each zone gets the dashboard's count for it (same weight on the same key), shared among its rooms in view.
        Sharing all the people among every room rounded each room to none once a zone linked many rooms. */
-    const placeCrowd = (floorIds: string[], zones: { key: string; ids: string[] }[], people: number) => {
+    const placeCrowd = async (floorIds: string[], zones: { key: string; ids: string[] }[], people: number) => {
+      const seq = heatSeq
       clearCrowd()
       const inView = new Set<string>()
       for (const floorId of floorIds) {
@@ -1477,8 +1544,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (!inView.size || people <= 0) return
       const zoneWeights = zones.map(z => occWeight(z.key))
       const zoneSum = zoneWeights.reduce((n, w) => n + w, 0) || 1
-      let total = 0
-      const plan: { id: string; count: number; ratio: number }[] = []
+      const plan: { id: string; count: number }[] = []
       zones.forEach((zone, z) => {
         const zoneCount = Math.max(0, Math.round(people * zoneWeights[z] / zoneSum))
         const rooms = zone.ids.filter(id => inView.has(id))
@@ -1489,43 +1555,93 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const counts = exact.map(Math.floor)
         let left = zoneCount - counts.reduce((n, c) => n + c, 0)
         exact.map((v, i) => [v - counts[i], i] as const).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { counts[i]++; left-- } })
-        rooms.forEach((id, i) => {
-          if (!counts[i]) return
-          const cap = Math.max(4, Math.round(6 + weights[i] * 14))
-          plan.push({ id, count: counts[i], ratio: Math.min(1, counts[i] / cap) })
-          total += counts[i]
-        })
+        rooms.forEach((id, i) => { if (counts[i]) plan.push({ id, count: counts[i] }) })
       })
+      if (!plan.length) return
+      const spots = plan.flatMap(sp => {
+        const entry = located.get(sp.id)
+        return entry?.localBox ? [{ ...sp, entry }] : []
+      })
+      if (!spots.length) return
+      await solidsFor(spots.map(sp => ({ guid: sp.id, model: sp.entry.model, localId: sp.entry.localId, box: sp.entry.localBox })))
+      if (seq !== heatSeq) return
+      type Ready = { count: number; walks: boolean; y: number; minX: number; maxX: number; minZ: number; maxZ: number; foot: CrowdFoot | null; area: number }
+      const ready: Ready[] = []
+      for (const sp of spots) {
+        const entry = sp.entry
+        entry.model.object.updateMatrixWorld(true)
+        const box = entry.localBox.clone().applyMatrix4(entry.model.object.matrixWorld)
+        const geom = heatSolids.get(sp.id)
+        const fit = geom ? footprintFrom(geom, entry.model.object.matrixWorld) : null
+        const width = Math.max(0, box.max.x - box.min.x)
+        const depth = Math.max(0, box.max.z - box.min.z)
+        ready.push({
+          count: sp.count,
+          walks: guidWalks(sp.id),
+          y: box.min.y + Math.min(1.1, Math.max(0.4, (box.max.y - box.min.y) * 0.35)),
+          minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z,
+          foot: fit?.foot ?? null,
+          area: fit ? fit.area : width * depth,
+        })
+      }
+      const areas = ready.map(r => r.area).filter(a => a > 1).sort((a, b) => a - b)
+      const typical = areas.length ? areas[Math.floor(areas.length / 2)] : 0
+      /* A storey-sized space is the floor plate, not a room. People there covered the site. */
+      const kept = typical > 0 ? ready.filter(r => r.area > 0.5 && r.area <= typical * 16) : ready.filter(r => r.area > 0.5)
+      const total = kept.reduce((n, r) => n + r.count, 0)
       if (!total) return
       const geo = new THREE.SphereGeometry(0.22, 6, 6)
-      // White people; the glow around them carries the colour
       const mat = new THREE.MeshBasicMaterial({ color: 0xffffff })
       const mesh = new THREE.InstancedMesh(geo, mat, total)
       mesh.frustumCulled = false
-      mesh.renderOrder = 3
+      mesh.renderOrder = 4
+      const glow = new THREE.InstancedMesh(glowGeo.clone(), glowMat, total)
+      glow.frustumCulled = false
+      glow.renderOrder = 2
       let idx = 0
-      for (const sp of plan) {
-        const entry = located.get(sp.id)
-        if (!entry?.localBox) continue
-        entry.model.object.updateMatrixWorld(true)
-        const box = entry.localBox.clone().applyMatrix4(entry.model.object.matrixWorld)
+      for (const sp of kept) {
         for (let i = 0; i < sp.count; i++) {
-          const x = box.min.x + Math.random() * Math.max(0.2, box.max.x - box.min.x)
-          const z = box.min.z + Math.random() * Math.max(0.2, box.max.z - box.min.z)
-          const y = box.min.y + Math.min(1.1, Math.max(0.4, (box.max.y - box.min.y) * 0.35))
+          let x: number
+          let z: number
+          if (sp.foot && sp.foot.cells.length) {
+            const cell = sp.foot.cells[Math.floor(Math.random() * sp.foot.cells.length)]
+            const ix = cell % sp.foot.cols
+            const iz = Math.floor(cell / sp.foot.cols)
+            x = sp.foot.originX + (ix + 0.5) * sp.foot.step
+            z = sp.foot.originZ + (iz + 0.5) * sp.foot.step
+          } else {
+            x = sp.minX + Math.random() * Math.max(0.2, sp.maxX - sp.minX)
+            z = sp.minZ + Math.random() * Math.max(0.2, sp.maxZ - sp.minZ)
+          }
           const ang = Math.random() * Math.PI * 2
-          const still = !guidWalks(sp.id)
-          crowd.push({ minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z, x, z, vx: Math.cos(ang), vz: Math.sin(ang), y, still, band: 0 })
-          crowdDummy.position.set(x, y, z)
+          crowd.push({
+            minX: sp.minX, maxX: sp.maxX, minZ: sp.minZ, maxZ: sp.maxZ,
+            x, z, vx: Math.cos(ang), vz: Math.sin(ang), y: sp.y,
+            still: !sp.walks, band: 0, foot: sp.foot,
+          })
+          crowdDummy.position.set(x, sp.y, z)
+          crowdDummy.rotation.set(0, 0, 0)
+          crowdDummy.scale.set(1, 1, 1)
           crowdDummy.updateMatrix()
           mesh.setMatrixAt(idx, crowdDummy.matrix)
+          glowDummy.position.set(x, sp.y - 0.08, z)
+          glowDummy.rotation.set(0, 0, 0)
+          glowDummy.scale.set(1, 1, 1)
+          glowDummy.updateMatrix()
+          glow.setMatrixAt(idx, glowDummy.matrix)
+          glow.setColorAt(idx, GLOW_COLOR[0])
           idx++
         }
       }
       mesh.count = idx
+      glow.count = idx
       mesh.instanceMatrix.needsUpdate = true
+      glow.instanceMatrix.needsUpdate = true
+      if (glow.instanceColor) glow.instanceColor.needsUpdate = true
       overlay.add(mesh)
+      overlay.add(glow)
       crowdMesh = mesh
+      crowdGlowMesh = glow
     }
     stepCrowd = () => {
       if (!crowdMesh || !crowd.length) return
@@ -1536,17 +1652,27 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const perPx = cam?.isPerspectiveCamera ? 2 * Math.tan((cam.fov * Math.PI) / 360) / viewH : 0
       for (let i = 0; i < crowd.length; i++) {
         const p = crowd[i]
-        /* Patient rooms and other unticked names stay where they were placed. */
+        /* Ordinary rooms stand still. A ticked name walks, and only on that room's floor. */
         if (!p.still) {
           if (Math.random() < 0.02) {
             const ang = Math.random() * Math.PI * 2
             p.vx = Math.cos(ang)
             p.vz = Math.sin(ang)
           }
-          p.x += p.vx * step
-          p.z += p.vz * step
-          if (p.x < p.minX || p.x > p.maxX) { p.vx *= -1; p.x = Math.max(p.minX, Math.min(p.x, p.maxX)) }
-          if (p.z < p.minZ || p.z > p.maxZ) { p.vz *= -1; p.z = Math.max(p.minZ, Math.min(p.z, p.maxZ)) }
+          let nx = p.x + p.vx * step
+          let nz = p.z + p.vz * step
+          if (p.foot) {
+            if (!onFoot(p.foot, nx, nz)) {
+              if (onFoot(p.foot, nx, p.z)) nz = p.z
+              else if (onFoot(p.foot, p.x, nz)) nx = p.x
+              else { p.vx *= -1; p.vz *= -1; nx = p.x; nz = p.z }
+            }
+          } else {
+            if (nx < p.minX || nx > p.maxX) { p.vx *= -1; nx = Math.max(p.minX, Math.min(nx, p.maxX)) }
+            if (nz < p.minZ || nz > p.maxZ) { p.vz *= -1; nz = Math.max(p.minZ, Math.min(nz, p.maxZ)) }
+          }
+          p.x = nx
+          p.z = nz
         }
         let near = 0
         for (let j = 0; j < crowd.length; j++) {
@@ -1557,12 +1683,25 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         /* Neighbours within 4 m, the medical twin's bands */
         p.band = near <= 2 ? 0 : near <= 4 ? 1 : near <= 7 ? 2 : 3
         crowdDummy.position.set(p.x, p.y, p.z)
+        crowdDummy.rotation.set(0, 0, 0)
         const grow = perPx && cam ? (10 * perPx * crowdDummy.position.distanceTo(cam.position)) / 0.44 : 1
         crowdDummy.scale.setScalar(Math.min(4, Math.max(1, grow)))
         crowdDummy.updateMatrix()
         crowdMesh.setMatrixAt(i, crowdDummy.matrix)
+        if (crowdGlowMesh) {
+          glowDummy.position.set(p.x, p.y - 0.08, p.z)
+          glowDummy.rotation.set(0, 0, 0)
+          glowDummy.scale.set(1, 1, 1)
+          glowDummy.updateMatrix()
+          crowdGlowMesh.setMatrixAt(i, glowDummy.matrix)
+          crowdGlowMesh.setColorAt(i, GLOW_COLOR[p.band] || GLOW_COLOR[0])
+        }
       }
       crowdMesh.instanceMatrix.needsUpdate = true
+      if (crowdGlowMesh) {
+        crowdGlowMesh.instanceMatrix.needsUpdate = true
+        if (crowdGlowMesh.instanceColor) crowdGlowMesh.instanceColor.needsUpdate = true
+      }
     }
     const clearSpaceHeat = async () => {
       heatSeq++
@@ -1731,9 +1870,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         return Math.max(0, Math.min(400, n == null || !Number.isFinite(Number(n)) ? 80 : Math.round(Number(n))))
       }
       const walkSig = () => {
-        const list = useProjectStore.getState().currentProject?.apiSettings?.heatmap?.walkRooms
-        const words = Array.isArray(list) ? list : ['corridor', 'circulat', 'public area', 'lobby', 'waiting', 'lounge']
-        return words.map(w => w.trim().toLowerCase()).filter(Boolean).join(',')
+        const heat = useProjectStore.getState().currentProject?.apiSettings?.heatmap
+        const list = heat?.walkRooms
+        const words = Array.isArray(list) ? list : WALK_WORDS
+        return (heat?.stillRooms === false ? 'walk' : 'still') + '|' + words.map(w => w.trim().toLowerCase()).filter(Boolean).join(',')
       }
       const jobs: { bimId: string; t: number }[] = []
       for (const z of zones || []) {
@@ -1771,7 +1911,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const wake = engine.world?.renderer as { needsUpdate?: boolean } | undefined
       if (md !== 'occ') clearCrowd()
       if (!missing.length) {
-        if (md === 'occ') placeCrowd(order, crowdZones, occPeople())
+        if (md === 'occ') await placeCrowd(order, crowdZones, occPeople())
         syncGhost()
         if (wake) wake.needsUpdate = true
         return
@@ -1798,7 +1938,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           for (const id of guids) kept.guids.add(id)
           if (seq === heatSeq) {
             kept.done = true
-            placeCrowd(order, crowdZones, occPeople())
+            await placeCrowd(order, crowdZones, occPeople())
             syncGhost()
             if (wake) wake.needsUpdate = true
           }
@@ -2135,7 +2275,6 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const miniMap = createMiniMap(engine)
     const afterFrame = () => {
       drawGhost()
-      drawCrowdGlow()
       miniMap.capture()
       // Fans in the shown equipment and the occupancy crowd move only while frames are drawn
       const spinning = !!(active && ghost?.group.visible)
@@ -2145,7 +2284,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
     }
 
-    const applyPose = (view: { position?: number[]; target?: number[] } | null | undefined, smooth: boolean) => {
+    const applyPose = (view: { position?: number[]; target?: number[] } | null | undefined, smooth: boolean, exact = false) => {
       const camCtl = engine.world?.camera?.controls as { setLookAt?: Function; updateCameraUp?: Function } | undefined
       const pos = view?.position
       const tgt = view?.target
@@ -2153,10 +2292,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const cam = engine.world?.camera?.three as THREE.PerspectiveCamera | undefined
       // A straight-down view leaves orbit and pan without a direction. Tilt it, as the
       // orientation cube does. Horizontal drag on that view is flipped in the engine.
+      // exact keeps a stored camera, such as the heatmap's saved view, as it was saved.
       const target = new THREE.Vector3(tgt[0], tgt[1], tgt[2])
       const offset = new THREE.Vector3(pos[0], pos[1], pos[2]).sub(target)
       const dist = offset.length()
-      if (dist > 0 && Math.abs(offset.y) / dist > 0.995) {
+      if (!exact && dist > 0 && Math.abs(offset.y) / dist > 0.995) {
         offset.normalize()
         offset.z += offset.y >= 0 ? 0.14 : -0.14
         offset.normalize().multiplyScalar(dist)
@@ -2206,23 +2346,38 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (wake) wake.needsUpdate = true
     }
 
-    /* Plan looks down on the loaded model. The pose from before Plan is put back
-       for 3D. Home, and leaving a page, drop Plan and use the project camera. */
+    /* Plan looks down on the loaded model. 3D on the heatmap uses that page's saved
+       view. Every other page puts back the camera from before Plan, or the project
+       camera when that was not stored. Home, and leaving a page, drop Plan. */
     let planOn = false
     let planHeld = false
     let planFramed = false
     let planSaved: { position: number[]; target: number[] } | null = null
     const readPose = () => {
-      const cam = engine.world?.camera?.controls as { getPosition?: (out: THREE.Vector3) => void; getTarget?: (out: THREE.Vector3) => void } | undefined
+      const cam = engine.world?.camera?.controls as {
+        getPosition?: (out: THREE.Vector3, end?: boolean) => void
+        getTarget?: (out: THREE.Vector3, end?: boolean) => void
+      } | undefined
       if (!cam?.getPosition || !cam?.getTarget) return null
       const position = new THREE.Vector3()
       const target = new THREE.Vector3()
-      cam.getPosition(position)
-      cam.getTarget(target)
+      // camera-controls defaults to the transition end. false is the camera on screen.
+      cam.getPosition(position, false)
+      cam.getTarget(target, false)
       return {
         position: [position.x, position.y, position.z],
         target: [target.x, target.y, target.z],
       }
+    }
+    /* The view saved in project settings for the heatmap. Null off that page, and
+       when the heatmap is set to look inside the floor or has no saved view. */
+    const heatmapSavedView = () => {
+      if ((window as any).EKO?.state?.pageId !== 'heatmap') return null
+      const heat = useProjectStore.getState().currentProject?.apiSettings?.heatmap
+      if (!heat || heat.camera === 'inside') return null
+      const view = heat.view
+      if (!view?.position || !view?.target || view.position.length !== 3 || view.target.length !== 3) return null
+      return view
     }
     const showPlan = () => {
       planHeld = false
@@ -2238,13 +2393,17 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         showPlan()
         return
       }
-      if (!planOn) return
+      const heat = heatmapSavedView()
+      if (!planOn && !heat) return
       planOn = false
       planHeld = false
       planFramed = false
       const saved = planSaved
       planSaved = null
-      if (saved) applyPose(saved, true)
+      // A heatmap top-look still in flight would replace the view we just put back.
+      window.dispatchEvent(new CustomEvent('eko-look-cancel'))
+      if (heat) applyPose(heat, false, true)
+      else if (saved) applyPose(saved, false, true)
       else resetCameraToHome(engine)
     }
     const leavePlan = () => {
@@ -2351,6 +2510,17 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       attachMiniMap: (el: HTMLElement | null) => miniMap.attach(el),
       setMiniMap: (on: boolean) => miniMap.setEnabled(on),
       setFurnitureVisible: (on: boolean) => { void applyFurniture(on !== false) },
+      setOccupancyStill: (on: boolean) => {
+        const cur = useProjectStore.getState().currentProject
+        if (!cur) return
+        const heat = { ...(cur.apiSettings?.heatmap || {}) }
+        if (on) delete heat.stillRooms
+        else heat.stillRooms = false
+        const apiSettings = { ...(cur.apiSettings || {}), heatmap: heat }
+        useProjectStore.setState({ currentProject: { ...cur, apiSettings } })
+        const save = useProjectStore.getState().saveApiSettings
+        if (useProjectStore.getState().folderHandle) void save(apiSettings).catch(() => { /* the open view already has the choice */ })
+      },
     }
     const dashState = (window as any).EKO?.state
     if (dashState?.e3dFurn === false) void applyFurniture(false)
@@ -2374,7 +2544,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       updateCameraUp?: Function
     } | undefined
     const onHeatCamera = (e: Event) => {
-      lookAtView((e as CustomEvent).detail)
+      applyPose((e as CustomEvent).detail, true, true)
     }
     controls?.addEventListener('update', onCameraUpdate)
     window.addEventListener('eko-heat-camera', onHeatCamera)
@@ -2460,8 +2630,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       window.removeEventListener('eko-heat-camera', onHeatCamera)
       engine.world?.renderer?.onBeforeUpdate?.remove(syncGhost)
       engine.world?.renderer?.onAfterUpdate?.remove(afterFrame)
-      crowdGlow?.remove()
-      crowdGlow = null
+      clearCrowd()
+      glowGeo.dispose()
+      glowMat.dispose()
+      glowTex?.dispose()
       miniMap.dispose()
       clearInterval(resolveTimer)
       fadeArch(false)
