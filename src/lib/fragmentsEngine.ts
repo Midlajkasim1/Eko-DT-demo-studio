@@ -34,7 +34,7 @@ import { PBR_MATERIAL_MAPPINGS } from '../constants/pbrMaterials'
 import { RENDER_DEFAULTS, studioAdjustOf, type RenderSettings, type ToneMappingId } from '../constants/renderSettings'
 import { applyStudioAdjust, DASHBOARD_DARK_SKY, getTemplateScene, type TemplateScene } from '../constants/viewTemplates'
 import { paintStudioModel } from '../constants/studioPalette'
-import { orbitDragSign } from './cameraUtils'
+import { orbitSpeedSigns } from './cameraUtils'
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { N8AOPass } from 'n8ao'
 
@@ -1429,86 +1429,6 @@ export async function initFragmentsEngine(
 
   world.camera.controls.setLookAt(50, 30, 50, 0, 0, 0)
 
-  // A drag must carry the point under the pointer with the pointer. camera-controls
-  // reports a rightward drag as a negative delta, so theta decreases when
-  // azimuthRotateSpeed is positive. Checked with a perspective camera, phi 0.14:
-  // that decrease moves the top of the plan left. The guess below matches that.
-  // The first real movement then measures the point under the pointer and flips
-  // the speed if that point went the other way. The guess alone kept the top view wrong.
-  {
-    const controls = world.camera.controls as unknown as {
-      azimuthRotateSpeed: number
-      polarAngle: number
-      getTarget: (out: THREE.Vector3) => THREE.Vector3
-      addEventListener: (type: string, fn: () => void) => void
-    }
-    const baseAzimuth = Math.abs(controls.azimuthRotateSpeed || 1)
-    const centre = new THREE.Vector3()
-    const grab = new THREE.Vector3()
-    const viewDir = new THREE.Vector3()
-    const raycaster = new THREE.Raycaster()
-    const ndc = new THREE.Vector2()
-    const plane = new THREE.Plane()
-    let downX = 0
-    let downY: number | null = null
-    let grabScreenX = 0
-    let grabValid = false
-    let checked = false
-    const screenXOf = (point: THREE.Vector3) => {
-      const rect = viewCanvas.getBoundingClientRect()
-      const projected = point.clone().project(world.camera.three)
-      return (projected.x * 0.5 + 0.5) * rect.width + rect.left
-    }
-    const pointerAboveCentre = () => {
-      const rect = viewCanvas.getBoundingClientRect()
-      if (downY == null || rect.height < 1) return false
-      try {
-        world.camera.three.updateMatrixWorld()
-        controls.getTarget(centre)
-        centre.project(world.camera.three)
-      } catch { return false }
-      return 1 - 2 * (downY - rect.top) / rect.height > centre.y
-    }
-    const applyGuess = () => {
-      if (!controls.azimuthRotateSpeed && controls.azimuthRotateSpeed !== 0) return
-      controls.azimuthRotateSpeed = orbitDragSign(controls.polarAngle, pointerAboveCentre()) * baseAzimuth
-    }
-    viewCanvas.addEventListener('pointerdown', (e: PointerEvent) => {
-      downX = e.clientX
-      downY = e.clientY
-      checked = false
-      grabValid = false
-      if (e.button !== 0) return
-      const cam = world.camera.three
-      cam.updateMatrixWorld()
-      const rect = viewCanvas.getBoundingClientRect()
-      if (rect.width < 1 || rect.height < 1) return
-      ndc.set(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1,
-      )
-      raycaster.setFromCamera(ndc, cam)
-      controls.getTarget(centre)
-      cam.getWorldDirection(viewDir)
-      plane.setFromNormalAndCoplanarPoint(viewDir, centre)
-      if (raycaster.ray.intersectPlane(plane, grab)) {
-        grabValid = true
-        grabScreenX = screenXOf(grab)
-      }
-    }, { capture: true })
-    controls.addEventListener('controlstart', applyGuess)
-    // After camera-controls has applied this move. Registered later, so it runs second.
-    viewCanvas.addEventListener('pointermove', (e: PointerEvent) => {
-      if (!grabValid || checked || (e.buttons & 1) === 0) return
-      const dx = e.clientX - downX
-      if (Math.abs(dx) < 6) return
-      world.camera.three.updateMatrixWorld()
-      const moved = screenXOf(grab) - grabScreenX
-      if (dx * moved < -0.5) controls.azimuthRotateSpeed = -controls.azimuthRotateSpeed
-      checked = true
-    })
-  }
-
   // Orbit, dolly and fit all set this flag. Waking from the flag means a parked
   // view still animates when the camera is moved from a button rather than a drag.
   {
@@ -1944,6 +1864,128 @@ export async function initFragmentsEngine(
 
   const fragments = new FRAGS.FragmentsModels()
 
+  // The surface under the pointer has to move with the pointer. That surface is
+  // often in front of the orbit target, and a turntable step then carries it
+  // the opposite way from a point on the target. Which way flips again between
+  // the top, the side and the bottom, so the speed is read from this camera on
+  // every move, before camera-controls applies the drag.
+  let removeOrbitFollow = () => {}
+  {
+    const controls = world.camera.controls as unknown as {
+      azimuthRotateSpeed: number
+      polarRotateSpeed: number
+      getTarget: (out: THREE.Vector3) => THREE.Vector3
+    }
+    const baseAzimuth = Math.abs(controls.azimuthRotateSpeed || 1)
+    const basePolar = Math.abs(controls.polarRotateSpeed || 1)
+    const centre = new THREE.Vector3()
+    const grab = new THREE.Vector3()
+    const viewDir = new THREE.Vector3()
+    const toGrab = new THREE.Vector3()
+    const raycaster = new THREE.Raycaster()
+    const ndc = new THREE.Vector2()
+    const plane = new THREE.Plane()
+    let grabValid = false
+
+    const ignoredHit = (obj: THREE.Object3D) => {
+      let node: THREE.Object3D | null = obj
+      while (node) {
+        if (node.userData?.ekoMeasure || node.userData?.ekoSlice || node.userData?.ekoGhostDepth) return true
+        if (node.name === 'SkyDome' || node.name === 'CloudsDome' || node.name === 'ShadowCatcherPlane') return true
+        node = node.parent
+      }
+      return false
+    }
+
+    const rememberGrab = (e: PointerEvent) => {
+      const cam = world.camera.three as THREE.PerspectiveCamera
+      if (!cam?.isPerspectiveCamera) return false
+      cam.updateMatrixWorld()
+      const rect = viewCanvas.getBoundingClientRect()
+      if (rect.width < 1 || rect.height < 1) return false
+      ndc.set(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      )
+      raycaster.layers.mask = cam.layers.mask
+      raycaster.setFromCamera(ndc, cam)
+      const roots: THREE.Object3D[] = []
+      for (const model of fragments.models.list.values()) {
+        const obj = (model as { object?: THREE.Object3D }).object
+        if (obj?.visible) roots.push(obj)
+      }
+      let hit: THREE.Intersection | undefined
+      if (roots.length) {
+        try {
+          hit = raycaster.intersectObjects(roots, true).find(item => !ignoredHit(item.object))
+        } catch {
+          // One broken mesh must not throw away the rest of the building.
+          let best: THREE.Intersection | undefined
+          const visit = (obj: THREE.Object3D) => {
+            if (!obj.visible) return
+            const mesh = obj as THREE.Mesh
+            if (mesh.isMesh && !ignoredHit(mesh)) {
+              try {
+                const found = raycaster.intersectObject(mesh, false)[0]
+                if (found && (!best || found.distance < best.distance)) best = found
+              } catch { /* this mesh cannot be picked */ }
+            }
+            for (const child of obj.children) visit(child)
+          }
+          for (const root of roots) visit(root)
+          hit = best
+        }
+      }
+      if (hit) {
+        grab.copy(hit.point)
+        return true
+      }
+      controls.getTarget(centre)
+      cam.getWorldDirection(viewDir)
+      plane.setFromNormalAndCoplanarPoint(viewDir, centre)
+      return raycaster.ray.intersectPlane(plane, grab) != null
+    }
+
+    const applySigns = () => {
+      if (!grabValid) return
+      const cam = world.camera.three as THREE.PerspectiveCamera
+      if (!cam?.isPerspectiveCamera) return
+      cam.updateMatrixWorld()
+      cam.getWorldDirection(viewDir)
+      // A point that has swung behind the camera no longer has a stable screen direction.
+      if (toGrab.subVectors(grab, cam.position).dot(viewDir) <= 0.05) return
+      controls.getTarget(centre)
+      const signs = orbitSpeedSigns(cam, centre, grab)
+      controls.azimuthRotateSpeed = signs.azimuth * baseAzimuth
+      controls.polarRotateSpeed = signs.polar * basePolar
+    }
+
+    const onPointerDown = (e: PointerEvent) => {
+      grabValid = false
+      if (e.button !== 0) return
+      grabValid = rememberGrab(e)
+      applySigns()
+    }
+    const onPointerMove = (e: PointerEvent) => {
+      if (!grabValid) return
+      if (e.pointerType !== 'touch' && (e.buttons & 1) === 0) return
+      applySigns()
+    }
+    const onPointerUp = () => { grabValid = false }
+
+    viewCanvas.addEventListener('pointerdown', onPointerDown, { capture: true })
+    const doc = viewCanvas.ownerDocument
+    doc.addEventListener('pointermove', onPointerMove, { capture: true })
+    doc.addEventListener('pointerup', onPointerUp, { capture: true })
+    doc.addEventListener('pointercancel', onPointerUp, { capture: true })
+    removeOrbitFollow = () => {
+      viewCanvas.removeEventListener('pointerdown', onPointerDown, { capture: true })
+      doc.removeEventListener('pointermove', onPointerMove, { capture: true })
+      doc.removeEventListener('pointerup', onPointerUp, { capture: true })
+      doc.removeEventListener('pointercancel', onPointerUp, { capture: true })
+    }
+  }
+
   world.camera.controls.addEventListener('update', () => {
     // Camera damping only continues while this loop is alive, so a change has to
     // both redraw and keep the next tick.
@@ -2163,6 +2205,7 @@ export async function initFragmentsEngine(
   const dispose = async () => {
     loopReady = false
     components.enabled = false
+    removeOrbitFollow()
     darkBackdrop.dispose()
     viewCanvas.removeEventListener('webglcontextrestored', onContextRestored)
     viewCanvas.removeEventListener('pointerdown', onUserInput)

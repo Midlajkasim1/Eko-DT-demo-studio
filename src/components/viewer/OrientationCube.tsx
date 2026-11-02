@@ -193,8 +193,13 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
       const v = face && FACE_VIEWS[face]
       if (v) snapTo(v[0], v[1], !!detail.closer, detail.spaceIds)
     }
+    const onCancel = () => { lookSeq.current++ }
     window.addEventListener('eko-look-face', onLook)
-    return () => window.removeEventListener('eko-look-face', onLook)
+    window.addEventListener('eko-look-cancel', onCancel)
+    return () => {
+      window.removeEventListener('eko-look-face', onLook)
+      window.removeEventListener('eko-look-cancel', onCancel)
+    }
   }, [snapTo])
 
   /** Follow the camera, and only while it is actually moving. */
