@@ -22,6 +22,7 @@ import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
 import { createFcuSchematic } from '@/lib/fcuSchematic'
 import { projectAhuSchematic } from '@/lib/ekoAhuSchematic'
+import { projectVavSchematic } from '@/lib/ekoVavSchematic'
 import { fahuSchematicFor } from '@/lib/ekoFahuSchematic'
 import { createMauSchematic } from '@/lib/mauSchematic'
 import { createEcoSchematic } from '@/lib/ecoSchematic'
@@ -52,6 +53,8 @@ const SCHEMATICS: Record<string, (localBox: THREE.Box3, modelMatrix: THREE.Matri
   ECO:  (box, matrix, casing) => createEcoSchematic(box, matrix, casing),
   // The Eko Hospital's FAHU has its own design; every other project keeps Marsa's createFahuSchematic, called as before
   FAHU: (box, matrix, casing, hospitalHvac) => fahuSchematicFor(hospitalHvac)(box, matrix, casing),
+  // No VAV schematic exists for any other project: its Locate in 3D shows the highlight alone, as before
+  VAV:  (box, matrix, casing, hospitalHvac) => projectVavSchematic(hospitalHvac, box, matrix, casing),
 }
 
 /* Types whose internals are driven by live FIN points (fan, coil, damper, filter, UV state) are listed in isLiveSchematic.
