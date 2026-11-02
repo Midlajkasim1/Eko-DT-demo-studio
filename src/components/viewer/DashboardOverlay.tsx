@@ -1231,13 +1231,17 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     /* The Spaces model is the heat map's: hidden in normal viewing, shown while the heat map is applied.
        (The heat plates follow their model's visibility, so it has to be on for them to draw.) */
     let spaceHeatActive = false
+    /* Occupancy draws people and colours no room, so the space volumes stay hidden: they covered the building and the people in it */
+    let heatModeNow = 'temp'
+    const spacesShown = () => spaceHeatActive && heatModeNow !== 'occ'
     const applySpacesGate = () => {
       const state = useModelStore.getState()
+      const show = spacesShown()
       for (const rec of state.models) {
         if (classifyLoaded(rec).group !== 'spaces') continue
-        if (state.modelVisibility[rec.modelId] !== spaceHeatActive) state.setModelVisibility(rec.modelId, spaceHeatActive)
+        if (state.modelVisibility[rec.modelId] !== show) state.setModelVisibility(rec.modelId, show)
         const root = modelObject(rec)
-        if (root && root.visible !== spaceHeatActive) root.visible = spaceHeatActive
+        if (root && root.visible !== show) root.visible = show
       }
     }
 
@@ -1246,7 +1250,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     let heatSheets: THREE.Mesh[] = []
     let heatSig = ''
     let heatSeq = 0
-    let heatReq: { zones: { bimId?: string; bimIds?: string[]; tempC?: number | null; rh?: number | null; co2?: number | null }[]; mode?: string } | null = null
+    let heatReq: { zones: { bimId?: string; bimIds?: string[]; gid?: string; nameEn?: string; tempC?: number | null; rh?: number | null; co2?: number | null }[]; mode?: string } | null = null
     /* Colour sits in the room and is tested against the building, so a ceiling does not hide it from an angled view. */
     let heatInsideWalls = false
     const heatInsideOf = () => {
@@ -1412,31 +1416,47 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const folded = name.toLowerCase()
       return words.some(word => folded.includes(word))
     }
-    const placeCrowd = (floorIds: string[], wanted: Set<string>, people: number) => {
+    const occWeight = (id: string) => {
+      let h = 2166136261
+      for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619)
+      return 0.35 + ((h >>> 0) % 1000) / 1000 * 1.3
+    }
+    /* Each zone gets the dashboard's count for it (same weight on the same key), shared among its rooms in view.
+       Sharing all the people among every room rounded each room to none once a zone linked many rooms. */
+    const placeCrowd = (floorIds: string[], zones: { key: string; ids: string[] }[], people: number) => {
       clearCrowd()
-      const ids: string[] = []
+      const inView = new Set<string>()
       for (const floorId of floorIds) {
         const set = floorRooms.get(floorId)?.guids
         if (!set) continue
-        for (const g of set) if (wanted.has(g) && located.has(g)) ids.push(g)
+        for (const g of set) if (located.has(g)) inView.add(g)
       }
-      if (!ids.length || people <= 0) return
-      const weights = ids.map(id => {
-        let h = 2166136261
-        for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619)
-        return 0.35 + ((h >>> 0) % 1000) / 1000 * 1.3
-      })
-      const sum = weights.reduce((n, w) => n + w, 0) || 1
+      if (!inView.size || people <= 0) return
+      const zoneWeights = zones.map(z => occWeight(z.key))
+      const zoneSum = zoneWeights.reduce((n, w) => n + w, 0) || 1
       let total = 0
-      const plan = ids.map((id, i) => {
-        const count = Math.max(0, Math.round(people * weights[i] / sum))
-        total += count
-        const cap = Math.max(4, Math.round(6 + weights[i] * 14))
-        return { id, count, ratio: Math.min(1, count / cap) }
-      }).filter(p => p.count > 0)
+      const plan: { id: string; count: number; ratio: number }[] = []
+      zones.forEach((zone, z) => {
+        const zoneCount = Math.max(0, Math.round(people * zoneWeights[z] / zoneSum))
+        const rooms = zone.ids.filter(id => inView.has(id))
+        if (!zoneCount || !rooms.length) return
+        const weights = rooms.map(occWeight)
+        const sum = weights.reduce((n, w) => n + w, 0) || 1
+        const exact = weights.map(w => zoneCount * w / sum)
+        const counts = exact.map(Math.floor)
+        let left = zoneCount - counts.reduce((n, c) => n + c, 0)
+        exact.map((v, i) => [v - counts[i], i] as const).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { counts[i]++; left-- } })
+        rooms.forEach((id, i) => {
+          if (!counts[i]) return
+          const cap = Math.max(4, Math.round(6 + weights[i] * 14))
+          plan.push({ id, count: counts[i], ratio: Math.min(1, counts[i] / cap) })
+          total += counts[i]
+        })
+      })
       if (!total) return
       const geo = new THREE.SphereGeometry(0.22, 6, 6)
-      const mat = new THREE.MeshBasicMaterial({ vertexColors: true })
+      // Each person's colour is its instance colour; vertexColors would multiply it by the sphere's missing colour attribute, which reads as black
+      const mat = new THREE.MeshBasicMaterial()
       const mesh = new THREE.InstancedMesh(geo, mat, total)
       mesh.frustumCulled = false
       mesh.renderOrder = 3
@@ -1474,6 +1494,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (!crowdMesh || !crowd.length) return
       const step = 0.016 * occSpeed()
       const col = new THREE.Color()
+      // A person keeps about 10 px across, so a whole floor seen from above still shows them; up close they stay life size
+      const cam = engine.world?.camera?.three as THREE.PerspectiveCamera | undefined
+      const viewH = engine.world?.renderer?.three?.domElement?.clientHeight || 800
+      const perPx = cam?.isPerspectiveCamera ? 2 * Math.tan((cam.fov * Math.PI) / 360) / viewH : 0
       for (let i = 0; i < crowd.length; i++) {
         const p = crowd[i]
         /* Patient rooms and other unticked names stay where they were placed. */
@@ -1497,6 +1521,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const hex = near <= 2 ? 0x3b82f6 : near <= 4 ? 0x22c55e : near <= 7 ? 0xeab308 : 0xef4444
         col.setHex(hex)
         crowdDummy.position.set(p.x, p.y, p.z)
+        const grow = perPx && cam ? (10 * perPx * crowdDummy.position.distanceTo(cam.position)) / 0.44 : 1
+        crowdDummy.scale.setScalar(Math.min(4, Math.max(1, grow)))
         crowdDummy.updateMatrix()
         crowdMesh.setMatrixAt(i, crowdDummy.matrix)
         crowdMesh.setColorAt(i, col)
@@ -1653,15 +1679,16 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       mesh.renderOrder = 2
       return mesh
     }
-    const applySpaceHeat = async (zones: { bimId?: string; bimIds?: string[]; tempC?: number | null; rh?: number | null; co2?: number | null }[], mode?: string) => {
+    const applySpaceHeat = async (zones: { bimId?: string; bimIds?: string[]; gid?: string; nameEn?: string; tempC?: number | null; rh?: number | null; co2?: number | null }[], mode?: string) => {
       heatReq = { zones, mode }
       /* Locating every room shares the worker that is still parsing the next file. */
       if (useLoadingProgressStore.getState().sessionActive) return
+      const md = mode === 'comfort' || mode === 'hum' || mode === 'occ' ? mode : 'temp'
       spaceHeatActive = true
+      heatModeNow = md
       applySpacesGate()
       const inside = heatInsideOf()
       heatInsideWalls = inside
-      const md = mode === 'comfort' || mode === 'hum' || mode === 'occ' ? mode : 'temp'
       const levelId = ((window as any).EKO?.state?.dock?.level as string) || 'ALL'
       const idsOf = (z: { bimId?: string; bimIds?: string[] }) =>
         (z.bimIds && z.bimIds.length ? z.bimIds : (z.bimId ? [z.bimId] : [])).filter(id => isGuid(id))
@@ -1692,6 +1719,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
       const seq = ++heatSeq
       const wanted = new Set(jobs.map(job => job.bimId))
+      // The zones the dashboard counts people in, keyed as it keys them
+      const crowdZones = md === 'occ'
+        ? (zones || []).filter(z => z.bimId || z.gid || (z.bimIds && z.bimIds.length))
+          .map(z => ({ key: String((z.bimIds && z.bimIds[0]) || z.bimId || z.gid || z.nameEn || ''), ids: idsOf(z) }))
+        : []
       const alone = !!(window as any).EKO?.state?.dock?.floorAlone
       if (levelId && levelId !== 'ALL') await guidsForFloor(levelId, wanted)
       else {
@@ -1705,7 +1737,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const wake = engine.world?.renderer as { needsUpdate?: boolean } | undefined
       if (md !== 'occ') clearCrowd()
       if (!missing.length) {
-        if (md === 'occ') placeCrowd(order, wanted, occPeople())
+        if (md === 'occ') placeCrowd(order, crowdZones, occPeople())
         syncGhost()
         if (wake) wake.needsUpdate = true
         return
@@ -1732,7 +1764,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           for (const id of guids) kept.guids.add(id)
           if (seq === heatSeq) {
             kept.done = true
-            placeCrowd(order, wanted, occPeople())
+            placeCrowd(order, crowdZones, occPeople())
             syncGhost()
             if (wake) wake.needsUpdate = true
           }
@@ -1956,7 +1988,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         + (keepContext ? '+ctx' : '') + '#' + [...new Set(models.map(m => m.modelId))].sort().join(',')
       if (!force && key === lastLayerKey) return
       lastLayerKey = key
-      const shown = layerVisibility(models, layerId, { keepContext, spacesVisible: spaceHeatActive })
+      const shown = layerVisibility(models, layerId, { keepContext, spacesVisible: spacesShown() })
       const fragList = engine.fragments?.models?.list
       for (const m of models) {
         const visible = shown.get(m.modelId) ?? true

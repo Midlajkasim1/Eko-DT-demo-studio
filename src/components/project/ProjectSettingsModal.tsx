@@ -59,12 +59,7 @@ function HeatmapPane({
   return (
     <div className="ds-pane">
       <h3 className="ds-section-title">Heatmap</h3>
-      <p className="ds-hint">
-        Linked rooms are coloured with sample readings until a FIN value arrives.
-        Turn sample readings off and a room is drawn only when its name is a sensor, such as IS-01 or IAQ-02.
-        IS reads zone temperature and humidity. IAQ reads CO2.
-        Save, then open the heatmap. Leave this as it is and the project keeps the top view of the ground floor, with the models as they are.
-      </p>
+      <p className="ds-hint">Rooms are coloured from FIN readings.</p>
 
       <h3 className="ds-section-title" style={{ marginTop: 24 }}>Sample readings</h3>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
@@ -81,9 +76,7 @@ function HeatmapPane({
         />
         Fill linked rooms when FIN has no reading
       </label>
-      <p className="ds-hint">
-        Linked rooms share seven sample sensors, S-01 to S-07. Rooms on one sensor use the same temperature, humidity, and CO2, so the view does not colour every room on its own. You do not rename the rooms. A real FIN reading is kept. Marsa has no linked rooms, so its heatmap stays on the FIN feed. Turn this off to draw only rooms you name IS-01 or IAQ-02.
-      </p>
+      <p className="ds-hint">Off: only rooms named after a sensor (IS-01, IAQ-02) are coloured.</p>
 
       <h3 className="ds-section-title" style={{ marginTop: 24 }}>Occupancy</h3>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
@@ -109,10 +102,7 @@ function HeatmapPane({
         />
         <span>{(current.speed ?? 1).toFixed(1)}</span>
       </label>
-      <p className="ds-hint">
-        The Occupancy tab puts these people in the rooms you are viewing. The colour is on the dots: blue when they are apart, then green, amber, and red as they bunch up. The room itself is not coloured. People in a ticked place, such as a corridor or lobby, walk. People in other rooms, such as patient rooms, stand still. Speed is how fast the walking ones move.
-      </p>
-      <p className="ds-hint">People walk in rooms whose name contains one of these words. Corridor covers CORRIDOR. Leave the extra line blank unless a room uses another word, such as atrium.</p>
+      <p className="ds-hint">People walk in rooms whose name contains:</p>
       {['Corridor', 'Circulation', 'Public area', 'Lobby', 'Waiting', 'Lounge'].map(word => {
         const on = (current.walkRooms ?? ['Corridor', 'Circulation', 'Public area', 'Lobby', 'Waiting', 'Lounge']).some(w => w.toLowerCase() === word.toLowerCase())
         return (
@@ -165,8 +155,7 @@ function HeatmapPane({
           }}>Use the automatic top view</button>
         )}
       </div>
-      <p className="ds-hint">Point the model, then save this top view. Only the heatmap opens there. Save Settings keeps it. Other panels keep the camera from Save Camera &amp; Render View. Inside the floor still uses its own look.</p>
-      <p className="ds-hint">Inside the floor looks in from a high corner. The ceiling of that storey is cut away, so the colour sits between the walls. Top view does the same while the box below is ticked.</p>
+      <p className="ds-hint">The heatmap opens on the saved top view.</p>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0 16px', fontSize: 13 }}>
         <input
           type="checkbox"
@@ -174,11 +163,10 @@ function HeatmapPane({
           disabled={current.camera === 'inside'}
           onChange={e => patch({ insideWalls: e.target.checked })}
         />
-        Draw the colour inside the room, under the ceiling
+        Colour inside the room, under the ceiling
       </label>
 
       <h3 className="ds-section-title">Floor</h3>
-      <p className="ds-hint">A named storey shows that floor only, with its ceiling opened while the colour is drawn inside. All floors keeps every storey. Leave this on Ground floor and the project keeps the usual ground-floor view.</p>
       <select
         value={current.floor || ''}
         onChange={e => patch({ floor: e.target.value || undefined })}
@@ -190,10 +178,10 @@ function HeatmapPane({
           <option key={f.id} value={f.id}>{f.name || f.id}</option>
         ))}
       </select>
-      {!floors.length && <p className="ds-hint">Open the model to list its storeys here. Ground floor and All floors can be saved before that.</p>}
+      {!floors.length && <p className="ds-hint">Open the model to list its floors.</p>}
 
       <h3 className="ds-section-title" style={{ marginTop: 8 }}>Fade</h3>
-      <p className="ds-hint">Nothing fades until you tick a model. A ticked model stays on screen but light, so the room colour reads through it.</p>
+      <p className="ds-hint">Ticked models stay light so the colour shows through.</p>
       {models.length ? models.map(name => (
         <label key={name} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, fontSize: 13 }}>
           <input type="checkbox" checked={namedFade && faded.has(name)} onChange={() => toggleModel(name)} />
