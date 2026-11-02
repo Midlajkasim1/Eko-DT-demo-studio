@@ -21,7 +21,7 @@ import { setHidden, isHidden, onVisibilityApplied } from '@/lib/visibilityCoordi
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
 import { createFcuSchematic } from '@/lib/fcuSchematic'
-import { createAhuSchematic } from '@/lib/ahuSchematic'
+import { projectAhuSchematic } from '@/lib/ekoAhuSchematic'
 import { fahuSchematicFor } from '@/lib/ekoFahuSchematic'
 import { createMauSchematic } from '@/lib/mauSchematic'
 import { createEcoSchematic } from '@/lib/ecoSchematic'
@@ -46,7 +46,8 @@ interface DashboardOverlayProps {
 /* Equipment type (from the project's asset links) -> the internals drawn inside its casing on selection */
 const SCHEMATICS: Record<string, (localBox: THREE.Box3, modelMatrix: THREE.Matrix4, casing: THREE.Object3D, hospitalHvac: boolean) => HvacSchematic | null> = {
   FCU:  (box, matrix, casing, hospitalHvac) => createFcuSchematic(box, matrix, casing, { hospitalHvac }),
-  AHU:  (box, matrix, casing, hospitalHvac) => createAhuSchematic(box, matrix, casing, { hospitalHvac }),
+  // The Eko Hospital's AHU has its own design; every other project keeps the original createAhuSchematic, with its original (flag-off) behaviour
+  AHU:  (box, matrix, casing, hospitalHvac) => projectAhuSchematic(hospitalHvac, box, matrix, casing),
   MAHU: (box, matrix, casing) => createMauSchematic(box, matrix, casing),
   ECO:  (box, matrix, casing) => createEcoSchematic(box, matrix, casing),
   // The Eko Hospital's FAHU has its own design; every other project keeps Marsa's createFahuSchematic, called as before
