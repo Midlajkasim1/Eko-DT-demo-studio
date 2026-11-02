@@ -96,22 +96,24 @@ export async function initFragmentsEngine(
   // nothing left to show, which is what leaves the idle frame counter at zero.
   world.renderer.mode = OBC.RendererMode.MANUAL
   let loopReady = false
-  let waking = false
   let inLoop = false
   let rendererNeedsUpdate = false
   let runLoop: () => void = () => {}
   let frameDirty = false
   let cameraChanged = false
+  /** A frame was asked for by something other than the camera, so the sun shadow may be out of date. */
+  let sceneRequested = false
+  let inCameraRequest = false
+  /** The loop has parked since the last template frame, so the next one is the first after a quiet moment. */
+  let parkedSinceTemplateFrame = true
   let viewFreshUntil = 0
+  // On the next animation frame, never inside the caller, and without the parked time: camera-controls asks for a frame
+  // before it listens for 'rest', and a frame that jumps a transition to its end leaves a fitToBox waiting for good
   const wakeLoop = () => {
-    if (!loopReady || waking || inLoop || components.enabled) return
-    waking = true
+    if (!loopReady || inLoop || components.enabled) return
     components.enabled = true
-    try {
-      runLoop()
-    } finally {
-      waking = false
-    }
+    ;(components as unknown as { _timer: THREE.Timer })._timer.update()
+    requestAnimationFrame(runLoop)
   }
   const requestFrame = () => {
     world.renderer.needsUpdate = true
@@ -124,6 +126,7 @@ export async function initFragmentsEngine(
       rendererNeedsUpdate = value
       if (value) {
         frameDirty = true
+        if (!inCameraRequest) sceneRequested = true
         // A request that lands mid-frame is picked up at the end of this tick.
         if (!inLoop) wakeLoop()
       }
@@ -314,13 +317,40 @@ export async function initFragmentsEngine(
   let isPbrEnabled = true
   let progressiveRenderingEnabled = true
   let cameraMoving = false
+  /** When the camera last changed. A template draws its light frame until the view has been still for MOTION_SETTLE_MS. */
+  let cameraChangedAt = 0
+  const MOTION_SETTLE_MS = 150
+  let motionSettleTimer: ReturnType<typeof setTimeout> | null = null
+  /** WebGL drawn on the CPU: a machine or a VM without a GPU */
+  const softwareGl = (() => {
+    try {
+      const gl = world.renderer.three.getContext()
+      let name = String(gl.getParameter(gl.RENDERER) || '')
+      if (/^webkit webgl$/i.test(name)) {
+        const info = gl.getExtension('WEBGL_debug_renderer_info')
+        if (info) name = String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL) || '')
+      }
+      return /llvmpipe|softpipe|swiftshader|software|basic render/i.test(name)
+    } catch {
+      return false
+    }
+  })()
+  /** Share of the template's pixel ratio drawn while the view moves, lowered when moving frames come slowly. Software GL starts at half. */
+  let motionScale = softwareGl ? 0.5 : 1
+  const motionGaps: number[] = []
+  let lastMotionFrameAt = 0
+  let templateWasMoving = false
+  let shadowTimer: ReturnType<typeof setTimeout> | null = null
+  let shadowDrawnAt = -Infinity
+  /** Without a GPU one frame can take longer than a second, so the shadow waits longer between redraws */
+  const SHADOW_GAP_MS = softwareGl ? 8000 : 1000
+  let fullFrameTimer: ReturnType<typeof setTimeout> | null = null
+  const shadowSunAt = new THREE.Vector3(Infinity, Infinity, Infinity)
   /** Auto-focus has reached the orbit target, so it no longer needs frames. */
   let focusSettled = true
   let progressiveRestoreTimer: ReturnType<typeof setTimeout> | null = null
   let savedAoEnabled = false
   let savedEdgeEnabled = false
-  let savedTemplateAoEnabled = false
-  let savedTemplateInkEnabled = false
   /** The template driving the scene, or null when the project settings do */
   let activeTemplate: TemplateScene | null = null
   /** Which template id is on the scene, so a Studio slider can retune without rebuilding it. */
@@ -384,6 +414,11 @@ export async function initFragmentsEngine(
       // GTAO, as the reference uses — its radius is in world units, and it reads
       // far cleaner on building-scale geometry than a screen-space pass does.
       const ao = new GTAOPass(world.scene.three, world.camera.three, size.x, size.y)
+      if (softwareGl) {
+        // Without a GPU the occlusion is worked out at half size; it is soft shading, so it upscales cleanly
+        const setFullSize = ao.setSize.bind(ao)
+        ao.setSize = (w: number, h: number) => setFullSize(Math.max(1, Math.floor(w / 2)), Math.max(1, Math.floor(h / 2)))
+      }
       ao.updateGtaoMaterial({ radius: frame.ao.radius, distanceExponent: 1.5, thickness: 1 })
       ao.blendIntensity = frame.ao.intensity
       composer.addPass(ao)
@@ -416,6 +451,41 @@ export async function initFragmentsEngine(
     // Tone maps and converts to sRGB; every pass above works in linear light
     composer.addPass(new OutputPass())
     templateComposer = composer
+  }
+
+  /** The template's frame at a share of its pixel ratio; only the composer's buffers resize, occlusion and edges keep theirs. */
+  const templateFrameSize = new THREE.Vector2()
+  const scaleTemplateFrame = (scale: number) => {
+    if (!templateComposer) return
+    const css = world.renderer.three.getSize(templateFrameSize)
+    let w = css.x * cappedPixelRatio()
+    let h = css.y * cappedPixelRatio()
+    if (scale < 1) {
+      w = Math.max(1, Math.floor(w * scale))
+      h = Math.max(1, Math.floor(h * scale))
+    }
+    if (templateComposer.renderTarget1.width === w && templateComposer.renderTarget1.height === h) return
+    templateComposer.renderTarget1.setSize(w, h)
+    templateComposer.renderTarget2.setSize(w, h)
+  }
+
+  /** Times the moving frames of a drag. When the drag ends, slow frames lower the next drag's motionScale and quick ones raise it. */
+  const trackMotionFrame = (moving: boolean, now: number) => {
+    if (moving) {
+      if (templateWasMoving && now - lastMotionFrameAt < 1000) motionGaps.push(now - lastMotionFrameAt)
+      lastMotionFrameAt = now
+      templateWasMoving = true
+      return
+    }
+    if (!templateWasMoving) return
+    templateWasMoving = false
+    if (motionGaps.length >= 4) {
+      motionGaps.sort((a, b) => a - b)
+      const median = motionGaps[motionGaps.length >> 1]
+      if (median > 45) motionScale = Math.max(0.5, motionScale * 0.75)
+      else if (median < 18) motionScale = Math.min(1, motionScale / 0.75)
+    }
+    motionGaps.length = 0
   }
 
   /** Updates occlusion and edges in place. Rebuilds only when a pass is added or removed. */
@@ -669,6 +739,11 @@ export async function initFragmentsEngine(
     }
     templateGroup.visible = false
     tSun.castShadow = false
+    // The template drew its shadow on demand; the other modes redraw it every frame
+    world.renderer.three.shadowMap.autoUpdate = true
+    shadowSunAt.set(Infinity, Infinity, Infinity)
+    templateWasMoving = false
+    motionGaps.length = 0
     if (tSun.target.parent) tSun.target.removeFromParent()
     const catcher = world.scene.three.getObjectByName('ShadowCatcherPlane')
     if (catcher) catcher.visible = true
@@ -1531,6 +1606,7 @@ export async function initFragmentsEngine(
     }
     if (followCamera) return
     components.enabled = false
+    parkedSinceTemplateFrame = true
   }
 
   world.renderer.update = () => {
@@ -1542,6 +1618,7 @@ export async function initFragmentsEngine(
     if (world.renderer.mode === OBC.RendererMode.MANUAL && !shouldDraw) {
       cameraChanged = false
       components.enabled = false
+      parkedSinceTemplateFrame = true
       return
     }
 
@@ -1580,12 +1657,49 @@ export async function initFragmentsEngine(
       if (templateAoPass) templateAoPass.camera = camera
       templateInkPass?.view(scene, camera)
 
+      // No occlusion or edges while the view moves, or without a GPU while frames follow each other; fewer pixels while moving
+      const now = performance.now()
+      const moving = progressiveRenderingEnabled && (cameraMoving || now - cameraChangedAt < MOTION_SETTLE_MS)
+      const burst = softwareGl && progressiveRenderingEnabled && !parkedSinceTemplateFrame
+      parkedSinceTemplateFrame = false
+      const light = moving || burst
+      if (templateAoPass) templateAoPass.enabled = !light
+      if (templateInkPass) templateInkPass.enabled = !light
+      trackMotionFrame(moving, now)
+      scaleTemplateFrame(moving ? motionScale : 1)
+      if (burst && !moving) {
+        // The full frame once the loop has had a quiet moment
+        if (fullFrameTimer) clearTimeout(fullFrameTimer)
+        fullFrameTimer = setTimeout(() => {
+          fullFrameTimer = null
+          requestFrame()
+        }, 200)
+      }
+
       if (tSun.userData.sunOffset && world.camera.controls) {
         const target = new THREE.Vector3()
         world.camera.controls.getTarget(target)
         tSun.target.position.copy(target)
         tSun.position.copy(target).add(tSun.userData.sunOffset)
         if (tSun.castShadow) tSun.shadow.camera.updateProjectionMatrix()
+      }
+
+      // The sun shadow is redrawn on a full frame once the scene or the sun has changed, at most once per SHADOW_GAP_MS
+      const shadowMap = world.renderer.three.shadowMap
+      shadowMap.autoUpdate = false
+      if (tSun.castShadow && !light && (sceneRequested || !tSun.position.equals(shadowSunAt))) {
+        const wait = shadowDrawnAt + SHADOW_GAP_MS - now
+        if (wait <= 0) {
+          shadowMap.needsUpdate = true
+          shadowDrawnAt = now
+          sceneRequested = false
+          shadowSunAt.copy(tSun.position)
+        } else if (!shadowTimer) {
+          shadowTimer = setTimeout(() => {
+            shadowTimer = null
+            requestFrame()
+          }, wait + 5)
+        }
       }
 
       world.renderer.onBeforeUpdate.trigger(world.renderer)
@@ -1740,7 +1854,8 @@ export async function initFragmentsEngine(
     try {
       const timer = (components as unknown as { _timer: THREE.Timer })._timer
       timer.update()
-      const delta = timer.getDelta()
+      // A frame that took seconds would jump a camera transition to its end in one step, and camera-controls then never reports 'rest'
+      const delta = Math.min(timer.getDelta(), 0.5)
       for (const component of components.list.values()) {
         if (component.enabled && component.isUpdateable()) component.update(delta)
       }
@@ -1778,8 +1893,19 @@ export async function initFragmentsEngine(
     // Camera damping only continues while this loop is alive, so a change has to
     // both redraw and keep the next tick.
     cameraChanged = true
+    cameraChangedAt = performance.now()
     void fragments.update()
+    inCameraRequest = true
     requestFrame()
+    inCameraRequest = false
+    // A template's full frame (occlusion, edges, shadow) once the camera has stopped, also after a fly-to
+    if (activeTemplate) {
+      if (motionSettleTimer) clearTimeout(motionSettleTimer)
+      motionSettleTimer = setTimeout(() => {
+        motionSettleTimer = null
+        requestFrame()
+      }, MOTION_SETTLE_MS + 10)
+    }
   })
 
   // Progressive Rendering
@@ -1789,11 +1915,8 @@ export async function initFragmentsEngine(
     if (!progressiveRenderingEnabled) return
     if (progressiveRestoreTimer) { clearTimeout(progressiveRestoreTimer); progressiveRestoreTimer = null }
     
-    // Disable heavy passes during camera movement for better FPS
-    if (activeTemplate) {
-      if (templateAoPass && templateAoPass.enabled) { savedTemplateAoEnabled = true; templateAoPass.enabled = false }
-      if (templateInkPass && templateInkPass.enabled) { savedTemplateInkEnabled = true; templateInkPass.enabled = false }
-    } else {
+    // Disable heavy passes during camera movement for better FPS. A template does this per frame in its render path.
+    if (!activeTemplate) {
       if (ssaoPass && ssaoPass.enabled) { savedAoEnabled = true; ssaoPass.enabled = false; renderPass.enabled = true }
       if (edgePass && edgePass.enabled) { savedEdgeEnabled = true; edgePass.enabled = false }
     }
@@ -1807,16 +1930,12 @@ export async function initFragmentsEngine(
     if (!progressiveRenderingEnabled) return
     if (progressiveRestoreTimer) clearTimeout(progressiveRestoreTimer)
     progressiveRestoreTimer = setTimeout(() => {
-      if (activeTemplate) {
-        if (savedTemplateAoEnabled && templateAoPass) { templateAoPass.enabled = true }
-        if (savedTemplateInkEnabled && templateInkPass) { templateInkPass.enabled = true }
-      } else {
+      if (!activeTemplate) {
         if (savedAoEnabled && ssaoPass) { ssaoPass.enabled = true; renderPass.enabled = false }
         if (savedEdgeEnabled && edgePass) { edgePass.enabled = true }
+        world.renderer.three.shadowMap.autoUpdate = true
+        world.renderer.three.shadowMap.needsUpdate = true
       }
-      
-      world.renderer.three.shadowMap.autoUpdate = true
-      world.renderer.three.shadowMap.needsUpdate = true
       progressiveRestoreTimer = null
       requestFrame()
     }, 150)
@@ -1836,10 +1955,25 @@ export async function initFragmentsEngine(
     requestFrame()
   })
   
+  // Fragments ends every periodic refresh with onViewUpdated, even with no tile changed; only a changed tile needs a frame
+  let tilesChanged = true
+  {
+    const meshes = fragments.models as unknown as { processTileRequest?: (request: { tileRequestClass: number }) => void }
+    const processTile = meshes.processTileRequest
+    if (typeof processTile === 'function') {
+      meshes.processTileRequest = function (request) {
+        if (request?.tileRequestClass !== FRAGS.TileRequestClass.FINISH) tilesChanged = true
+        return processTile.call(this, request)
+      }
+    }
+  }
+
   fragments.models.list.onItemSet.add(async ({ value: model }: any) => {
     // Tiles land after the camera has already stopped. This is what wakes a
     // parked view so the new geometry is actually shown.
     model.onViewUpdated?.add?.(() => {
+      if (!tilesChanged) return
+      tilesChanged = false
       viewFreshUntil = performance.now() + 150
       requestFrame()
     })

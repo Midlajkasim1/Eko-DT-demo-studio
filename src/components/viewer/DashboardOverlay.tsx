@@ -1711,7 +1711,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const stops = HEAT_STOPS[md] || HEAT_STOPS.temp
       const low = new THREE.Color(stops[0])
       const high = new THREE.Color(stops[1])
-      const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+      /* Batches yield to the page, not to a drawn frame: without a GPU one frame takes seconds and would set the pace */
+      const nextFrame = () => new Promise<void>(resolve => setTimeout(resolve, 0))
       let batchFrom = performance.now()
       for (const floorId of missing) {
         if (seq !== heatSeq) return
@@ -2067,6 +2068,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const afterFrame = () => {
       drawGhost()
       miniMap.capture()
+      // Fans in the shown equipment and the occupancy crowd move only while frames are drawn
+      const spinning = !!(active && ghost?.group.visible)
+      if (spinning || (crowdMesh && crowd.length)) {
+        const wake = engine.world?.renderer as { needsUpdate?: boolean } | undefined
+        if (wake) wake.needsUpdate = true
+      }
     }
 
     const lookAtView = (view?: { position?: number[]; target?: number[] }) => {
