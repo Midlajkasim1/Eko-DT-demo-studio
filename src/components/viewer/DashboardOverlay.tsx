@@ -1391,8 +1391,50 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
     }
     let crowdMesh: THREE.InstancedMesh | null = null
-    let crowd: { minX: number; maxX: number; minZ: number; maxZ: number; x: number; z: number; vx: number; vz: number; y: number; still: boolean }[] = []
+    /* band: how crowded it is around a person, 0 low, 1 normal, 2 high, 3 critical */
+    let crowd: { minX: number; maxX: number; minZ: number; maxZ: number; x: number; z: number; vx: number; vz: number; y: number; still: boolean; band: number }[] = []
     const crowdDummy = new THREE.Object3D()
+    /* The medical twin's glow: a soft blob around each person in the colour of its band, drawn over the 3D view */
+    const CROWD_GLOW: [string, number][] = [['59,130,246', 0.45], ['34,197,94', 0.5], ['234,179,8', 0.6], ['239,68,68', 0.7]]
+    let crowdGlow: HTMLCanvasElement | null = null
+    const glowAt = new THREE.Vector3()
+    const drawCrowdGlow = () => {
+      const view = engine.world?.renderer?.three?.domElement as HTMLCanvasElement | undefined
+      const cam = engine.world?.camera?.three
+      const ctx = crowdGlow?.getContext('2d')
+      if (!crowdMesh || !crowd.length || !view || !cam) {
+        if (crowdGlow && ctx) ctx.clearRect(0, 0, crowdGlow.width, crowdGlow.height)
+        return
+      }
+      if (!crowdGlow) {
+        crowdGlow = document.createElement('canvas')
+        Object.assign(crowdGlow.style, { position: 'absolute', pointerEvents: 'none' })
+        view.insertAdjacentElement('afterend', crowdGlow)
+      }
+      const w = view.clientWidth
+      const h = view.clientHeight
+      Object.assign(crowdGlow.style, { left: `${view.offsetLeft}px`, top: `${view.offsetTop}px`, width: `${w}px`, height: `${h}px` })
+      if (crowdGlow.width !== w || crowdGlow.height !== h) { crowdGlow.width = w; crowdGlow.height = h }
+      const g = crowdGlow.getContext('2d')
+      if (!g) return
+      g.clearRect(0, 0, w, h)
+      const radius = Math.max(30, w * 0.05)
+      for (const p of crowd) {
+        glowAt.set(p.x, p.y, p.z).project(cam)
+        if (glowAt.z > 1 || glowAt.z < -1) continue
+        const sx = (glowAt.x + 1) / 2 * w
+        const sy = (1 - glowAt.y) / 2 * h
+        if (sx < -radius || sy < -radius || sx > w + radius || sy > h + radius) continue
+        const [rgb, alpha] = CROWD_GLOW[p.band] || CROWD_GLOW[0]
+        // Nearly clear at the centre, so the white person stays white inside its glow
+        const grad = g.createRadialGradient(sx, sy, 0, sx, sy, radius)
+        grad.addColorStop(0, `rgba(${rgb},${alpha * 0.15})`)
+        grad.addColorStop(0.18, `rgba(${rgb},${alpha})`)
+        grad.addColorStop(1, `rgba(${rgb},0)`)
+        g.fillStyle = grad
+        g.fillRect(sx - radius, sy - radius, radius * 2, radius * 2)
+      }
+    }
     const clearCrowd = () => {
       if (crowdMesh) {
         overlay.remove(crowdMesh)
@@ -1401,6 +1443,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         crowdMesh = null
       }
       crowd = []
+      drawCrowdGlow()
     }
     const occSpeed = () => {
       const n = useProjectStore.getState().currentProject?.apiSettings?.heatmap?.speed
@@ -1455,45 +1498,38 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       })
       if (!total) return
       const geo = new THREE.SphereGeometry(0.22, 6, 6)
-      // Each person's colour is its instance colour; vertexColors would multiply it by the sphere's missing colour attribute, which reads as black
-      const mat = new THREE.MeshBasicMaterial()
+      // White people; the glow around them carries the colour
+      const mat = new THREE.MeshBasicMaterial({ color: 0xffffff })
       const mesh = new THREE.InstancedMesh(geo, mat, total)
       mesh.frustumCulled = false
       mesh.renderOrder = 3
-      const col = new THREE.Color()
       let idx = 0
       for (const sp of plan) {
         const entry = located.get(sp.id)
         if (!entry?.localBox) continue
         entry.model.object.updateMatrixWorld(true)
         const box = entry.localBox.clone().applyMatrix4(entry.model.object.matrixWorld)
-        const a = sp.ratio < 0.5 ? occBlue : occAmber
-        const b = sp.ratio < 0.5 ? occAmber : occRed
-        col.copy(a).lerp(b, sp.ratio < 0.5 ? sp.ratio * 2 : (sp.ratio - 0.5) * 2)
         for (let i = 0; i < sp.count; i++) {
           const x = box.min.x + Math.random() * Math.max(0.2, box.max.x - box.min.x)
           const z = box.min.z + Math.random() * Math.max(0.2, box.max.z - box.min.z)
           const y = box.min.y + Math.min(1.1, Math.max(0.4, (box.max.y - box.min.y) * 0.35))
           const ang = Math.random() * Math.PI * 2
           const still = !guidWalks(sp.id)
-          crowd.push({ minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z, x, z, vx: Math.cos(ang), vz: Math.sin(ang), y, still })
+          crowd.push({ minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z, x, z, vx: Math.cos(ang), vz: Math.sin(ang), y, still, band: 0 })
           crowdDummy.position.set(x, y, z)
           crowdDummy.updateMatrix()
           mesh.setMatrixAt(idx, crowdDummy.matrix)
-          mesh.setColorAt(idx, col)
           idx++
         }
       }
       mesh.count = idx
       mesh.instanceMatrix.needsUpdate = true
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
       overlay.add(mesh)
       crowdMesh = mesh
     }
     stepCrowd = () => {
       if (!crowdMesh || !crowd.length) return
       const step = 0.016 * occSpeed()
-      const col = new THREE.Color()
       // A person keeps about 10 px across, so a whole floor seen from above still shows them; up close they stay life size
       const cam = engine.world?.camera?.three as THREE.PerspectiveCamera | undefined
       const viewH = engine.world?.renderer?.three?.domElement?.clientHeight || 800
@@ -1518,17 +1554,15 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           const dz = crowd[j].z - p.z
           if (dx * dx + dz * dz < 16) near++
         }
-        const hex = near <= 2 ? 0x3b82f6 : near <= 4 ? 0x22c55e : near <= 7 ? 0xeab308 : 0xef4444
-        col.setHex(hex)
+        /* Neighbours within 4 m, the medical twin's bands */
+        p.band = near <= 2 ? 0 : near <= 4 ? 1 : near <= 7 ? 2 : 3
         crowdDummy.position.set(p.x, p.y, p.z)
         const grow = perPx && cam ? (10 * perPx * crowdDummy.position.distanceTo(cam.position)) / 0.44 : 1
         crowdDummy.scale.setScalar(Math.min(4, Math.max(1, grow)))
         crowdDummy.updateMatrix()
         crowdMesh.setMatrixAt(i, crowdDummy.matrix)
-        crowdMesh.setColorAt(i, col)
       }
       crowdMesh.instanceMatrix.needsUpdate = true
-      if (crowdMesh.instanceColor) crowdMesh.instanceColor.needsUpdate = true
     }
     const clearSpaceHeat = async () => {
       heatSeq++
@@ -2101,6 +2135,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const miniMap = createMiniMap(engine)
     const afterFrame = () => {
       drawGhost()
+      drawCrowdGlow()
       miniMap.capture()
       // Fans in the shown equipment and the occupancy crowd move only while frames are drawn
       const spinning = !!(active && ghost?.group.visible)
@@ -2312,6 +2347,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       window.removeEventListener('eko-heat-camera', onHeatCamera)
       engine.world?.renderer?.onBeforeUpdate?.remove(syncGhost)
       engine.world?.renderer?.onAfterUpdate?.remove(afterFrame)
+      crowdGlow?.remove()
+      crowdGlow = null
       miniMap.dispose()
       clearInterval(resolveTimer)
       fadeArch(false)

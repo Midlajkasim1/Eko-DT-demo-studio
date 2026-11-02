@@ -898,9 +898,12 @@ window.EKO_A = (function(){
     const projected = tiles.indexOf('left:') !== -1;
     return `<div class="hmlayer"${projected ? ' data-proj="1"' : ''}>${tiles}</div>
       <div class="heatbar mzglass">
-        <span class="tMonoS cT3">${esc(legend)}</span>
+        ${mode === 'occ'
+          ? `<span class="hmocc">${[['hmOccLow', '#3b82f6'], ['hmOccNormal', '#22c55e'], ['hmOccHigh', '#eab308'], ['hmOccCritical', '#ef4444']]
+              .map(([k, c]) => `<span><i style="background:${c}"></i>${esc(E.t(k))}</span>`).join('')}</span>`
+          : `<span class="tMonoS cT3">${esc(legend)}</span>
         <span class="hmgrad" data-mode="${mode}"></span>
-        <span class="tCap">${esc(E.t('hmLegendCap'))}</span>
+        <span class="tCap">${esc(E.t('hmLegendCap'))}</span>`}
         <span class="segbox row msA">${seg(E.t('rangeToday'),'today')}${seg(E.t('rangeWeekly'),'week')}${seg(E.t('rangeMonthly'),'month')}</span>
         <button class="chip" data-on="${s.hmPlay?'true':'false'}" data-act="hmPlay">${esc(s.hmPlay?E.t('pauseW'):E.t('playW'))}</button>
         <span class="tMonoS" style="color:var(--posTx)">${esc(s.hmPlay && s.hmStepLabel ? s.hmStepLabel : rangeLabel)}</span>
