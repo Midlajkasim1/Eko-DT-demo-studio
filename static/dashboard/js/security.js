@@ -22,7 +22,24 @@ window.EKO_SEC = (function(){
   const C = () => window.EKO_C, A = () => window.EKO_A;
   const esc = s => C().esc(s), fmt = (v, d) => C().fmt(v, d), icon = (n, s) => C().icon(n, s);
   let E = null;
-  const use = E2 => { if(E2) E = E2; return E; };
+  /* The sample cameras name their element by a GlobalId of an older model export and carry its Revit id (CAM-L1-2541878).
+     The Studio maps them to the loaded model once, so the markers sit on the cameras and Locate finds them. */
+  const camAsked = new Set();
+  let camRetryAt = 0;
+  const revitIdOf = id => (String(id || '').match(/(\d{5,})$/) || [])[1];
+  function linkCams(){
+    const eng = E && E.engine, d = E && E.data.security;
+    if(!eng || !eng.matchElements || !d || Date.now() < camRetryAt) return;
+    const items = (d.cameras || []).filter(c => c.gid && !camAsked.has(c.gid)).map(c => ({ gid: c.gid, revitId: revitIdOf(c.id), kind: 'CCTV' }));
+    if(!items.length) return;
+    camRetryAt = Date.now() + 3000;
+    eng.matchElements(items).then(r => {
+      if(!r || !r.ready) return;
+      items.forEach(i => camAsked.add(i.gid));
+      if(r.matched && window.EKO_V) window.EKO_V.schedulePosition(E);
+    }, () => {});
+  }
+  const use = E2 => { if(E2){ E = E2; linkCams(); } return E; };
   const t = (k, p) => E.t(k, p);
   const D = () => (E && E.data.security) || null;
   const L = (en, ar) => E.lang === 'ar' ? (ar || en) : en;
@@ -145,7 +162,7 @@ window.EKO_SEC = (function(){
     const d = D(); if(!d) return '';
     const sel = E.state.secSel;
     const pts = [];
-    cams().forEach(c => { if(isFinite(+c.x) && isFinite(+c.y) && c.x !== undefined) pts.push({ id: c.id, x: +c.x, y: +c.y, k: 'cam', bad: c.online === false, tip: c.id + ' · ' + L(c.en, c.ar) }); });
+    cams().forEach(c => { if(isFinite(+c.x) && isFinite(+c.y) && c.x !== undefined) pts.push({ id: c.id, gid: c.gid, x: +c.x, y: +c.y, k: 'cam', bad: c.online === false, tip: c.id + ' · ' + L(c.en, c.ar) }); });
     doors().forEach(c => { if(isFinite(+c.x) && isFinite(+c.y) && c.x !== undefined) pts.push({ id: c.id, x: +c.x, y: +c.y, k: 'door', bad: accessEvents().some(e => e.door === c.id && FLAG.includes(e.kind) && e.open !== false), tip: c.id + ' · ' + L(c.en, c.ar) }); });
     /* D180: fire devices in alarm (the demo scenario) are marked; a site with many devices shows only what needs a look:
        flagged doors, offline cameras, the selection, and every camera only with the view cones on */
@@ -154,7 +171,7 @@ window.EKO_SEC = (function(){
     for(let q = pts.length - 1; q >= 0; q--) if(!fOk(pts[q])) pts.splice(q, 1);
     if(cams().length + doors().length > 60){ const keep = p => p.k === 'fire' || p.bad || p.id === sel || (p.k === 'cam' && (E.state.secCones || fk === 'cctv'));
       for(let q = pts.length - 1; q >= 0; q--) if(!keep(pts[q])) pts.splice(q, 1); }
-    return `<div class="mklayer secmklayer">${pts.map(p => `<button class="mk secmk" data-x="${p.x}" data-y="${p.y}" data-k="${p.k}" data-bad="${p.bad ? 1 : 0}" data-sel="${sel === p.id ? 1 : 0}"
+    return `<div class="mklayer secmklayer">${pts.map(p => `<button class="mk secmk" data-x="${p.x}" data-y="${p.y}"${p.gid ? ` data-bimid="${esc(p.gid)}"` : ''} data-k="${p.k}" data-bad="${p.bad ? 1 : 0}" data-sel="${sel === p.id ? 1 : 0}"
         data-act="${p.k === 'cam' ? 'secCam' : p.k === 'fire' ? 'secEv' : 'secDoor'}" data-v="${esc(p.ev || p.id)}" data-tip="${esc(p.tip)}" aria-label="${esc(p.tip)}">${icon(p.k === 'cam' ? 'eye' : p.k === 'fire' ? 'flame' : 'lock', 11)}</button>`).join('')}${window.EKO_SECW ? window.EKO_SECW.pulse(E) : ''}${window.EKO_SCN3 ? window.EKO_SCN3.markers(E) : ''}${window.EKO_EVAC && window.EKO_EVAC.markers ? window.EKO_EVAC.markers(E) : ''}</div>`;
   }
   /* the landing: the summary over the model, the open events in the panel */
@@ -368,8 +385,11 @@ window.EKO_SEC = (function(){
     /* Locate in 3D: the landing over the model, the item framed and marked */
     secLocate(el){ const E2 = window.EKO; use(E2); const id = el.dataset.v, p = posOf(id); if(!p) return;
       E2.state.dlg = null; E2.state.secDlg = null; E2.state.secSel = id; E2.go('sec', 'security', null);
+      const cam = cams().find(c => c.id === id);
       requestAnimationFrame(() => requestAnimationFrame(() => { const eng = E2.engine, host = document.getElementById('enginehost');
-        if(!eng || !host) return; const r = host.getBoundingClientRect();
+        if(!eng || !host) return;
+        if(cam && cam.gid && eng.matchElements && eng.flyToGid){ eng.flyToGid(cam.gid); if(eng.highlightGid) eng.highlightGid(cam.gid); return; }
+        const r = host.getBoundingClientRect();
         if(eng.frameRect) eng.frameRect([p], { left: r.width * 0.35, top: 40, width: r.width * 0.5, height: r.height - 160 }, { scale: 1.8 }); })); }
   };
   /* D182: the internals the overview and event workspace build on (js/sec-ws.js) */

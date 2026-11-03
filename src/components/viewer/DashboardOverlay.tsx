@@ -7,7 +7,8 @@ import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import { useAppStore } from '@/store/useAppStore'
 import type { RenderSettings } from '@/constants/renderSettings'
 import { useModelStore } from '@/store/useModelStore'
-import { foldName, indexLinks, indexSpaceLinks, isGuid } from '@/lib/assetLinks'
+import { foldName, indexLinks, indexSpaceLinks, isGuid, matchStaleGids, prepareElements, type PreparedElement } from '@/lib/assetLinks'
+import { guidsInModels, listModelElements } from '@/lib/modelElements'
 import type { AssetLink } from '@/types'
 import { frameModelFromAbove, resetCameraToHome, tiltIfVertical } from '@/lib/cameraUtils'
 import { frameSphereInView } from '@/lib/viewFraming'
@@ -140,6 +141,29 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     const linkFor = (assetId?: string | null) => (assetId ? links().byFold.get(fold(assetId)) : undefined)
 
+    /* The dashboard's sample cameras name their element by a GlobalId of an older export of the model.
+       matchElements maps each to the loaded model's element by its Revit id; every lookup below goes through it. */
+    const remap = new Map<string, string>()
+    const current = (gid: string) => remap.get(gid) ?? gid
+    let elementScan: { sig: string; job: Promise<PreparedElement[]> } | null = null
+    const matchElements = async (items: { gid: string; revitId?: string; kind?: string }[]) => {
+      const list = engine?.fragments?.models?.list
+      if (!engine || !list?.size) return { ready: false, matched: 0 }
+      const fresh = items.filter(i => isGuid(i.gid) && !remap.has(i.gid))
+      if (!fresh.length) return { ready: true, matched: 0 }
+      const present = await guidsInModels(engine, fresh.map(i => i.gid)).catch(() => null)
+      if (!present) return { ready: false, matched: 0 }
+      for (const i of fresh) if (present.has(i.gid)) remap.set(i.gid, i.gid)
+      const stale = fresh.filter(i => !present.has(i.gid))
+      if (!stale.length) return { ready: true, matched: 0 }
+      const sig = [...list.keys()].join('|')
+      if (elementScan?.sig !== sig) elementScan = { sig, job: listModelElements(engine, 'equip').then(prepareElements) }
+      const found = matchStaleGids(stale, await elementScan.job)
+      for (const [from, to] of found) remap.set(from, to)
+      if (found.size) repositionMarkers()
+      return { ready: true, matched: found.size }
+    }
+
     /* Asset id (with or without the ast- prefix) -> IFC GUID, or null.
        The project's asset link wins over whatever id the live feed carries. */
     const bimIdFor = (assetId?: string | null): string | null => {
@@ -150,11 +174,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const assets: any[] = (window as any).EKO?.data?.assets || []
       const asset = assets.find(a => a.id === assetId || normAssetId(a.id || '') === norm)
       // Simulation engine assets name their element (gid) or room (roomGid) instead of bimId
-      return [asset?.bimId, asset?.gid, asset?.roomGid].find(isGuid) || null
+      const gid = [asset?.bimId, asset?.gid, asset?.roomGid].find(isGuid)
+      return gid ? current(gid) : null
     }
 
     /* Accepts an asset id or a raw IFC GUID */
-    const toBimId = (idOrBimId?: string | null) => bimIdFor(idOrBimId) || (isGuid(idOrBimId) ? idOrBimId : null)
+    const toBimId = (idOrBimId?: string | null) => bimIdFor(idOrBimId) || (isGuid(idOrBimId) ? current(idOrBimId) : null)
 
     const locate = (bimId: string): Promise<Located | null> => {
       const hit = located.get(bimId)
@@ -728,10 +753,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       // Not an equipment point (e.g. a PMU chip): leave it to the adapter's 2D fallback
       if (!point.asset && !point.bimId && !point.alarm) return null
 
-      let bimId = toBimId(point.asset) || (isGuid(point.bimId) ? point.bimId : null)
+      let bimId = toBimId(point.asset) || (isGuid(point.bimId) ? current(point.bimId) : null)
       if (!bimId && point.alarm) {
         const al = (window as any).EKO?.data?.alarms?.find((a: any) => a.id === point.alarm)
-        bimId = toBimId(al?.asset) || (isGuid(al?.bimId) ? al.bimId : null)
+        bimId = toBimId(al?.asset) || (isGuid(al?.bimId) ? current(al.bimId) : null)
       }
       // Only equipment found in the model gets a marker: anything else has no
       // real position and would float at an arbitrary spot.
@@ -2492,6 +2517,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       setViewMode,
       setDashboardOpen,
       bimIdFor,
+      matchElements,
       isAlarmed,
       listMapped: () => links().list.map(m => ({ id: m.equip, bimId: m.guid })),
       spaceLinks: () => indexSpaceLinks(useProjectStore.getState().currentProject?.assetLinks),

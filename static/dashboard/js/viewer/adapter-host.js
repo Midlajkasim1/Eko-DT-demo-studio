@@ -77,6 +77,11 @@
         if (gid && h.highlightAsset) h.highlightAsset(gid);
         else if (!gid && h.clearHighlight) h.clearHighlight();
       },
+      /* GlobalIds of an older model export, mapped by the Studio to the loaded model's elements */
+      matchElements: function (items) {
+        var h = window.EKO_HOST_ENGINE;
+        return h && h.matchElements ? h.matchElements(items) : Promise.resolve({ ready: true, matched: 0 });
+      },
       projectAsset: function (assetId) {
         var h = window.EKO_HOST_ENGINE, p = h && h.projectPoint ? h.projectPoint({ asset: assetId }) : null;
         return p || { x: 0, y: 0, visible: false };

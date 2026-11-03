@@ -322,6 +322,26 @@ export function elementLabel(el: { name?: string; objectType?: string; category?
 /** Words of a link type, for ranking model elements in the picker */
 export const typeWords = (type: string): string[] => TYPE_WORDS[type.toUpperCase()] ?? []
 
+/**
+ * GlobalIds of an older export, each mapped to the loaded model's element of the same type: by the Revit element id when
+ * the caller knows it (the element's Tag), else by the id the old GlobalId carries (matchOlderExport).
+ */
+export function matchStaleGids(items: { gid: string; revitId?: string; kind?: string }[], prepared: PreparedElement[]): Map<string, string> {
+  const out = new Map<string, string>()
+  const byTag = new Map<string, PreparedElement[]>()
+  for (const p of prepared) if (p.el.tag) byTag.set(p.el.tag, [...(byTag.get(p.el.tag) ?? []), p])
+  const rest: { bimId: string; words: string[] }[] = []
+  for (const it of items) {
+    if (!isGuid(it.gid) || out.has(it.gid)) continue
+    const words = it.kind ? typeWords(it.kind) : []
+    const hits = (it.revitId ? byTag.get(String(it.revitId)) ?? [] : []).filter(p => !words.length || words.some(w => p.hay.includes(` ${w} `)))
+    if (hits.length === 1) out.set(it.gid, hits[0].el.guid)
+    else rest.push({ bimId: it.gid, words })
+  }
+  for (const [gid, hit] of matchOlderExport(rest, prepared)) if (hit.typed) out.set(gid, hit.el.guid)
+  return out
+}
+
 /** Links for every unlinked equipment whose best suggestion clears the bar, one element per equipment, best scores first */
 export function bestMatches(
   unlinked: LinkEquipment[],
