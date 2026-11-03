@@ -972,6 +972,14 @@
       window.dispatchEvent(new Event('eko-tree-sync'));
     };
   }
+  /* a clip that is playing keeps playing through a render: the same markup re-adopts the live element */
+  function keepVideos(){
+    const root = window.DASHBOARD_ROOT || document, old = new Map();
+    root.querySelectorAll('video').forEach(v => { const k = v._ekoKey || v.outerHTML; if(!old.has(k)) old.set(k, []); old.get(k).push(v); });
+    return () => root.querySelectorAll('video').forEach(v => { if(v._ekoKey) return;
+      const k = v.outerHTML, hit = (old.get(k) || []).shift();
+      if(hit){ hit._ekoKey = k; v.replaceWith(hit); if(hit.hidden && hit.nextElementSibling) hit.nextElementSibling.hidden = false; } else v._ekoKey = k; });
+  }
   function keepScroll(){
     const saved = [];
     SCROLLERS.forEach(sel => {
@@ -1012,6 +1020,7 @@
     }
     const restoreScroll = keepScroll();
     const adoptTree = keepTree();
+    const adoptVideos = keepVideos();
     if(window.EKO_SURF) window.EKO_SURF.reconcile();            /* R2 (D67) */
     (document.querySelector('.dashboard-native-container') || window.DASHBOARD_ROOT || document.documentElement).removeAttribute('data-wall');
     (window.DASHBOARD_ROOT||document.documentElement).setAttribute('data-nav', E.state.navMin ? 'min' : 'full');
@@ -1045,6 +1054,7 @@
     if(fresh && keptHost) fresh.replaceWith(keptHost);
     $('mobtabs').innerHTML = mobtabs();
     paintOverlays();
+    adoptVideos();
     /* E15 port (D180): the demo scenario's presenter bar floats over every page while a scenario plays */
     if(window.EKO_SCN && (window.EKO_SCN.on(E) || document.getElementById('scnbarhost'))){ let sb = document.getElementById('scnbarhost'); if(!sb){ sb = document.createElement('div'); sb.id = 'scnbarhost'; }   /* only a site with a scenario (the hospital) gets the host */
       /* D182: on a page with the model the bar sits at the bottom of the model, never over the tiles; elsewhere at the bottom of the window */

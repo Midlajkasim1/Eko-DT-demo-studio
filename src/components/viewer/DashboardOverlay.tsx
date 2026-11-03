@@ -186,6 +186,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           storey: scan?.storeyOf.get(l.guid) ?? '',
           clip: l.clip || defaultClip(l.equip),
         }))
+      cameras.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
       const value = { source, cameras }
       setupMemo = { links, source, scan, value }
       return value

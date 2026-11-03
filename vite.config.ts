@@ -191,6 +191,15 @@ function staticFolderPlugin() {
         const rawUrl: string = req.url || ''
         const urlPath = rawUrl.split('?')[0]
 
+        if (urlPath === '/dashboard/assets/video/clips.json') {
+          const dir = path.join(staticPath, 'dashboard', 'assets', 'video')
+          const names = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => /\.mp4$/i.test(f)).map(f => f.slice(0, -4)) : []
+          names.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+          res.setHeader('Content-Type', 'application/json; charset=utf-8')
+          res.setHeader('Cache-Control', 'no-store')
+          res.end(JSON.stringify(names))
+          return
+        }
         const filePath = path.join(staticPath, urlPath)
         // Prevent path traversal out of static/
         if (!filePath.startsWith(staticPath)) {

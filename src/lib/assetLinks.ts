@@ -287,11 +287,24 @@ function linkFrom(rec: Record<string, unknown>): AssetLink | string {
   if (kind === 'cctv' && isGuid(String(rec.room ?? '').trim())) link.room = String(rec.room).trim()
   if (kind === 'space' && rec.level) link.level = String(rec.level).trim()
   const clip = String(rec.clip ?? '').trim()
-  if (kind === 'cctv' && (CLIPS.includes(clip) || clip === 'none')) link.clip = clip
+  if (kind === 'cctv' && isClipName(clip)) link.clip = clip
   return link
 }
 
 export const CLIPS = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7']
+
+/** A video file name in static/dashboard/assets/video without .mp4, or 'none' */
+export const isClipName = (s: string) => /^[\w .()-]{1,80}$/.test(s) && s.trim() === s
+
+/** The clips in the video folder; the seven demo names when the folder can't be listed */
+export async function listClips(): Promise<{ names: string[]; listed: boolean }> {
+  try {
+    const res = await fetch('/static/dashboard/assets/video/clips.json', { cache: 'no-store' })
+    const names = res.ok ? (await res.json() as unknown[]).filter((n): n is string => typeof n === 'string' && isClipName(n) && n !== 'none') : null
+    if (names) return { names, listed: true }
+  } catch { /* not served by the Studio's dev server */ }
+  return { names: CLIPS, listed: false }
+}
 
 /** CCTV_01 → V1 … CCTV_07 → V7, CCTV_08 → V1 */
 export function defaultClip(name: string): string {

@@ -20,6 +20,7 @@ import {
   isGuid,
   levelRank,
   linksToCsv,
+  listClips,
   mergeLinks,
   parseLinks,
   prepareElements,
@@ -331,6 +332,17 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
     )
     return () => { cancelled = true }
   }, [spaceScanRun, mode, engineRef])
+
+  const [clipFiles, setClipFiles] = useState<{ names: string[]; listed: boolean }>({ names: CLIPS, listed: false })
+  useEffect(() => {
+    let live = true
+    void listClips().then(found => { if (live) setClipFiles(found) })
+    return () => { live = false }
+  }, [])
+  const clipOptions = useMemo(() => {
+    const saved = links.flatMap(l => (l.kind === 'cctv' && l.clip && l.clip !== 'none' ? [l.clip] : []))
+    return [...new Set([...clipFiles.names, ...saved])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+  }, [clipFiles, links])
 
   // FIN equipment is read only while a watch is held
   const [finWaiting, setFinWaiting] = useState(true)
@@ -1021,7 +1033,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
               {row.link ? (
                 <select className="al-clip" value={row.link.clip ?? ''} onChange={e => setClip(row, e.target.value)} aria-label={`Footage of ${row.link.equip}`}>
                   <option value="">{defaultClip(row.link.equip)} (in order)</option>
-                  {CLIPS.map(c => <option key={c} value={c}>{c}</option>)}
+                  {clipOptions.map(c => <option key={c} value={c}>{clipFiles.listed && !clipFiles.names.includes(c) ? `${c} (not in the folder)` : c}</option>)}
                   <option value="none">None</option>
                 </select>
               ) : <span className="al-sub">Link the camera first</span>}
