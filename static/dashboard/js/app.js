@@ -978,6 +978,74 @@
     }, NO_SEL));
   }
 
+  /* The one popup frame for documents and FIN screens (#docov, so the surface manager closes it on Escape and navigation).
+     A PDF passes `download`. A live FIN screen passes `live`: it shows a loading note until the frame reports loaded and an error
+     note, with the same Open in a new tab link, if it does not. The browser does not tell a page whether a frame was refused
+     (X-Frame-Options / frame-ancestors) or login-gated, so the note also names those causes. */
+  const FRAME_TIMEOUT_MS = 30000;
+  function openFramePopup(o){
+    const title = o.title || '';
+    const dl = C.esc(E.t('docDownload'));
+    const tab = C.esc(E.t('docOpenLarge'));
+    ACTS.docClose();
+    const ov = document.createElement('div');
+    ov.id = 'docov';
+    ov.innerHTML = `<div class="docbox" role="dialog" aria-modal="true" aria-label="${C.esc(title)}">
+        <div class="dochead">
+          <h2 class="doctitle">${C.esc(title)}</h2>
+          <div class="docacts">
+            ${o.download ? `<a class="iconbtn tipU" href="${C.esc(o.download)}" download data-tip="${dl}" aria-label="${dl}">${C.icon('download', 15)}</a>` : ''}
+            ${o.tab ? `<a class="iconbtn tipU" href="${C.esc(o.tab)}" target="_blank" rel="noopener noreferrer" data-tip="${tab}" aria-label="${tab}">${C.icon('external', 15)}</a>` : ''}
+          </div>
+          <button type="button" class="wmaxx docx" data-act="docClose" aria-label="${C.esc(E.t('close'))}">✕</button>
+        </div>
+        ${o.live
+          ? `<div class="docbody"><iframe class="docframe" title="${C.esc(title)}"></iframe>
+              <div class="docstate" role="status"><span class="wospin" aria-hidden="true"></span><span class="docstatet">${C.esc(E.t('gfxLoading'))}</span></div></div>`
+          : `<iframe class="docframe" title="${C.esc(title)}"></iframe>`}
+      </div>`;
+    ov.addEventListener('click', ev => { if (ev.target === ov) ACTS.docClose(); });
+    const frame = ov.querySelector('.docframe');
+    const armed = new WeakSet();
+    /* The PDF viewer keeps its own key presses, so Escape has to be read inside the frame. A cross-origin FIN frame refuses this; that is fine. */
+    const armFrame = () => {
+      try {
+        const win = frame.contentWindow;
+        if (!win || armed.has(win)) return;
+        armed.add(win);
+        win.addEventListener('keydown', ev => {
+          if (ev.key !== 'Escape') return;
+          ev.preventDefault();
+          if (window.EKO_SURF) window.EKO_SURF.escape();
+          else ACTS.docClose();
+        });
+      } catch (e) {}
+    };
+    frame.addEventListener('load', armFrame);
+    if (o.live) {
+      const state = ov.querySelector('.docstate');
+      const done = () => { clearTimeout(timer); state.remove(); };
+      const fail = (head, why) => {
+        clearTimeout(timer);
+        state.dataset.err = '1';
+        state.setAttribute('role', 'alert');
+        state.innerHTML = `<div class="docerr"><b>${C.esc(head)}</b><p>${C.esc(why)}</p>
+          ${o.tab ? `<a class="btnG btnSm" href="${C.esc(o.tab)}" target="_blank" rel="noopener noreferrer">${C.esc(E.t('docOpenLarge'))}</a>` : ''}</div>`;
+      };
+      const failLoad = () => fail(E.t('gfxFailed'), E.t('gfxFailedWhy'));
+      const timer = setTimeout(failLoad, FRAME_TIMEOUT_MS);
+      /* No FIN server to point at (not connected to FIN, or its address is not usable): say so, load nothing */
+      if (!o.src) fail(E.t('gfxNoFin'), E.t('gfxNoFinWhy'));
+      else {
+        frame.addEventListener('load', done, { once: true });
+        frame.addEventListener('error', failLoad, { once: true });
+      }
+    }
+    if (o.src) frame.src = o.src;
+    (window.DASHBOARD_ROOT || document.body).appendChild(ov);
+    armFrame();
+    ov.querySelector('.docx').focus();
+  }
   const ACTS = {
     goMod(el){ const m = E.nav.modules.find(x=>x.id===el.dataset.mod);
       if(!E.state.exp[m.id]) E.state.born = 'nsub:'+m.id;
@@ -1054,44 +1122,18 @@
           download = url + '&download=1';
         } else return;
       } catch (e) { return; }
-      const title = el.dataset.title || 'PDF';
-      const dl = C.esc(E.t('docDownload'));
-      const tab = C.esc(E.t('docOpenLarge'));
-      ACTS.docClose();
-      const ov = document.createElement('div');
-      ov.id = 'docov';
-      ov.innerHTML = `<div class="docbox" role="dialog" aria-modal="true" aria-label="${C.esc(title)}">
-        <div class="dochead">
-          <h2 class="doctitle">${C.esc(title)}</h2>
-          <div class="docacts">
-            <a class="iconbtn tipU" href="${C.esc(download)}" download data-tip="${dl}" aria-label="${dl}">${C.icon('download', 15)}</a>
-            <a class="iconbtn tipU" href="${C.esc(url)}" target="_blank" rel="noopener noreferrer" data-tip="${tab}" aria-label="${tab}">${C.icon('external', 15)}</a>
-          </div>
-          <button type="button" class="wmaxx docx" data-act="docClose" aria-label="${C.esc(E.t('close'))}">✕</button>
-        </div>
-        <iframe class="docframe" title="${C.esc(title)}" src="${C.esc(url)}"></iframe>
-      </div>`;
-      ov.addEventListener('click', ev => { if (ev.target === ov) ACTS.docClose(); });
-      const frame = ov.querySelector('.docframe');
-      const armed = new WeakSet();
-      /* The PDF viewer keeps its own key presses, so Escape has to be read inside the frame. */
-      const armFrame = () => {
-        try {
-          const win = frame.contentWindow;
-          if (!win || armed.has(win)) return;
-          armed.add(win);
-          win.addEventListener('keydown', ev => {
-            if (ev.key !== 'Escape') return;
-            ev.preventDefault();
-            if (window.EKO_SURF) window.EKO_SURF.escape();
-            else ACTS.docClose();
-          });
-        } catch (e) {}
-      };
-      frame.addEventListener('load', armFrame);
-      (window.DASHBOARD_ROOT || document.body).appendChild(ov);
-      armFrame();
-      ov.querySelector('.docx').focus();
+      openFramePopup({ title: el.dataset.title || 'PDF', src: url, download, tab: url });
+    },
+    /* A FIN graphics screen (the Eko Hospital roof HVAC), listed by the Studio in INJECTED_PROJECT_CONFIG.graphics for that project only.
+       Opens in the same popup as O&M and warranty. The URL is used exactly as given: no rewrite, no proxy, no stored credentials, no address kept here. */
+    graphicOpen(el){
+      const cfg = window.INJECTED_PROJECT_CONFIG;
+      const g = ((cfg && cfg.graphics) || []).find(x => x && x.id === el.dataset.graphic);
+      if (!g) return;
+      /* g.url is read now, not when the list was built: it follows the FIN server connected at this moment, and is null when there is none */
+      let url = null;
+      try { if (typeof g.url === 'string' && /^https?:$/.test(new URL(g.url).protocol)) url = g.url; } catch (e) {}
+      openFramePopup({ title: g.title || '', src: url, tab: url, live: true });
     },
     docClose(){ const ov = document.getElementById('docov'); if (ov) ov.remove(); },
     /* Asset panel wide mode: a real state toggle (not a snapshot) so the

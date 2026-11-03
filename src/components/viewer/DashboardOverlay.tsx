@@ -28,7 +28,7 @@ import { createMauSchematic } from '@/lib/mauSchematic'
 import { createEcoSchematic } from '@/lib/ecoSchematic'
 import { createHvacLabels } from '@/lib/hvacLabels'
 import type { HvacSchematic } from '@/lib/hvacGeometry'
-import { hospitalHvacEnabled, isLiveSchematic } from '@/lib/hospitalHvac'
+import { hospitalHvacEnabled, hospitalGraphics, isLiveSchematic } from '@/lib/hospitalHvac'
 import { useFinStore } from '@/store/useFinStore'
 import type { ProjectApiSettings } from '@/types'
 import { dashboardProjectInfo } from '@/lib/finSettings'
@@ -1809,6 +1809,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         // The project open now: its id (answers stamped for another project are dropped), site and basis
         if (currentProject && (window as any).INJECTED_PROJECT_CONFIG) {
           Object.assign((window as any).INJECTED_PROJECT_CONFIG, dashboardProjectInfo(currentProject))
+          // FIN graphics (Eko Hospital only). Each entry reads the FIN server this session is connected to when it is opened, so the
+          // address is never copied or kept here: signed out, there is none and the dashboard says so.
+          ;(window as any).INJECTED_PROJECT_CONFIG.graphics = hospitalGraphics(currentProject, () => {
+            const fin = useFinStore.getState()
+            return fin.isConnected && fin.status?.connected ? fin.status.server_url : null
+          })
         }
         // The backend serves this project before the dashboard's first poll is trusted
         void useFinStore.getState().syncProjectSettings()

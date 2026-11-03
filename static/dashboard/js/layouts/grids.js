@@ -67,6 +67,13 @@
     id:'assets', titleKey:'regTitle', exportName:'asset-register', rowKey:'id', rowAct:{ act:'openAsset', attr:'asset', tab:'alarms' }, searchKeys:['id', 'type'],
     isSelectedRow:(E2, r) => E2.state.assetSel === r.id,
     rows: E2 => E2.data.assets,
+    /* FIN graphics screens the Studio lists for this project (INJECTED_PROJECT_CONFIG.graphics; only the Eko Hospital has any). Not assets: no record,
+       nothing in E.data.assets to count, sort or export. One pinned row each, opened by graphicOpen in the same popup as O&M and warranty. */
+    pinned:(E2, q, span) => ((window.INJECTED_PROJECT_CONFIG || {}).graphics || [])
+      .filter(g => g && g.id && g.title && (!q || g.title.toLowerCase().includes(String(q).toLowerCase())))
+      .map(g => `<tr class="dgfin"><td colspan="${span}" data-act="graphicOpen" data-graphic="${esc(g.id)}"><div class="dgfinw">
+        <button type="button" class="dgfinb" data-act="graphicOpen" data-graphic="${esc(g.id)}" aria-haspopup="dialog">${C().icon('monitor', 14)}<span>${esc(g.title)}</span></button>
+        <span class="tCap">${esc(E2.t('gfxKind'))}</span></div></td></tr>`).join(''),
     groups:[{ id:'identity', labelKey:'dgg.identity' }, { id:'condition', labelKey:'dgg.condition' }, { id:'maintenance', labelKey:'dgg.maintenance' }, { id:'reference', labelKey:'dgg.reference' }],
     rowMenu, expand,
     head: (E2, n, total) => {

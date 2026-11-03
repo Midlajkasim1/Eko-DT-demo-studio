@@ -12,8 +12,8 @@
     "test": "node tests/run.mjs",
     "test:unit": "node tests/run.mjs --unit",
     "test:browser": "node tests/run.mjs --browser",
-    "test:hospital-hvac": "node --test spec/hospitalHvac.test.mjs spec/hvacGraphics.test.mjs",
-    "test:hospital-hvac:browser": "node --test spec/hospitalPanel.browser.test.mjs spec/hospitalOverlay.browser.test.mjs",
+    "test:hospital-hvac": "node --test spec/hospitalHvac.test.mjs spec/hvacGraphics.test.mjs spec/hospitalGraphics.test.mjs",
+    "test:hospital-hvac:browser": "node --test spec/hospitalPanel.browser.test.mjs spec/hospitalOverlay.browser.test.mjs spec/hospitalGraphics.browser.test.mjs",
     "build:renders": "node scripts/buildBuiltinRenders.mjs"
   },
   "dependencies": {
