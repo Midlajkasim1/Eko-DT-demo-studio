@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
-import { azimuthDragSign, resetCameraToHome } from '@/lib/cameraUtils'
+import { azimuthDragSign, resetCameraToHome, tiltIfVertical } from '@/lib/cameraUtils'
 import * as THREE from 'three'
 
 interface OrientationCubeProps {
@@ -106,8 +106,7 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
         : closer
           ? Math.max(distV, distH, size.y, 8) * 1.35
           : Math.max(size.x, size.y, size.z, 8) * 0.7
-      /* Keep world Y-up. A true vertical look locks orbit and mouse rotates the wrong way. */
-      if (topOrBottom) dir.set(dir.x, dir.y, dir.z + (dir.y >= 0 ? 0.14 : -0.14)).normalize()
+      if (topOrBottom) tiltIfVertical(dir)
       cam.up.set(0, 1, 0)
       const controls = engine.world.camera.controls as { setLookAt: Function; updateCameraUp?: Function }
       controls.updateCameraUp?.()

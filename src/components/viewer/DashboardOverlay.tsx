@@ -9,7 +9,7 @@ import type { RenderSettings } from '@/constants/renderSettings'
 import { useModelStore } from '@/store/useModelStore'
 import { foldName, indexLinks, indexSpaceLinks, isGuid } from '@/lib/assetLinks'
 import type { AssetLink } from '@/types'
-import { frameModelFromAbove, resetCameraToHome } from '@/lib/cameraUtils'
+import { frameModelFromAbove, resetCameraToHome, tiltIfVertical } from '@/lib/cameraUtils'
 import { frameSphereInView } from '@/lib/viewFraming'
 import { startPeekFramer } from '@/lib/peekFrame'
 import { createMiniMap } from '@/lib/miniMap'
@@ -2340,17 +2340,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const tgt = view?.target
       if (!camCtl?.setLookAt || !pos || !tgt || pos.length !== 3 || tgt.length !== 3) return false
       const cam = engine.world?.camera?.three as THREE.PerspectiveCamera | undefined
-      // A straight-down view leaves orbit and pan without a direction. Tilt it, as the
-      // orientation cube does. Horizontal drag on that view is flipped in the engine.
       // exact keeps a stored camera, such as the heatmap's saved view, as it was saved.
       const target = new THREE.Vector3(tgt[0], tgt[1], tgt[2])
       const offset = new THREE.Vector3(pos[0], pos[1], pos[2]).sub(target)
-      const dist = offset.length()
-      if (!exact && dist > 0 && Math.abs(offset.y) / dist > 0.995) {
-        offset.normalize()
-        offset.z += offset.y >= 0 ? 0.14 : -0.14
-        offset.normalize().multiplyScalar(dist)
-      }
+      if (!exact) tiltIfVertical(offset)
       const position = target.clone().add(offset)
       cam?.up.set(0, 1, 0)
       camCtl.updateCameraUp?.()

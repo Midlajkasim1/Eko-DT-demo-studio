@@ -16,6 +16,15 @@ export function azimuthDragSign(polarAngle: number): number {
 /** Radians from straight up or straight down in which the plan's far side fills much of the screen. */
 const STEEP_VIEW_RAD = 1.05
 
+/** A straight-down look has no heading. Nudge it so Front (+z) sits at the top of the screen. */
+export function tiltIfVertical(offset: THREE.Vector3): THREE.Vector3 {
+  const dist = offset.length()
+  if (!(dist > 0) || Math.abs(offset.y) / dist <= 0.995) return offset
+  offset.multiplyScalar(1 / dist)
+  offset.z += offset.y >= 0 ? -0.14 : 0.14
+  return offset.normalize().multiplyScalar(dist)
+}
+
 /**
  * Speed signs so this world point follows the pointer.
  * camera-controls applies a rightward drag as a negative azimuth delta and a
@@ -135,10 +144,7 @@ function loadedModelBox(engine: FragmentsEngine): THREE.Box3 {
 
 /**
  * Look down on the loaded model, the same top face as the orientation cube.
- * A true vertical look leaves orbit with no heading, so the camera sits 0.14
- * toward +z: direction (0, 1, 0.14) normalises to about (0, 0.990, 0.139).
- * The view looks toward −y and −z, and world up (0, 1, 0) puts the −z side
- * of the plan at the top of the screen. Returns false when nothing is loaded.
+ * Returns false when nothing is loaded.
  */
 export function frameModelFromAbove(engine: FragmentsEngine | null): boolean {
   if (!engine?.world?.camera?.controls) return false
@@ -152,7 +158,7 @@ export function frameModelFromAbove(engine: FragmentsEngine | null): boolean {
   const distV = (size.z / 2) / Math.tan(fov / 2)
   const distH = (size.x / 2) / (Math.tan(fov / 2) * aspect)
   const dist = Math.max(distV, distH, 8) * 1.15
-  const dir = new THREE.Vector3(0, 1, 0.14).normalize()
+  const dir = tiltIfVertical(new THREE.Vector3(0, 1, 0))
   cam.up.set(0, 1, 0)
   const controls = engine.world.camera.controls as { setLookAt: Function; updateCameraUp?: Function }
   controls.updateCameraUp?.()
