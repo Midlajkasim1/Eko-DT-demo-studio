@@ -181,35 +181,3 @@ test('a feed of another FIN project is not read: Marsa\'s FCU labels never show 
   assert.equal(await fanRun(), 'On', 'the same feed from its own FIN project is read, so the check above can fail')
   await clear()
 })
-
-// ── FIN graphics entry (Hospital roof HVAC): the real overlay + the real FIN store, the connected server read when it is opened ──
-// The store is set the way fetchStatus/login leave it. The server addresses are TEST INPUTS; no real FIN is contacted.
-const setFin = server => page.evaluate(async server => {
-  const { useFinStore } = await import('/src/store/useFinStore.ts')
-  useFinStore.setState(server
-    ? { isConnected: true, status: { connected: true, project_name: 'ekoHospital', server_url: server, display_name: '' } }
-    : { isConnected: false, status: null })
-}, server)
-const graphicUrl = () => page.evaluate(() => (window.INJECTED_PROJECT_CONFIG.graphics || []).map(g => g.url))
-const STABLE = '/finMobile/ekoHospital#frame?app=graphics&targetRef=@p:ekoHospital:r:3260abd5-07a0a7b6&url=%2Ffin5%2FekoHospital%3FprojectRef%3D%40p%3AekoHospital%3Ar%3A326dc5ee-27ca9b5a%26title%3DshowSettings%23targetRef%3D%40p%3AekoHospital%3Ar%3A3260abd5-07a0a7b6'
-
-test('FIN graphics: Eko Hospital lists the entry and its URL is the connected FIN server + the stable path; it follows a new address without reopening', { skip }, async () => {
-  await open(EKO())
-  await setFin('https://192.0.2.10')
-  assert.deepEqual(await graphicUrl(), ['https://192.0.2.10' + STABLE])
-  await setFin('http://198.51.100.7:8080')   // FIN reconnected on another address
-  assert.deepEqual(await graphicUrl(), ['http://198.51.100.7:8080' + STABLE])
-  await setFin(null)   // signed out: no address is kept
-  assert.deepEqual(await graphicUrl(), [null])
-  const cfg = await page.evaluate(() => window.INJECTED_PROJECT_CONFIG.graphics.map(g => [g.id, g.title]))
-  assert.deepEqual(cfg, [['hospital-roof-hvac', 'Hospital Roof – HVAC Graphics']])
-})
-
-test('FIN graphics: Marsa and other projects have none, and Eko Hospital -> Marsa -> Eko Hospital follows', { skip }, async () => {
-  await setFin('https://192.0.2.10')
-  for (const [meta, n] of [[MARSA(), 0], [OTHER(), 0], [OLD(), 0], [EKO(), 1], [MARSA(), 0]]) {
-    await open(meta)
-    assert.equal((await graphicUrl()).length, n, meta.name)
-  }
-  await setFin(null)
-})

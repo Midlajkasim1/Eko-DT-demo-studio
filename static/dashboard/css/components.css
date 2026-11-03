@@ -6001,76 +6001,81 @@
   flex:none
 }
 
-.dashboard-native-container .docbody {
-  position:relative;
-  flex:1;
-  min-height:0;
-  display:flex
-}
-
-.dashboard-native-container .docstate {
-  position:absolute;
-  inset:0;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:10px;
-  color:var(--t2);
-  background:var(--s2);
-  pointer-events:none
-}
-
-.dashboard-native-container .docstate[data-err] {
-  background:var(--s1);
-  pointer-events:auto
-}
-
-.dashboard-native-container .docerr {
-  max-width:460px;
-  padding:20px;
-  text-align:center;
-  display:grid;
-  gap:10px;
-  justify-items:center
-}
-
-.dashboard-native-container .docerr b {
-  color:var(--t1)
-}
-
-.dashboard-native-container .docerr p {
-  margin:0;
-  line-height:1.5
-}
-
-.dashboard-native-container .dgfinw {
+.dashboard-native-container .dgroofw {
   display:flex;
   align-items:center;
   gap:12px
 }
 
-.dashboard-native-container table.dg tr.dgfin td {
-  padding:9px 12px;
-  border-inline-start:3px solid var(--acc);
-  background:var(--s1);
-  cursor:pointer
+.dashboard-native-container .dgroofn {
+  font-weight:600;
+  color:var(--t1)
 }
 
-.dashboard-native-container table.dg tr.dgfin:hover td {
+.dashboard-native-container table.dg tr.dgroof td {
+  padding:9px 12px;
+  border-inline-start:3px solid var(--acc);
+  background:var(--s1)
+}
+
+.dashboard-native-container .roofbody {
+  flex:1;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
   background:var(--s2)
 }
 
-.dashboard-native-container .dgfinb {
-  display:inline-flex;
-  align-items:center;
-  gap:8px;
-  padding:0;
-  background:none;
-  border:0;
-  color:var(--t1);
-  font:inherit;
-  font-weight:600;
+.dashboard-native-container .roofsvg {
+  flex:1;
+  min-height:0;
+  overflow:hidden;
+  background:#e6e7ea;
+  touch-action:none
+}
+
+.dashboard-native-container .roofsvg .rf-svg {
+  width:100%;
+  height:100%;
+  display:block
+}
+
+.dashboard-native-container .rf-eq[data-act] {
   cursor:pointer
+}
+
+.dashboard-native-container .rf-eq[data-act]:hover .rf-hit,
+.dashboard-native-container .rf-eq[data-act]:focus-visible .rf-hit {
+  fill:rgba(42,110,200,.14);
+  stroke:#2a6ec8;
+  stroke-width:1.5
+}
+
+.dashboard-native-container .rf-eq:focus {
+  outline:none
+}
+
+.dashboard-native-container .roofmap {
+  flex:none;
+  max-height:30%;
+  overflow:auto;
+  padding:6px 14px;
+  border-top:1px solid var(--bd2);
+  background:var(--s1);
+  color:var(--t2)
+}
+
+.dashboard-native-container .roofmap summary {
+  cursor:pointer;
+  font-weight:600;
+  color:var(--t1)
+}
+
+.dashboard-native-container .roofmaplist {
+  margin:8px 0;
+  padding-inline-start:18px;
+  display:grid;
+  gap:4px
 }
 
 .dashboard-native-container .docframe {

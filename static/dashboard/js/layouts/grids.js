@@ -67,13 +67,16 @@
     id:'assets', titleKey:'regTitle', exportName:'asset-register', rowKey:'id', rowAct:{ act:'openAsset', attr:'asset', tab:'alarms' }, searchKeys:['id', 'type'],
     isSelectedRow:(E2, r) => E2.state.assetSel === r.id,
     rows: E2 => E2.data.assets,
-    /* FIN graphics screens the Studio lists for this project (INJECTED_PROJECT_CONFIG.graphics; only the Eko Hospital has any). Not assets: no record,
-       nothing in E.data.assets to count, sort or export. One pinned row each, opened by graphicOpen in the same popup as O&M and warranty. */
-    pinned:(E2, q, span) => ((window.INJECTED_PROJECT_CONFIG || {}).graphics || [])
-      .filter(g => g && g.id && g.title && (!q || g.title.toLowerCase().includes(String(q).toLowerCase())))
-      .map(g => `<tr class="dgfin"><td colspan="${span}" data-act="graphicOpen" data-graphic="${esc(g.id)}"><div class="dgfinw">
-        <button type="button" class="dgfinb" data-act="graphicOpen" data-graphic="${esc(g.id)}" aria-haspopup="dialog">${C().icon('monitor', 14)}<span>${esc(g.title)}</span></button>
-        <span class="tCap">${esc(E2.t('gfxKind'))}</span></div></td></tr>`).join(''),
+    /* The Eko Hospital roof HVAC schematic (layouts/hospital-roof.js): not an asset, so no record, nothing in E.data.assets to count, sort or
+       export. One pinned row, only for a project whose Hospital graphics are on (the Studio sets hospitalHvac for the ekoHospital FIN project). */
+    pinned:(E2, q, span) => {
+      if(!((window.INJECTED_PROJECT_CONFIG || {}).hospitalHvac === true)) return '';
+      const title = E2.t('roofTitle');
+      if(q && !title.toLowerCase().includes(String(q).toLowerCase())) return '';
+      return `<tr class="dgroof"><td colspan="${span}"><div class="dgroofw">${C().icon('monitor', 14)}<span class="dgroofn">${esc(title)}</span>
+        <span class="tCap">${esc(E2.t('roofKind'))}</span>
+        <button type="button" class="btnG btnSm dgroofb" data-act="roofOpen" aria-haspopup="dialog">${esc(E2.t('roofBtn'))}</button></div></td></tr>`;
+    },
     groups:[{ id:'identity', labelKey:'dgg.identity' }, { id:'condition', labelKey:'dgg.condition' }, { id:'maintenance', labelKey:'dgg.maintenance' }, { id:'reference', labelKey:'dgg.reference' }],
     rowMenu, expand,
     head: (E2, n, total) => {
