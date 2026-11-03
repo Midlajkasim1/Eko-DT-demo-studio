@@ -6,8 +6,7 @@ const post = (path: string, body: object) =>
     keepalive: true,
   }).catch(() => null)
 
-/** The backend reads FIN (equipment, alarms, live points) only while something holds a watch, as an open dashboard does.
- *  Holds one until the returned function is called. */
+/** Holds a FIN watch (the backend reads FIN only while one is held) until the returned function runs */
 export function holdFinWatch(): () => void {
   let id: string | null = null
   let released = false
@@ -16,7 +15,7 @@ export function holdFinWatch(): () => void {
     if (!res?.ok) return
     const data = await res.json().catch(() => null)
     if (data?.id) id = data.id
-    // Released while this beat was in flight: let go of the id it brought back
+    // Released mid-beat: drop the new id
     if (released && id) void post('unwatch', { id })
   }
   void beat()

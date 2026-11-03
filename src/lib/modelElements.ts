@@ -12,7 +12,6 @@ const STOREY = /^IFCBUILDINGSTOREY$/i
 interface SpatialNode { category: string | null; localId: number | null; children?: SpatialNode[] }
 interface Storey { name: string; elevation?: number }
 
-/** The storey of every item of one model, from its spatial structure */
 async function storeysOf(model: {
   getSpatialStructure(): Promise<SpatialNode>
   getItemsData(ids: number[], config?: unknown): Promise<unknown[]>
@@ -161,7 +160,6 @@ export async function guidsInModels(engine: FragmentsEngine, guids: string[]): P
   return found
 }
 
-/** World boxes of these GlobalIds, from whichever loaded model has each one */
 async function boxesByGuid(engine: FragmentsEngine, guids: string[]): Promise<Map<string, THREE.Box3>> {
   const out = new Map<string, THREE.Box3>()
   let left = [...new Set(guids)]
@@ -179,8 +177,7 @@ async function boxesByGuid(engine: FragmentsEngine, guids: string[]): Promise<Ma
   return out
 }
 
-/** The room each camera is in: the smallest room box around the camera's centre.
- *  A camera on the ceiling may sit just above its room's box, so the top is raised by CEILING_GAP. */
+/** Smallest saved room box around each camera; the top is raised for ceiling mounts */
 export async function roomsContaining(engine: FragmentsEngine, cameraGuids: string[], roomGuids: string[]): Promise<Map<string, string>> {
   const CEILING_GAP = 1
   const out = new Map<string, string>()

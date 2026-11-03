@@ -66,7 +66,6 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString
 const fileLabel = (name: string) => name.split(/[/\\]/).pop() || name
 const PICKER_LIMIT = 60
 
-/** One entry per FIN equipment name */
 function toLinkEquipment(equipment: FinEquipment[]): LinkEquipment[] {
   const seen = new Map<string, LinkEquipment>()
   for (const e of equipment) {
@@ -102,6 +101,7 @@ export function AssetLinksModal({ visible, onClose, engineRef }: AssetLinksModal
     <AssetLinksDialog
       key={currentProject.projectId}
       initial={currentProject.assetLinks ?? []}
+      initialSource={currentProject.apiSettings?.dashboardCameraSource === 'model' ? 'model' : 'fin'}
       projectName={currentProject.name}
       onClose={onClose}
       engineRef={engineRef}
@@ -109,14 +109,17 @@ export function AssetLinksModal({ visible, onClose, engineRef }: AssetLinksModal
   )
 }
 
+type CameraSource = 'fin' | 'model'
+
 interface AssetLinksDialogProps {
   initial: AssetLink[]
+  initialSource: CameraSource
   projectName: string
   onClose: () => void
   engineRef: React.MutableRefObject<FragmentsEngine | null>
 }
 
-function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLinksDialogProps) {
+function AssetLinksDialog({ initial, initialSource, projectName, onClose, engineRef }: AssetLinksDialogProps) {
   const equipment = useFinStore(s => s.equipment)
   const finConnected = useFinStore(s => s.isConnected)
 
@@ -159,10 +162,11 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
   const declinedRef = useRef<Set<string>>(new Set())
   const declinedRoomsRef = useRef<Set<string>>(new Set())
   const [confirmClose, setConfirmClose] = useState(false)
+  const [cameraSource, setCameraSource] = useState<CameraSource>(initialSource)
   const spaceMode = mode === 'space'
 
   const initialText = useMemo(() => JSON.stringify(initial), [initial])
-  const dirty = useMemo(() => JSON.stringify(links) !== initialText, [links, initialText])
+  const dirty = useMemo(() => JSON.stringify(links) !== initialText || cameraSource !== initialSource, [links, initialText, cameraSource, initialSource])
   const requestClose = () => (dirty ? setConfirmClose(true) : onClose())
 
   useEffect(() => {
@@ -182,8 +186,7 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     if (pickerFor) document.querySelector('.al-picker')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }, [pickerFor])
 
-  /* Links every unlinked equipment and camera whose best match clears the bar, once FIN and the model are both read,
-     and gives every linked camera without a room the saved room it sits in. The user's own unlinks, room clears and undos are not redone. */
+  // Links sure matches and camera rooms; never redoes what the user undid
   const runAuto = useCallback(async (found: ModelElement[], equipment: FinEquipment[]) => {
     const finL = toLinkEquipment(equipment)
     if (!found.length || !finL.length) return
@@ -207,7 +210,7 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     const roomOf = engine && rooms.length && needRoom.length
       ? await roomsContaining(engine, needRoom.map(l => l.guid), rooms).catch(() => new Map<string, string>())
       : new Map<string, string>()
-    // Edited while the model was asked: leave it to the buttons
+    // Edited meanwhile: leave it to the buttons
     if ((!added.length && !roomOf.size) || linksRef.current !== current) return
     const withRoom = (l: AssetLink): AssetLink => {
       const room = l.kind !== 'space' && isCam(l) && !l.room ? roomOf.get(l.guid) : undefined
@@ -224,7 +227,6 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     setError(null)
   }, [engineRef])
 
-  /* The saved room a camera sits in, after it is linked to an element by hand */
   const fillRoom = async (key: string, guid: string) => {
     const engine = engineRef.current
     const rooms = linksRef.current.filter(l => l.kind === 'space').map(l => l.guid)
@@ -235,7 +237,7 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     setAutoRooms(prev => new Set(prev).add(key))
   }
 
-  /* A change to many rows at once. Undo works until the next edit. */
+  // Undo holds until the next edit
   const bulk = (next: AssetLink[], message: string) => {
     setUndo({ before: links, after: next })
     setLinks(next)
@@ -327,7 +329,7 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     return () => { cancelled = true }
   }, [spaceScanRun, mode, engineRef])
 
-  /* The backend reads FIN equipment only while a watch is held; its first read takes a few seconds */
+  // FIN equipment is read only while a watch is held
   const [finWaiting, setFinWaiting] = useState(true)
   useEffect(() => {
     if (!finConnected) return
@@ -486,7 +488,6 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     return out.sort((a, b) => nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true }))
   }, [mode, elements, spaceLinks])
 
-  /* FIN's floor for equipment and cameras, the model storey for rooms */
   const rowLevel = (r: Row) => r.eq?.floor || (r.link ? byGuid.get(r.link.guid)?.level : '') || ''
   const spaceLevel = (r: SpaceRow) => r.el?.level || r.link?.level || ''
   const levels = (() => {
@@ -510,7 +511,6 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
   const scopeText = levelKey === ALL_LEVELS ? 'in this tab' : `on ${levelLabel(levelKey)}`
   const showLevelHeads = levels.length > 1 || (levels.length === 1 && levels[0].key !== '')
 
-  /* Rows under their level, bottom floor first */
   const groupRows = <T,>(list: T[], levelOf: (r: T) => string) => {
     const byKey = new Map<string, T[]>()
     for (const r of list) byKey.set(levelOf(r), [...(byKey.get(levelOf(r)) ?? []), r])
@@ -721,7 +721,13 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     setSaving(true)
     setError(null)
     try {
-      // Rooms saved before levels were kept get theirs from the last scan
+      if (cameraSource !== initialSource) {
+        const api = { ...(useProjectStore.getState().currentProject?.apiSettings ?? {}) }
+        if (cameraSource === 'model') api.dashboardCameraSource = 'model'
+        else delete api.dashboardCameraSource
+        await useProjectStore.getState().saveApiSettings(api)
+      }
+      // Backfill levels of rooms saved without one
       const scanned = new Map((spaceCache.current ?? []).map(e => [e.guid, e.level]))
       await useProjectStore.getState().saveAssetLinks(links.map(l => {
         const lv = l.kind === 'space' && !l.level ? scanned.get(l.guid) : undefined
@@ -864,7 +870,6 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     )
   }
 
-  /* Elements a row can take: its own type first (cameras for a camera), the same level first, then by name */
   const renderPicker = (row: Row) => {
     const type = isCctvRow(row) ? 'CCTV' : row.link?.type || (row.eq ? defaultType(row.eq) : '')
     const words = typeWords(type)
@@ -1076,6 +1081,25 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
               </div>
 
               <p className="ds-hint al-hint">{HINTS[mode]}</p>
+
+              {mode === 'cctv' && (
+                <div className="al-setting">
+                  <span className="al-setting-label">Dashboard shows</span>
+                  <div className="al-filters" role="radiogroup" aria-label="Cameras the dashboard shows">
+                    <button role="radio" aria-checked={cameraSource === 'fin'} className={`ds-toggle-btn ${cameraSource === 'fin' ? 'active' : ''}`} onClick={() => setCameraSource('fin')}>
+                      FIN cameras linked here ({cctvLinkedCount})
+                    </button>
+                    <button role="radio" aria-checked={cameraSource === 'model'} className={`ds-toggle-btn ${cameraSource === 'model' ? 'active' : ''}`} onClick={() => setCameraSource('model')}>
+                      Every camera in the model
+                    </button>
+                  </div>
+                  <span className="al-sub">
+                    {cameraSource === 'fin'
+                      ? 'Only the cameras linked below appear in Security: in the camera grid, on the model and in the counts.'
+                      : 'Every camera of the sample data appears, whether FIN has it or not.'}
+                  </span>
+                </div>
+              )}
 
               <div className="al-sources">
                 {mode !== 'space' ? (

@@ -7,7 +7,7 @@ import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import { useAppStore } from '@/store/useAppStore'
 import type { RenderSettings } from '@/constants/renderSettings'
 import { useModelStore } from '@/store/useModelStore'
-import { foldName, indexLinks, indexSpaceLinks, isGuid, matchStaleGids, prepareElements, type PreparedElement } from '@/lib/assetLinks'
+import { foldName, indexLinks, indexSpaceLinks, isGuid, levelRank, matchStaleGids, prepareElements, type PreparedElement } from '@/lib/assetLinks'
 import { guidsInModels, listModelElements } from '@/lib/modelElements'
 import type { AssetLink } from '@/types'
 import { frameModelFromAbove, resetCameraToHome, tiltIfVertical } from '@/lib/cameraUtils'
@@ -141,11 +141,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     const linkFor = (assetId?: string | null) => (assetId ? links().byFold.get(fold(assetId)) : undefined)
 
-    /* The dashboard's sample cameras name their element by a GlobalId of an older export of the model.
-       matchElements maps each to the loaded model's element by its Revit id; every lookup below goes through it. */
+    // Older-export GlobalIds of sample data, mapped to the loaded model
     const remap = new Map<string, string>()
     const current = (gid: string) => remap.get(gid) ?? gid
     let elementScan: { sig: string; job: Promise<PreparedElement[]> } | null = null
+    const levelOf = new Map<string, string>()
     const matchElements = async (items: { gid: string; revitId?: string; kind?: string }[]) => {
       const list = engine?.fragments?.models?.list
       if (!engine || !list?.size) return { ready: false, matched: 0 }
@@ -157,11 +157,35 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const stale = fresh.filter(i => !present.has(i.gid))
       if (!stale.length) return { ready: true, matched: 0 }
       const sig = [...list.keys()].join('|')
-      if (elementScan?.sig !== sig) elementScan = { sig, job: listModelElements(engine, 'equip').then(prepareElements) }
-      const found = matchStaleGids(stale, await elementScan.job)
+      if (elementScan?.sig !== sig) {
+        elementScan = { sig, job: listModelElements(engine, 'equip').then(prepareElements) }
+        levelOf.clear()
+      }
+      const prepared = await elementScan.job
+      if (!levelOf.size) for (const p of prepared) levelOf.set(p.el.guid, p.el.level ?? '')
+      const found = matchStaleGids(stale, prepared)
       for (const [from, to] of found) remap.set(from, to)
       if (found.size) repositionMarkers()
       return { ready: true, matched: found.size }
+    }
+
+    const cameraSetup = () => {
+      const project = useProjectStore.getState().currentProject
+      const links = project?.assetLinks ?? []
+      const rooms = new Map(links.filter(l => l.kind === 'space').map(l => [l.guid, l.equip]))
+      const storey = (guid: string) => {
+        const rank = levelRank(levelOf.get(guid) ?? '')
+        return Number.isInteger(rank) && rank >= 0 && rank < 100 ? `L${rank}` : ''
+      }
+      return {
+        source: project?.apiSettings?.dashboardCameraSource === 'model' ? 'model' : 'fin',
+        cameras: links.filter(l => l.kind === 'cctv' && isGuid(l.guid)).map(l => ({
+          name: l.equip,
+          guid: l.guid,
+          room: l.room ? rooms.get(l.room) ?? '' : '',
+          storey: storey(l.guid),
+        })),
+      }
     }
 
     /* Asset id (with or without the ast- prefix) -> IFC GUID, or null.
@@ -2153,7 +2177,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (s.templateId !== prev.templateId) void syncAlarmGlow()
     })
     const unsubLinks = useProjectStore.subscribe((s, prev) => {
-      if (s.currentProject?.assetLinks === prev.currentProject?.assetLinks) return
+      if (s.currentProject?.assetLinks === prev.currentProject?.assetLinks
+        && s.currentProject?.apiSettings?.dashboardCameraSource === prev.currentProject?.apiSettings?.dashboardCameraSource) return
       void resolveAllAssetPositions()
       try { (window as { EKO_HEAT?: { relink?: () => void } }).EKO_HEAT?.relink?.() } catch { /* the next equipment refresh rebuilds the zones */ }
       try { (window as { EKO?: { set?: (patch: object) => void } }).EKO?.set?.({}) } catch { /* the dashboard redraws on its next refresh */ }
@@ -2518,6 +2543,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       setDashboardOpen,
       bimIdFor,
       matchElements,
+      cameraSetup,
+      currentGid: (gid: string) => (isGuid(gid) ? current(gid) : gid),
       isAlarmed,
       listMapped: () => links().list.map(m => ({ id: m.equip, bimId: m.guid })),
       spaceLinks: () => indexSpaceLinks(useProjectStore.getState().currentProject?.assetLinks),

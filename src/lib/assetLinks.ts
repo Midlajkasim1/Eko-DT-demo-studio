@@ -70,14 +70,13 @@ export interface ModelElement {
   tag: string
   category: string
   modelName: string
-  /** Name and elevation of the storey that holds it */
   level?: string
   elevation?: number
 }
 
 const ORDINALS = ['GROUND', 'FIRST', 'SECOND', 'THIRD', 'FOURTH', 'FIFTH', 'SIXTH', 'SEVENTH', 'EIGHTH', 'NINTH', 'TENTH']
 
-/** Where a level name sits in the building: basements below 0, ground 0, floors by number, roof on top. NaN when the name says nothing. */
+/** Floor number from a level name: basements below 0, roof 1000, NaN if none */
 export function levelRank(name: string): number {
   const words = name.toUpperCase()
     .replace(/([A-Z])(\d)/g, '$1 $2')
@@ -99,7 +98,7 @@ export function levelRank(name: string): number {
   return n + mezz
 }
 
-/** Levels bottom to top: by model elevation when every level has one, else by the name. Unnamed last. */
+/** Bottom to top: by elevation when every level has one, else by name */
 export function sortLevels<T extends { key: string; elevation?: number }>(levels: T[]): T[] {
   const named = levels.filter(l => l.key)
   const byElevation = named.length > 0 && named.every(l => l.elevation !== undefined)
@@ -123,7 +122,6 @@ export interface LinkEquipment {
   cctv?: boolean
 }
 
-/** A FIN camera: the cctv marker tag, FIN's cctv category, or CCTV in its name */
 export function isCctv(eq: { name: string; category?: string; tags?: string[]; type?: string }): boolean {
   return eq.category === 'cctv' || !!eq.tags?.includes('cctv') || (eq.type || '').toLowerCase() === 'cctv' || /cctv/i.test(eq.name)
 }
@@ -211,19 +209,13 @@ export function suggest(eq: LinkEquipment, elements: PreparedElement[], limit = 
 
 const GUID_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$'
 
-/** An IFC GlobalId split into its high 96 bits and its last 32 */
 function guidParts(guid: string): { head: string; low: number } {
   let n = 0n
   for (const c of guid) n = n * 64n + BigInt(GUID_CHARS.indexOf(c))
   return { head: (n >> 32n).toString(36), low: Number(n & 0xffffffffn) }
 }
 
-/**
- * Revit writes an element's GlobalId as a GUID of the session that made it, with the element id XORed into the last 32 bits.
- * A model exported again from a copy of the file gets new GlobalIds but keeps the element ids (the IFC Tag), so a FIN bimId
- * from the older export still names its element. Per session, the key is the one under which the FIN bimIds land on element
- * ids of the loaded model whose type is the equipment's own (element ids are dense, so a near key lands on neighbours too).
- */
+/** Revit element ids recovered from older-export GlobalIds (Revit XORs the id into the last 32 bits) */
 export function matchOlderExport(
   items: { bimId: string; words: string[] }[],
   prepared: PreparedElement[],
@@ -271,14 +263,14 @@ export function matchOlderExport(
       if (n > bestN) { secondN = bestN; bestN = n; best = key }
       else if (n > secondN) secondN = n
     }
-    // At least two bimIds on elements of their own type, and no other key as good
+    // Two typed hits and no tie
     if (bestN < 20 || bestN === secondN) continue
     const hits = group.flatMap(b => {
       const id = (b.low ^ best) >>> 0
       const ps = byId.get(id)
       return ps ? [{ b, id, ps }] : []
     })
-    // The same element id can exist in other files; take the file most of this session's hits are in
+    // Ids repeat across files: prefer the file with most hits
     const perModel = new Map<string, number>()
     for (const h of hits) for (const m of new Set(h.ps.map(p => p.el.modelName))) perModel.set(m, (perModel.get(m) ?? 0) + 1)
     for (const h of hits) {
@@ -290,7 +282,7 @@ export function matchOlderExport(
   return out
 }
 
-/** Suggestions for every FIN equipment, keyed by folded name: its own bimId, the element an older export's bimId names, then name likeness */
+/** Per FIN equipment: own bimId, then older-export bimId, then name likeness */
 export function suggestAll(finList: LinkEquipment[], prepared: PreparedElement[], present: Set<string> | null): Map<string, Suggestion[]> {
   const out = new Map<string, Suggestion[]>()
   const known = new Set(prepared.map(p => p.el.guid))
@@ -319,13 +311,9 @@ export function elementLabel(el: { name?: string; objectType?: string; category?
   return parts.join(' · ') || el.objectType || el.category || el.guid || ''
 }
 
-/** Words of a link type, for ranking model elements in the picker */
 export const typeWords = (type: string): string[] => TYPE_WORDS[type.toUpperCase()] ?? []
 
-/**
- * GlobalIds of an older export, each mapped to the loaded model's element of the same type: by the Revit element id when
- * the caller knows it (the element's Tag), else by the id the old GlobalId carries (matchOlderExport).
- */
+/** Older-export GlobalIds mapped to same-type elements, by Revit id when known */
 export function matchStaleGids(items: { gid: string; revitId?: string; kind?: string }[], prepared: PreparedElement[]): Map<string, string> {
   const out = new Map<string, string>()
   const byTag = new Map<string, PreparedElement[]>()

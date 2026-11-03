@@ -2127,6 +2127,22 @@ Wait, if iframe has pointer-events: auto, it works. Let's fix this in iframe bod
 .al-manual input {
   max-width: 260px;
 }
+.al-setting {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface);
+}
+.al-setting-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
 .al-banner {
   margin: 0 0 12px;
   padding: 8px 12px;

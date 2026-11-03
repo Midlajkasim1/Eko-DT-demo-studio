@@ -202,7 +202,7 @@ export interface ProjectMeta {
 /**
  * One named thing and the model element it is drawn as.
  * Equipment links omit `kind`. Space links set `kind: 'space'` and use `equip` as the heatmap name.
- * CCTV links set `kind: 'cctv'`: a FIN camera, its model element and, in `room`, the space it is in.
+ * CCTV links set `kind: 'cctv'` and the camera's space in `room`.
  * Keyed on the IFC GlobalId, which a revised model keeps.
  */
 export interface AssetLink {
@@ -220,7 +220,7 @@ export interface AssetLink {
   kind?: 'equip' | 'space' | 'cctv'
   /** IFC GlobalId of the saved space a CCTV camera is in */
   room?: string
-  /** Storey of a space, read from the model when it was added */
+  /** Storey of a space */
   level?: string
 }
 
@@ -307,6 +307,8 @@ export interface ProjectApiSettings {
   dashboardSampleData?: 'medical'
   /** The dashboard's module set. 'extended' adds ESG, Maintenance, and Security and life safety; absent = standard. */
   dashboardModules?: 'extended'
+  /** 'model': every sample camera; absent: only linked FIN cameras */
+  dashboardCameraSource?: 'model'
   /** Reporting basis. A cost or CO₂ figure whose rate is not set is reported as unavailable. */
   energyTariff?: number
   gasTariff?: number

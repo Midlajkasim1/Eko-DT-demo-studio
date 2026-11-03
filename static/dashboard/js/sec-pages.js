@@ -368,7 +368,7 @@ window.EKO_SECP = (function(){
     spAccLv(el){ window.EKO.set({ spAccLv: el.dataset.v }); },
     /* rule 4: the item's level isolated, the camera flies to it; a fire zone as a volume, a camera with its cone */
     spLocate(el){ const E = window.EKO, d = el.dataset; if(E.engine && E.engine.setLabels) E.engine.setLabels(null); E.state.dlg = null; E.state.opsDrill = null; E.state.secDlg = null; E.state.evac3d = null;
-      /* The Studio host has no simulation scene. A camera is found on the model by its element; anything else stays on the mock plan. */
+      /* Studio host: a camera is located by its element, anything else stays on the mock plan */
       if(!(E.engine && E.engine.setMode)){
         const eng = E.engine;
         if(!(d.cam && d.v && eng && eng.matchElements && eng.flyToGid)){ E.set({}); return; }

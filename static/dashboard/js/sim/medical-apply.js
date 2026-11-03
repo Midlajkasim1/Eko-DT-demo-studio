@@ -91,7 +91,7 @@
         demandForecast: Object.assign({}, d.lookahead.demandForecast || {}, { hourlyMw: hrs, basisEn: 'the building data engine for the coming hours (schedule and weather)', basisAr: 'محرك بيانات المبنى للساعات القادمة (الجدول والطقس)' }) }); }
     /* security, fire, power, beds and nurse calls now; the scenario replays at its own hour */
     const sec = d.security; if(sec){ const S = e.security(now), byId = (l, id) => l.find(x => x.id === id) || {};
-      (sec.cameras || []).forEach(c => Object.assign(c, byId(S.cameras, c.id)));
+      (sec.cameras || []).forEach(c => Object.assign(c, byId(S.cameras, c.simId || c.id), c.simId ? { id: c.id } : {}));
       (sec.doors || []).forEach(r => Object.assign(r, byId(S.doors, r.id)));
       sec.access = Object.assign({}, sec.access || {}, S.access);
       sec.fire = Object.assign({}, sec.fire || {}, { events: S.fire.events, isolations: S.fire.isolations.map(i => { const dv = ((sec.fire.deviceTests || []).find(q => q.id === i.device)) || {}; return Object.assign({ gid: dv.gid, storey: dv.storey }, i); }),

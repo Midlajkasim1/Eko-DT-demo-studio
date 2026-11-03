@@ -22,24 +22,40 @@ window.EKO_SEC = (function(){
   const C = () => window.EKO_C, A = () => window.EKO_A;
   const esc = s => C().esc(s), fmt = (v, d) => C().fmt(v, d), icon = (n, s) => C().icon(n, s);
   let E = null;
-  /* The sample cameras name their element by a GlobalId of an older model export and carry its Revit id (CAM-L1-2541878).
-     The Studio maps them to the loaded model once, so the markers sit on the cameras and Locate finds them. */
+  /* sample cameras carry an older-export GlobalId and their Revit id; the Studio maps them to the model */
   const camAsked = new Set();
   let camRetryAt = 0;
   const revitIdOf = id => (String(id || '').match(/(\d{5,})$/) || [])[1];
   function linkCams(){
     const eng = E && E.engine, d = E && E.data.security;
     if(!eng || !eng.matchElements || !d || Date.now() < camRetryAt) return;
-    const items = (d.cameras || []).filter(c => c.gid && !camAsked.has(c.gid)).map(c => ({ gid: c.gid, revitId: revitIdOf(c.id), kind: 'CCTV' }));
+    const items = (d.allCameras || d.cameras || []).filter(c => c.gid && !camAsked.has(c.gid)).map(c => ({ gid: c.gid, revitId: revitIdOf(c.id), kind: 'CCTV' }));
     if(!items.length) return;
     camRetryAt = Date.now() + 3000;
     eng.matchElements(items).then(r => {
       if(!r || !r.ready) return;
       items.forEach(i => camAsked.add(i.gid));
       if(r.matched && window.EKO_V) window.EKO_V.schedulePosition(E);
+      E.set({});
     }, () => {});
   }
-  const use = E2 => { if(E2){ E = E2; linkCams(); } return E; };
+  /* linked FIN cameras (default) or every sample camera; a FIN camera keeps its sample twin's demo status */
+  let camKey = null;
+  function camerasBySource(){
+    const eng = E && E.engine, d = E && E.data.security;
+    const setup = eng && eng.cameraSetup ? eng.cameraSetup() : null;
+    if(!d || !setup) return;
+    if(!d.allCameras) d.allCameras = d.cameras || [];
+    const ready = d.allCameras.every(c => !c.gid || camAsked.has(c.gid));
+    const key = setup.source + '|' + (ready ? 1 : 0) + '|' + (setup.cameras || []).map(c => [c.name, c.guid, c.room, c.storey].join(':')).join(',');
+    if(key === camKey) return;
+    camKey = key;
+    d.cameras = setup.source === 'model' ? d.allCameras : (setup.cameras || []).map(l => {
+      const s = d.allCameras.find(c => c.gid && eng.currentGid(c.gid) === l.guid);
+      return Object.assign({}, s || {}, { id: l.name, gid: l.guid, en: l.name, ar: l.name, room: l.room || (s && s.room) || '', storey: (s && s.storey) || l.storey || '', simId: s ? s.id : null });
+    });
+  }
+  const use = E2 => { if(E2){ E = E2; linkCams(); camerasBySource(); } return E; };
   const t = (k, p) => E.t(k, p);
   const D = () => (E && E.data.security) || null;
   const L = (en, ar) => E.lang === 'ar' ? (ar || en) : en;
@@ -162,7 +178,7 @@ window.EKO_SEC = (function(){
     const d = D(); if(!d) return '';
     const sel = E.state.secSel;
     const pts = [];
-    cams().forEach(c => { if(isFinite(+c.x) && isFinite(+c.y) && c.x !== undefined) pts.push({ id: c.id, gid: c.gid, x: +c.x, y: +c.y, k: 'cam', bad: c.online === false, tip: c.id + ' · ' + L(c.en, c.ar) }); });
+    cams().forEach(c => { if(c.gid || (isFinite(+c.x) && isFinite(+c.y) && c.x !== undefined)) pts.push({ id: c.id, gid: c.gid, x: +c.x || 0, y: +c.y || 0, k: 'cam', bad: c.online === false, tip: c.id + ' · ' + L(c.en, c.ar) }); });
     doors().forEach(c => { if(isFinite(+c.x) && isFinite(+c.y) && c.x !== undefined) pts.push({ id: c.id, x: +c.x, y: +c.y, k: 'door', bad: accessEvents().some(e => e.door === c.id && FLAG.includes(e.kind) && e.open !== false), tip: c.id + ' · ' + L(c.en, c.ar) }); });
     /* D180: fire devices in alarm (the demo scenario) are marked; a site with many devices shows only what needs a look:
        flagged doors, offline cameras, the selection, and every camera only with the view cones on */
@@ -383,9 +399,8 @@ window.EKO_SEC = (function(){
     secCamSel(el){ const E2 = window.EKO; E2.set({ secCamF: el.value, secCamPg: 0 }); },
     secCamPg(el){ const E2 = window.EKO; E2.set({ secCamPg: Math.max(0, +el.dataset.v || 0) }); },
     /* Locate in 3D: the landing over the model, the item framed and marked */
-    secLocate(el){ const E2 = window.EKO; use(E2); const id = el.dataset.v, p = posOf(id); if(!p) return;
+    secLocate(el){ const E2 = window.EKO; use(E2); const id = el.dataset.v, p = posOf(id), cam = cams().find(c => c.id === id); if(!p && !(cam && cam.gid)) return;
       E2.state.dlg = null; E2.state.secDlg = null; E2.state.secSel = id; E2.go('sec', 'security', null);
-      const cam = cams().find(c => c.id === id);
       requestAnimationFrame(() => requestAnimationFrame(() => { const eng = E2.engine, host = document.getElementById('enginehost');
         if(!eng || !host) return;
         if(cam && cam.gid && eng.matchElements && eng.flyToGid){ eng.flyToGid(cam.gid); if(eng.highlightGid) eng.highlightGid(cam.gid); return; }
