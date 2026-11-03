@@ -14,12 +14,12 @@ export function hospitalHvacEnabled(meta?: { apiSettings?: ProjectApiSettings } 
 }
 
 /**
- * The Eko Hospital roof graphic's FIN route, exactly as the client gave it: path, query and hash. Only the server in front of it changes
- * (the FIN address changes regularly), so the server is never part of this constant: it is the origin of the FIN server this session is
- * connected to, read when the graphic is opened (hospitalRoofUrl).
+ * The Eko Hospital roof graphic's FIN route, exactly as the client gave it: path and query, with no fragment. Only the server in front of
+ * it changes (the FIN address changes regularly), so the server is never part of this constant: it is the origin of the FIN server this
+ * session is connected to, read when the graphic is opened (hospitalRoofUrl).
  */
 export const HOSPITAL_ROOF_FIN_ROUTE =
-  '/fin5/ekoHospital?projectRef=@p:ekoHospital:r:326dc5ee-27ca9b5a#targetRef=@p:ekoHospital:r:3260abd5-07a0a7b6'
+  '/fin5/ekoHospital?projectRef=@p:ekoHospital:r:326dc5ee-27ca9b5a'
 
 /** The FIN server a URL points at: protocol, host and port as configured, nothing else (no path, credentials, query or hash).
  *  null for anything that is not an http(s) address; nothing is guessed or defaulted. */

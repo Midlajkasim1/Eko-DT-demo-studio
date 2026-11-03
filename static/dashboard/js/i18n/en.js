@@ -592,6 +592,7 @@ window.EKO_I18N.en = {
   "roofTitle": "Hospital Roof \u2013 HVAC",
   "roofKind": "Live FIN graphic",
   "roofBtn": "Schematic",
+  "roofBack": "Back to Dashboard",
   "roofLoading": "Loading the FIN graphic\u2026",
   "roofNoFin": "No FIN server to open the graphic from",
   "roofNoFinWhy": "The graphic is shown from the FIN server you are connected to. Connect to FIN, then open it again.",

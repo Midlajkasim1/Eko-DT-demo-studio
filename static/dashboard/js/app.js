@@ -41,6 +41,7 @@
     return ids;
   }
 
+  let roofHost = null;   /* the kept element of the Hospital roof graphic view (openRoofView) */
   const E = window.EKO = {
     data: window.EKO_DATA.marsa,
     nav: window.EKO_LAYOUTS.nav,
@@ -49,6 +50,7 @@
     lang: ls.get('eko-lang') || 'en',
     state: {
       pageId: 'marsa-overview', module: 'overview', sub: null,
+      roofView: false,   /* the Hospital roof graphic is showing in the content area instead of the page (openRoofView) */
       rolePreview: ss.get('eko-role-preview') || null,     /* D105: demo-only role preview, session-scoped */
       disclose: {},                                        /* D105: per-user progressive-disclosure overrides (loaded per role) */
       themeMode: ls.get('eko-theme-mode') || 'auto',
@@ -207,6 +209,7 @@
       if(gate){ this.set({ born:'dlg', teaserKey: gate, dlg:'teaser', mobMore:false }); return; }
       if(pageId !== this.state.pageId) this.state._prev = { pageId: this.state.pageId, module: this.state.module, sub: this.state.sub };
       this.state.locFocus = null;   /* any navigation (the logo, a module, search, Back) ends Locate-in-3D focus */
+      if(this.state.roofView) closeRoofView();   /* ...and the Hospital roof graphic, which stands in the content area */
       if(window.EKO_SURF) window.EKO_SURF.closeAll();          /* R4 (D67) */
       const targetModule = module ?? this.state.module;
       const targetSub = sub ?? null;
@@ -776,7 +779,10 @@
       : E.state.born === 'navx' ? 'x'
       : (E.state.born === 'nav' || /^nsub:/.test(E.state.born || '')) ? '1' : '0');
     $('ekonav').innerHTML = navRail();
-    $('mount').innerHTML = (stacked ? pagehead() : '') + P.renderPage(E);
+    if(E.state.roofView && roofHost){
+      const m = $('mount');
+      if(m.firstElementChild !== roofHost || m.childElementCount !== 1) m.replaceChildren(roofHost);   /* only when it is not already there: moving an iframe reloads it */
+    } else $('mount').innerHTML = (stacked ? pagehead() : '') + P.renderPage(E);
     const fresh = document.getElementById('enginehost');
     if(fresh && keptHost) fresh.replaceWith(keptHost);
     $('mobtabs').innerHTML = mobtabs();
@@ -1021,35 +1027,37 @@
     armFrame();
     ov.querySelector('.docx').focus();
   }
-  /* The Hospital roof graphic: the client's FIN screen in an iframe inside the popup frame (#docov, so Escape and navigation close it).
-     Nothing is rewritten, proxied or signed in here: the frame is FIN's own page, with whatever FIN session the browser holds. With no FIN
-     server to point at (not connected), it says so and loads nothing. The browser does not tell a page whether FIN refused the frame or
-     sent it to a sign-in page, so the loading note only says the frame has loaded, never that the graphic is showing. */
-  function openRoofFrame(url, frameTitle){
+  /* The Hospital roof graphic: the client's FIN screen in an iframe that fills the main content area (#mount) in place of the dashboard page,
+     with a Back to Dashboard button. It is not a dialog: no overlay, no backdrop. Nothing is rewritten, proxied or signed in here: the frame is
+     FIN's own page, with whatever FIN session the browser holds. With no FIN server to point at (not connected), it says so and loads nothing.
+     The browser does not tell a page whether FIN refused the frame or sent it to a sign-in page, so the loading note only says the frame has
+     loaded, never that the graphic is showing.
+     render() rebuilds #mount on every state change and live data changes state every few seconds, so the view's element is KEPT (roofHost) and
+     put back as it is: an iframe that is removed and re-inserted reloads, which would restart the FIN page on every data update. */
+  function openRoofView(url, frameTitle){
     let src = null;
     try { if (typeof url === 'string' && /^https?:$/.test(new URL(url).protocol)) src = url; } catch (e) {}
     const title = E.t('roofTitle');
-    ACTS.docClose();
-    const ov = document.createElement('div');
-    ov.id = 'docov';
-    ov.innerHTML = `<div class="docbox roofbox" role="dialog" aria-modal="true" aria-label="${C.esc(title)}">
-        <div class="dochead">
-          <h2 class="doctitle">${C.esc(title)}</h2>
-          <button type="button" class="wmaxx docx" data-act="docClose" aria-label="${C.esc(E.t('close'))}">✕</button>
-        </div>
-        <div class="roofframewrap">${src
-          ? `<iframe class="roofframe" title="${C.esc(frameTitle || 'Hospital Roof Graphic')}"></iframe>
-             <div class="roofload" role="status"><span class="wospin" aria-hidden="true"></span><span>${C.esc(E.t('roofLoading'))}</span></div>`
-          : `<div class="roofnone" role="alert"><b>${C.esc(E.t('roofNoFin'))}</b><p>${C.esc(E.t('roofNoFinWhy'))}</p></div>`}
-        </div>
+    roofHost = document.createElement('section');
+    roofHost.className = 'roofview';
+    roofHost.setAttribute('aria-label', title);
+    roofHost.innerHTML = `<div class="roofbar">
+        <button type="button" class="btnG btnSm roofback" data-act="roofBack">${C.esc(E.t('roofBack'))}</button>
+        <h2 class="roofttl">${C.esc(title)}</h2>
+      </div>
+      <div class="roofstage">${src
+        ? `<iframe class="roofframe" title="${C.esc(frameTitle || 'Hospital Roof Graphic')}"></iframe>
+           <div class="roofload" role="status"><span class="wospin" aria-hidden="true"></span><span>${C.esc(E.t('roofLoading'))}</span></div>`
+        : `<div class="roofnone" role="alert"><b>${C.esc(E.t('roofNoFin'))}</b><p>${C.esc(E.t('roofNoFinWhy'))}</p></div>`}
       </div>`;
-    ov.addEventListener('click', ev => { if (ev.target === ov) ACTS.docClose(); });
-    const frame = ov.querySelector('.roofframe');
-    if (frame) frame.addEventListener('load', () => { const n = ov.querySelector('.roofload'); if (n) n.remove(); }, { once: true });
+    const frame = roofHost.querySelector('.roofframe');
+    const host = roofHost;
+    if (frame) frame.addEventListener('load', () => { const n = host.querySelector('.roofload'); if (n) n.remove(); }, { once: true });
     if (frame) frame.src = src;
-    (window.DASHBOARD_ROOT || document.body).appendChild(ov);
-    ov.querySelector('.docx').focus();
+    if (window.EKO_SURF) window.EKO_SURF.closeAll();
+    E.set({ roofView: true, assetSel: null, dlg: null, mobMore: false });
   }
+  function closeRoofView(){ roofHost = null; E.state.roofView = false; }
   const ACTS = {
     goMod(el){ const m = E.nav.modules.find(x=>x.id===el.dataset.mod);
       if(!E.state.exp[m.id]) E.state.born = 'nsub:'+m.id;
@@ -1128,9 +1136,10 @@
       } catch (e) { return; }
       openFramePopup({ title: el.dataset.title || 'PDF', src: url, download, tab: url });
     },
-    /* The Eko Hospital roof graphic (the client's own FIN screen), listed in the Assets register for that project only. It opens in the same
-       popup frame as the O&M and warranty documents. The URL is the Studio's: the connected FIN server + the client's route, read now. */
-    roofOpen(){ const g = (window.INJECTED_PROJECT_CONFIG || {}).roofGraphic; openRoofFrame(g && g.url, g && g.title); },
+    /* The Eko Hospital roof graphic (the client's own FIN screen), listed in the Assets register for that project only. It opens in the main
+       content area (not a popup) with a Back to Dashboard button. The URL is the Studio's: the connected FIN server + the client's route, read now. */
+    roofOpen(){ const g = (window.INJECTED_PROJECT_CONFIG || {}).roofGraphic; openRoofView(g && g.url, g && g.title); },
+    roofBack(){ closeRoofView(); E.set({}); },
     docClose(){ const ov = document.getElementById('docov'); if (ov) ov.remove(); },
     /* Asset panel wide mode: a real state toggle (not a snapshot) so the
        tabs, work-order buttons and live values keep working while wide. */
