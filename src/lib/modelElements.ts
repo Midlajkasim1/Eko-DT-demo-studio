@@ -1,3 +1,4 @@
+import * as THREE from 'three'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import type { ModelElement } from '@/lib/assetLinks'
 import { useModelStore } from '@/store/useModelStore'
@@ -6,6 +7,42 @@ import { useModelStore } from '@/store/useModelStore'
 const EQUIPMENT_CLASSES = /^IFC(BUILDINGELEMENTPROXY|UNITARYEQUIPMENT|AIRTERMINALBOX|FLOWTERMINAL|ENERGYCONVERSIONDEVICE|FLOWMOVINGDEVICE|FLOWCONTROLLER|FLOWSTORAGEDEVICE|FLOWTREATMENTDEVICE|FLOWMETER|DISTRIBUTIONCONTROLELEMENT|DISTRIBUTIONFLOWELEMENT|DISTRIBUTIONELEMENT|ELECTRICDISTRIBUTIONBOARD|ELECTRICAPPLIANCE|ELECTRICGENERATOR|ELECTRICMOTOR|TRANSFORMER|TRANSPORTELEMENT|FAN|PUMP|COIL|CHILLER|BOILER|COOLINGTOWER|CONDENSER|COMPRESSOR|HEATEXCHANGER|HUMIDIFIER|AIRTOAIRHEATRECOVERY|EVAPORATIVECOOLER|TANK|FILTER|DAMPER|VALVE|SWITCHINGDEVICE|PROTECTIVEDEVICE|CONTROLLER|SENSOR|ACTUATOR|ALARM|UNITARYCONTROLELEMENT|SPACEHEATER|MEDICALDEVICE|COMMUNICATIONSAPPLIANCE|AUDIOVISUALAPPLIANCE)$/i
 
 const SPACE_CLASSES = /^IFCSPACE$/i
+const STOREY = /^IFCBUILDINGSTOREY$/i
+
+interface SpatialNode { category: string | null; localId: number | null; children?: SpatialNode[] }
+interface Storey { name: string; elevation?: number }
+
+/** The storey of every item of one model, from its spatial structure */
+async function storeysOf(model: {
+  getSpatialStructure(): Promise<SpatialNode>
+  getItemsData(ids: number[], config?: unknown): Promise<unknown[]>
+}): Promise<Map<number, Storey>> {
+  const storeyOf = new Map<number, number>()
+  const walk = (node: SpatialNode, parentCategory: string | null, storey: number | null) => {
+    let here = storey
+    if (node.localId != null) {
+      if (parentCategory && STOREY.test(parentCategory)) here = node.localId
+      else if (here != null) storeyOf.set(node.localId, here)
+    }
+    for (const child of node.children ?? []) walk(child, node.category, here)
+  }
+  walk(await model.getSpatialStructure(), null, null)
+  const ids = [...new Set(storeyOf.values())]
+  const rows = ids.length
+    ? await model.getItemsData(ids, { attributesDefault: false, attributes: ['Name', 'LongName', 'Elevation'], relationsDefault: { attributes: false, relations: false } })
+    : []
+  const storeys = new Map<number, Storey>()
+  ids.forEach((id, i) => {
+    const elevation = parseFloat(attr(rows[i], 'Elevation'))
+    storeys.set(id, { name: attr(rows[i], 'Name') || attr(rows[i], 'LongName'), ...(Number.isFinite(elevation) ? { elevation } : {}) })
+  })
+  const out = new Map<number, Storey>()
+  for (const [item, storey] of storeyOf) {
+    const s = storeys.get(storey)
+    if (s?.name) out.set(item, s)
+  }
+  return out
+}
 
 export type ElementScan = 'equip' | 'space'
 
@@ -64,6 +101,7 @@ export async function listModelElements(
     if (limit && !limit.has(stable) && !limit.has(key)) continue
     const name = rec?.originalFileName ?? key
     const byClass = await model.getItemsOfCategories([classes])
+    const storeys = await storeysOf(model).catch(() => new Map<number, Storey>())
     for (const [category, ids] of Object.entries(byClass)) {
       for (let i = 0; i < ids.length; i += CHUNK) {
         const chunk = ids.slice(i, i + CHUNK)
@@ -78,7 +116,9 @@ export async function listModelElements(
         chunk.forEach((_, j) => {
           const guid = guids[j]
           if (!guid || out.has(guid)) return
+          const storey = storeys.get(chunk[j])
           out.set(guid, {
+            ...(storey ? { level: storey.name, ...(storey.elevation !== undefined ? { elevation: storey.elevation } : {}) } : {}),
             guid,
             name: attr(rows[j], 'Name'),
             longName: attr(rows[j], 'LongName'),
@@ -119,4 +159,47 @@ export async function guidsInModels(engine: FragmentsEngine, guids: string[]): P
     ids.forEach((id, i) => { if (id != null) found.add(ask[i]) })
   }
   return found
+}
+
+/** World boxes of these GlobalIds, from whichever loaded model has each one */
+async function boxesByGuid(engine: FragmentsEngine, guids: string[]): Promise<Map<string, THREE.Box3>> {
+  const out = new Map<string, THREE.Box3>()
+  let left = [...new Set(guids)]
+  for (const model of engine.fragments.models.list.values()) {
+    if (!left.length) break
+    const ids = await model.getLocalIdsByGuids(left)
+    const found = left.flatMap((guid, i) => (ids[i] != null ? [{ guid, localId: ids[i] as number }] : []))
+    if (!found.length) continue
+    model.object.updateMatrixWorld(true)
+    const boxes = await model.getBoxes(found.map(f => f.localId))
+    found.forEach((f, i) => { if (boxes[i] && !boxes[i].isEmpty()) out.set(f.guid, boxes[i]) })
+    const done = new Set(found.map(f => f.guid))
+    left = left.filter(g => !done.has(g))
+  }
+  return out
+}
+
+/** The room each camera is in: the smallest room box around the camera's centre.
+ *  A camera on the ceiling may sit just above its room's box, so the top is raised by CEILING_GAP. */
+export async function roomsContaining(engine: FragmentsEngine, cameraGuids: string[], roomGuids: string[]): Promise<Map<string, string>> {
+  const CEILING_GAP = 1
+  const out = new Map<string, string>()
+  if (!cameraGuids.length || !roomGuids.length) return out
+  const boxes = await boxesByGuid(engine, [...cameraGuids, ...roomGuids])
+  const rooms = roomGuids.flatMap(guid => {
+    const box = boxes.get(guid)
+    if (!box) return []
+    const reach = box.clone()
+    reach.max.y += CEILING_GAP
+    const size = box.getSize(new THREE.Vector3())
+    return [{ guid, box, reach, area: size.x * size.z }]
+  })
+  for (const cam of cameraGuids) {
+    const at = boxes.get(cam)?.getCenter(new THREE.Vector3())
+    if (!at) continue
+    const hits = rooms.filter(r => r.reach.containsPoint(at))
+    hits.sort((a, b) => Number(b.box.containsPoint(at)) - Number(a.box.containsPoint(at)) || a.area - b.area)
+    if (hits.length) out.set(cam, hits[0].guid)
+  }
+  return out
 }

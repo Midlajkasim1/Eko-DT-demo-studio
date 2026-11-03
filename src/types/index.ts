@@ -202,6 +202,7 @@ export interface ProjectMeta {
 /**
  * One named thing and the model element it is drawn as.
  * Equipment links omit `kind`. Space links set `kind: 'space'` and use `equip` as the heatmap name.
+ * CCTV links set `kind: 'cctv'`: a FIN camera, its model element and, in `room`, the space it is in.
  * Keyed on the IFC GlobalId, which a revised model keeps.
  */
 export interface AssetLink {
@@ -216,7 +217,11 @@ export interface AssetLink {
   /** The element's name when it was linked */
   element?: string
   /** Absent on equipment links saved before spaces existed */
-  kind?: 'equip' | 'space'
+  kind?: 'equip' | 'space' | 'cctv'
+  /** IFC GlobalId of the saved space a CCTV camera is in */
+  room?: string
+  /** Storey of a space, read from the model when it was added */
+  level?: string
 }
 
 /** Everything the project list renders, so opening it never parses project.json */

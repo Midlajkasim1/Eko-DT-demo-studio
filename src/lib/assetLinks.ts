@@ -11,7 +11,7 @@ export interface LinkIndex {
   byFold: Map<string, AssetLink>
 }
 
-/** Equipment links only. A room name must not take a machine's guid. */
+/** Equipment and CCTV links. A room name must not take a machine's guid. */
 export function indexLinks(links: AssetLink[] | undefined): LinkIndex {
   const list = (links ?? []).filter(l => l.kind !== 'space' && l.equip && isGuid(l.guid))
   return { list, byFold: new Map(list.map(l => [foldName(l.equip), l])) }
@@ -57,6 +57,7 @@ const TYPE_WORDS: Record<string, string[]> = {
   ATS: ['ATS', 'TRANSFER SWITCH'],
   FACP: ['FACP', 'FIRE ALARM'],
   FM200: ['FM200', 'FM 200'],
+  CCTV: ['CCTV', 'CAMERA', 'IFCAUDIOVISUALAPPLIANCE', 'IFCCOMMUNICATIONSAPPLIANCE'],
 }
 
 export const KNOWN_TYPES = Object.keys(TYPE_WORDS)
@@ -69,6 +70,47 @@ export interface ModelElement {
   tag: string
   category: string
   modelName: string
+  /** Name and elevation of the storey that holds it */
+  level?: string
+  elevation?: number
+}
+
+const ORDINALS = ['GROUND', 'FIRST', 'SECOND', 'THIRD', 'FOURTH', 'FIFTH', 'SIXTH', 'SEVENTH', 'EIGHTH', 'NINTH', 'TENTH']
+
+/** Where a level name sits in the building: basements below 0, ground 0, floors by number, roof on top. NaN when the name says nothing. */
+export function levelRank(name: string): number {
+  const words = name.toUpperCase()
+    .replace(/([A-Z])(\d)/g, '$1 $2')
+    .replace(/(\d)([A-Z])/g, '$1 $2')
+    .split(/[^A-Z0-9]+/)
+    .filter(Boolean)
+  const has = (...w: string[]) => w.some(x => words.includes(x))
+  const num = words.find(w => /^\d+$/.test(w))
+  const n = num === undefined ? undefined : parseInt(num, 10)
+  const mezz = has('MEZZANINE', 'MEZZ') ? 0.5 : 0
+  if (has('ROOF', 'RF', 'TERRACE', 'PENTHOUSE')) return 1000
+  if (has('BASEMENT', 'CELLAR', 'BSMT', 'B')) return -(n || 1) + mezz
+  if (has('LG', 'LGF') || (has('LOWER') && has('GROUND'))) return -0.5
+  if (has('UG', 'UGF') || (has('UPPER') && has('GROUND'))) return 0.5
+  if (has('GROUND', 'GF', 'G')) return mezz
+  const ordinal = ORDINALS.findIndex(o => words.includes(o))
+  if (ordinal >= 0) return ordinal + mezz
+  if (n === undefined) return mezz || NaN
+  return n + mezz
+}
+
+/** Levels bottom to top: by model elevation when every level has one, else by the name. Unnamed last. */
+export function sortLevels<T extends { key: string; elevation?: number }>(levels: T[]): T[] {
+  const named = levels.filter(l => l.key)
+  const byElevation = named.length > 0 && named.every(l => l.elevation !== undefined)
+  const rank = (l: T) => {
+    const r = levelRank(l.key)
+    return Number.isNaN(r) ? Infinity : r
+  }
+  const out = [...named].sort((a, b) =>
+    (byElevation ? (a.elevation as number) - (b.elevation as number) : rank(a) - rank(b))
+    || a.key.localeCompare(b.key, undefined, { numeric: true }))
+  return [...out, ...levels.filter(l => !l.key)]
 }
 
 /** The FIN equipment fields the linking screen reads */
@@ -78,6 +120,12 @@ export interface LinkEquipment {
   type?: string
   bimId?: string
   finId?: string
+  cctv?: boolean
+}
+
+/** A FIN camera: the cctv marker tag, FIN's cctv category, or CCTV in its name */
+export function isCctv(eq: { name: string; category?: string; tags?: string[]; type?: string }): boolean {
+  return eq.category === 'cctv' || !!eq.tags?.includes('cctv') || (eq.type || '').toLowerCase() === 'cctv' || /cctv/i.test(eq.name)
 }
 
 export interface Suggestion {
@@ -201,10 +249,11 @@ function csvCells(line: string): string[] {
   return cells.map(c => c.trim())
 }
 
-const CSV_COLUMNS = ['equip', 'guid', 'type', 'finId', 'element', 'kind'] as const
+const CSV_COLUMNS = ['equip', 'guid', 'type', 'finId', 'element', 'kind', 'room', 'level'] as const
 
 function linkFrom(rec: Record<string, unknown>): AssetLink | string {
-  const kind = String(rec.kind ?? '').trim().toLowerCase() === 'space' ? 'space' as const : undefined
+  const kindText = String(rec.kind ?? '').trim().toLowerCase()
+  const kind = kindText === 'space' ? 'space' as const : kindText === 'cctv' ? 'cctv' as const : undefined
   const equip = String(rec.equip ?? rec.name ?? rec.id ?? '').trim()
   const guid = String(rec.guid ?? rec.bimId ?? '').trim()
   if (!equip) return kind === 'space' ? 'a space link has no heatmap name' : 'a link has no equipment name'
@@ -212,15 +261,17 @@ function linkFrom(rec: Record<string, unknown>): AssetLink | string {
   const link: AssetLink = {
     equip,
     guid,
-    type: kind === 'space' ? 'SPACE' : (String(rec.type ?? '').trim() || defaultType({ name: equip })),
+    type: kind === 'space' ? 'SPACE' : (String(rec.type ?? '').trim() || (kind === 'cctv' ? 'CCTV' : defaultType({ name: equip }))),
     ...(kind ? { kind } : {}),
   }
   if (rec.finId) link.finId = String(rec.finId).trim()
   if (rec.element) link.element = String(rec.element).trim()
+  if (kind === 'cctv' && isGuid(String(rec.room ?? '').trim())) link.room = String(rec.room).trim()
+  if (kind === 'space' && rec.level) link.level = String(rec.level).trim()
   return link
 }
 
-/** A JSON list of links, the old { name: { bimId, type } } table, or CSV with an equip,guid header. kind=space marks a heatmap room. */
+/** A JSON list of links, the old { name: { bimId, type } } table, or CSV with an equip,guid header. kind=space marks a heatmap room, kind=cctv a camera. */
 export function parseLinks(text: string): { links?: AssetLink[]; error?: string } {
   const trimmed = text.trim()
   if (!trimmed) return { error: 'Nothing to import.' }
@@ -262,7 +313,7 @@ export function parseLinks(text: string): { links?: AssetLink[]; error?: string 
   return out.length ? { links: out } : { error: 'No links found.' }
 }
 
-/** Imported equipment replaces the same name. Imported spaces replace the same GlobalId. */
+/** Imported equipment and cameras replace the same name. Imported spaces replace the same GlobalId. */
 export function mergeLinks(current: AssetLink[], incoming: AssetLink[]): { links: AssetLink[]; added: number; replaced: number } {
   const equip = new Map(current.filter(l => l.kind !== 'space').map(l => [foldName(l.equip), l]))
   const spaces = new Map(current.filter(l => l.kind === 'space').map(l => [l.guid, l]))

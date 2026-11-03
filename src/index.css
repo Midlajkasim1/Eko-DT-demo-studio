@@ -2058,8 +2058,105 @@ Wait, if iframe has pointer-events: auto, it works. Let's fix this in iframe bod
   align-items: center;
   gap: 8px;
 }
-.al-actions {
-  justify-content: flex-start;
+.al-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.al-count {
+  margin-left: 8px;
+  font-size: 11px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.ds-hint.al-hint {
+  margin-top: 0;
+}
+.al-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.al-actions .ds-btn:disabled,
+.al-models .ds-btn:disabled {
+  opacity: 0.4;
+}
+.al-level {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  max-width: 240px;
+}
+.al-table tr.al-level-row td {
+  padding: 0;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+.al-level-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.al-level-head:hover .al-level-name {
+  color: var(--accent);
+}
+.al-level-name {
+  font-weight: 600;
+}
+.al-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+}
+.al-manual {
+  align-items: center;
+  margin-bottom: 12px;
+}
+.al-manual input {
+  max-width: 260px;
+}
+.al-undo {
+  margin-left: 10px;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.al-empty {
+  text-align: center;
+  padding: 24px !important;
+}
+.al-row-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+.al-row-actions .ds-btn + .ds-btn {
+  margin-left: 6px;
+}
+.al-dirty {
+  margin-right: auto;
+  align-self: center;
+  font-size: 13px;
+  color: #f59e0b;
+}
+.al-dirty.al-clean {
+  color: var(--text-muted);
 }
 .al-filters {
   display: flex;
