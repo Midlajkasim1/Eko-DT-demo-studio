@@ -2157,6 +2157,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
       return null
     }
+    // The parked renderer does not draw until a frame is asked for.
+    const wakeView = () => {
+      const renderer = engine.world?.renderer as { needsUpdate?: boolean } | undefined
+      if (renderer) renderer.needsUpdate = true
+    }
     const fadeArch = (on: boolean) => {
       archFadeOn = on
       const amount = heatFadeOf().amount
@@ -2199,6 +2204,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           }
         })
       }
+      wakeView()
     }
 
     /* Whole models, by the discipline in the file name (lib/layerGroups): every model of a chosen
@@ -2231,6 +2237,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         if (object3D) object3D.visible = visible
       }
       repositionMarkers()
+      wakeView()
     }
 
     /* The Layers menu follows the registry: a model that registers late adds its discipline, a new
@@ -2318,7 +2325,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
 
     /* Floor, tree and template hides all land here once the worker has them */
     const unsubVisibility = onVisibilityApplied(() => {
-      void engine.fragments?.update?.(true)
+      const done = engine.fragments?.update?.(true) as Promise<unknown> | void
+      if (done && typeof done.then === 'function') void done.then(wakeView, wakeView)
+      wakeView()
       repositionMarkers()
     })
 
