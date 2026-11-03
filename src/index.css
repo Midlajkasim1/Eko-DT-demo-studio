@@ -626,10 +626,26 @@ html, body, #root { height: 100%; overflow: hidden; background: var(--bg); color
 
 /* The Studio's Render / Transform tabs are a strip (--right-tab-w) over the right edge, above the dashboard.
    The dashboard stops where the strip starts, so the tabs sit beside the asset panel instead of on its close
-   button and its last tab. Only while those tabs exist (the exported viewer has none). */
+   button and its last tab. Only while those tabs exist (the exported viewer has none).
+   The tab buttons do not fill that strip. With the dashboard open the canvas showed through the rest of it,
+   a gap down the right edge. The sheet is the page ground (tokens --s0) and sits under the tabs. It stays
+   off while Close model or the wall is showing, because those views are the canvas. */
 :root { --right-tab-w: 36px; }
 .viewer-canvas-wrapper:has(> .right-panels-container) > .dashboard-overlay-container {
   right: var(--right-tab-w);
+}
+.viewer-canvas-wrapper:has(> .right-panels-container) > .dashboard-overlay-container:not(:has([data-modelfs="1"])):not(:has([data-wall="1"]))::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  width: var(--right-tab-w);
+  background: #0A0F1F;
+  pointer-events: auto;
+}
+.viewer-canvas-wrapper:has(> .right-panels-container):has(.dashboard-native-container[data-theme="light"]) > .dashboard-overlay-container:not(:has([data-modelfs="1"])):not(:has([data-wall="1"]))::after {
+  background: #E9EDF3;
 }
 
 /* Studio only, stacked (window <= 1023px): the Studio's toolbar sits at the bottom centre, over the dashboard's bottom
