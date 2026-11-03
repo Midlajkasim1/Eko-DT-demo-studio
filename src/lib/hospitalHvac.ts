@@ -16,7 +16,7 @@ export function hospitalHvacEnabled(meta?: { apiSettings?: ProjectApiSettings } 
 /** Schematic types whose internals follow live FIN points whatever the project. */
 const ALWAYS_LIVE = ['MAHU', 'ECO', 'FCU', 'FAHU']
 
-/** Whether a schematic's labels and live readings run: AHU only for a project with the Hospital graphics on. */
+/** Whether a schematic's labels and live readings run: AHU and VAV only for a project with the Hospital graphics on. */
 export function isLiveSchematic(type: string, hospitalHvac: boolean): boolean {
-  return ALWAYS_LIVE.includes(type) || (hospitalHvac && type === 'AHU')
+  return ALWAYS_LIVE.includes(type) || (hospitalHvac && (type === 'AHU' || type === 'VAV'))
 }

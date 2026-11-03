@@ -159,11 +159,14 @@ export function createEkoVavSchematic(
   // Damper, zone temperature and fan status show "—" when FIN sends nothing (the FCU's convention); only the humidity probe is optional
   const at = (key: EkoVavKey, title: string, x: number, y: number, z: number, side: HvacAnchor['side']): HvacAnchor =>
     ({ key, title, position: new THREE.Vector3(x, y, z), side, optional: key === 'zoneHum' })
+  // A VAV is a small unit, so its labels are spread over both edges and the far ends: the two on the top edge are over a unit apart
+  // and the two on the bottom edge sit at the middle of the casing and under the diffuser. On one line they overlapped, and the label layer shows a
+  // label only if it does not cover one already shown, so ZONETEMP vanished.
   const anchors: HvacAnchor[] = [
-    at('damperPos', 'DAMPERPOS',    -hx * 0.40, top,     0,  'above'),
-    at('zoneHum',   'ZONEHUMIDITY',  humX,      top,     zH, 'above'),
-    at('zoneTemp',  'ZONETEMP',      tempX,     top,     0,  'above'),
-    at('fanStatus', 'STATUS',        fanX,      y0 - r,  0,  'below'),
+    at('damperPos', 'DAMPERPOS',    -hx * 0.70, top,      0,  'above'),
+    at('zoneHum',   'ZONEHUMIDITY',  hx * 0.55, top,      zH, 'above'),
+    at('zoneTemp',  'ZONETEMP',      riserX,    -top,     0,  'below'),
+    at('fanStatus', 'STATUS',        0,         y0 - r,   0,  'below'),
   ]
 
   let fanRate = 0
