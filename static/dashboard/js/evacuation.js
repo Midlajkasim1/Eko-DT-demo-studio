@@ -226,5 +226,24 @@ window.EKO_EVAC = (function(){
       setTimeout(go, 60); },
     evacBed(el){ const E2 = window.EKO; E2.set({ evacBed: E2.state.evacBed === el.dataset.v ? null : el.dataset.v }); }
   };
-  return { page, nursePage, markers, bedsNow, ACTS };
+  /* The Model view's sheet is the page colour with a hole the size of .evxvis, so the
+     Studio canvas shows there and nowhere else. The box is in page coordinates. */
+  function syncHole(){
+    const page = document.querySelector('.pwarea.evxpage');
+    const hole = page && page.querySelector('.evxvis');
+    if(!page || !hole) return;
+    const p = page.getBoundingClientRect(), h = hole.getBoundingClientRect();
+    const box = [Math.max(0, h.left - p.left), Math.max(0, h.top - p.top), Math.max(0, h.width), Math.max(0, h.height)].map(n => n.toFixed(1) + 'px');
+    const key = box.join(',');
+    if(syncHole.key !== key || syncHole.watch !== hole){
+      syncHole.key = key;
+      page.style.setProperty('--evx-x', box[0]);
+      page.style.setProperty('--evx-y', box[1]);
+      page.style.setProperty('--evx-w', box[2]);
+      page.style.setProperty('--evx-h', box[3]);
+    }
+    if(!syncHole.ro && window.ResizeObserver) syncHole.ro = new ResizeObserver(() => syncHole());
+    if(syncHole.ro && syncHole.watch !== hole){ syncHole.ro.disconnect(); syncHole.ro.observe(page); syncHole.ro.observe(hole); syncHole.watch = hole; }
+  }
+  return { page, nursePage, markers, bedsNow, ACTS, syncHole };
 })();

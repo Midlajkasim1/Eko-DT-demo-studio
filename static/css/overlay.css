@@ -20,6 +20,54 @@
   background: transparent;
   pointer-events: none;
 }
+/* Evacuation Model view. #vpmain is already clear, but .pwarea paints --s0 over
+   the whole page, so the canvas never showed. A sheet behind the cards has a
+   hole the size of .evxvis (syncHole writes the box). The Ask EKO reserve is a
+   margin; with #vpmain on the page #mount is clear too, and the canvas showed
+   in that strip. The reserve stays padding, inside the sheet. No routes. */
+.dashboard-native-container .pwarea.evxpage:has(.evxvis) {
+  position: relative;
+  background: transparent;
+  margin-block-end: 0;
+  padding-block-end: calc(14px + var(--aiCornerH, 56px));
+}
+.dashboard-native-container .pwarea.evxpage:has(.evxvis)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--s0);
+  pointer-events: none;
+  mask-image: linear-gradient(#fff, #fff), linear-gradient(#fff, #fff);
+  mask-repeat: no-repeat;
+  mask-size: 100% 100%, var(--evx-w, 0px) var(--evx-h, 0px);
+  mask-position: 0 0, var(--evx-x, 0px) var(--evx-y, 0px);
+  mask-composite: exclude;
+}
+.dashboard-native-container .pwarea.evxpage:has(.evxvis) > * {
+  position: relative;
+  z-index: 1;
+}
+.dashboard-native-container #mount > .pwarea.evxpage:has(.evxvis):not(#vpmain) {
+  pointer-events: none;
+}
+.dashboard-native-container .pwarea.evxpage:has(.evxvis) :is(.opshl, .pwhero, .evxvbar, .pfpanel, [data-frame="top"]) {
+  pointer-events: auto;
+}
+.dashboard-native-container .pwarea.evxpage .pfvisual > div:has(> .evxvis) {
+  border: 1px solid var(--bd1);
+  border-radius: 10px;
+}
+.dashboard-native-container .pwarea.evxpage .evxvis,
+.dashboard-native-container .pwarea.evxpage .evxvis #vpmain,
+.dashboard-native-container .pwarea.evxpage .evxvis #enginehost {
+  background: transparent;
+  border: 0;
+  pointer-events: none;
+}
+.dashboard-native-container .pwarea.evxpage .evxvis :is(#vbottom, #vcap, .minimap, .histbanner) {
+  display: none;
+}
 /* 3D / Plan / Furniture sits on the model. The canvas behind stays the hit target. */
 .dashboard-native-container .e3dsw { pointer-events: auto; }
 .dashboard-native-container .v3tint,
