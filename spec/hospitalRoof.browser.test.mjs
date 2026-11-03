@@ -7,35 +7,62 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
 // The real dashboard (templates/index.html + static/dashboard) in a browser, with the settings DashboardOverlay injects
-// (INJECTED_PROJECT_CONFIG.hospitalHvac = true only for the ekoHospital FIN project):
+// (INJECTED_PROJECT_CONFIG.hospitalHvac = true and roofGraphic = the connected FIN server + the client's route, only for ekoHospital):
 //   - the Assets register lists the Hospital roof entry with a Schematic button for Eko Hospital only,
-//   - it opens the BMS-style graphic in the popup frame: equipment, coloured pipework, no point tables, no mapping section,
-//   - fans, impellers and the flame turn only while the equipment's own run-status point says On; pipes flow only while the pumps
-//     (or the measured flow) say so; unmapped, missing, stale and disconnected data leave everything still,
-//   - data updates change the drawing in place (a turning fan is not restarted), selecting an equipment shows only its live points,
-//   - zoom, pan and fit work; the O&M / warranty popup still works.
-// The equipment names and points below are TEST INPUTS, not a FIN export: no roof equipment list exists in this repository.
+//   - the button opens the CLIENT'S FIN SCREEN in an iframe inside the existing popup frame: exact URL, no new tab, responsive,
+//   - the FIN address always comes from the connection (two stand-in servers play FIN before and after its address changed),
+//   - with no FIN server it says so and loads nothing; close, Escape and outside click work; O&M / warranty still work,
+//   - AUTHENTICATION EVIDENCE: what the browser sends to FIN for the frame, and what happens when FIN redirects to its sign-in page or
+//     forbids framing, observed through the stand-in servers' logs and the browser's own console and network errors.
+// The stand-in servers are local test servers. This does NOT prove that the real FIN shows the graphic inside the Studio: that needs a
+// browser on the Hospital network, signed in to FIN, and FIN's response headers allowing the frame.
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' }
-let server, browser, base
+const ROUTE = '/fin5/ekoHospital?projectRef=@p:ekoHospital:r:326dc5ee-27ca9b5a#targetRef=@p:ekoHospital:r:3260abd5-07a0a7b6'
+const FIN_PATH = '/fin5/ekoHospital?projectRef=@p:ekoHospital:r:326dc5ee-27ca9b5a'   // what a server receives: the hash is never sent
+
+let dash, finA, finB, browser, dashBase, A, B
+const seen = { A: [], B: [] }
+const M = { needSession: false, xfo: false }   // how the stand-in FIN behaves for the current test
+
+const listen = s => new Promise(r => s.listen(0, '127.0.0.1', () => r(s.address().port)))
+/** A stand-in for FIN: the graphic page, a sign-in page that forbids framing, and a way to hold a FIN session cookie */
+const fakeFin = tag => http.createServer((req, res) => {
+  const u = new URL(req.url, 'http://x')
+  const cookie = /finsess=1/.test(req.headers.cookie || '')
+  if (u.pathname === '/set-session') {
+    const attrs = u.searchParams.get('sa') === 'None' ? 'SameSite=None; Secure' : 'SameSite=Lax'
+    res.writeHead(200, { 'set-cookie': `finsess=1; Path=/; ${attrs}`, 'content-type': 'text/html' }).end('signed in to FIN in this browser'); return
+  }
+  seen[tag].push({ url: req.url, dest: req.headers['sec-fetch-dest'], site: req.headers['sec-fetch-site'], cookie })
+  if (u.pathname === '/user/login') { res.writeHead(200, { 'content-type': 'text/html', 'x-frame-options': 'DENY' }).end('<title>FIN sign in</title>sign in'); return }
+  if (u.pathname === '/fin5/ekoHospital') {
+    if (M.needSession && !cookie) { res.writeHead(302, { location: '/user/login' }).end(); return }
+    res.writeHead(200, { 'content-type': 'text/html', ...(M.xfo ? { 'x-frame-options': 'DENY' } : {}) }).end(`<!doctype html><title>stand-in FIN graphic ${tag}</title><h1>FIN graphic ${tag}</h1>`); return
+  }
+  res.writeHead(404).end()
+})
 
 before(async () => {
-  server = http.createServer((req, res) => {
+  dash = http.createServer((req, res) => {
     const p = decodeURIComponent(new URL(req.url, 'http://x').pathname)
     const file = p === '/' ? path.join(root, 'templates/index.html') : path.join(root, p)
     if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404).end(); return }
     res.writeHead(200, { 'content-type': types[path.extname(file)] || 'application/octet-stream' })
     fs.createReadStream(file).pipe(res)
   })
-  await new Promise(r => server.listen(0, '127.0.0.1', r))
+  finA = fakeFin('A'); finB = fakeFin('B')
+  const [dp, ap, bp] = await Promise.all([listen(dash), listen(finA), listen(finB)])
+  // the Studio is on "localhost" and each FIN on "127.0.0.1": different sites, like the Studio host and a FIN IP
+  dashBase = `http://localhost:${dp}`; A = `http://127.0.0.1:${ap}`; B = `http://127.0.0.1:${bp}`
   browser = await chromium.launch({ channel: 'msedge', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
-  base = `http://127.0.0.1:${server.address().port}`
 })
 after(async () => {
   await browser?.close()
-  await new Promise(r => server?.close(r))
+  for (const s of [dash, finA, finB]) { s?.closeAllConnections?.(); await new Promise(r => s?.close(r)) }
 })
+const reset = () => { seen.A.length = 0; seen.B.length = 0; M.needSession = false; M.xfo = false }
 
 const CONFIGS = {
   eko: { projectId: 'p-eko', demo: false, hospitalHvac: true, site: { name: 'Eko Hospital', finProject: 'ekoHospital', timezone: 'Asia/Dubai' }, basis: {} },
@@ -46,87 +73,52 @@ const CONFIGS = {
 }
 
 let loads = 0
-async function openFor(kind, viewport = { width: 1440, height: 900 }, opts = {}) {
-  const page = await browser.newPage({ viewport, reducedMotion: opts.reducedMotion ? 'reduce' : 'no-preference' })
-  await page.goto(base + '/')
-  await page.waitForFunction(() => window.EKO && window.EKO.data && window.EKO_ROOF)
-  // What DashboardOverlay does on each project open: inject the project's settings, then run data-map.js, which maps the live feed.
-  // DashboardData.connected is what the data layer reports about FIN: the test controls it (window.__connected).
-  await page.evaluate(cfg => {
+/** A dashboard page with what DashboardOverlay injects. `window.__finServer` stands for the FIN server the session is connected to. */
+async function openFor(kind, viewport = { width: 1440, height: 900 }) {
+  const ctx = await browser.newContext({ viewport })
+  const page = await ctx.newPage()
+  page.once('close', () => { ctx.close().catch(() => {}) })
+  page.logs = []
+  page.on('console', m => page.logs.push(m.text()))
+  page.fails = []
+  page.on('requestfailed', r => page.fails.push(`${r.url().split('#')[0]} ${r.failure()?.errorText || ''}`))
+  page.popups = 0
+  ctx.on('page', () => { page.popups++ })
+  await page.goto(dashBase + '/')
+  await page.waitForFunction(() => window.EKO && window.EKO.data)
+  await page.evaluate(([cfg, route]) => {
     window.DASHBOARD_OVERLAY = true
-    window.__connected = true
-    Object.defineProperty(window, 'DashboardData', { configurable: true, get: () => ({ connected: window.__connected }) })
-    if (cfg) window.INJECTED_PROJECT_CONFIG = cfg; else delete window.INJECTED_PROJECT_CONFIG
-  }, CONFIGS[kind])
-  await page.addScriptTag({ url: `${base}/static/js/data-map.js?load=${++loads}` })
+    window.__finServer = null
+    if (cfg) {
+      window.INJECTED_PROJECT_CONFIG = { ...cfg }
+      // what hospitalRoofGraphic() gives the dashboard: only for the Hospital project, the URL read from the connection when opened
+      if (cfg.hospitalHvac) window.INJECTED_PROJECT_CONFIG.roofGraphic = { title: 'Hospital Roof Graphic', get url() { return window.__finServer ? window.__finServer + route : null } }
+      else window.INJECTED_PROJECT_CONFIG.roofGraphic = null
+    } else delete window.INJECTED_PROJECT_CONFIG
+  }, [CONFIGS[kind], ROUTE])
+  await page.addScriptTag({ url: `${dashBase}/static/js/data-map.js?load=${++loads}` })
   return page
 }
+const connect = (page, server) => page.evaluate(s => { window.__finServer = s }, server)
 const showRegister = async page => {
   await page.evaluate(() => window.EKO.set({ pageId: 'assets-register', module: 'assets', sub: 'reg', assetSel: null }))
   await page.waitForSelector('table.dg')
 }
 const popup = page => page.locator('#docov')
-const point = (navName, currentValue, extra = {}) => ({ navName, currentValue, text: currentValue, unit: '', reporting: true, ...extra })
-/** The equipment feed the way the live data layer delivers it */
-const feed = (page, equipment) => page.evaluate(equipment => {
-  window.dispatchEvent(new CustomEvent('dashboard-data', { detail: { type: 'equipment', data: { equipment: equipment.map(e => ({ floor: 'Roof', tags: [], type: '', ...e })) } } }))
-}, equipment)
-const confirm = (page, map) => page.evaluate(map => { window.EKO_ROOF.SLOTS.forEach(s => { if (map[s.id]) s.equip = map[s.id] }) }, map)
-const openSchematic = async page => {
+const openGraphic = async page => {
   await showRegister(page)
   await page.locator('tr.dgroof button[data-act="roofOpen"]').click()
-  await popup(page).locator('svg.rf-svg').waitFor()
+  await popup(page).waitFor()
 }
-const ALL = { coolingTower: 'T', condenserPumps: 'CP', chiller: 'C', chilledPumps: 'WP', boiler: 'B', btu: 'BT' }
-/** A plant feed; `over` replaces the points of one equipment */
-const plant = (over = {}) => [
-  { name: 'T', points: over.T ?? [point('FAN_RUN_STATUS', 'On'), point('FAN_SPEED', '82'), point('CW_ENTERING_TEMP', '33.9'), point('CW_LEAVING_TEMP', '30.4')] },
-  { name: 'CP', points: over.CP ?? [point('PUMP1_RUN_STATUS', 'On'), point('PUMP2_RUN_STATUS', 'On'), point('PUMP1_SPEED', '100')] },
-  { name: 'C', points: over.C ?? [point('RUN_STATUS', 'On'), point('CHWS_TEMP', '8.8'), point('CHWR_TEMP', '16.4'), point('POWER', '94.3'), point('OPERATING_HOURS', '1018')] },
-  { name: 'WP', points: over.WP ?? [point('PUMP1_RUN_STATUS', 'On'), point('PUMP2_RUN_STATUS', 'Off')] },
-  { name: 'B', points: over.B ?? [point('RUN_STATUS', 'On'), point('HWS_TEMP', '58.2')] },
-  { name: 'BT', points: over.BT ?? [point('CHW_FLOW', '11.8'), point('COOLING_POWER', '172.3')] },
-]
-/** Open the graphic for a confirmed plant */
-const openPlant = async (over, viewport, opts) => {
-  const page = await openFor('eko', viewport, opts)
-  await feed(page, plant(over))
-  await confirm(page, ALL)
-  await openSchematic(page)
-  return page
-}
+const frameSrc = page => popup(page).locator('iframe.roofframe').getAttribute('src')
+const settle = page => page.waitForTimeout(1200)   // let the frame's requests finish
 
-/** Wait until the page's animation clock has advanced by `ms`. A software-rendered headless browser draws frames slowly and the clock only
- *  moves on frames, so this waits for the clock, not for wall-clock time. */
-const WAIT_CLOCK = `window.__clock = ms => new Promise(res => { const t0 = document.timeline.currentTime, w0 = performance.now(); const tick = () => document.timeline.currentTime - t0 >= ms ? res(true) : performance.now() - w0 > 15000 ? res(false) : requestAnimationFrame(tick); requestAnimationFrame(tick) })`
-/** Is a rotating part turning right now? Reads the computed animation and whether its transform actually changes as the clock advances */
-const spin = (page, part) => page.evaluate(async ([part, def]) => {
-  if (!window.__clock) (0, eval)(def)
-  const el = document.querySelector(`#docov [data-part="${part}"] .rf-rot`)
-  await Promise.all(el.getAnimations().map(x => x.ready))   // a just-started animation is pending until the compositor takes it
-  const a = getComputedStyle(el).transform
-  const ticked = await window.__clock(350)
-  const b = getComputedStyle(el).transform
-  return { name: getComputedStyle(el).animationName, moving: a !== b, running: el.getAnimations().some(x => x.playState === 'running'), ticked }
-}, [part, WAIT_CLOCK])
-const flow = (page, loop) => page.evaluate(async ([loop, def]) => {
-  if (!window.__clock) (0, eval)(def)
-  const el = document.querySelector(`#docov .rf-loop[data-loop="${loop}"] .rf-flow`)
-  await Promise.all(el.getAnimations().map(x => x.ready))
-  const cs = getComputedStyle(el), a = cs.strokeDashoffset
-  await window.__clock(350)
-  return { display: getComputedStyle(el).display, name: cs.animationName, moving: a !== getComputedStyle(el).strokeDashoffset, attr: el.closest('.rf-loop').dataset.flow }
-}, [loop, WAIT_CLOCK])
-const stripTick = ({ ticked, ...rest }) => rest
-const chip = (page, id) => page.evaluate(id => { const c = document.querySelector(`#docov [data-chip="${id}"]`); return [c.dataset.state, c.textContent.trim()] }, id)
-
-test('the Hospital roof entry is in the Assets register with a Schematic button for Eko Hospital only, and has no iframe action', async () => {
+test('the Hospital roof entry is in the Assets register with a Schematic button for Eko Hospital only', async () => {
   const eko = await openFor('eko'); await showRegister(eko)
   assert.equal(await eko.locator('tr.dgroof').count(), 1)
   assert.equal((await eko.locator('tr.dgroof button[data-act="roofOpen"]').innerText()).trim(), 'Schematic')
   assert.ok((await eko.locator('tr.dgroof').innerText()).includes('Hospital Roof'))
   assert.equal(await eko.locator('table.dg tbody tr').first().getAttribute('class'), 'dgroof', 'top of the list')
-  assert.equal(await eko.locator('[data-act="graphicOpen"], tr.dgfin, .dgfinb').count(), 0, 'the old iframe action is gone')
   await eko.close()
   for (const kind of ['marsa', 'other', 'missing', 'standalone']) {
     const page = await openFor(kind); await showRegister(page)
@@ -137,324 +129,193 @@ test('the Hospital roof entry is in the Assets register with a Schematic button 
 
 test('the entry is not an asset: the register\'s own rows are unchanged by it', async () => {
   const page = await openFor('eko')
-  await feed(page, plant()); await showRegister(page)
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('dashboard-data', { detail: { type: 'equipment', data: { equipment: [
+    { name: 'T', floor: 'Roof', tags: [], type: '', points: [] }, { name: 'C', floor: 'Roof', tags: [], type: '', points: [] }] } } })))
+  await showRegister(page)
   const rows = () => page.locator('table.dg tbody tr:not(.dgroof):not(.dgx)').allInnerTexts()
   const withEntry = await rows()
-  assert.equal(withEntry.length, 6, 'the register lists the six assets of the feed')
+  assert.equal(withEntry.length, 2)
   await page.evaluate(() => { window.INJECTED_PROJECT_CONFIG.hospitalHvac = false; window.EKO.set({ sub: 'reg2' }); window.EKO.set({ sub: 'reg' }) })
   await page.waitForFunction(() => !document.querySelector('tr.dgroof'))
-  assert.deepEqual(await rows(), withEntry, 'the entry adds no row, count or asset')
+  assert.deepEqual(await rows(), withEntry)
   await page.close()
 })
 
-test('the schematic is a BMS-style plant graphic: six equipment, three coloured loops, no iframe, no point tables, no mapping section', async () => {
-  const page = await openFor('eko'); await openSchematic(page)
-  assert.equal(await popup(page).locator('iframe').count(), 0)
+test('the Schematic button opens the client\'s FIN screen in an iframe inside the existing popup: exact URL, no new tab, no native drawing', async () => {
+  reset()
+  const page = await openFor('eko'); await connect(page, A)
+  await openGraphic(page)
+  assert.equal(await popup(page).locator('iframe.roofframe').count(), 1)
+  assert.equal(await frameSrc(page), A + ROUTE, 'the connected FIN server + the client\'s exact path, query and hash')
+  assert.equal(await popup(page).locator('iframe.roofframe').getAttribute('title'), 'Hospital Roof Graphic')
   assert.equal(await popup(page).locator('.doctitle').innerText(), 'Hospital Roof – HVAC')
-  const probe = await page.evaluate(() => {
-    const svg = document.querySelector('#docov svg.rf-svg')
-    return {
-      slots: [...svg.querySelectorAll('.rf-eq')].map(g => g.dataset.slot).sort(),
-      loops: [...svg.querySelectorAll('.rf-loop')].map(g => g.dataset.loop).sort(),
-      pipeColours: [...new Set([...svg.querySelectorAll('.rf-pipe')].map(p => p.getAttribute('stroke')))].sort(),
-      rotors: svg.querySelectorAll('.rf-rot').length,
-      text: svg.textContent,
-      tables: document.querySelectorAll('#docov .rf-panel, #docov .rf-val, #docov details, #docov .roofmap, #docov table').length,
-    }
-  })
-  assert.deepEqual(probe.slots, ['boiler', 'btu', 'chilledPumps', 'chiller', 'condenserPumps', 'coolingTower'])
-  assert.deepEqual(probe.loops, ['chilled', 'condenser', 'hot'])
-  assert.deepEqual(probe.pipeColours, ['#2b7fdc', '#35a853', '#e0453a'])
-  assert.equal(probe.rotors, 6, 'the tower fan, four pump impellers and the chiller motor fan turn; the boiler has a flame instead')
-  assert.equal(probe.tables, 0, 'no equipment point tables, no mapping section')
-  assert.ok(!/FANRUNSTATUS|PUMP1RUNSTATUS|OPERATINGHOURS|Mapping status|Candidates/.test(probe.text), 'point names and suggestions are not on the schematic')
-  for (const word of ['HOSPITAL ROOF', 'COOLING TOWER', 'CONDENSER WATER PUMPS', 'CHILLER', 'CHILLED WATER PUMPS', 'BOILER', 'BTU METER', 'BUILDING HOT WATER']) assert.ok(probe.text.includes(word), word)
+  assert.equal(await popup(page).locator('svg, a[target="_blank"], .rf-svg').count(), 0, 'no native schematic and no link to another tab')
+  await page.waitForFunction(() => !document.querySelector('#docov .roofload'))   // the frame reported loaded
+  await settle(page)
+  const hit = seen.A.find(r => r.url === FIN_PATH)
+  assert.ok(hit, 'FIN was asked for the client\'s route (the hash stays in the browser): ' + JSON.stringify(seen.A))
+  assert.equal(hit.dest, 'iframe')
+  assert.equal(page.popups, 0, 'no new tab or window was opened')
+  const css = await page.evaluate(() => { const f = document.querySelector('#docov .roofframe'); const c = getComputedStyle(f); return { border: c.borderTopWidth, display: c.display } })
+  assert.deepEqual(css, { border: '0px', display: 'block' })
   await page.close()
 })
 
-test('with nothing mapped every part is "UNMAPPED" and still: nothing turns, nothing flows, nothing is assumed', async () => {
-  const page = await openFor('eko')
-  await feed(page, plant())   // the feed has the right-looking points, but no slot is confirmed
-  await openSchematic(page)
-  for (const id of ['fan', 'cp1', 'cp2', 'wp1', 'wp2', 'chiller', 'boiler', 'btu']) assert.equal((await chip(page, id))[0], 'unmapped', id)
-  for (const part of ['fan', 'cp1', 'wp1', 'chiller']) assert.deepEqual(stripTick(await spin(page, part)), { name: 'none', moving: false, running: false }, part)
-  for (const loop of ['condenser', 'chilled', 'hot']) {
-    const f = await flow(page, loop)
-    assert.deepEqual([f.display, f.name, f.moving, f.attr], ['none', 'none', false, 'unknown'], loop)
+test('the FIN address comes from the connection: after FIN moves and the user reconnects, the new address is used and the old one is never asked again', async () => {
+  reset()
+  const page = await openFor('eko'); await connect(page, A)
+  await openGraphic(page)
+  assert.equal(await frameSrc(page), A + ROUTE)
+  await settle(page)
+  const askedA = seen.A.length
+  assert.ok(askedA > 0)
+  await popup(page).locator('.docx').click()
+  await connect(page, B)   // the same page, no reload: the next open reads the new connection
+  await page.locator('tr.dgroof button[data-act="roofOpen"]').click()
+  await popup(page).waitFor()
+  assert.equal(await frameSrc(page), B + ROUTE)
+  assert.ok(!(await frameSrc(page)).includes(A), 'no trace of the old address')
+  await settle(page)
+  assert.ok(seen.B.some(r => r.url === FIN_PATH))
+  assert.equal(seen.A.length, askedA, 'the old server is not asked again')
+  await page.close()
+})
+
+test('not connected to FIN: the popup says so and loads nothing; an unusable address is refused; nothing is guessed', async () => {
+  reset()
+  const page = await openFor('eko')   // __finServer stays null
+  await openGraphic(page)
+  assert.equal(await popup(page).locator('iframe').count(), 0)
+  const msg = await popup(page).locator('.roofnone').innerText()
+  assert.ok(msg.includes('No FIN server') && msg.includes('Connect to FIN'))
+  assert.equal(await popup(page).locator('a').count(), 0, 'no link to a made-up address')
+  for (const bad of ['javascript:alert(1)', 'ftp://x', 'not a url']) {
+    await popup(page).locator('.docx').click()
+    await page.evaluate(b => { window.INJECTED_PROJECT_CONFIG.roofGraphic = { title: 'x', url: b } }, bad)
+    await page.locator('tr.dgroof button[data-act="roofOpen"]').click()
+    await popup(page).waitFor()
+    assert.equal(await popup(page).locator('iframe').count(), 0, bad)
   }
-  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#docov .rf-flame')).opacity), '0', 'no flame')
-  assert.equal(await page.locator('#docov .rf-eq[data-state="unmapped"]').count(), 6)
+  assert.deepEqual(seen.A.concat(seen.B), [], 'FIN was never contacted')
   await page.close()
 })
 
-test('running equipment turns: the tower fan, each pump impeller and the chiller motor fan rotate; stopped ones do not', async () => {
-  const page = await openPlant()
-  for (const part of ['fan', 'cp1', 'cp2', 'wp1', 'chiller']) {
-    const s = await spin(page, part)
-    assert.deepEqual([s.name, s.moving, s.running, s.ticked], ['rf-rot', true, true, true], `${part} turns`)
-  }
-  assert.deepEqual(stripTick(await spin(page, 'wp2')), { name: 'none', moving: false, running: false }, 'chilled pump 2 is stopped: its impeller does not turn')
-  assert.deepEqual((await chip(page, 'wp1')), ['running', 'P1 RUNNING'])
-  assert.deepEqual((await chip(page, 'wp2')), ['stopped', 'P2 STOPPED'])
-  assert.deepEqual((await chip(page, 'btu')), ['online', 'ONLINE'])
-  await page.close()
-})
-
-test('the boiler flame burns only while the boiler status says On; a fault shows FAULT and the flame is out', async () => {
-  const flame = page => page.evaluate(() => { const f = document.querySelector('#docov .rf-flame'); return [getComputedStyle(f).opacity, getComputedStyle(f).animationName] })
-  const page = await openPlant()
-  const on = await flame(page)
-  assert.equal(on[1], 'rf-flame')
-  assert.ok(Number(on[0]) > 0.8)
-  await feed(page, plant({ B: [point('RUN_STATUS', 'Fault')] }))
-  await page.waitForFunction(() => document.querySelector('#docov [data-chip="boiler"]').dataset.state === 'fault')
-  assert.deepEqual(await flame(page), ['0', 'none'])
-  assert.deepEqual(await chip(page, 'boiler'), ['fault', 'FAULT'])
-  assert.equal(await page.locator('#docov .rf-eq[data-slot="boiler"]').getAttribute('data-state'), 'fault')
-  await page.close()
-})
-
-test('pipes flow only while the pumps say so: condenser and chilled flow while a pump runs, none when all are stopped, hot follows the boiler', async () => {
-  const page = await openPlant({ CP: [point('PUMP1_RUN_STATUS', 'On'), point('PUMP2_RUN_STATUS', 'Off')], B: [point('RUN_STATUS', 'Off')] })
-  let f = await flow(page, 'condenser')
-  assert.deepEqual([f.attr, f.display, f.name, f.moving], ['on', 'inline', 'rf-flow', true], 'one running condenser pump is enough')
-  f = await flow(page, 'chilled')
-  assert.deepEqual([f.attr, f.moving], ['on', true])
-  f = await flow(page, 'hot')
-  assert.deepEqual([f.attr, f.display, f.moving], ['off', 'none', false], 'the boiler is off, so no hot water flow')
-
-  await feed(page, plant({ CP: [point('PUMP1_RUN_STATUS', 'Off'), point('PUMP2_RUN_STATUS', 'Off')], WP: [point('PUMP1_RUN_STATUS', 'Off'), point('PUMP2_RUN_STATUS', 'Off')], BT: [point('CHW_FLOW', '0')], B: [point('RUN_STATUS', 'On')] }))
-  await page.waitForFunction(() => document.querySelector('#docov .rf-loop[data-loop="condenser"]').dataset.flow === 'off')
-  for (const [loop, want] of [['condenser', 'off'], ['chilled', 'off'], ['hot', 'on']]) {
-    const g = await flow(page, loop)
-    assert.equal(g.attr, want, loop)
-    assert.equal(g.moving, want === 'on', loop)
-  }
-  // one pump with no status: the loop is "unknown", not stopped
-  await feed(page, plant({ CP: [point('PUMP1_RUN_STATUS', 'Off')] }))
-  await page.waitForFunction(() => document.querySelector('#docov .rf-loop[data-loop="condenser"]').dataset.flow === 'unknown')
-  assert.equal((await flow(page, 'condenser')).moving, false)
-  await page.close()
-})
-
-test('a live update changes the drawing in place: a running fan keeps turning without restarting, a stopped one stops', async () => {
-  const page = await openPlant()
-  await page.evaluate(() => {
-    const el = document.querySelector('#docov [data-part="fan"] .rf-rot')
-    window.__fan = el; window.__anim = el.getAnimations()[0]; window.__t = window.__anim.currentTime
-  })
-  await page.evaluate(def => { (0, eval)(def); return window.__clock(400) }, WAIT_CLOCK)
-  await feed(page, plant({ T: [point('FAN_RUN_STATUS', 'On'), point('FAN_SPEED', '90')] }))   // new reading, still running
-  await page.evaluate(() => window.__clock(300))
-  const kept = await page.evaluate(() => {
-    const el = document.querySelector('#docov [data-part="fan"] .rf-rot')
-    const a = el.getAnimations()[0]
-    return { sameNode: el === window.__fan, sameAnimation: a === window.__anim, progressed: a.currentTime > window.__t + 500 }
-  })
-  assert.deepEqual(kept, { sameNode: true, sameAnimation: true, progressed: true })
-
-  await feed(page, plant({ T: [point('FAN_RUN_STATUS', 'Off')] }))
-  await page.waitForFunction(() => document.querySelector('#docov [data-chip="fan"]').dataset.state === 'stopped')
-  assert.deepEqual(stripTick(await spin(page, 'fan')), { name: 'none', moving: false, running: false })
-  assert.deepEqual(await chip(page, 'fan'), ['stopped', 'Fan STOPPED'])
-  await feed(page, plant({ T: [point('FAN_RUN_STATUS', 'On')] }))
-  await page.waitForFunction(() => document.querySelector('#docov [data-chip="fan"]').dataset.state === 'running')
-  assert.equal((await spin(page, 'fan')).moving, true, 'and it turns again when FIN says On')
-  await page.close()
-})
-
-test('missing, not reporting, stale and invalid status points leave the part at NO DATA and still', async () => {
-  const cases = [
-    ['no run-status point', [point('FAN_SPEED', '80')]],
-    ['not reporting', [point('FAN_RUN_STATUS', 'On', { reporting: false })]],
-    ['empty value', [point('FAN_RUN_STATUS', 'null')]],
-    ['an unrecognised status text', [point('FAN_RUN_STATUS', 'Standby')]],
-    ['a similar name only', [point('FAN_RUN_STATUS_FEEDBACK', 'On')]],
-  ]
-  for (const [name, points] of cases) {
-    const page = await openPlant({ T: points })
-    assert.deepEqual(await chip(page, 'fan'), ['unknown', 'Fan NO DATA'], name)
-    assert.deepEqual(stripTick(await spin(page, 'fan')), { name: 'none', moving: false, running: false }, name)
-    await page.close()
-  }
-  const page = await openPlant()
-  assert.equal((await spin(page, 'fan')).moving, true)
-  await page.evaluate(() => { window.EKO.data.assets.forEach(a => { a.st = 'stale' }) })   // the asset is flagged stale
-  await feed(page, plant()); await page.evaluate(() => window.EKO.data.assets.forEach(a => { a.st = 'stale' })); await page.evaluate(() => window.dispatchEvent(new CustomEvent('dashboard-data', { detail: { type: 'status', data: { connected: true } } })))
-  await page.waitForFunction(() => document.querySelector('#docov [data-chip="fan"]').dataset.state === 'unknown')
-  assert.deepEqual(stripTick(await spin(page, 'fan')), { name: 'none', moving: false, running: false }, 'stale: stops')
-  await page.close()
-})
-
-test('FIN disconnected: everything goes to NO DATA, nothing turns or flows, the status line says so; reconnecting restores it', async () => {
-  const page = await openPlant()
-  assert.equal((await spin(page, 'fan')).moving, true)
-  assert.ok((await page.locator('#docov .rf-strip').textContent()).includes('Live'))
-  await page.evaluate(() => { window.__connected = false; window.dispatchEvent(new CustomEvent('dashboard-data', { detail: { type: 'status', data: { connected: false } } })) })
-  await page.waitForFunction(() => document.querySelector('#docov [data-chip="fan"]').dataset.state === 'unknown')
-  assert.ok((await page.locator('#docov .rf-strip').textContent()).includes('FIN disconnected'))
-  for (const part of ['fan', 'cp1', 'wp1', 'chiller']) assert.equal((await spin(page, part)).moving, false, part)
-  for (const loop of ['condenser', 'chilled', 'hot']) assert.equal((await flow(page, loop)).attr, 'unknown', loop)
-  await page.evaluate(() => { window.__connected = true; window.dispatchEvent(new CustomEvent('dashboard-data', { detail: { type: 'status', data: { connected: true } } })) })
-  await page.waitForFunction(() => document.querySelector('#docov [data-chip="fan"]').dataset.state === 'running')
-  assert.equal((await spin(page, 'fan')).moving, true)
-  await page.close()
-})
-
-test('prefers-reduced-motion: nothing is animated, the state chips still tell what runs', async () => {
-  const page = await openPlant(undefined, undefined, { reducedMotion: true })
-  assert.deepEqual(stripTick(await spin(page, 'fan')), { name: 'none', moving: false, running: false })
-  assert.equal((await flow(page, 'condenser')).moving, false)
-  assert.deepEqual(await chip(page, 'fan'), ['running', 'Fan RUNNING'])
-  await page.close()
-})
-
-test('selecting an equipment highlights it and shows only its live points, with a link to its asset panel; selecting again or ✕ closes it', async () => {
-  const page = await openPlant()
-  await page.locator('#docov .rf-eq[data-slot="chiller"]').click()
-  assert.equal(await page.locator('#docov .rf-eq[data-selected]').count(), 1)
-  assert.equal(await page.locator('#docov .rf-eq[data-selected]').getAttribute('data-slot'), 'chiller')
-  const det = popup(page).locator('.roofdet')
-  assert.equal(await det.isVisible(), true)
-  const rows = await det.locator('.rd-row').allInnerTexts()
-  assert.deepEqual(rows.map(r => r.replace(/\s+/g, ' ')), ['Chiller status On', 'Chilled water supply temperature 8.8 °C', 'Chilled water return temperature 16.4 °C', 'Operating hours 1018 h', 'Power 94.3 kW'])
-  assert.ok(!(await det.innerText()).includes('Not mapped'), 'no placeholder rows for points FIN does not report')
-  await page.locator('#docov .rf-eq[data-slot="chiller"]').click()
-  assert.equal(await det.isVisible(), false)
-  await page.locator('#docov .rf-eq[data-slot="btu"]').click()
-  assert.ok((await det.innerText()).includes('11.8 L/s'))
-  await det.locator('[data-rf="closedet"]').click()
-  assert.equal(await det.isVisible(), false)
-  assert.equal(await page.locator('#docov .rf-eq[data-selected]').count(), 0)
-  await page.close()
-})
-
-test('the details follow live data while open, and the asset-panel link opens the equipment\'s existing asset by its id', async () => {
-  const page = await openPlant()
-  await page.locator('#docov .rf-eq[data-slot="coolingTower"]').click()
-  const det = popup(page).locator('.roofdet')
-  assert.ok((await det.innerText()).includes('82 %'))
-  await feed(page, plant({ T: [point('FAN_RUN_STATUS', 'On'), point('FAN_SPEED', '64')] }))
-  await page.waitForFunction(() => document.querySelector('#docov .roofdet')?.textContent.includes('64 %'))
-  await det.locator('[data-act="roofAsset"]').click()
-  await page.waitForFunction(() => !document.getElementById('docov'))
-  assert.equal(await page.evaluate(() => window.EKO.state.assetSel), 'T')
-  await page.waitForSelector('#assetpanel')
-  await page.close()
-})
-
-test('an unmapped or unreporting equipment says what it still needs instead of showing values', async () => {
-  const page = await openFor('eko')
-  await feed(page, plant()); await openSchematic(page)
-  await page.locator('#docov .rf-eq[data-slot="boiler"]').click()
-  const text = await popup(page).locator('.roofdet').innerText()
-  assert.ok(text.includes('Not mapped to a FIN equipment record yet.'))
-  assert.ok(/RUNSTATUS/.test(text) && /HWSTEMP/.test(text))
-  assert.equal(await popup(page).locator('.roofdet [data-act="roofAsset"]').count(), 0)
-  assert.ok(!/candidate|suggest/i.test(text), 'no candidate equipment is offered')
-  await confirm(page, { boiler: 'B' })
-  await feed(page, plant({ B: [] }))   // confirmed, but FIN reports none of its points
-  await page.waitForFunction(() => document.querySelector('#docov .roofdet')?.textContent.includes('none of this equipment'))
-  await page.close()
-})
-
-test('close button, Escape and a click outside close it; reopening leaves one popup', async () => {
-  const page = await openFor('eko'); await openSchematic(page)
+test('close button, Escape and a click outside close the popup and remove the frame; reopening leaves one popup and one frame', async () => {
+  reset()
+  const page = await openFor('eko'); await connect(page, A)
+  await openGraphic(page)
   await popup(page).locator('.docx').click()
   assert.equal(await page.locator('#docov').count(), 0)
-  const open = async () => { await page.locator('tr.dgroof button[data-act="roofOpen"]').click(); await popup(page).locator('svg.rf-svg').waitFor() }
+  assert.equal(await page.locator('iframe.roofframe').count(), 0, 'frame removed')
+  const open = async () => { await page.locator('tr.dgroof button[data-act="roofOpen"]').click(); await popup(page).locator('iframe.roofframe').waitFor() }
   await open(); await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.getElementById('docov'))
   await open(); await page.mouse.click(4, 4)
   await page.waitForFunction(() => !document.getElementById('docov'))
-  await open(); await page.evaluate(() => document.querySelector('[data-act="roofOpen"]').click()); await page.evaluate(() => window.EKO_ROOF.open())
+  await open()
+  await page.evaluate(() => { document.querySelector('[data-act="roofOpen"]').click(); document.querySelector('[data-act="roofOpen"]').click() })
   assert.equal(await page.locator('#docov').count(), 1)
-  assert.equal(await page.locator('#docov svg.rf-svg').count(), 1)
+  assert.equal(await page.locator('#docov iframe').count(), 1)
   await page.close()
 })
 
-test('zoom in, zoom out, fit and drag-to-pan are kept and stay inside the drawing', async () => {
-  const page = await openFor('eko'); await openSchematic(page)
-  const vb = () => page.locator('#docov svg.rf-svg').getAttribute('viewBox').then(v => v.split(' ').map(Number))
-  assert.deepEqual(await vb(), [0, 0, 1280, 780])
-  await popup(page).locator('[data-rf="in"]').click()
-  const zoomed = await vb()
-  assert.ok(zoomed[2] < 1280 && zoomed[3] < 780)
-  await popup(page).locator('[data-rf="in"]').click(); await popup(page).locator('[data-rf="in"]').click()
-  const deep = await vb()
-  assert.ok(deep[2] >= 1280 / 8 - 0.01, 'zoom has a limit')
-  assert.ok(deep[0] >= 0 && deep[1] >= 0 && deep[0] + deep[2] <= 1280.01 && deep[1] + deep[3] <= 780.01, 'the view stays inside the drawing')
-  // pan: drag on empty canvas moves the view
-  const box = await page.locator('#docov .rfwrap').boundingBox()
-  const empty = await page.evaluate(() => {
-    const r = document.querySelector('#docov .rfwrap').getBoundingClientRect()
-    for (let y = 0.1; y < 0.95; y += 0.05) for (let x = 0.1; x < 0.95; x += 0.05) {
-      const px = r.left + r.width * x, py = r.top + r.height * y
-      if (document.elementFromPoint(px, py)?.classList.contains('rf-bg')) return [px, py]
-    }
-    return null
-  })
-  assert.ok(empty, 'there is empty canvas to drag')
-  await page.mouse.move(empty[0], empty[1])
-  await page.mouse.down(); await page.mouse.move(empty[0] - 60, empty[1] - 40, { steps: 4 }); await page.mouse.up()
-  const panned = await vb()
-  assert.ok(panned[0] !== deep[0] || panned[1] !== deep[1], 'dragging pans the view')
-  assert.ok(panned[0] >= 0 && panned[0] + panned[2] <= 1280.01 && panned[1] >= 0 && panned[1] + panned[3] <= 780.01)
-  // wheel zoom
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-  await page.mouse.wheel(0, 300)
-  assert.ok((await vb())[2] >= panned[2], 'wheel down zooms out')
-  await popup(page).locator('[data-rf="out"]').click()
-  await popup(page).locator('[data-rf="fit"]').click()
-  assert.deepEqual(await vb(), [0, 0, 1280, 780])
-  await page.close()
-})
-
-for (const [name, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 800 }]]) {
-  test(`rendering (${name}): the graphic fills the popup, and no label or state chip overlaps another`, async () => {
-    const page = await openPlant(undefined, viewport)
-    const r = await page.evaluate(() => {
-      const wrap = document.querySelector('#docov .rfwrap').getBoundingClientRect()
-      const bg = document.querySelector('#docov .rf-bg').getBoundingClientRect()
-      const box = document.querySelector('#docov .docbox').getBoundingClientRect()
-      const items = [...document.querySelectorAll('#docov .rf-chip, #docov .rf-lbl, #docov .rf-legend text, #docov .rf-strip text, #docov svg > text')].map((e, i) => ({ id: (e.dataset.chip || e.textContent).slice(0, 24), ...e.getBoundingClientRect().toJSON() }))
-      const overlaps = []
-      for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
-        const a = items[i], b = items[j]
-        if (a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5) overlaps.push(`${a.id} / ${b.id}`)
-      }
-      return { fillW: bg.width / wrap.width, fillH: bg.height / wrap.height, box: box.toJSON(), vw: innerWidth, vh: innerHeight, bg: bg.toJSON(), overlaps, count: items.length, scrollX: document.documentElement.scrollWidth > innerWidth }
+test('responsive: 100% wide, 850px tall as the starting size, filling a bigger popup and shrinking in a smaller one', async () => {
+  reset()
+  const measure = async viewport => {
+    const page = await openFor('eko', viewport); await connect(page, A)
+    await openGraphic(page)
+    const m = await page.evaluate(() => {
+      const f = document.querySelector('#docov .roofframe').getBoundingClientRect(), w = document.querySelector('#docov .roofframewrap').getBoundingClientRect(), b = document.querySelector('#docov .docbox').getBoundingClientRect()
+      return { fw: f.width, fh: f.height, ww: w.width, wh: w.height, bw: b.width, bh: b.height, vw: innerWidth, scrollX: document.documentElement.scrollWidth > innerWidth }
     })
-    assert.ok(Math.max(r.fillW, r.fillH) >= 0.95, `the drawing fills the popup in one dimension (${r.fillW.toFixed(2)} x ${r.fillH.toFixed(2)})`)
-    assert.ok(r.box.width >= r.vw * 0.9 && r.box.height >= r.vh * 0.9, `the popup takes most of the screen (${Math.round(r.box.width)}x${Math.round(r.box.height)})`)
-    assert.ok(r.bg.left >= r.box.left - 1 && r.bg.right <= r.box.right + 1, 'the drawing is inside the popup')
-    assert.deepEqual(r.overlaps, [], 'no two labels or chips overlap')
-    assert.ok(r.count >= 20)
-    assert.equal(r.scrollX, false, 'no horizontal page scroll')
-    // an open details panel keeps the drawing usable
-    await page.locator('#docov .rf-eq[data-slot="chiller"]').click({ force: true })
-    const after = await page.evaluate(() => {
-      const bg = document.querySelector('#docov .rf-bg').getBoundingClientRect(), det = document.querySelector('#docov .roofdet').getBoundingClientRect(), box = document.querySelector('#docov .docbox').getBoundingClientRect()
-      return { bgW: bg.width, bgH: bg.height, inside: det.left >= box.left - 1 && det.right <= box.right + 1 && det.bottom <= box.bottom + 1 }
-    })
-    assert.ok(after.bgW > 200 && after.bgH > 120 && after.inside, `the drawing and the panel both fit (${Math.round(after.bgW)}x${Math.round(after.bgH)})`)
     await page.close()
-  })
-}
+    return m
+  }
+  const big = await measure({ width: 1920, height: 1300 })
+  assert.ok(Math.abs(big.fw - big.ww) <= 1, 'full width of the popup')
+  assert.ok(big.fh >= 850, `a roomy popup gives at least the 850px reference (${Math.round(big.fh)})`)
+  assert.ok(Math.abs(big.fh - big.wh) <= 1, 'and it fills the popup')
+  const mid = await measure({ width: 1440, height: 900 })
+  assert.ok(mid.fh < 850 && Math.abs(mid.fh - mid.wh) <= 1, `a shorter screen shrinks it to fit (${Math.round(mid.fh)}) instead of overflowing`)
+  assert.ok(Math.abs(mid.fw - mid.ww) <= 1)
+  const phone = await measure({ width: 390, height: 800 })
+  assert.ok(Math.abs(phone.fw - phone.ww) <= 1 && phone.fw > 300, `full width on a phone (${Math.round(phone.fw)})`)
+  assert.ok(phone.fh > 300 && phone.fh <= phone.wh + 1)
+  assert.equal(phone.scrollX, false, 'no horizontal page scroll')
+  assert.ok(mid.bw >= 1440 * 0.9 && mid.bh >= 900 * 0.9, 'the popup takes most of the screen')
+})
+
+// ── authentication / framing evidence: what the browser does with the frame, observed against stand-in FIN servers ──
+
+test('EVIDENCE · a browser with no FIN session: FIN redirects the frame to its sign-in page, and that page forbids framing, so the frame is blank', async () => {
+  reset(); M.needSession = true
+  const page = await openFor('eko'); await connect(page, A)
+  await openGraphic(page)
+  await settle(page)
+  const first = seen.A.find(r => r.url === FIN_PATH)
+  assert.equal(first.cookie, false, 'no FIN session cookie was sent for the frame')
+  assert.ok(seen.A.some(r => r.url === '/user/login' && r.dest === 'iframe'), 'FIN sent the frame to /user/login: ' + JSON.stringify(seen.A))
+  assert.ok(page.logs.some(l => /Refused to display .*X-Frame-Options/.test(l)), 'the browser says it refused the sign-in page in a frame: ' + JSON.stringify(page.logs.slice(-4)))
+  assert.ok(page.fails.some(f => /\/user\/login .*ERR_BLOCKED_BY_RESPONSE/.test(f)), 'and the network log shows ERR_BLOCKED_BY_RESPONSE: ' + JSON.stringify(page.fails))
+  // The page cannot tell: the frame fired `load`, so the loading note is gone although nothing is showing. This is why the popup never claims success.
+  assert.equal(await page.locator('#docov .roofload').count(), 0)
+  await page.close()
+})
+
+test('EVIDENCE · signed in to FIN in a normal tab: a Lax session cookie is NOT sent for the cross-site frame, so it still ends at the sign-in page', async () => {
+  reset(); M.needSession = true
+  const page = await openFor('eko'); await connect(page, A)
+  const tab = await page.context().newPage()
+  await tab.goto(A + '/set-session?sa=Lax')   // the user has signed in to FIN in this browser
+  await tab.close()
+  await openGraphic(page)
+  await settle(page)
+  const req = seen.A.find(r => r.url === FIN_PATH)
+  assert.equal(req.site, 'cross-site')
+  assert.equal(req.cookie, false, 'the browser withheld the SameSite=Lax session cookie from the cross-site frame')
+  assert.ok(seen.A.some(r => r.url === '/user/login'), 'so FIN redirected to sign in')
+  await page.close()
+})
+
+test('EVIDENCE · a session cookie set with SameSite=None; Secure IS sent for the frame, and the graphic is served', async () => {
+  reset(); M.needSession = true
+  const page = await openFor('eko'); await connect(page, A)
+  const tab = await page.context().newPage()
+  await tab.goto(A + '/set-session?sa=None')
+  await tab.close()
+  await openGraphic(page)
+  await settle(page)
+  const req = seen.A.find(r => r.url === FIN_PATH)
+  assert.equal(req.cookie, true, 'the session cookie reached FIN from inside the frame')
+  assert.ok(!seen.A.some(r => r.url === '/user/login'), 'no redirect to sign in')
+  assert.ok(!page.logs.some(l => /Refused to display/.test(l)), 'no framing refusal')
+  await page.close()
+})
+
+test('EVIDENCE · FIN forbidding framing on the graphic itself: the browser refuses it, with a console message naming the header', async () => {
+  reset(); M.xfo = true
+  const page = await openFor('eko'); await connect(page, A)
+  await openGraphic(page)
+  await settle(page)
+  assert.ok(page.logs.some(l => /Refused to display .*X-Frame-Options/.test(l)), JSON.stringify(page.logs.slice(-4)))
+  assert.ok(page.fails.some(f => f.includes('/fin5/ekoHospital') && /ERR_BLOCKED_BY_RESPONSE/.test(f)))
+  assert.equal(await popup(page).locator('a[target="_blank"]').count(), 0, 'and the popup does not turn into a link to another tab')
+  await page.close()
+})
 
 test('switching projects: Eko Hospital -> Marsa -> Eko Hospital shows the entry only where it belongs', async () => {
   const page = await openFor('eko'); await showRegister(page)
   assert.equal(await page.locator('tr.dgroof').count(), 1)
-  await page.evaluate(cfg => { window.INJECTED_PROJECT_CONFIG = cfg; window.EKO.set({ sub: 'reg2' }); window.EKO.set({ sub: 'reg' }) }, CONFIGS.marsa)
+  await page.evaluate(cfg => { window.INJECTED_PROJECT_CONFIG = { ...cfg, roofGraphic: null }; window.EKO.set({ sub: 'reg2' }); window.EKO.set({ sub: 'reg' }) }, CONFIGS.marsa)
   await page.waitForSelector('table.dg')
   assert.equal(await page.locator('tr.dgroof').count(), 0)
-  await page.evaluate(cfg => { window.INJECTED_PROJECT_CONFIG = cfg; window.EKO.set({ sub: 'reg2' }); window.EKO.set({ sub: 'reg' }) }, CONFIGS.eko)
+  await page.evaluate(cfg => { window.INJECTED_PROJECT_CONFIG = { ...cfg, roofGraphic: { title: 'x', url: null } }; window.EKO.set({ sub: 'reg2' }); window.EKO.set({ sub: 'reg' }) }, CONFIGS.eko)
   await page.waitForSelector('table.dg')
   assert.equal(await page.locator('tr.dgroof').count(), 1)
   await page.close()
 })
 
-test('regression: the O&M / warranty popup still opens with its download link; a foreign address is refused; Escape closes it', async () => {
+test('regression: the O&M / warranty popup still opens with its download and new-tab links; a foreign address is refused; Escape closes it', async () => {
   const page = await openFor('marsa')
   await page.evaluate(() => {
     const mk = (id, url, title) => { const b = document.createElement('button'); b.dataset.act = 'docOpen'; b.dataset.title = title; b.dataset.url = url; b.id = id; document.body.appendChild(b) }
@@ -474,15 +335,15 @@ test('regression: the O&M / warranty popup still opens with its download link; a
   await page.close()
 })
 
-test('regression: opening the graphic and then an O&M popup leaves exactly one popup, and the dashboard data listener is released', async () => {
-  const page = await openPlant()
+test('regression: opening the roof graphic and then an O&M popup leaves exactly one popup', async () => {
+  reset()
+  const page = await openFor('eko'); await connect(page, A)
+  await openGraphic(page)
   await page.evaluate(() => {
     const b = document.createElement('button'); b.dataset.act = 'docOpen'; b.dataset.title = 'Warranty'; b.dataset.url = '/api/fin/file?ref=' + encodeURIComponent('@p:ekoHospital:r:1a2b-3c4d'); b.id = 'wty'; document.body.appendChild(b); b.click()
   })
   await page.waitForSelector('#docov iframe.docframe')
   assert.equal(await page.locator('#docov').count(), 1)
-  assert.equal(await page.locator('#docov svg.rf-svg').count(), 0, 'the graphic was replaced, not stacked')
-  await feed(page, plant())   // a feed update with the graphic gone must not throw or redraw anything
-  assert.equal(await page.locator('#docov svg.rf-svg').count(), 0)
+  assert.equal(await page.locator('#docov iframe.roofframe').count(), 0, 'the graphic was replaced, not stacked')
   await page.close()
 })

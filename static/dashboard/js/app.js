@@ -1021,6 +1021,35 @@
     armFrame();
     ov.querySelector('.docx').focus();
   }
+  /* The Hospital roof graphic: the client's FIN screen in an iframe inside the popup frame (#docov, so Escape and navigation close it).
+     Nothing is rewritten, proxied or signed in here: the frame is FIN's own page, with whatever FIN session the browser holds. With no FIN
+     server to point at (not connected), it says so and loads nothing. The browser does not tell a page whether FIN refused the frame or
+     sent it to a sign-in page, so the loading note only says the frame has loaded, never that the graphic is showing. */
+  function openRoofFrame(url, frameTitle){
+    let src = null;
+    try { if (typeof url === 'string' && /^https?:$/.test(new URL(url).protocol)) src = url; } catch (e) {}
+    const title = E.t('roofTitle');
+    ACTS.docClose();
+    const ov = document.createElement('div');
+    ov.id = 'docov';
+    ov.innerHTML = `<div class="docbox roofbox" role="dialog" aria-modal="true" aria-label="${C.esc(title)}">
+        <div class="dochead">
+          <h2 class="doctitle">${C.esc(title)}</h2>
+          <button type="button" class="wmaxx docx" data-act="docClose" aria-label="${C.esc(E.t('close'))}">✕</button>
+        </div>
+        <div class="roofframewrap">${src
+          ? `<iframe class="roofframe" title="${C.esc(frameTitle || 'Hospital Roof Graphic')}"></iframe>
+             <div class="roofload" role="status"><span class="wospin" aria-hidden="true"></span><span>${C.esc(E.t('roofLoading'))}</span></div>`
+          : `<div class="roofnone" role="alert"><b>${C.esc(E.t('roofNoFin'))}</b><p>${C.esc(E.t('roofNoFinWhy'))}</p></div>`}
+        </div>
+      </div>`;
+    ov.addEventListener('click', ev => { if (ev.target === ov) ACTS.docClose(); });
+    const frame = ov.querySelector('.roofframe');
+    if (frame) frame.addEventListener('load', () => { const n = ov.querySelector('.roofload'); if (n) n.remove(); }, { once: true });
+    if (frame) frame.src = src;
+    (window.DASHBOARD_ROOT || document.body).appendChild(ov);
+    ov.querySelector('.docx').focus();
+  }
   const ACTS = {
     goMod(el){ const m = E.nav.modules.find(x=>x.id===el.dataset.mod);
       if(!E.state.exp[m.id]) E.state.born = 'nsub:'+m.id;
@@ -1099,10 +1128,9 @@
       } catch (e) { return; }
       openFramePopup({ title: el.dataset.title || 'PDF', src: url, download, tab: url });
     },
-    /* The Eko Hospital roof HVAC schematic (layouts/hospital-roof.js), listed in the Assets register for that project only. It opens
-       in the same popup frame as the O&M and warranty documents. An equipment drawn on it opens that equipment's own asset panel. */
-    roofOpen(){ if (window.EKO_ROOF) window.EKO_ROOF.open(); },
-    roofAsset(el){ ACTS.docClose(); ACTS.openAsset(el); },
+    /* The Eko Hospital roof graphic (the client's own FIN screen), listed in the Assets register for that project only. It opens in the same
+       popup frame as the O&M and warranty documents. The URL is the Studio's: the connected FIN server + the client's route, read now. */
+    roofOpen(){ const g = (window.INJECTED_PROJECT_CONFIG || {}).roofGraphic; openRoofFrame(g && g.url, g && g.title); },
     docClose(){ const ov = document.getElementById('docov'); if (ov) ov.remove(); },
     /* Asset panel wide mode: a real state toggle (not a snapshot) so the
        tabs, work-order buttons and live values keep working while wide. */

@@ -67,8 +67,9 @@
     id:'assets', titleKey:'regTitle', exportName:'asset-register', rowKey:'id', rowAct:{ act:'openAsset', attr:'asset', tab:'alarms' }, searchKeys:['id', 'type'],
     isSelectedRow:(E2, r) => E2.state.assetSel === r.id,
     rows: E2 => E2.data.assets,
-    /* The Eko Hospital roof HVAC schematic (layouts/hospital-roof.js): not an asset, so no record, nothing in E.data.assets to count, sort or
-       export. One pinned row, only for a project whose Hospital graphics are on (the Studio sets hospitalHvac for the ekoHospital FIN project). */
+    /* The Eko Hospital roof graphic (the client's FIN screen, opened by roofOpen in the popup frame): not an asset, so no record, nothing in
+       E.data.assets to count, sort or export. One pinned row, only for a project whose Hospital graphics are on (the Studio sets hospitalHvac
+       for the ekoHospital FIN project). */
     pinned:(E2, q, span) => {
       if(!((window.INJECTED_PROJECT_CONFIG || {}).hospitalHvac === true)) return '';
       const title = E2.t('roofTitle');

@@ -160,7 +160,7 @@ window.EKO_DG = (function(){
       if(open) body += `<tr class="dgx" role="row"><td colspan="${span}" role="gridcell">${spec.expand(E, r)}</td></tr>`;
     });
     if(!pageRows.length) body = `<tr><td colspan="${span}" class="dgempty">${esc(t('dgEmpty'))}</td></tr>`;
-    /* A spec may pin rows that are not records (the asset register's Hospital roof schematic): first page only, and only while no column filter narrows the list */
+    /* A spec may pin rows that are not records (the asset register's Hospital roof graphic): first page only, and only while no column filter narrows the list */
     if(spec.pinned && s.page === 0 && !Object.keys(s.filters).some(k => cols[k] && active(s.filters[k]))) body = spec.pinned(E, s.q, span) + body;
     const alt = spec.altBody ? spec.altBody(E, rows, s) : null;   /* D103: the map takes the table's place, the toolbar and filters stay */
     const table = alt != null ? `<div class="dgalt">${alt}</div>` : `<div class="dgscroll"><table class="dg" role="grid" aria-label="${esc(t(spec.titleKey))}" aria-rowcount="${rows.length + 1}" aria-colcount="${span}" aria-multiselectable="${selectable}">

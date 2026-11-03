@@ -6030,306 +6030,52 @@
   height:min(960px,96vh)
 }
 
-.dashboard-native-container .roofsvg {
+.dashboard-native-container .roofframewrap {
   position:relative;
   flex:1;
   min-height:0;
   display:flex;
-  overflow:hidden;
-  background:#e9ecf0;
-  touch-action:none
+  flex-direction:column;
+  background:#fff
 }
 
-.dashboard-native-container .rf-svg .rf-arrow {
-  fill:#fff;
-  stroke:#1c2430;
-  stroke-opacity:.6;
-  stroke-width:1
-}
-
-.dashboard-native-container .rfwrap {
-  flex:1;
-  min-width:0;
+.dashboard-native-container .roofframe {
+  flex:1 1 850px;
   min-height:0;
-  display:flex
-}
-
-.dashboard-native-container .rfwrap .rf-svg {
   width:100%;
-  height:100%;
+  height:850px;
+  border:0;
   display:block
 }
 
-.dashboard-native-container .rf-eq {
-  cursor:pointer;
-  outline:none
-}
-
-.dashboard-native-container .rf-eq .rf-hit {
-  fill:transparent;
-  stroke:transparent;
-  stroke-width:2
-}
-
-.dashboard-native-container .rf-eq:hover .rf-hit,
-.dashboard-native-container .rf-eq:focus-visible .rf-hit {
-  fill:rgba(42,110,200,.08);
-  stroke:#2a6ec8
-}
-
-.dashboard-native-container .rf-eq[data-selected] .rf-hit {
-  fill:rgba(42,110,200,.14);
-  stroke:#1d5fc0;
-  stroke-width:3
-}
-
-.dashboard-native-container .rf-eq[data-state="fault"] .rf-hit {
-  stroke:#d32f2f;
-  stroke-dasharray:7 4
-}
-
-.dashboard-native-container .rf-svg .rf-rot {
-  transform-box:fill-box;
-  transform-origin:50% 50%
-}
-
-.dashboard-native-container .rf-svg [data-part][data-run="on"] .rf-rot {
-  animation:rf-rot .9s linear infinite
-}
-
-.dashboard-native-container .rf-svg [data-part="fan"][data-run="on"] .rf-rot {
-  animation-duration:.7s
-}
-
-.dashboard-native-container .rf-svg .rf-flame {
-  opacity:0;
-  transform-box:fill-box;
-  transform-origin:50% 100%
-}
-
-.dashboard-native-container .rf-svg [data-part="boiler"][data-run="on"] .rf-flame {
-  opacity:1;
-  animation:rf-flame .5s ease-in-out infinite alternate
-}
-
-.dashboard-native-container .rf-svg .rf-flow {
-  display:none
-}
-
-.dashboard-native-container .rf-svg .rf-loop[data-flow="on"] .rf-flow {
-  display:inline;
-  animation:rf-flow 1s linear infinite
-}
-
-.dashboard-native-container .rf-svg .rf-loop[data-flow="unknown"] .rf-pipe {
-  opacity:.45
-}
-
-.dashboard-native-container .rf-svg .rf-chip rect {
-  fill:#6b7280
-}
-
-.dashboard-native-container .rf-svg .rf-chip circle {
-  fill:#fff
-}
-
-.dashboard-native-container .rf-svg .rf-chip text {
-  fill:#fff;
-  font-size:9.5px;
-  font-weight:700;
-  letter-spacing:.3px
-}
-
-.dashboard-native-container .rf-svg .rf-chip[data-state="running"] rect {
-  fill:#1f9d57
-}
-
-.dashboard-native-container .rf-svg .rf-chip[data-state="online"] rect {
-  fill:#2b7fdc
-}
-
-.dashboard-native-container .rf-svg .rf-chip[data-state="fault"] rect {
-  fill:#d32f2f
-}
-
-.dashboard-native-container .rf-svg .rf-chip[data-state="fault"] {
-  animation:rf-pulse 1.2s ease-in-out infinite
-}
-
-.dashboard-native-container .rf-svg .rf-chip[data-state="unknown"] rect {
-  fill:#b7791f
-}
-
-.dashboard-native-container .rf-svg .rf-chip[data-state="unmapped"] rect {
-  fill:#eceef2;
-  stroke:#9aa1ad;
-  stroke-dasharray:3 2
-}
-
-.dashboard-native-container .rf-svg .rf-chip[data-state="unmapped"] circle {
-  fill:#9aa1ad
-}
-
-.dashboard-native-container .rf-svg .rf-chip[data-state="unmapped"] text {
-  fill:#4b5563
-}
-
-.dashboard-native-container .rf-svg .rf-strip circle {
-  fill:#b7791f
-}
-
-.dashboard-native-container .rf-svg .rf-strip[data-live="on"] circle {
-  fill:#1f9d57
-}
-
-@keyframes rf-rot {
-  to {
-    transform:rotate(360deg)
-  }
-}
-
-@keyframes rf-flow {
-  to {
-    stroke-dashoffset:-16
-  }
-}
-
-@keyframes rf-flame {
-  from {
-    transform:scale(.88,.8);
-    opacity:.85
-  }
-  to {
-    transform:scale(1.08,1.1);
-    opacity:1
-  }
-}
-
-@keyframes rf-pulse {
-  50% {
-    opacity:.55
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .dashboard-native-container .rf-svg * {
-    animation:none !important
-  }
-}
-
-.dashboard-native-container .roofdet {
-  flex:none;
-  width:310px;
-  overflow:auto;
-  padding:14px 16px;
-  background:var(--s1);
-  color:var(--t1);
-  border-inline-start:1px solid var(--bd2)
-}
-
-.dashboard-native-container .roofdet[hidden] {
-  display:none
-}
-
-.dashboard-native-container .roofdet .rd-head {
+.dashboard-native-container .roofload {
+  position:absolute;
+  inset:0;
   display:flex;
   align-items:center;
-  gap:8px
-}
-
-.dashboard-native-container .roofdet .rd-head h3 {
-  flex:1;
-  margin:0;
-  font-size:15px
-}
-
-.dashboard-native-container .roofdet .rd-pill {
-  padding:2px 9px;
-  border-radius:999px;
-  font-size:11px;
-  font-weight:700;
-  color:#fff;
-  background:#6b7280
-}
-
-.dashboard-native-container .roofdet .rd-pill[data-state="running"] {
-  background:#1f9d57
-}
-
-.dashboard-native-container .roofdet .rd-pill[data-state="online"] {
-  background:#2b7fdc
-}
-
-.dashboard-native-container .roofdet .rd-pill[data-state="fault"] {
-  background:#d32f2f
-}
-
-.dashboard-native-container .roofdet .rd-pill[data-state="unknown"] {
-  background:#b7791f
-}
-
-.dashboard-native-container .roofdet .rd-pill[data-state="unmapped"] {
+  justify-content:center;
+  gap:10px;
   color:var(--t2);
   background:var(--s2);
-  border:1px dashed var(--bd2)
+  pointer-events:none
 }
 
-.dashboard-native-container .roofdet .rd-asset {
-  display:flex;
-  align-items:center;
-  flex-wrap:wrap;
-  gap:8px;
-  margin:10px 0 0
+.dashboard-native-container .roofnone {
+  margin:auto;
+  max-width:460px;
+  padding:20px;
+  text-align:center;
+  color:var(--t2);
+  background:var(--s1)
 }
 
-.dashboard-native-container .roofdet .rd-list {
-  display:grid;
-  gap:0;
-  margin:10px 0 0
-}
-
-.dashboard-native-container .roofdet .rd-row {
-  display:flex;
-  justify-content:space-between;
-  gap:14px;
-  padding:6px 0;
-  border-bottom:1px solid var(--bd2)
-}
-
-.dashboard-native-container .roofdet .rd-row dt {
-  color:var(--t2)
-}
-
-.dashboard-native-container .roofdet .rd-row dd {
-  margin:0;
-  font-weight:600;
-  text-align:end
-}
-
-.dashboard-native-container .roofdet .rd-why {
-  margin:12px 0 6px;
+.dashboard-native-container .roofnone b {
   color:var(--t1)
 }
 
-.dashboard-native-container .roofdet .rd-needs {
-  margin:4px 0 0;
-  font-size:11px;
-  line-height:1.6;
-  color:var(--t2);
-  word-break:break-word
-}
-
-@media (max-width:640px) {
-  .dashboard-native-container .roofsvg {
-    flex-direction:column
-  }
-
-  .dashboard-native-container .roofdet {
-    width:auto;
-    max-height:45%;
-    border-inline-start:0;
-    border-top:1px solid var(--bd2)
-  }
+.dashboard-native-container .roofnone p {
+  margin:10px 0 0;
+  line-height:1.5
 }
 
 .dashboard-native-container .docframe {
