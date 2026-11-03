@@ -820,11 +820,6 @@ window.EKO_A = (function(){
     const selBody = sel
       ? `<div class="aprow"><dt>${esc(zn(sel))}</dt><dd>${esc(heatText(sel, mode, zones))}</dd></div>`
       : `<p class="alempty">${esc(E.t('hmSelectedEmpty'))}</p>`;
-    const hourRows = zones.filter(z => z.hours && z.hours.length);
-    const playingToday = s.hmPlay && (s.hmRange || 'today') === 'today';
-    const matrix = `<div class="todwrap"><table class="todm hmm"><tbody>${hourRows.map(z =>
-      `<tr><td>${esc(zn(z))}</td>${z.hours.map((v, i) =>
-        `<td style="${playingToday && s.hmStep===i?'outline:2px solid var(--acc);outline-offset:-2px':''}"><span class="todc" style="background:${heatCell(mode, v)}"></span></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
     const cap = mode === 'occ' ? E.t('hmRankPeopleCap') : mode === 'comfort' ? E.t('hmRankComfortCap') : mode === 'hum' ? E.t('hmRankOccCap') : E.t('hmRankTempCap');
     const unit = mode === 'occ' ? '' : mode === 'comfort' ? E.t('hmUnitDt') : mode === 'hum' ? E.t('hmUnitPpl') : E.t('hmUnitTemp');
     const mseg = (lbl, on, v) => `<button class="hmseg" data-on="${on}" data-act="hmMode" data-v="${v}">${esc(lbl)}</button>`;
@@ -839,9 +834,6 @@ window.EKO_A = (function(){
       ? E.t('hmCo2Foot', { m: co2Mean == null ? '—' : Math.round(co2Mean) })
       : mode === 'hum' ? E.t('hmOccFoot')
       : E.t('hmTempFoot', { m: siteMean == null ? '—' : fmt(siteMean, 1) });
-    const hoursCard = mode !== 'occ' && hourRows.length ? `<div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('hmByHour'))}</span>
-        <span class="alcardm">${esc(E.t('hmByHourCap'))}</span>${chrome(E, E.t('hmByHour'), E.t('hmByHourCap'))}</div>
-        ${matrix}<div class="alfoot">${esc(E.t('hmByHourFoot'))}</div></div>` : '';
     return C().modShell(E, E.t('subHeat'), '', '',
       `<div class="hmwrap"><div class="row gap8">
         <span class="row gap2">${mseg(E.t('hmTemp'), mode==='temp', 'temp')}${mseg(E.t('hmComfort'), mode==='comfort', 'comfort')}${mseg(E.t('hmOcc'), mode==='hum', 'hum')}${mseg(E.t('hmPeople'), mode==='occ', 'occ')}</span>
@@ -857,7 +849,6 @@ window.EKO_A = (function(){
         ${tglRow(E.t('hmLabels'),'labels',s.hmLayers.labels)}
         ${tglRow(E.t('hmValues'),'values',s.hmLayers.values)}</div>
       <div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('hmSelected'))}</span></div>${selBody}</div>
-      ${hoursCard}
       <div class="alfoot">${esc(foot)}</div></div>`);
   }
 
