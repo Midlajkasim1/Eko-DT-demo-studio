@@ -5,12 +5,13 @@ import topLevelAwait from 'vite-plugin-top-level-await'
 import path from 'path'
 import fs from 'fs'
 
-// wasm is studio-only. models/ and mapassets/ are project data that both exporters write
-// from the project folder, so anything under dist/ is a dev fixture. map/regions ships
-// with the exported viewer so location maps keep their bundled satellite renders.
+// wasm is studio-only. models/ and mapassets/ at the export root are project data that
+// both exporters write from the project folder, so anything under dist/ is a dev fixture.
+// map/regions ships with the exported viewer so location maps keep their satellite renders.
+// The Medical Centre demo is under static/dashboard/models/hospital/ and must ship too,
+// or a packaged backend has no building for the evacuation page.
 const EXPORT_SKIP = ['wasm/', 'models/', 'mapassets/']
-/* The hospital demo model is a symlink into the E15 pack. Do not bake it into the Studio export. */
-const skipFromExport = (rel: string) => EXPORT_SKIP.some(prefix => rel.startsWith(prefix)) || rel.includes('models/hospital/')
+const skipFromExport = (rel: string) => EXPORT_SKIP.some(prefix => rel.startsWith(prefix))
 
 function viewerAssetsPlugin() {
   return {
