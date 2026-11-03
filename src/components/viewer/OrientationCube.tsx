@@ -210,10 +210,10 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
       const cube = cubeRef.current
       const cam = engineRef.current?.world?.camera?.three as THREE.PerspectiveCamera | undefined
       if (!cube || !cam) return
-      const euler = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ')
-      const xDeg = THREE.MathUtils.radToDeg(euler.x)
-      const yDeg = -THREE.MathUtils.radToDeg(euler.y)
-      cube.style.transform = `rotateX(${xDeg.toFixed(2)}deg) rotateY(${yDeg.toFixed(2)}deg)`
+      // The view's rotation in the cube's axes (CSS y points down), roll included for a camera past a pole
+      const e = new THREE.Matrix4().makeRotationFromQuaternion(cam.quaternion.clone().invert()).elements
+      const n = (v: number) => v.toFixed(5)
+      cube.style.transform = `matrix3d(${n(e[0])},${n(-e[1])},${n(e[2])},0,${n(-e[4])},${n(e[5])},${n(-e[6])},0,${n(e[8])},${n(-e[9])},${n(e[10])},0,0,0,0,1)`
     }
     const wait = () => {
       if (stopped) return
@@ -479,7 +479,8 @@ function CompassRing({ engineRef }: { engineRef: React.MutableRefObject<Fragment
       const cam = engineRef.current?.world?.camera?.three as THREE.PerspectiveCamera | undefined
       if (!cam || !needleRef.current) return
       const euler = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ')
-      const deg = THREE.MathUtils.radToDeg(euler.y)
+      // A camera turned over a pole reads as rolled half a turn
+      const deg = THREE.MathUtils.radToDeg(euler.y + (Math.abs(euler.z) > Math.PI / 2 ? Math.PI : 0))
       needleRef.current.style.transform = `rotate(${-deg.toFixed(1)}deg)`
       needleRef.current.style.transformOrigin = '18px 18px'
     }

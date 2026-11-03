@@ -35,6 +35,7 @@ import { RENDER_DEFAULTS, studioAdjustOf, type RenderSettings, type ToneMappingI
 import { applyStudioAdjust, DASHBOARD_DARK_SKY, getTemplateScene, type TemplateScene } from '../constants/viewTemplates'
 import { paintStudioModel } from '../constants/studioPalette'
 import { azimuthDragSign } from './cameraUtils'
+import { enableOrbitOverPoles } from './orbitOverPoles'
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { N8AOPass } from 'n8ao'
 
@@ -1864,7 +1865,7 @@ export async function initFragmentsEngine(
 
   const fragments = new FRAGS.FragmentsModels()
 
-  // A sideways drag turns the plan clockwise in a view from above, wherever it is grabbed. Read when the drag starts and kept until release.
+  // A sideways drag turns a plan view clockwise, wherever it is grabbed. Read when the drag starts and kept until release.
   let removeOrbitFollow = () => {}
   {
     const controls = world.camera.controls as unknown as {
@@ -1881,7 +1882,11 @@ export async function initFragmentsEngine(
       controls.azimuthRotateSpeed = azimuthDragSign(controls.polarAngle) * baseAzimuth
     }
     doc.addEventListener('pointerdown', onPointerDown, { capture: true })
-    removeOrbitFollow = () => doc.removeEventListener('pointerdown', onPointerDown, { capture: true })
+    const restorePoles = enableOrbitOverPoles(world.camera.controls, world.camera.three)
+    removeOrbitFollow = () => {
+      doc.removeEventListener('pointerdown', onPointerDown, { capture: true })
+      restorePoles()
+    }
   }
 
   world.camera.controls.addEventListener('update', () => {

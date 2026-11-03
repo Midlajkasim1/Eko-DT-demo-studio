@@ -2,8 +2,8 @@ import * as THREE from 'three'
 import type { FragmentsEngine } from './fragmentsEngine'
 import { useProjectStore } from '@/store/useProjectStore'
 
-/** Radians from straight down within which a view counts as from above. */
-const FROM_ABOVE_RAD = THREE.MathUtils.degToRad(50)
+/** Radians from straight down within which a view is a plan (Top, Plan, or orbited all the way up). */
+const FROM_ABOVE_RAD = THREE.MathUtils.degToRad(15)
 
 /** Speed sign for a sideways drag. From above it is -1, so a right drag turns the plan clockwise
  *  on screen wherever it is grabbed. Elsewhere the usual turntable, which from below is clockwise already. */
