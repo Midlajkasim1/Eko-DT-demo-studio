@@ -351,6 +351,39 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       colorWrite: false, depthWrite: true, depthTest: true, side: THREE.DoubleSide,
     })
     watchClipping(heatOccluder)
+    const coverCorner = new THREE.Vector3()
+    const coverCache = new WeakMap<object, boolean>()
+    /* A faded ceiling is a thin flat plate, so the solid test above skips it.
+       It still has to cover the glow. A duct is thin in one direction only. */
+    const horizontalCover = (obj: THREE.Mesh) => {
+      const geom = obj.geometry as THREE.BufferGeometry | undefined
+      if (!geom) return false
+      if (!geom.boundingBox) geom.computeBoundingBox()
+      const bb = geom.boundingBox
+      if (!bb) return false
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity
+      for (let xi = 0; xi < 2; xi++) for (let yi = 0; yi < 2; yi++) for (let zi = 0; zi < 2; zi++) {
+        coverCorner.set(xi ? bb.max.x : bb.min.x, yi ? bb.max.y : bb.min.y, zi ? bb.max.z : bb.min.z)
+        coverCorner.applyMatrix4(obj.matrixWorld)
+        if (coverCorner.x < minX) minX = coverCorner.x
+        if (coverCorner.x > maxX) maxX = coverCorner.x
+        if (coverCorner.y < minY) minY = coverCorner.y
+        if (coverCorner.y > maxY) maxY = coverCorner.y
+        if (coverCorner.z < minZ) minZ = coverCorner.z
+        if (coverCorner.z > maxZ) maxZ = coverCorner.z
+      }
+      const h = maxY - minY
+      const w = maxX - minX
+      const d = maxZ - minZ
+      return h < 0.55 && w > 1.5 && d > 1.5 && h < Math.min(w, d) * 0.22
+    }
+    const cachedCover = (obj: THREE.Mesh) => {
+      const known = coverCache.get(obj)
+      if (known != null) return known
+      const hit = horizontalCover(obj)
+      coverCache.set(obj, hit)
+      return hit
+    }
     // Flat-shaded towards the camera (face normals from screen derivatives), so
     // the shape reads the same whatever lights the style has
     const ghostFill = new THREE.ShaderMaterial({
@@ -522,7 +555,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
                 && !(typeof m.opacity === 'number' && m.opacity < 0.5)
                 && !(m.transparent && m.depthWrite === false)
               )
-              if (!solid) {
+              const fadedPlate = !!crowdGlowMesh && mats.some((m: any) =>
+                m && typeof m.opacity === 'number' && m.opacity >= 0.15 && m.opacity < 0.5
+              ) && cachedCover(obj)
+              if (!solid && !fadedPlate) {
                 obj.visible = false
                 hidden.push(obj)
               }
@@ -1398,7 +1434,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     let crowd: { minX: number; maxX: number; minZ: number; maxZ: number; x: number; z: number; vx: number; vz: number; y: number; still: boolean; band: number; foot: CrowdFoot | null }[] = []
     const crowdDummy = new THREE.Object3D()
     const glowDummy = new THREE.Object3D()
-    /* About 1.15 m around a person. A screen-sized blob stayed huge when the camera moved back and painted over the ceiling. */
+    /* Unit disc. The drawn size is set per person so a close view keeps the halo
+       and a pulled-back view is only a little smaller. The band colour is the
+       instance colour: this plane has no vertex colours, and turning those on
+       multiplied every pixel by black. */
     const GLOW_RADIUS = 1.15
     const GLOW_COLOR = [0x3b82f6, 0x22c55e, 0xeab308, 0xef4444].map(hex => new THREE.Color(hex))
     const glowGeo = new THREE.PlaneGeometry(GLOW_RADIUS * 2, GLOW_RADIUS * 2)
@@ -1410,23 +1449,25 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (!g) return null
       const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64)
       grd.addColorStop(0, 'rgba(255,255,255,0)')
-      grd.addColorStop(0.22, 'rgba(255,255,255,0.25)')
-      grd.addColorStop(0.48, 'rgba(255,255,255,1)')
+      grd.addColorStop(0.18, 'rgba(255,255,255,0.2)')
+      grd.addColorStop(0.36, 'rgba(255,255,255,0.9)')
+      grd.addColorStop(0.68, 'rgba(255,255,255,0.45)')
       grd.addColorStop(1, 'rgba(255,255,255,0)')
       g.fillStyle = grd
       g.fillRect(0, 0, 128, 128)
       const tex = new THREE.CanvasTexture(c)
       tex.colorSpace = THREE.NoColorSpace
+      tex.premultiplyAlpha = false
       tex.needsUpdate = true
       return tex
     })()
     const glowMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
       map: glowTex || undefined,
       transparent: true,
       depthWrite: false,
       depthTest: true,
       toneMapped: false,
-      vertexColors: true,
     })
     const clearCrowd = () => {
       if (crowdMesh) {
@@ -1649,6 +1690,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       // A person keeps about 10 px across, so a whole floor seen from above still shows them; up close they stay life size
       const cam = engine.world?.camera?.three as THREE.PerspectiveCamera | undefined
       const viewH = engine.world?.renderer?.three?.domElement?.clientHeight || 800
+      const viewW = engine.world?.renderer?.three?.domElement?.clientWidth || 1200
       const perPx = cam?.isPerspectiveCamera ? 2 * Math.tan((cam.fov * Math.PI) / 360) / viewH : 0
       for (let i = 0; i < crowd.length; i++) {
         const p = crowd[i]
@@ -1685,13 +1727,21 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         crowdDummy.position.set(p.x, p.y, p.z)
         crowdDummy.rotation.set(0, 0, 0)
         const grow = perPx && cam ? (10 * perPx * crowdDummy.position.distanceTo(cam.position)) / 0.44 : 1
-        crowdDummy.scale.setScalar(Math.min(4, Math.max(1, grow)))
+        const personScale = Math.min(4, Math.max(1, grow))
+        crowdDummy.scale.setScalar(personScale)
         crowdDummy.updateMatrix()
         crowdMesh.setMatrixAt(i, crowdDummy.matrix)
         if (crowdGlowMesh) {
           glowDummy.position.set(p.x, p.y - 0.08, p.z)
           glowDummy.rotation.set(0, 0, 0)
-          glowDummy.scale.set(1, 1, 1)
+          /* 0 up close, 1 when the camera is far enough that people are held at 10 px.
+             Close keeps the halo. Pulled back, it loses about a third, and a solid
+             ceiling in front still covers it because the disc tests depth. */
+          const pulled = (personScale - 1) / 3
+          const radiusPx = Math.max(22, viewW * (0.05 - 0.016 * pulled))
+          const dist = cam ? Math.max(0.5, glowDummy.position.distanceTo(cam.position)) : 1
+          const radiusWorld = perPx > 0 ? radiusPx * perPx * dist : GLOW_RADIUS
+          glowDummy.scale.setScalar(Math.max(0.35, radiusWorld / GLOW_RADIUS))
           glowDummy.updateMatrix()
           crowdGlowMesh.setMatrixAt(i, glowDummy.matrix)
           crowdGlowMesh.setColorAt(i, GLOW_COLOR[p.band] || GLOW_COLOR[0])
