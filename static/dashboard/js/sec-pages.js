@@ -372,6 +372,7 @@ window.EKO_SECP = (function(){
       if(!(E.engine && E.engine.setMode)){
         const eng = E.engine;
         if(!(d.cam && d.v && eng && eng.cameraSetup && eng.flyToGid)){ E.set({}); return; }
+        if(window.EKO_SEC) E.state.secLocated = window.EKO_SEC.locatedFrom(E, d.cam);
         E.state.secSel = d.cam;
         E.go('sec', 'security', null);
         requestAnimationFrame(() => requestAnimationFrame(() => { eng.flyToGid(d.v); if(eng.highlightGid) eng.highlightGid(d.v); }));

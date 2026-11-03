@@ -487,12 +487,13 @@ window.EKO_V = (function(){
 
   /* The loaded Studio model. 3D is the orbit camera. Plan looks down on that
      same model. Furniture hides furnishing on it. Neither one is a simulation. */
-  function planSwitch(E){
+  function planSwitch(E, config){
     if(((E.data.viewer || {}).engine) !== 'host') return '';
-    const t = E.t.bind(E), m = E.state.e3dMode === 'plan' ? 'plan' : '3d', furn = E.state.e3dFurn !== false;
+    const t = E.t.bind(E), m = E.state.e3dMode === 'plan' ? 'plan' : '3d', furn = E.state.e3dFurn !== false, cams = !E.state.secCamsOff;
     const b = (v, k, on) => `<button class="seg" data-act="e3dMode" data-v="${v}" data-on="${on}" aria-pressed="${on}">${C().esc(t(k))}</button>`;
     return `<div class="e3dsw" role="group" aria-label="${C().esc(t('e3d.aria'))}">${b('3d', 'e3d.3d', m === '3d')}${b('plan', 'e3d.plan', m === 'plan')}`
       + `<button class="seg" data-act="e3dFurn" data-on="${furn}" aria-pressed="${furn}">${C().esc(t('e3d.furn'))}</button>`
+      + (config && config.camToggle ? `<button class="seg" data-act="secCamsShow" data-on="${cams}" aria-pressed="${cams}">${C().esc(t('e3d.cams'))}</button>` : '')
       + `</div>`;
   }
   /* Viewer surface. summaryHtml (the #ovp overlay) renders INSIDE vpmain,
@@ -501,7 +502,7 @@ window.EKO_V = (function(){
     const t = E.t.bind(E);
     return `<main id="vpmain" data-vst="${E.state.dock.style}" data-tl="${config.timeline?1:0}">
       <div id="enginehost"></div>
-      ${planSwitch(E)}
+      ${planSwitch(E, config)}
       <div class="v3tint" aria-hidden="true"></div>
       <div class="v3glow" aria-hidden="true"></div>
       ${E.state.locFocus && E.stacked() ? `<button class="btnG btnSm vpback" data-act="locBack">${C().icon('chevL', 14)} ${C().esc(t('backToAssets'))}</button>` : ''}

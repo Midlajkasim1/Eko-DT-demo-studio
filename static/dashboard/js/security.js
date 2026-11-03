@@ -161,8 +161,10 @@ window.EKO_SEC = (function(){
     fireEvents().filter(e => e.active !== false && e.kind !== 'fault' && isFinite(+e.x) && e.x !== undefined).forEach(e => pts.push({ id: e.device, ev: e.id, x: +e.x, y: +e.y, k: 'fire', bad: true, tip: L(e.en, e.ar) }));
     const fk = E.state.secFilter, fOk = p => !fk || (fk === 'cctv' && p.k === 'cam') || (fk === 'access' && p.k === 'door') || (fk === 'fire' && p.k === 'fire');   /* D182: a tile filters the model */
     for(let q = pts.length - 1; q >= 0; q--) if(!fOk(pts[q])) pts.splice(q, 1);
-    if(cams().length + doors().length > 60){ const keep = p => p.k === 'fire' || p.bad || p.id === sel || (p.k === 'cam' && (E.state.secCones || fk === 'cctv'));
-      for(let q = pts.length - 1; q >= 0; q--) if(!keep(pts[q])) pts.splice(q, 1); }
+    const crowded = { cam: cams().length > 60, door: doors().length > 60 };
+    const off = p => p.k === 'cam' && E.state.secCamsOff;
+    const keep = p => p.id === sel || (!off(p) && (!crowded[p.k] || p.bad || (p.k === 'cam' && (E.state.secCones || fk === 'cctv'))));
+    for(let q = pts.length - 1; q >= 0; q--) if(!keep(pts[q])) pts.splice(q, 1);
     return `<div class="mklayer secmklayer">${pts.map(p => `<button class="mk secmk" data-x="${p.x}" data-y="${p.y}"${p.gid ? ` data-bimid="${esc(p.gid)}"` : ''} data-k="${p.k}" data-bad="${p.bad ? 1 : 0}" data-sel="${sel === p.id ? 1 : 0}"
         data-act="${p.k === 'cam' ? 'secCam' : p.k === 'fire' ? 'secEv' : 'secDoor'}" data-v="${esc(p.ev || p.id)}" data-tip="${esc(p.tip)}" aria-label="${esc(p.tip)}">${icon(p.k === 'cam' ? 'eye' : p.k === 'fire' ? 'flame' : 'lock', 11)}</button>`).join('')}${window.EKO_SECW ? window.EKO_SECW.pulse(E) : ''}${window.EKO_SCN3 ? window.EKO_SCN3.markers(E) : ''}${window.EKO_EVAC && window.EKO_EVAC.markers ? window.EKO_EVAC.markers(E) : ''}</div>`;
   }
@@ -170,8 +172,20 @@ window.EKO_SEC = (function(){
   function landing(E2, doc){
     use(E2);
     const model = (doc.widgets || []).find(w => w.type === 'viewer3d') || {};
-    const cfg = Object.assign({}, model.config || {}, { markers: false });
-    return window.EKO_V.viewer(E, cfg, markers(E) + summary(E)) + (E.state.assetSel ? C().assetPanel(E) : panel(E));
+    const cfg = Object.assign({}, model.config || {}, { markers: false, camToggle: cams().length > 0 });
+    return window.EKO_V.viewer(E, cfg, located(E) + markers(E) + summary(E)) + (E.state.assetSel ? C().assetPanel(E) : panel(E));
+  }
+  function located(E2){
+    const b = E2.state.secLocated;
+    if(!b) return '';
+    return `<div class="secloc" role="status"><span>${esc(t('sec.located', { c: b.id }))}</span>
+      <button class="btnG btnSm" data-act="secLocatedBack">${icon('chevL', 12)} ${esc(t('back'))}</button></div>`;
+  }
+  /* A second locate keeps the first one's way back */
+  function locatedFrom(E2, id){
+    const prev = E2.state.secLocated, eng = E2.engine;
+    if(prev) return Object.assign({}, prev, { id });
+    return { id, from: { pageId: E2.state.pageId, module: E2.state.module, sub: E2.state.sub }, view: eng && eng.saveViewpoint ? eng.saveViewpoint() : null };
   }
 
   const widget = (...a) => A().widget(E, ...a), hero = (...a) => A().heroTile(E, ...a);
@@ -376,17 +390,25 @@ window.EKO_SEC = (function(){
     secCamPg(el){ const E2 = window.EKO; E2.set({ secCamPg: Math.max(0, +el.dataset.v || 0) }); },
     /* Locate in 3D: the landing over the model, the item framed and marked */
     secLocate(el){ const E2 = window.EKO; use(E2); const id = el.dataset.v, p = posOf(id), cam = cams().find(c => c.id === id); if(!p && !(cam && cam.gid)) return;
+      if(cam && cam.gid) E2.state.secLocated = locatedFrom(E2, id);
       E2.state.dlg = null; E2.state.secDlg = null; E2.state.secSel = id; E2.go('sec', 'security', null);
       requestAnimationFrame(() => requestAnimationFrame(() => { const eng = E2.engine, host = document.getElementById('enginehost');
         if(!eng || !host) return;
         if(cam && cam.gid && eng.cameraSetup && eng.flyToGid){ eng.flyToGid(cam.gid); if(eng.highlightGid) eng.highlightGid(cam.gid); return; }
         const r = host.getBoundingClientRect();
-        if(eng.frameRect) eng.frameRect([p], { left: r.width * 0.35, top: 40, width: r.width * 0.5, height: r.height - 160 }, { scale: 1.8 }); })); }
+        if(eng.frameRect) eng.frameRect([p], { left: r.width * 0.35, top: 40, width: r.width * 0.5, height: r.height - 160 }, { scale: 1.8 }); })); },
+    secCamsShow(){ const E2 = window.EKO; E2.set({ secCamsOff: !E2.state.secCamsOff }); },
+    secLocatedBack(){ const E2 = window.EKO, b = E2.state.secLocated, eng = E2.engine; if(!b) return;
+      if(eng && eng.highlightGid) eng.highlightGid(null);
+      E2.state.secLocated = null; E2.state.secSel = null;
+      if(b.from.pageId !== E2.state.pageId){ E2.go(b.from.pageId, b.from.module, b.from.sub); return; }
+      if(b.view && eng && eng.flyToViewpoint) eng.flyToViewpoint(b.view); else if(eng && eng.resetView) eng.resetView();
+      E2.set({}); }
   };
   /* D182: the internals the overview and event workspace build on (js/sec-ws.js) */
   const _x = E2 => { use(E2); return { D, cams, doors, accessEvents, fireEvents, intrEvents, famAlarms, zoneName, storeyName, evTitle, sevOfEv, findEvent, openEvents, nearestCam, status, markers, posOf }; };
   /* E13: the counts the security officer's headline and Brief read: open events (and the high ones), the fire state, the cameras online */
   function counts(E2){ use(E2); const ev = openEvents(), st = status(), fire = st.find(r => r.k === 'fire') || {};
     return { open: ev.length, high: ev.filter(e => e.sev === 'critical' || e.sev === 'high').length, top: ev[0] || null, topTitle: ev[0] ? evTitle(ev[0]) : '', fireTone: fire.tone, fireV: fire.v, camOn: camOnline(), cams: cams().length }; }
-  return { active, summary, panel, landing, camsPage, accessPage, firePage, powerPage, dialog, ACTS, openEvents, nearestCam, status, counts, _x };
+  return { active, summary, panel, landing, locatedFrom, camsPage, accessPage, firePage, powerPage, dialog, ACTS, openEvents, nearestCam, status, counts, _x };
 })();
