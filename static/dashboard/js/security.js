@@ -29,7 +29,7 @@ window.EKO_SEC = (function(){
     const setup = eng && eng.cameraSetup ? eng.cameraSetup() : null;
     if(!d || !setup || setup === camSetup) return;
     camSetup = setup;
-    d.cameras = (setup.cameras || []).map(c => ({ id: c.name, gid: c.guid, en: c.name, ar: c.name, room: c.room, storey: c.storey }));
+    d.cameras = (setup.cameras || []).map(c => ({ id: c.name, gid: c.guid, en: c.name, ar: c.name, room: c.room, storey: c.storey, clip: c.clip }));
   }
   const use = E2 => { if(E2){ E = E2; camerasBySource(); } return E; };
   const t = (k, p) => E.t(k, p);

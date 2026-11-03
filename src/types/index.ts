@@ -222,6 +222,8 @@ export interface AssetLink {
   room?: string
   /** Storey of a space */
   level?: string
+  /** A camera's demo clip (V1–V7) or 'none'; absent: the clip in order */
+  clip?: string
 }
 
 /** Everything the project list renders, so opening it never parses project.json */

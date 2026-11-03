@@ -9,8 +9,10 @@ import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import type { AssetLink } from '@/types'
 import type { FinEquipment } from '@/types/fin'
 import {
+  CLIPS,
   KNOWN_TYPES,
   bestMatches,
+  defaultClip,
   defaultType,
   elementLabel,
   foldName,
@@ -571,6 +573,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
       ...(finId ? { finId } : {}),
       ...(el ? { element: el.name || el.objectType } : {}),
       ...(cctv && row.link?.room && row.link.guid === guid ? { room: row.link.room } : {}),
+      ...(cctv && row.link?.clip ? { clip: row.link.clip } : {}),
     }
     setLinks(prev => [...prev.filter(l => l.kind === 'space' || (l !== row.link && foldName(l.equip) !== row.key)), next])
     forget(row.key)
@@ -592,6 +595,13 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
     setPickerAll(false)
   }
   const setType = (row: Row, type: string) => setLinks(prev => prev.map(l => (l === row.link ? { ...l, type: type.toUpperCase() } : l)))
+  const setClip = (row: Row, clip: string) => setLinks(prev => prev.map(l => {
+    if (l !== row.link) return l
+    const next: AssetLink = { ...l }
+    if (clip) next.clip = clip
+    else delete next.clip
+    return next
+  }))
   const followRename = (row: Row) => setLinks(prev => prev.map(l => (l === row.link && row.eq ? { ...l, equip: row.eq.name } : l)))
   const setRoom = (row: Row, room: string | null) => {
     setLinks(prev => prev.map(l => {
@@ -1006,6 +1016,17 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
               ) : <span className="al-sub">Link the camera first</span>}
             </td>
           )}
+          {mode === 'cctv' && (
+            <td>
+              {row.link ? (
+                <select className="al-clip" value={row.link.clip ?? ''} onChange={e => setClip(row, e.target.value)} aria-label={`Footage of ${row.link.equip}`}>
+                  <option value="">{defaultClip(row.link.equip)} (in order)</option>
+                  {CLIPS.map(c => <option key={c} value={c}>{c}</option>)}
+                  <option value="none">None</option>
+                </select>
+              ) : <span className="al-sub">Link the camera first</span>}
+            </td>
+          )}
           <td>
             <span className={`al-status al-${st.tone}`} title={autoKeys.get(row.key)}>{st.text}</span>
             {row.renamedFrom && (
@@ -1021,7 +1042,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
         </tr>
         {picking && (
           <tr className="al-picker-row">
-            <td colSpan={mode === 'cctv' ? 6 : 5}>{renderPicker(row)}</td>
+            <td colSpan={mode === 'cctv' ? 7 : 5}>{renderPicker(row)}</td>
           </tr>
         )}
       </Fragment>
@@ -1310,14 +1331,15 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
                       <th>Type</th>
                       <th>Model element</th>
                       {mode === 'cctv' && <th>Room</th>}
+                      {mode === 'cctv' && <th>Footage</th>}
                       <th>Status</th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {groupRows(shown, rowLevel).map(g => renderGroup(g.key, mode === 'cctv' ? 6 : 5, g.rows.map(renderLinkRow)))}
+                    {groupRows(shown, rowLevel).map(g => renderGroup(g.key, mode === 'cctv' ? 7 : 5, g.rows.map(renderLinkRow)))}
                     {!shown.length && (
-                      <tr><td colSpan={mode === 'cctv' ? 6 : 5} className="al-sub al-empty">
+                      <tr><td colSpan={mode === 'cctv' ? 7 : 5} className="al-sub al-empty">
                         {rows.length
                           ? 'Nothing matches.'
                           : !finConnected

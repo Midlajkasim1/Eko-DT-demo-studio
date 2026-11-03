@@ -2215,7 +2215,8 @@ Wait, if iframe has pointer-events: auto, it works. Let's fix this in iframe bod
 }
 .al-search,
 .al-search-row input,
-.al-type {
+.al-type,
+.al-clip {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   color: var(--text-primary);

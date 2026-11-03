@@ -121,8 +121,10 @@ window.EKO_SECW = (function(){
         <div class="alfoot">${esc(t('sw.listFoot'))}</div></div>`);
   }
   const CLIPS = { marsa: { GF: 'GF', '1F': '1stF', '2F': '2ndF', '3F': '3rdF', '4F': '4thF', '5F': '5thF', RF: 'RF_CCTV_new' } };
+  /* a camera's own clip, set in the Studio's Equipment & Spaces; 'none' is a still frame */
+  const own = c => ({ clip: c.clip === 'none' ? null : c.clip, why: c.clip === 'none' ? 'off' : null });
   function clipOf(E, c, i){
-    if(c.clip) return c.clip;
+    if(c.clip) return own(c).clip;
     const m = CLIPS[E.siteName]; if(m) return m[c.storey] || 'GF';
     return 'V' + (((i || 0) % 7) + 1);
   }
@@ -140,12 +142,13 @@ window.EKO_SECW = (function(){
   }
   const hash = s => { let h = 7; for(let k = 0; k < s.length; k++) h = (h * 31 + s.charCodeAt(k)) >>> 0; return h; };
   /* the clip of a camera on its own (a workspace, the scenario corner): the first of its pool, rotated by the camera's ID */
-  const pick = (E, c) => { const k = kindOf(E, c); if(!k) return null; const p = POOL[k]; return p[hash(c.id) % p.length]; };
+  const pick = (E, c) => { if(c.clip) return own(c).clip; const k = kindOf(E, c); if(!k) return null; const p = POOL[k]; return p[hash(c.id) % p.length]; };
   const engineSite = E => !!(E.sim && E.sim.typeOf);
   /* a grid: no clip the same as the tile before it or the tile above it (cols per row); a camera with no clip left gets a still */
   function clipsFor(E, list, cols){
     const out = new Map(), seq = [];
-    list.forEach((c, i) => { let clip = engineSite(E) ? null : clipOf(E, c, i), why = null;
+    list.forEach((c, i) => { if(c.clip){ const a = own(c); seq.push(a.clip); out.set(c.id, a); return; }
+      let clip = engineSite(E) ? null : clipOf(E, c, i), why = null;
       if(engineSite(E)){ const k = kindOf(E, c);
         if(!k) why = 'type';
         else { const p = POOL[k], s = hash(c.id) % p.length, near = [seq[i - 1], cols > 1 ? seq[i - cols] : null];
@@ -155,11 +158,12 @@ window.EKO_SECW = (function(){
     return out;
   }
   const clipSrc = (E, c, i) => { const v = engineSite(E) ? pick(E, c) : clipOf(E, c, i); return v ? '/static/dashboard/assets/video/' + v + '.mp4' : ''; };
-  const stillEl = (E, a) => `<div class="spstill" role="img" aria-label="${C().esc(E.t(a.why === 'repeat' ? 'sp.clipRepeat17' : 'sp.clipNone17'))}"><span>${C().esc(E.t(a.why === 'repeat' ? 'sp.clipRepeat17' : 'sp.clipNone17'))}</span></div>`;
+  const stillKey = a => a.why === 'repeat' ? 'sp.clipRepeat17' : a.why === 'off' ? 'sp.clipOff' : 'sp.clipNone17';
+  const stillEl = (E, a) => `<div class="spstill" role="img" aria-label="${C().esc(E.t(stillKey(a)))}"><span>${C().esc(E.t(stillKey(a)))}</span></div>`;
   /* the video element, or the still frame where there is no clip (as) is a grid's assignment, when there is one.
      The handover clips are empty files, so a failed video shows that still instead of a blank tile. */
   function videoEl(E, c, i, attrs, as){
-    const a = as || (engineSite(E) ? { clip: pick(E, c), why: pick(E, c) ? null : 'type' } : { clip: clipOf(E, c, i) });
+    const a = as || (c.clip ? own(c) : engineSite(E) ? { clip: pick(E, c), why: pick(E, c) ? null : 'type' } : { clip: clipOf(E, c, i) });
     if(!a.clip) return stillEl(E, a);
     const src = '/static/dashboard/assets/video/' + a.clip + '.mp4';
     return `<video src="${C().esc(src)}" ${attrs} onerror="this.hidden=true;var n=this.nextElementSibling;if(n)n.hidden=false"></video><span hidden>${stillEl(E, a)}</span>`;

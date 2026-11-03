@@ -267,7 +267,7 @@ function csvCells(line: string): string[] {
   return cells.map(c => c.trim())
 }
 
-const CSV_COLUMNS = ['equip', 'guid', 'type', 'finId', 'element', 'kind', 'room', 'level'] as const
+const CSV_COLUMNS = ['equip', 'guid', 'type', 'finId', 'element', 'kind', 'room', 'level', 'clip'] as const
 
 function linkFrom(rec: Record<string, unknown>): AssetLink | string {
   const kindText = String(rec.kind ?? '').trim().toLowerCase()
@@ -286,7 +286,18 @@ function linkFrom(rec: Record<string, unknown>): AssetLink | string {
   if (rec.element) link.element = String(rec.element).trim()
   if (kind === 'cctv' && isGuid(String(rec.room ?? '').trim())) link.room = String(rec.room).trim()
   if (kind === 'space' && rec.level) link.level = String(rec.level).trim()
+  const clip = String(rec.clip ?? '').trim()
+  if (kind === 'cctv' && (CLIPS.includes(clip) || clip === 'none')) link.clip = clip
   return link
+}
+
+export const CLIPS = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7']
+
+/** CCTV_01 → V1 … CCTV_07 → V7, CCTV_08 → V1 */
+export function defaultClip(name: string): string {
+  const n = Number((name.match(/\d+/g) ?? []).pop())
+  const i = Number.isFinite(n) && n > 0 ? n - 1 : [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7)
+  return CLIPS[i % CLIPS.length]
 }
 
 /** A JSON list of links, the old { name: { bimId, type } } table, or CSV with an equip,guid header. kind=space marks a heatmap room, kind=cctv a camera. */

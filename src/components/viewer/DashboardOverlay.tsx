@@ -7,7 +7,7 @@ import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import { useAppStore } from '@/store/useAppStore'
 import type { RenderSettings } from '@/constants/renderSettings'
 import { useModelStore } from '@/store/useModelStore'
-import { elementLabel, foldName, indexLinks, indexSpaceLinks, isGuid, levelRank, prepareElements, typeWords } from '@/lib/assetLinks'
+import { defaultClip, elementLabel, foldName, indexLinks, indexSpaceLinks, isGuid, levelRank, prepareElements, typeWords } from '@/lib/assetLinks'
 import { listModelElements } from '@/lib/modelElements'
 import type { AssetLink } from '@/types'
 import { frameModelFromAbove, resetCameraToHome, tiltIfVertical } from '@/lib/cameraUtils'
@@ -178,12 +178,13 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (setupMemo && setupMemo.links === links && setupMemo.source === source && setupMemo.scan === scan) return setupMemo.value
       const rooms = new Map(links.filter(l => l.kind === 'space').map(l => [l.guid, l.equip]))
       const cameras = source === 'model'
-        ? (scan?.cams ?? []).map(c => ({ name: c.name, guid: c.guid, room: '', storey: c.storey }))
+        ? (scan?.cams ?? []).map(c => ({ name: c.name, guid: c.guid, room: '', storey: c.storey, clip: defaultClip(c.name) }))
         : links.filter(l => l.kind === 'cctv' && isGuid(l.guid)).map(l => ({
           name: l.equip,
           guid: l.guid,
           room: l.room ? rooms.get(l.room) ?? '' : '',
           storey: scan?.storeyOf.get(l.guid) ?? '',
+          clip: l.clip || defaultClip(l.equip),
         }))
       const value = { source, cameras }
       setupMemo = { links, source, scan, value }

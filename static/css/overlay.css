@@ -90,7 +90,7 @@
 .dashboard-native-container .mpeek .v3glow {
   display: none;
 }
-.dashboard-native-container #modelfs :is(.mfsclose, #vbar, #vbottom, .vfab, #vcap, .vpback, .minimap, .histbanner, .mk, .mkpop, .vradial, .vsheet, .scrim) {
+.dashboard-native-container #modelfs :is(.mfsclose, #vbar, #vbottom, .vfab, #vcap, .vpback, .secloc, .minimap, .histbanner, .mk, .mkpop, .vradial, .vsheet, .scrim) {
   pointer-events: auto;
 }
 /* Open model is a full-screen view of the canvas. The summary and the alarms
@@ -159,6 +159,7 @@
 }
 .dashboard-native-container .mklayer .mk,
 .dashboard-native-container .vpback,
+.dashboard-native-container .secloc,
 .dashboard-native-container .pmuchip,
 .dashboard-native-container .mkpop,
 .dashboard-native-container .vradial,
