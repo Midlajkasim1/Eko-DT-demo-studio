@@ -105,7 +105,8 @@
       },
 
       setStyle: function (mode) {
-        var id = STYLE[mode] || 'photoreal';
+        var id = STYLE[mode] || 'photoreal', h = window.EKO_HOST_ENGINE;
+        if (h && h.styleDuringFocus && h.styleDuringFocus(id)) return;
         if (window.StudioViewer && window.StudioViewer.setStyle) window.StudioViewer.setStyle(id);
         else if (window.ViewerTemplates && window.ViewerTemplates.set) window.ViewerTemplates.set(id);
       },

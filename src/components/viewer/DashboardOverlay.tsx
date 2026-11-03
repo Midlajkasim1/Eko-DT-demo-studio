@@ -1247,6 +1247,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (colored) tintGhost(colored.tone)
       return shown
     }
+    // While a focus shows x-ray, the dashboard's style is kept for when the focus ends
+    const styleDuringFocus = (id: string): boolean => {
+      if (!focusPrev) return false
+      focusPrev = { ...focusPrev, templateId: id as RenderSettings['templateId'] }
+      return true
+    }
     let cutSeq = 0
     const cutAboveAsset = async (assetIdOrBimId: string | null) => {
       const seq = ++cutSeq
@@ -2584,6 +2590,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       lookAtView,
       isolateLevel,
       focusAsset,
+      styleDuringFocus,
       cutAboveAsset,
       outlineFloorOf,
       listLayers: () => layerIds(useModelStore.getState().models).map(id => ({ id, name: id })),
