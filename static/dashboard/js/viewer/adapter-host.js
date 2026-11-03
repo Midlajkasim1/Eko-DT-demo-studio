@@ -63,6 +63,10 @@
         var h = window.EKO_HOST_ENGINE;
         return !!(h && h.bimIdFor && h.bimIdFor(assetId));
       },
+      inModel: function (assetId) {
+        var h = window.EKO_HOST_ENGINE;
+        return !!(h && h.inModel && h.inModel(assetId));
+      },
       flyToAssetAt: function (assetId) {
         if (!this.locatable(assetId)) return false;
         window.EKO_HOST_ENGINE.flyToAsset(assetId);

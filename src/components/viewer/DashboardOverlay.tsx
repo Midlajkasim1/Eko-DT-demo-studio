@@ -342,6 +342,24 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       return null
     }
 
+    // Whether a loaded model holds the asset's element; a first ask looks it up and redraws once found
+    let foundRedraw = 0
+    const inModel = (assetId?: string | null): boolean => {
+      const bimId = toBimId(assetId)
+      if (!bimId) return false
+      if (located.has(bimId)) return true
+      if (!missing.has(bimId) && !pending.has(bimId)) {
+        void locate(bimId).then(e => {
+          if (!e || foundRedraw) return
+          foundRedraw = window.setTimeout(() => {
+            foundRedraw = 0
+            try { (window as { EKO?: { set?: (patch: object) => void } }).EKO?.set?.({}) } catch { /* the dashboard redraws on its next refresh */ }
+          }, 50)
+        })
+      }
+      return false
+    }
+
     /* ONE alarm rule for the dot colour and the model colour: any alarm on an
        asset mapped to this element, or any register row on it in alarm. */
     const isAlarmed = (bimId: string) => {
@@ -2545,6 +2563,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       setViewMode,
       setDashboardOpen,
       bimIdFor,
+      inModel,
       cameraSetup,
       isAlarmed,
       listMapped: () => links().list.map(m => ({ id: m.equip, bimId: m.guid })),

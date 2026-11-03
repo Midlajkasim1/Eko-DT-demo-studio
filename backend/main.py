@@ -648,9 +648,14 @@ def _compute_sensor_averages(realtime: dict):
         cached_sensor_avg["co2"] = round(sum(co2_vals) / len(co2_vals), 2)
 
 
+# A record's own type marker, for a project that configures no type priority
+TYPE_MARKERS = ["ahu", "fahu", "mahu", "fcu", "vav", "chiller", "boiler", "coolingTower", "pump", "condenser", "fan", "exhaust",
+                "compressor", "meter", "pmu", "btu", "elecPanel", "smdb", "ats", "ups", "generator", "lift", "cctv"]
+
+
 def _equip_type(tags: list, priority: list) -> str:
     """First matching marker tag, in configured priority order."""
-    for t in priority:
+    for t in priority or TYPE_MARKERS:
         if t in (tags or []):
             return t
     return "other"

@@ -1623,7 +1623,7 @@ window.EKO_C = (function(){
         <button class="iconbtn icon26" data-act="apWide" data-on="${E.state.apWide?1:0}" aria-pressed="${E.state.apWide?'true':'false'}" aria-label="${esc(t('mpExpand'))}">${icon('maximize',14)}</button>
         <button class="iconbtn icon26" data-act="closeAsset" aria-label="${esc(t('close'))}">${icon('x',12)}</button>
       </div>
-      <div class="apctx" data-tip="${esc(arL?(r.levelAr||r.level):r.level)} · ${esc(arL?(r.zoneAr||r.zone):r.zone)}" data-tipif="trunc">${esc(arL?(r.levelAr||r.level):r.level)} · ${esc(arL?(r.zoneAr||r.zone):r.zone)} · ${esc(arL?(r.typeAr||r.typeEn||''):(r.typeEn||''))}</div>
+      <div class="apctx" data-tip="${esc([arL?(r.levelAr||r.level):r.level, arL?(r.zoneAr||r.zone):r.zone].filter(Boolean).join(' · '))}" data-tipif="trunc">${esc([arL?(r.levelAr||r.level):r.level, arL?(r.zoneAr||r.zone):r.zone, arL?(r.typeAr||r.typeEn||''):(r.typeEn||'')].filter(Boolean).join(' · '))}</div>
       <div class="aptabs">${tabBtn('alarms', t('apAlarms'), badge)}${tabBtn('activity', t('apActivityTab'))}${tabBtn('analytics', t('apFullT'))}${tabBtn('om', t('apOmTab'))}${tabBtn('warranty', t('apWtyTab'))}${ctl?tabBtn('control', t('apControlTab')):''}</div>
       <div class="apbody">${body}</div>
       <div class="apfoot apfootmob">

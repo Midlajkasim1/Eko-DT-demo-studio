@@ -44,6 +44,7 @@ window.EKO_BFOCUS = (function(){
   /* an asset the model can show: an element or a room of the model, and an engine that can fly to it */
   function locatable(app, id){
     if(!id || !app || !app.engine || !app.engine.flyToAssetAt) return false;
+    if(app.engine.inModel) return app.engine.inModel(id);
     const a = (app.data.assets || []).find(x => x.id === id);
     return !!(a && (a.gid || a.roomGid) && (!app.engine.locatable || app.engine.locatable(id)));
   }
