@@ -2,17 +2,6 @@ import * as THREE from 'three'
 import type { FragmentsEngine } from './fragmentsEngine'
 import { useProjectStore } from '@/store/useProjectStore'
 
-/** Radians from straight up or straight down. Inside this cone a right-drag
- *  spins the plan the other way from every shallower view. */
-const TOP_VIEW_RAD = 0.65
-
-/** +1 keeps the usual turntable. -1 is the top and bottom views, so a drag
- *  to the right carries the far side of the plan to the right. */
-export function azimuthDragSign(polarAngle: number): number {
-  if (!Number.isFinite(polarAngle)) return 1
-  return polarAngle < TOP_VIEW_RAD || polarAngle > Math.PI - TOP_VIEW_RAD ? -1 : 1
-}
-
 /** Radians from straight up or straight down in which the plan's far side fills much of the screen. */
 const STEEP_VIEW_RAD = 1.05
 
@@ -57,9 +46,11 @@ export function orbitSpeedSigns(
   }
   /* A right drag with speed +1 decreases theta. A down drag with speed +1 decreases phi. */
   const right = shifted(-0.02, 0)
-  const down = shifted(0, -0.02)
+  // At the top pole the phi step is read upward, so it does not cross over to the other side
+  const phiStep = sph.phi > 0.03 ? -0.02 : 0.02
+  const down = shifted(0, phiStep)
   const dx = right.x - before.x
-  const dy = down.y - before.y
+  const dy = (down.y - before.y) * Math.sign(-phiStep)
   return {
     azimuth: Math.abs(dx) < 1e-4 ? 1 : dx > 0 ? 1 : -1,
     polar: Math.abs(dy) < 1e-4 ? 1 : dy < 0 ? 1 : -1,

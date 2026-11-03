@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
-import { azimuthDragSign, resetCameraToHome, tiltIfVertical } from '@/lib/cameraUtils'
+import { orbitSpeedSigns, resetCameraToHome, tiltIfVertical } from '@/lib/cameraUtils'
 import * as THREE from 'three'
 
 interface OrientationCubeProps {
@@ -234,9 +234,33 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
     }
   }, [engineRef])
 
+  /** The same rule as a drag on the model: the part of the cube under the pointer follows it. */
+  const cubeDragSigns = (clientX: number, clientY: number) => {
+    const engine = engineRef.current
+    const cam = engine?.world?.camera?.three as THREE.PerspectiveCamera | undefined
+    const controls = engine?.world?.camera?.controls as { getTarget?: (out: THREE.Vector3) => THREE.Vector3 } | undefined
+    const rect = cubeRef.current?.parentElement?.getBoundingClientRect()
+    if (!cam?.isPerspectiveCamera || !controls?.getTarget || !rect || rect.width < 1) return { azimuth: 1, polar: 1 }
+    const target = controls.getTarget(new THREE.Vector3())
+    const half = Math.max(cam.position.distanceTo(target), 1) * 0.3
+    const u = THREE.MathUtils.clamp((clientX - rect.left) / rect.width * 2 - 1, -1, 1)
+    const v = THREE.MathUtils.clamp(1 - (clientY - rect.top) / rect.height * 2, -1, 1)
+    cam.updateMatrixWorld()
+    const axis = (i: number) => new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, i).normalize()
+    // A point on the cube face that looks at the camera, under the pointer
+    const grab = target.clone()
+      .addScaledVector(axis(2), half)
+      .addScaledVector(axis(0), u * half)
+      .addScaledVector(axis(1), v * half)
+    return orbitSpeedSigns(cam, target, grab)
+  }
+
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return
     dragStartRef.current = { x: e.clientX, y: e.clientY }
+    // Read once and kept for the whole drag, as on the model
+    const signs = cubeDragSigns(e.clientX, e.clientY)
+    let started = false
 
     const onMove = (ev: PointerEvent) => {
       if (!dragStartRef.current) return
@@ -244,12 +268,15 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
       const dy = ev.clientY - dragStartRef.current.y
       if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
         setIsDragging(true)
+        if (!started) {
+          started = true
+          lookSeq.current++
+        }
         const engine = engineRef.current
         if (engine?.world?.camera?.controls) {
           const controls = engine.world.camera.controls as any
           if (typeof controls.rotate === 'function') {
-            const sign = azimuthDragSign(controls.polarAngle)
-            controls.rotate(sign * -dx * 0.008, -dy * 0.008, false)
+            controls.rotate(signs.azimuth * -dx * 0.008, signs.polar * -dy * 0.008, false)
           }
         }
         dragStartRef.current = { x: ev.clientX, y: ev.clientY }

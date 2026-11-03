@@ -1867,8 +1867,9 @@ export async function initFragmentsEngine(
   // The surface under the pointer has to move with the pointer. That surface is
   // often in front of the orbit target, and a turntable step then carries it
   // the opposite way from a point on the target. Which way flips again between
-  // the top, the side and the bottom, so the speed is read from this camera on
-  // every move, before camera-controls applies the drag.
+  // the top, the side and the bottom, so the speed is read from this camera when
+  // the drag starts and kept until release. Read on every move, it flipped back
+  // and forth once the point could follow no further, and the spin stuck.
   let removeOrbitFollow = () => {}
   {
     const controls = world.camera.controls as unknown as {
@@ -1885,7 +1886,6 @@ export async function initFragmentsEngine(
     const raycaster = new THREE.Raycaster()
     const ndc = new THREE.Vector2()
     const plane = new THREE.Plane()
-    let grabValid = false
 
     const ignoredHit = (obj: THREE.Object3D) => {
       let node: THREE.Object3D | null = obj
@@ -1947,7 +1947,6 @@ export async function initFragmentsEngine(
     }
 
     const applySigns = () => {
-      if (!grabValid) return
       const cam = world.camera.three as THREE.PerspectiveCamera
       if (!cam?.isPerspectiveCamera) return
       cam.updateMatrixWorld()
@@ -1961,28 +1960,15 @@ export async function initFragmentsEngine(
     }
 
     const onPointerDown = (e: PointerEvent) => {
-      grabValid = false
       if (e.button !== 0) return
-      grabValid = rememberGrab(e)
-      applySigns()
+      controls.azimuthRotateSpeed = baseAzimuth
+      controls.polarRotateSpeed = basePolar
+      if (rememberGrab(e)) applySigns()
     }
-    const onPointerMove = (e: PointerEvent) => {
-      if (!grabValid) return
-      if (e.pointerType !== 'touch' && (e.buttons & 1) === 0) return
-      applySigns()
-    }
-    const onPointerUp = () => { grabValid = false }
 
     viewCanvas.addEventListener('pointerdown', onPointerDown, { capture: true })
-    const doc = viewCanvas.ownerDocument
-    doc.addEventListener('pointermove', onPointerMove, { capture: true })
-    doc.addEventListener('pointerup', onPointerUp, { capture: true })
-    doc.addEventListener('pointercancel', onPointerUp, { capture: true })
     removeOrbitFollow = () => {
       viewCanvas.removeEventListener('pointerdown', onPointerDown, { capture: true })
-      doc.removeEventListener('pointermove', onPointerMove, { capture: true })
-      doc.removeEventListener('pointerup', onPointerUp, { capture: true })
-      doc.removeEventListener('pointercancel', onPointerUp, { capture: true })
     }
   }
 
