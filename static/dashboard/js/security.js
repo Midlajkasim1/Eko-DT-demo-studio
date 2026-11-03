@@ -162,17 +162,17 @@ window.EKO_SEC = (function(){
     const fk = E.state.secFilter, fOk = p => !fk || (fk === 'cctv' && p.k === 'cam') || (fk === 'access' && p.k === 'door') || (fk === 'fire' && p.k === 'fire');   /* D182: a tile filters the model */
     for(let q = pts.length - 1; q >= 0; q--) if(!fOk(pts[q])) pts.splice(q, 1);
     const crowded = { cam: cams().length > 60, door: doors().length > 60 };
-    const off = p => p.k === 'cam' && E.state.secCamsOff;
-    const keep = p => p.id === sel || (!off(p) && (!crowded[p.k] || p.bad || (p.k === 'cam' && (E.state.secCones || fk === 'cctv'))));
+    const off = !!E.state.secMarksOff;
+    const keep = p => p.id === sel || (!off && (!crowded[p.k] || p.bad || (p.k === 'cam' && (E.state.secCones || fk === 'cctv'))));
     for(let q = pts.length - 1; q >= 0; q--) if(!keep(pts[q])) pts.splice(q, 1);
     return `<div class="mklayer secmklayer">${pts.map(p => `<button class="mk secmk" data-x="${p.x}" data-y="${p.y}"${p.gid ? ` data-bimid="${esc(p.gid)}"` : ''} data-k="${p.k}" data-bad="${p.bad ? 1 : 0}" data-sel="${sel === p.id ? 1 : 0}"
-        data-act="${p.k === 'cam' ? 'secCam' : p.k === 'fire' ? 'secEv' : 'secDoor'}" data-v="${esc(p.ev || p.id)}" data-tip="${esc(p.tip)}" aria-label="${esc(p.tip)}">${icon(p.k === 'cam' ? 'eye' : p.k === 'fire' ? 'flame' : 'lock', 11)}</button>`).join('')}${window.EKO_SECW ? window.EKO_SECW.pulse(E) : ''}${window.EKO_SCN3 ? window.EKO_SCN3.markers(E) : ''}${window.EKO_EVAC && window.EKO_EVAC.markers ? window.EKO_EVAC.markers(E) : ''}</div>`;
+        data-act="${p.k === 'cam' ? 'secCam' : p.k === 'fire' ? 'secEv' : 'secDoor'}" data-v="${esc(p.ev || p.id)}" data-tip="${esc(p.tip)}" aria-label="${esc(p.tip)}">${icon(p.k === 'cam' ? 'eye' : p.k === 'fire' ? 'flame' : 'lock', 11)}</button>`).join('')}${window.EKO_SECW ? window.EKO_SECW.pulse(E) : ''}${!off && window.EKO_SCN3 ? window.EKO_SCN3.markers(E) : ''}${!off && window.EKO_EVAC && window.EKO_EVAC.markers ? window.EKO_EVAC.markers(E) : ''}</div>`;
   }
   /* the landing: the summary over the model, the open events in the panel */
   function landing(E2, doc){
     use(E2);
     const model = (doc.widgets || []).find(w => w.type === 'viewer3d') || {};
-    const cfg = Object.assign({}, model.config || {}, { markers: false, camToggle: cams().length > 0 });
+    const cfg = Object.assign({}, model.config || {}, { markers: false, markToggle: true });
     return window.EKO_V.viewer(E, cfg, located(E) + markers(E) + summary(E)) + (E.state.assetSel ? C().assetPanel(E) : panel(E));
   }
   function located(E2){
@@ -397,7 +397,7 @@ window.EKO_SEC = (function(){
         if(cam && cam.gid && eng.cameraSetup && eng.flyToGid){ eng.flyToGid(cam.gid); if(eng.highlightGid) eng.highlightGid(cam.gid); return; }
         const r = host.getBoundingClientRect();
         if(eng.frameRect) eng.frameRect([p], { left: r.width * 0.35, top: 40, width: r.width * 0.5, height: r.height - 160 }, { scale: 1.8 }); })); },
-    secCamsShow(){ const E2 = window.EKO; E2.set({ secCamsOff: !E2.state.secCamsOff }); },
+    secMarksShow(){ const E2 = window.EKO; E2.set({ secMarksOff: !E2.state.secMarksOff }); },
     secLocatedBack(){ const E2 = window.EKO, b = E2.state.secLocated, eng = E2.engine; if(!b) return;
       if(eng && eng.highlightGid) eng.highlightGid(null);
       E2.state.secLocated = null; E2.state.secSel = null;

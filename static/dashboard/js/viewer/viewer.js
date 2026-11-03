@@ -489,11 +489,11 @@ window.EKO_V = (function(){
      same model. Furniture hides furnishing on it. Neither one is a simulation. */
   function planSwitch(E, config){
     if(((E.data.viewer || {}).engine) !== 'host') return '';
-    const t = E.t.bind(E), m = E.state.e3dMode === 'plan' ? 'plan' : '3d', furn = E.state.e3dFurn !== false, cams = !E.state.secCamsOff;
+    const t = E.t.bind(E), m = E.state.e3dMode === 'plan' ? 'plan' : '3d', furn = E.state.e3dFurn !== false, marks = !E.state.secMarksOff;
     const b = (v, k, on) => `<button class="seg" data-act="e3dMode" data-v="${v}" data-on="${on}" aria-pressed="${on}">${C().esc(t(k))}</button>`;
     return `<div class="e3dsw" role="group" aria-label="${C().esc(t('e3d.aria'))}">${b('3d', 'e3d.3d', m === '3d')}${b('plan', 'e3d.plan', m === 'plan')}`
       + `<button class="seg" data-act="e3dFurn" data-on="${furn}" aria-pressed="${furn}">${C().esc(t('e3d.furn'))}</button>`
-      + (config && config.camToggle ? `<button class="seg" data-act="secCamsShow" data-on="${cams}" aria-pressed="${cams}">${C().esc(t('e3d.cams'))}</button>` : '')
+      + (config && config.markToggle ? `<button class="seg" data-act="secMarksShow" data-on="${marks}" aria-pressed="${marks}">${C().esc(t('e3d.marks'))}</button>` : '')
       + `</div>`;
   }
   /* Viewer surface. summaryHtml (the #ovp overlay) renders INSIDE vpmain,

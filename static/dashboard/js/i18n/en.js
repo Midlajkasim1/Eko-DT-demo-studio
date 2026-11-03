@@ -3928,7 +3928,7 @@ window.EKO_I18N.en = {
   "e3d.3d": "3D",
   "e3d.plan": "Plan",
   "e3d.furn": "Furniture",
-  "e3d.cams": "Cameras",
+  "e3d.marks": "Markers",
   "e3d.loading": "Loading the model",
   "e3d.fallback": "The 3D model could not load; the plan is shown",
   "scn.start": "Play scenario: fire alarm, Level 2",
