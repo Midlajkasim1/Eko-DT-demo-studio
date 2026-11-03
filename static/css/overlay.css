@@ -25,13 +25,20 @@
    hole the size of .evxvis (syncHole writes the box). The Ask EKO reserve is a
    margin; with #vpmain on the page #mount is clear too, and the canvas showed
    in that strip. The reserve stays padding, inside the sheet. No routes. */
-.dashboard-native-container .pwarea.evxpage:has(.evxvis) {
+.dashboard-native-container .pwarea.evxpage:has(.evxvis):not(:has(.evxdemo)) {
   position: relative;
   background: transparent;
   margin-block-end: 0;
   padding-block-end: calc(14px + var(--aiCornerH, 56px));
 }
-.dashboard-native-container .pwarea.evxpage:has(.evxvis)::before {
+/* The medical demo paints its own model in the visual. The page stays opaque,
+   including the Ask EKO strip, so the Studio canvas does not show around it. */
+.dashboard-native-container .pwarea.evxpage:has(.evxdemo) {
+  margin-block-end: 0;
+  padding-block-end: calc(14px + var(--aiCornerH, 56px));
+  background: var(--s0);
+}
+.dashboard-native-container .pwarea.evxpage:has(.evxvis):not(:has(.evxdemo))::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -44,14 +51,14 @@
   mask-position: 0 0, var(--evx-x, 0px) var(--evx-y, 0px);
   mask-composite: exclude;
 }
-.dashboard-native-container .pwarea.evxpage:has(.evxvis) > * {
+.dashboard-native-container .pwarea.evxpage:has(.evxvis):not(:has(.evxdemo)) > * {
   position: relative;
   z-index: 1;
 }
-.dashboard-native-container #mount > .pwarea.evxpage:has(.evxvis):not(#vpmain) {
+.dashboard-native-container #mount > .pwarea.evxpage:has(.evxvis):not(:has(.evxdemo)):not(#vpmain) {
   pointer-events: none;
 }
-.dashboard-native-container .pwarea.evxpage:has(.evxvis) :is(.opshl, .pwhero, .evxvbar, .pfpanel, [data-frame="top"]) {
+.dashboard-native-container .pwarea.evxpage:has(.evxvis):not(:has(.evxdemo)) :is(.opshl, .pwhero, .evxvbar, .pfpanel, [data-frame="top"]) {
   pointer-events: auto;
 }
 .dashboard-native-container .pwarea.evxpage .pfvisual > div:has(> .evxvis) {
@@ -67,6 +74,21 @@
 }
 .dashboard-native-container .pwarea.evxpage .evxvis :is(#vbottom, #vcap, .minimap, .histbanner) {
   display: none;
+}
+.dashboard-native-container .pwarea.evxpage .evxvis.evxdemo,
+.dashboard-native-container .pwarea.evxpage .evxvis.evxdemo #vpmain,
+.dashboard-native-container .pwarea.evxpage .evxvis.evxdemo #evxhost {
+  background: var(--s0);
+  pointer-events: auto;
+}
+.dashboard-native-container .pwarea.evxpage .evxvis.evxdemo #vpmain {
+  position: relative;
+  height: 100%;
+  min-height: 240px;
+}
+.dashboard-native-container .pwarea.evxpage .evxvis.evxdemo #evxhost {
+  position: absolute;
+  inset: 0;
 }
 /* 3D / Plan / Furniture sits on the model. The canvas behind stays the hit target. */
 .dashboard-native-container .e3dsw { pointer-events: auto; }

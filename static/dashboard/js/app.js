@@ -1144,6 +1144,7 @@
     }
     if(window.EKO_MAP && document.querySelector('.pfcard')) window.EKO_MAP.after();   /* D122: keep the marker card inside the map box */
     if(window.EKO_AI) window.EKO_AI.after();                     /* D132: the conversation panel's geometry and scroll */
+    if(window.EKO_EVAC && window.EKO_EVAC.mountDemo) window.EKO_EVAC.mountDemo(E);   /* medical demo: the hospital model, not the Studio canvas */
     if(window.EKO_EVAC && window.EKO_EVAC.syncHole) window.EKO_EVAC.syncHole();   /* evacuation Model view: the canvas hole */
     syncPaint();
   }

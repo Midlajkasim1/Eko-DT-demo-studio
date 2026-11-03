@@ -192,6 +192,9 @@ window.EKO_EVACP = (function(){
   }
   /* E9: the replay in the Evacuation page's own visual area (the model beside the tabs), and its live figures in the On the model tab */
   function replayVisual(E){
+    /* The medical demo draws in its own canvas. The Studio host is not mounted here. */
+    if(window.EKO_EVAC && EKO_EVAC.demoSite && EKO_EVAC.demoSite(E))
+      return `<div class="evxvis evxdemo"><main id="vpmain"><div id="evxhost"></div></main></div>`;
     return `<div class="evxvis">${window.EKO_V.viewer(E, { markers: false, timeline: false }, '')}</div>`;
   }
   function replayPanel(E){
@@ -211,14 +214,16 @@ window.EKO_EVACP = (function(){
     E.state.evxReplay = true; if(![10, 30, 60].includes(E.state.evxSpeed)) E.state.evxSpeed = 10;
     anim = { raf: 0, prevLevel: prev, sec: 0, t0: performance.now(), lastPanel: 0, lv: pageLv(E) };
     const mock = !(E.engine && E.engine.setRoutes);
-    if(!mock) E.state.dock.level = anim.lv;
+    /* The demo model's level stays on that model. The Studio dock is the real building's floor. */
+    if(!mock && !(window.EKO_EVAC && EKO_EVAC.demoSite && EKO_EVAC.demoSite(E))) E.state.dock.level = anim.lv;
     E.state.pfTab = Object.assign({}, E.state.pfTab || {}, { 'sec-evac': 'model' });   /* E9: the live figures are in the On the model tab */
     if(E.state.pageId !== 'sec-evac') E.go('sec-evac', 'security', 'evac'); else E.set({});
     /* the level on the model: its routes (E10: the walked paths, wider where more people use them), its exits, stairs and lifts */
-    const showLevel = (E2, eng, lv) => { if(!(eng && eng.setRoutes)) return; E2.state.dock.level = lv; if(eng.isolateLevel) eng.isolateLevel(lv); eng.setRoutes(routeSegs(p, lv)); if(eng.setLabels) eng.setLabels(markers(E2, lv)); if(eng.frameLevel) eng.frameLevel(lv); };
+    const showLevel = (E2, eng, lv) => { if(!(eng && eng.setRoutes)) return; if(!(window.EKO_EVAC && EKO_EVAC.demoSite && EKO_EVAC.demoSite(E2))) E2.state.dock.level = lv; if(eng.isolateLevel) eng.isolateLevel(lv); eng.setRoutes(routeSegs(p, lv)); if(eng.setLabels) eng.setLabels(markers(E2, lv)); if(eng.frameLevel) eng.frameLevel(lv); };
     const TRAIL = [1.25, 2.5, 3.75, 5];   /* the trail: where a walking dot was over the last 5 seconds of the plan */
     const frame = () => { const E2 = window.EKO, eng = E2.engine, vp = document.getElementById('vpmain'), host = document.getElementById('enginehost');
       if(!anim) return; anim.raf = requestAnimationFrame(frame);
+      const hostEl = document.getElementById('enginehost') || document.getElementById('evxhost');
       if(mock){
         const speed = E2.state.evxSpeed || 10, sec = Math.min(end, (performance.now() - anim.t0) / 1000 * speed);
         anim.sec = sec;
@@ -227,13 +232,13 @@ window.EKO_EVACP = (function(){
         if(live && (now - anim.lastPanel > 100 || sec >= end)){ anim.lastPanel = now; if(!anim.doneDrawn) live.innerHTML = liveHtml(E2, p, sec, end); if(sec >= end) anim.doneDrawn = true; }
         return;
       }
-      if(!eng || !eng.ready || !eng.ready() || !vp || !host) return;
+      if(!eng || !eng.ready || !eng.ready() || !vp || !hostEl) return;
       if(!anim.started){ anim.started = true; anim.t0 = performance.now(); showLevel(E2, eng, anim.lv); }
       /* E12: a level picked while the replay plays: the replay goes on, on that level */
       const lvNow = pageLv(E2); if(lvNow !== anim.lv){ anim.lv = lvNow; showLevel(E2, eng, lvNow); }
       const lv = anim.lv;
       let el = document.getElementById('evxreplay'); if(!el || el.parentNode !== vp){ if(el) el.remove(); el = document.createElement('div'); el.id = 'evxreplay'; vp.appendChild(el); }
-      const speed = E2.state.evxSpeed || 10, sec = Math.min(end, (performance.now() - anim.t0) / 1000 * speed), hr = host.getBoundingClientRect(), vr = vp.getBoundingClientRect();
+      const speed = E2.state.evxSpeed || 10, sec = Math.min(end, (performance.now() - anim.t0) / 1000 * speed), hr = hostEl.getBoundingClientRect(), vr = vp.getBoundingClientRect();
       anim.sec = sec;
       const scr = q => { const sp = eng.worldToScreen({ x: q.x, y: q.y }); return sp.visible ? [sp.x + hr.left - vr.left, sp.y + hr.top - vr.top] : null; };
       const dots = [], trails = [], cnt = { here: 0, other: 0, out: 0 };
@@ -280,10 +285,13 @@ window.EKO_EVACP = (function(){
   /* E10: the model view of the page (not playing): the plan's walked routes on the level, set once per plan and level */
   let routeKey = null;
   function showRoutes(E, lv){
-    if(E.state.dock && E.state.dock.level !== lv) E.state.dock.level = lv;
+    /* Hospital floors (L1, L2) are not the Studio model's floors. Only a pack engine shares the dock. */
+    const demo = window.EKO_EVAC && EKO_EVAC.demoSite && EKO_EVAC.demoSite(E);
+    if(!demo && E.state.dock && E.state.dock.level !== lv) E.state.dock.level = lv;
     const key = JSON.stringify(optsOf(E, st(E))) + '|' + lv; if(key === routeKey) return; routeKey = key;
     let n = 0; const go = () => { const eng = E.engine; if(routeKey !== key) return; if(!(eng && eng.ready && eng.ready())){ if(n++ < 80) setTimeout(go, 120); return; }
-      if(eng.setRoutes) eng.setRoutes(pageSegs(E, lv)); if(eng.setLabels) eng.setLabels(markers(E, lv)); if(eng.frameLevel && !go.framed){ go.framed = true; eng.frameLevel(lv); } };
+      if(eng.isolateLevel) eng.isolateLevel(lv);
+      if(eng.setRoutes) eng.setRoutes(pageSegs(E, lv)); if(eng.setLabels) eng.setLabels(markers(E, lv)); if(eng.frameLevel && go.framed !== lv){ go.framed = lv; eng.frameLevel(lv); } };
     setTimeout(go, 80);
   }
   /* the links of the page's own plan (its order, fire and what-if) on a level, for the 3D */

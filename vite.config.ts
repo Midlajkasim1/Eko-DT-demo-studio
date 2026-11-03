@@ -9,7 +9,8 @@ import fs from 'fs'
 // from the project folder, so anything under dist/ is a dev fixture. map/regions ships
 // with the exported viewer so location maps keep their bundled satellite renders.
 const EXPORT_SKIP = ['wasm/', 'models/', 'mapassets/']
-const skipFromExport = (rel: string) => EXPORT_SKIP.some(prefix => rel.startsWith(prefix))
+/* The hospital demo model is a symlink into the E15 pack. Do not bake it into the Studio export. */
+const skipFromExport = (rel: string) => EXPORT_SKIP.some(prefix => rel.startsWith(prefix)) || rel.includes('models/hospital/')
 
 function viewerAssetsPlugin() {
   return {
@@ -180,6 +181,7 @@ const MIME_TYPES: Record<string, string> = {
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
   '.mp4': 'video/mp4',
+  '.glb': 'model/gltf-binary',
 }
 
 function staticFolderPlugin() {
