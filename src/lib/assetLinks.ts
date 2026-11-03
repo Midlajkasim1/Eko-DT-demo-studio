@@ -209,6 +209,119 @@ export function suggest(eq: LinkEquipment, elements: PreparedElement[], limit = 
   return out.sort((a, b) => b.score - a.score).slice(0, limit)
 }
 
+const GUID_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$'
+
+/** An IFC GlobalId split into its high 96 bits and its last 32 */
+function guidParts(guid: string): { head: string; low: number } {
+  let n = 0n
+  for (const c of guid) n = n * 64n + BigInt(GUID_CHARS.indexOf(c))
+  return { head: (n >> 32n).toString(36), low: Number(n & 0xffffffffn) }
+}
+
+/**
+ * Revit writes an element's GlobalId as a GUID of the session that made it, with the element id XORed into the last 32 bits.
+ * A model exported again from a copy of the file gets new GlobalIds but keeps the element ids (the IFC Tag), so a FIN bimId
+ * from the older export still names its element. Per session, the key is the one under which the FIN bimIds land on element
+ * ids of the loaded model whose type is the equipment's own (element ids are dense, so a near key lands on neighbours too).
+ */
+export function matchOlderExport(
+  items: { bimId: string; words: string[] }[],
+  prepared: PreparedElement[],
+): Map<string, { el: ModelElement; id: number; typed: boolean }> {
+  const out = new Map<string, { el: ModelElement; id: number; typed: boolean }>()
+  const byId = new Map<number, PreparedElement[]>()
+  for (const p of prepared) {
+    if (!/^\d+$/.test(p.el.tag)) continue
+    const id = Number(p.el.tag)
+    byId.set(id, [...(byId.get(id) ?? []), p])
+  }
+  if (!byId.size) return out
+  const fits = (p: PreparedElement, words: string[]) => words.some(w => p.hay.includes(` ${w} `))
+  const typedIds = new Map<string, Set<number>>()
+  const typedFor = (words: string[]) => {
+    const key = words.join('|')
+    let set = typedIds.get(key)
+    if (!set) {
+      set = new Set([...byId].filter(([, ps]) => ps.some(p => fits(p, words))).map(([id]) => id))
+      typedIds.set(key, set)
+    }
+    return set
+  }
+  const sessions = new Map<string, { bimId: string; low: number; words: string[] }[]>()
+  for (const it of items) {
+    if (!isGuid(it.bimId) || [...sessions.values()].some(g => g.some(b => b.bimId === it.bimId))) continue
+    const { head, low } = guidParts(it.bimId)
+    sessions.set(head, [...(sessions.get(head) ?? []), { bimId: it.bimId, low, words: it.words }])
+  }
+  const ids = [...byId.keys()]
+  for (const group of sessions.values()) {
+    if (group.length < 2 || group.every(b => !b.words.length)) continue
+    const votes = new Map<number, number>()
+    for (const b of group.slice(0, 20)) {
+      const typed = typedFor(b.words)
+      for (const id of ids) {
+        const key = (b.low ^ id) >>> 0
+        votes.set(key, (votes.get(key) ?? 0) + (typed.has(id) ? 10 : 1))
+      }
+    }
+    let best = 0
+    let bestN = 0
+    let secondN = 0
+    for (const [key, n] of votes) {
+      if (n > bestN) { secondN = bestN; bestN = n; best = key }
+      else if (n > secondN) secondN = n
+    }
+    // At least two bimIds on elements of their own type, and no other key as good
+    if (bestN < 20 || bestN === secondN) continue
+    const hits = group.flatMap(b => {
+      const id = (b.low ^ best) >>> 0
+      const ps = byId.get(id)
+      return ps ? [{ b, id, ps }] : []
+    })
+    // The same element id can exist in other files; take the file most of this session's hits are in
+    const perModel = new Map<string, number>()
+    for (const h of hits) for (const m of new Set(h.ps.map(p => p.el.modelName))) perModel.set(m, (perModel.get(m) ?? 0) + 1)
+    for (const h of hits) {
+      const ranked = [...h.ps].sort((a, b) =>
+        Number(fits(b, h.b.words)) - Number(fits(a, h.b.words)) || (perModel.get(b.el.modelName) ?? 0) - (perModel.get(a.el.modelName) ?? 0))
+      out.set(h.b.bimId, { el: ranked[0].el, id: h.id, typed: fits(ranked[0], h.b.words) })
+    }
+  }
+  return out
+}
+
+/** Suggestions for every FIN equipment, keyed by folded name: its own bimId, the element an older export's bimId names, then name likeness */
+export function suggestAll(finList: LinkEquipment[], prepared: PreparedElement[], present: Set<string> | null): Map<string, Suggestion[]> {
+  const out = new Map<string, Suggestion[]>()
+  const known = new Set(prepared.map(p => p.el.guid))
+  const wordsOf = (eq: LinkEquipment) => TYPE_WORDS[eq.cctv ? 'CCTV' : defaultType(eq)] ?? []
+  const stale = finList.flatMap(eq => (isGuid(eq.bimId) && !known.has(eq.bimId) && !present?.has(eq.bimId) ? [{ bimId: eq.bimId, words: wordsOf(eq) }] : []))
+  const older = matchOlderExport(stale, prepared)
+  for (const eq of finList) {
+    const key = foldName(eq.name)
+    if (isGuid(eq.bimId) && !known.has(eq.bimId) && present?.has(eq.bimId)) {
+      out.set(key, [{ guid: eq.bimId, score: 1, reason: 'FIN bimId tag' }])
+      continue
+    }
+    const hit = isGuid(eq.bimId) ? older.get(eq.bimId) : undefined
+    if (hit) {
+      out.set(key, [{ guid: hit.el.guid, score: hit.typed ? 0.95 : 0.6, reason: `Revit element ${hit.id}, named by FIN’s bimId from an older model export` }])
+      continue
+    }
+    out.set(key, prepared.length ? suggest(eq, prepared) : [])
+  }
+  return out
+}
+
+/** "CCTV Camera_C_mbii · Fixed · 2541507" from a Revit "Family:Type:Id" name */
+export function elementLabel(el: { name?: string; objectType?: string; category?: string; guid?: string }): string {
+  const parts = (el.name || '').split(':').map(p => p.trim()).filter(Boolean)
+  return parts.join(' · ') || el.objectType || el.category || el.guid || ''
+}
+
+/** Words of a link type, for ranking model elements in the picker */
+export const typeWords = (type: string): string[] => TYPE_WORDS[type.toUpperCase()] ?? []
+
 /** Links for every unlinked equipment whose best suggestion clears the bar, one element per equipment, best scores first */
 export function bestMatches(
   unlinked: LinkEquipment[],

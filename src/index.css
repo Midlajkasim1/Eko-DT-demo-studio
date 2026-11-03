@@ -2127,6 +2127,15 @@ Wait, if iframe has pointer-events: auto, it works. Let's fix this in iframe bod
 .al-manual input {
   max-width: 260px;
 }
+.al-banner {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--text-primary);
+  font-size: 13px;
+}
 .al-undo {
   margin-left: 10px;
   background: none;
@@ -2280,6 +2289,86 @@ Wait, if iframe has pointer-events: auto, it works. Let's fix this in iframe bod
 .al-chip:hover {
   border-color: var(--accent);
 }
+.al-chip .al-sub {
+  display: block;
+  margin-top: 2px;
+}
+.ds-btn.al-choose {
+  align-self: flex-start;
+}
+.al-linked {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.al-table tr.al-row-picking td {
+  border-bottom-color: transparent;
+  background: var(--accent-dim);
+}
+.al-table tr.al-picker-row td {
+  padding: 0 8px 12px;
+  background: var(--accent-dim);
+}
+.al-picker {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  padding: 10px;
+}
+.al-picker-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.al-picker-head .al-search {
+  flex: 1;
+  min-width: 240px;
+}
+.al-picker-only {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.al-picker-list {
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.al-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+.al-option:hover,
+.al-option:focus-visible {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+}
+.al-option-name {
+  font-weight: 500;
+}
+.al-option-used {
+  font-size: 12px;
+  color: #f59e0b;
+}
 .al-search-row {
   display: flex;
   gap: 6px;
@@ -2294,6 +2383,7 @@ Wait, if iframe has pointer-events: auto, it works. Let's fix this in iframe bod
   margin-bottom: 4px;
 }
 .al-ok { color: #2ecc71; }
+.al-auto { color: #3b82f6; font-weight: 500; }
 .al-warn { color: #f59e0b; }
 .al-bad { color: var(--red); }
 .al-none { color: var(--text-muted); }

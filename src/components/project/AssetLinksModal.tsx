@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useProjectStore } from '@/store/useProjectStore'
@@ -7,24 +7,28 @@ import { useModelStore } from '@/store/useModelStore'
 import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import type { AssetLink } from '@/types'
+import type { FinEquipment } from '@/types/fin'
 import {
   KNOWN_TYPES,
   bestMatches,
   defaultType,
+  elementLabel,
   foldName,
   isCctv,
   isGuid,
+  levelRank,
   linksToCsv,
   mergeLinks,
   parseLinks,
   prepareElements,
   sortLevels,
   spaceLabel,
-  suggest,
+  suggestAll,
+  typeWords,
   type LinkEquipment,
   type ModelElement,
-  type Suggestion,
 } from '@/lib/assetLinks'
+import { holdFinWatch } from '@/lib/finWatch'
 import { defaultSpaceModelKeys, guidsInModel, guidsInModels, listModelElements, listScannedModels, roomsContaining, type ScannedModel } from '@/lib/modelElements'
 
 interface AssetLinksModalProps {
@@ -51,7 +55,7 @@ interface SpaceRow {
   link: AssetLink | null
 }
 
-type Tone = 'ok' | 'warn' | 'bad' | 'none'
+type Tone = 'ok' | 'auto' | 'warn' | 'bad' | 'none'
 
 const AUTO_MIN = 0.8
 const ALL_LEVELS = '*'
@@ -59,6 +63,30 @@ const levelLabel = (key: string) => key || 'No level'
 const isCctvRow = (r: Row) => (r.eq ? !!r.eq.cctv : r.link?.kind === 'cctv')
 const pct = (score: number) => `${Math.round(score * 100)}%`
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`
+const fileLabel = (name: string) => name.split(/[/\\]/).pop() || name
+const PICKER_LIMIT = 60
+
+/** One entry per FIN equipment name */
+function toLinkEquipment(equipment: FinEquipment[]): LinkEquipment[] {
+  const seen = new Map<string, LinkEquipment>()
+  for (const e of equipment) {
+    if (!e?.name) continue
+    const key = foldName(e.name)
+    if (!seen.has(key)) seen.set(key, { name: e.name, floor: e.floor, type: e.type, bimId: e.bimId, finId: e.finId, cctv: isCctv(e) })
+  }
+  return [...seen.values()]
+}
+
+function newLink(eq: LinkEquipment, guid: string, el?: ModelElement): AssetLink {
+  return {
+    equip: eq.name,
+    guid,
+    type: eq.cctv ? 'CCTV' : defaultType(eq),
+    ...(eq.cctv ? { kind: 'cctv' as const } : {}),
+    ...(eq.finId ? { finId: eq.finId } : {}),
+    ...(el ? { element: el.name || el.objectType } : {}),
+  }
+}
 
 const HINTS: Record<Mode, string> = {
   equip: 'Link each FIN equipment to its element in the model. A link keeps the IFC GlobalId, so it carries over to a revised model.',
@@ -120,7 +148,16 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
   const [saving, setSaving] = useState(false)
   const [loadingFin, setLoadingFin] = useState(false)
   const [findingRooms, setFindingRooms] = useState(false)
-  const [undo, setUndo] = useState<{ before: AssetLink[]; after: AssetLink[] } | null>(null)
+  const [undo, setUndo] = useState<{ before: AssetLink[]; after: AssetLink[]; auto?: string[]; rooms?: string[] } | null>(null)
+  const [autoKeys, setAutoKeys] = useState<Map<string, string>>(new Map())
+  const [autoRooms, setAutoRooms] = useState<Set<string>>(new Set())
+  const [pickerFor, setPickerFor] = useState<string | null>(null)
+  const [pickerQuery, setPickerQuery] = useState('')
+  const [pickerAll, setPickerAll] = useState(false)
+  const linksRef = useRef(links)
+  const scannedRef = useRef<ModelElement[] | null>(null)
+  const declinedRef = useRef<Set<string>>(new Set())
+  const declinedRoomsRef = useRef<Set<string>>(new Set())
   const [confirmClose, setConfirmClose] = useState(false)
   const spaceMode = mode === 'space'
 
@@ -132,12 +169,71 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     if (confirmClose) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      if (dirty) setConfirmClose(true)
+      if (pickerFor) setPickerFor(null)
+      else if (dirty) setConfirmClose(true)
       else onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [dirty, confirmClose, onClose])
+  }, [dirty, confirmClose, onClose, pickerFor])
+
+  useEffect(() => { linksRef.current = links }, [links])
+  useEffect(() => {
+    if (pickerFor) document.querySelector('.al-picker')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [pickerFor])
+
+  /* Links every unlinked equipment and camera whose best match clears the bar, once FIN and the model are both read,
+     and gives every linked camera without a room the saved room it sits in. The user's own unlinks, room clears and undos are not redone. */
+  const runAuto = useCallback(async (found: ModelElement[], equipment: FinEquipment[]) => {
+    const finL = toLinkEquipment(equipment)
+    if (!found.length || !finL.length) return
+    const engine = engineRef.current
+    const bimIds = finL.flatMap(eq => (isGuid(eq.bimId) ? [eq.bimId] : []))
+    const presentSet = engine && bimIds.length ? await guidsInModels(engine, bimIds).catch(() => null) : null
+    const sugg = suggestAll(finL, prepareElements(found), presentSet)
+    const current = linksRef.current
+    const machines = current.filter(l => l.kind !== 'space')
+    const named = new Set(machines.map(l => foldName(l.equip)))
+    const finIds = new Set(machines.flatMap(l => (l.finId ? [l.finId] : [])))
+    const open = finL.filter(eq => !named.has(foldName(eq.name)) && !(eq.finId && finIds.has(eq.finId)) && !declinedRef.current.has(foldName(eq.name)))
+    const matches = bestMatches(open, sugg, new Set(machines.map(l => l.guid)), AUTO_MIN)
+    const byG = new Map(found.map(e => [e.guid, e]))
+    const added = matches.map(({ eq, s }) => newLink(eq, s.guid, byG.get(s.guid)))
+
+    const cameras = new Set(finL.filter(eq => eq.cctv).map(eq => foldName(eq.name)))
+    const isCam = (l: AssetLink) => l.kind === 'cctv' || cameras.has(foldName(l.equip))
+    const rooms = current.filter(l => l.kind === 'space').map(l => l.guid)
+    const needRoom = [...machines, ...added].filter(l => isCam(l) && !l.room && !declinedRoomsRef.current.has(foldName(l.equip)))
+    const roomOf = engine && rooms.length && needRoom.length
+      ? await roomsContaining(engine, needRoom.map(l => l.guid), rooms).catch(() => new Map<string, string>())
+      : new Map<string, string>()
+    // Edited while the model was asked: leave it to the buttons
+    if ((!added.length && !roomOf.size) || linksRef.current !== current) return
+    const withRoom = (l: AssetLink): AssetLink => {
+      const room = l.kind !== 'space' && isCam(l) && !l.room ? roomOf.get(l.guid) : undefined
+      return room ? { ...l, kind: 'cctv', room } : l
+    }
+    const next = [...current.map(withRoom), ...added.map(withRoom)]
+    const keys = matches.map(m => foldName(m.eq.name))
+    const roomKeys = needRoom.filter(l => roomOf.has(l.guid)).map(l => foldName(l.equip))
+    setUndo({ before: current, after: next, auto: keys, rooms: roomKeys })
+    setLinks(next)
+    setAutoKeys(prev => new Map([...prev, ...matches.map(m => [foldName(m.eq.name), m.s.reason] as [string, string])]))
+    setAutoRooms(prev => new Set([...prev, ...roomKeys]))
+    setNotice(null)
+    setError(null)
+  }, [engineRef])
+
+  /* The saved room a camera sits in, after it is linked to an element by hand */
+  const fillRoom = async (key: string, guid: string) => {
+    const engine = engineRef.current
+    const rooms = linksRef.current.filter(l => l.kind === 'space').map(l => l.guid)
+    if (!engine || !rooms.length) return
+    const room = (await roomsContaining(engine, [guid], rooms).catch(() => new Map<string, string>())).get(guid)
+    if (!room) return
+    setLinks(prev => prev.map(l => (l.kind !== 'space' && l.guid === guid && foldName(l.equip) === key && !l.room ? { ...l, kind: 'cctv', room } : l)))
+    setAutoRooms(prev => new Set(prev).add(key))
+  }
 
   /* A change to many rows at once. Undo works until the next edit. */
   const bulk = (next: AssetLink[], message: string) => {
@@ -150,6 +246,14 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
   const undoBulk = () => {
     if (!undo || undo.after !== links) return
     setLinks(undo.before)
+    if (undo.auto?.length) {
+      for (const key of undo.auto) declinedRef.current.add(key)
+      setAutoKeys(prev => new Map([...prev].filter(([k]) => !undo.auto!.includes(k))))
+    }
+    if (undo.rooms?.length) {
+      for (const key of undo.rooms) declinedRoomsRef.current.add(key)
+      setAutoRooms(prev => new Set([...prev].filter(k => !undo.rooms!.includes(k))))
+    }
     setUndo(null)
     setNotice('Undone.')
   }
@@ -164,8 +268,10 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     job.then(
       found => {
         if (cancelled) return
+        scannedRef.current = found
         setElements(found)
         setScan({ state: 'idle' })
+        void runAuto(found, useFinStore.getState().equipment)
       },
       (e: unknown) => {
         if (cancelled) return
@@ -174,7 +280,7 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
       },
     )
     return () => { cancelled = true }
-  }, [scanRun, engineRef, spaceMode, loadingModels])
+  }, [scanRun, engineRef, spaceMode, loadingModels, runAuto])
 
   /* Names of the loaded files only. The rooms themselves wait for Scan. */
   useEffect(() => {
@@ -221,10 +327,29 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     return () => { cancelled = true }
   }, [spaceScanRun, mode, engineRef])
 
+  /* The backend reads FIN equipment only while a watch is held; its first read takes a few seconds */
+  const [finWaiting, setFinWaiting] = useState(true)
   useEffect(() => {
-    const fin = useFinStore.getState()
-    if (fin.isConnected && !fin.equipment.length) void fin.fetchEquipment()
-  }, [])
+    if (!finConnected) return
+    const release = holdFinWatch()
+    const fetchIfEmpty = () => {
+      const fin = useFinStore.getState()
+      if (fin.equipment.length) return
+      void fin.fetchEquipment().then(() => {
+        const eq = useFinStore.getState().equipment
+        if (eq.length && scannedRef.current) void runAuto(scannedRef.current, eq)
+      })
+    }
+    fetchIfEmpty()
+    const poll = setInterval(fetchIfEmpty, 3000)
+    const giveUp = setTimeout(() => setFinWaiting(false), 60000)
+    return () => {
+      release()
+      clearInterval(poll)
+      clearTimeout(giveUp)
+    }
+  }, [finConnected, runAuto])
+  const readingFin = finConnected && !equipment.length && finWaiting
 
   const switchMode = (next: Mode) => {
     if (next === mode) return
@@ -233,6 +358,7 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     setFilter('all')
     setLevel(ALL_LEVELS)
     setCollapsed(new Set())
+    setPickerFor(null)
     setNotice(null)
     setError(null)
     if (next === 'space') {
@@ -257,11 +383,12 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     setPickedKeys(next)
   }
 
-  const fileLabel = (name: string) => name.split(/[/\\]/).pop() || name
-
   const reloadFin = async () => {
     setLoadingFin(true)
-    try { await useFinStore.getState().fetchEquipment() } finally { setLoadingFin(false) }
+    try {
+      await useFinStore.getState().fetchEquipment()
+      if (scannedRef.current) void runAuto(scannedRef.current, useFinStore.getState().equipment)
+    } finally { setLoadingFin(false) }
   }
 
   const equipLinks = useMemo(() => links.filter(l => l.kind !== 'space'), [links])
@@ -290,7 +417,7 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     return () => { cancelled = true }
   }, [mode, loadingModels, spaceGuidKey, modelChoices, engineRef])
 
-  const finBimIds = useMemo(() => equipment.filter(e => e && isCctv(e) && isGuid(e.bimId)).map(e => e.bimId), [equipment])
+  const finBimIds = useMemo(() => equipment.filter(e => e && isGuid(e.bimId)).map(e => e.bimId), [equipment])
   const guidKey = useMemo(() => [...new Set([...links.map(l => l.guid), ...finBimIds])].sort().join(','), [links, finBimIds])
   useEffect(() => {
     const engine = engineRef.current
@@ -306,26 +433,8 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
   const prepared = useMemo(() => (!spaceMode && elements ? prepareElements(elements) : []), [elements, spaceMode])
   const byGuid = useMemo(() => new Map((elements ?? []).map(e => [e.guid, e])), [elements])
 
-  const finList = useMemo(() => {
-    const seen = new Map<string, LinkEquipment>()
-    for (const e of equipment) {
-      if (!e?.name) continue
-      const key = foldName(e.name)
-      if (!seen.has(key)) seen.set(key, { name: e.name, floor: e.floor, type: e.type, bimId: e.bimId, finId: e.finId, cctv: isCctv(e) })
-    }
-    return [...seen.values()]
-  }, [equipment])
-
-  const suggestions = useMemo(() => {
-    const out = new Map<string, Suggestion[]>()
-    if (prepared.length) for (const eq of finList) out.set(foldName(eq.name), suggest(eq, prepared))
-    for (const eq of finList) {
-      if (!eq.cctv || !isGuid(eq.bimId) || !present?.has(eq.bimId)) continue
-      const key = foldName(eq.name)
-      if (!out.get(key)?.length) out.set(key, [{ guid: eq.bimId, score: 1, reason: 'FIN bimId tag' }])
-    }
-    return out
-  }, [finList, prepared, present])
+  const finList = useMemo(() => toLinkEquipment(equipment), [equipment])
+  const suggestions = useMemo(() => suggestAll(finList, prepared, present), [finList, prepared, present])
 
   const allRows = useMemo<Row[]>(() => {
     const finKeys = new Set(finList.map(eq => foldName(eq.name)))
@@ -430,10 +539,15 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
       if (present && !present.has(row.link.guid) && !byGuid.has(row.link.guid)) return { tone: 'bad', text: 'Not in model' }
       if (row.renamedFrom) return { tone: 'warn', text: `Renamed in FIN (was ${row.renamedFrom})` }
       if (!row.eq && finList.length) return { tone: 'warn', text: 'Not in FIN' }
+      if (autoKeys.has(row.key)) return { tone: 'auto', text: 'Linked automatically' }
       return { tone: 'ok', text: 'Linked' }
     }
     const best = suggestions.get(row.key)?.[0]
     return best ? { tone: 'none', text: `Suggested ${pct(best.score)}` } : { tone: 'none', text: 'Not linked' }
+  }
+
+  const forget = (key: string) => {
+    if (autoKeys.has(key)) setAutoKeys(prev => new Map([...prev].filter(([k]) => k !== key)))
   }
 
   const spaceStatus = (row: SpaceRow): { tone: Tone; text: string } => {
@@ -455,13 +569,27 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
       ...(cctv ? { kind: 'cctv' as const } : {}),
       ...(finId ? { finId } : {}),
       ...(el ? { element: el.name || el.objectType } : {}),
-      ...(cctv && row.link?.room ? { room: row.link.room } : {}),
+      ...(cctv && row.link?.room && row.link.guid === guid ? { room: row.link.room } : {}),
     }
     setLinks(prev => [...prev.filter(l => l.kind === 'space' || (l !== row.link && foldName(l.equip) !== row.key)), next])
-    setPicks(prev => ({ ...prev, [row.key]: '' }))
+    forget(row.key)
+    setPickerFor(null)
+    if (cctv && !next.room) {
+      setAutoRooms(prev => new Set([...prev].filter(k => k !== row.key)))
+      void fillRoom(row.key, guid)
+    }
   }
 
-  const unlink = (row: Row) => setLinks(prev => prev.filter(l => l !== row.link))
+  const unlink = (row: Row) => {
+    declinedRef.current.add(row.key)
+    forget(row.key)
+    setLinks(prev => prev.filter(l => l !== row.link))
+  }
+  const openPicker = (row: Row) => {
+    setPickerFor(pickerFor === row.key ? null : row.key)
+    setPickerQuery('')
+    setPickerAll(false)
+  }
   const setType = (row: Row, type: string) => setLinks(prev => prev.map(l => (l === row.link ? { ...l, type: type.toUpperCase() } : l)))
   const followRename = (row: Row) => setLinks(prev => prev.map(l => (l === row.link && row.eq ? { ...l, equip: row.eq.name } : l)))
   const setRoom = (row: Row, room: string | null) => {
@@ -472,6 +600,8 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
       else delete next.room
       return next
     }))
+    if (!room) declinedRoomsRef.current.add(row.key)
+    setAutoRooms(prev => new Set([...prev].filter(k => k !== row.key)))
     setPicks(prev => ({ ...prev, [`room:${row.key}`]: '' }))
   }
 
@@ -495,6 +625,7 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
         const room = l.kind !== 'space' && !l.room && want.has(foldName(l.equip)) ? found.get(l.guid) : undefined
         return room ? { ...l, kind: 'cctv' as const, room } : l
       }))
+      setAutoRooms(prev => new Set([...prev, ...cams.filter(l => found.has(l.guid)).map(l => foldName(l.equip))]))
       setNotice(`Found the room of ${cams.filter(l => found.has(l.guid)).length} of ${plural(cams.length, 'camera')}${where} from the model. Check them, then save.`)
     } catch (e) {
       setError(`Rooms not found. ${e instanceof Error ? e.message : String(e)}`)
@@ -548,30 +679,18 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     bulk(links.filter(l => !(l.kind === 'space' && drop.has(l.guid))), `Removed ${plural(drop.size, 'room')}${why}. Save to keep this.`)
   }
 
-  const pickedGuid = (text: string | undefined): string | null => {
-    const t = (text ?? '').trim()
-    if (isGuid(t)) return t
-    const hits = (elements ?? []).filter(e => e.name === t)
-    return hits.length === 1 ? hits[0].guid : null
-  }
-
   const thing = mode === 'cctv' ? { one: 'camera', many: 'cameras' } : { one: 'equipment', many: 'equipment' }
   const unlinked = scoped.filter(r => r.eq && !r.link).map(r => r.eq as LinkEquipment)
   const autoMatches = bestMatches(unlinked, suggestions, new Set(equipLinks.map(l => l.guid)), AUTO_MIN)
 
   const linkAll = () => {
-    const added: AssetLink[] = autoMatches.map(({ eq, s }) => {
-      const el = byGuid.get(s.guid)
-      return {
-        equip: eq.name,
-        guid: s.guid,
-        type: eq.cctv ? 'CCTV' : defaultType(eq),
-        ...(eq.cctv ? { kind: 'cctv' as const } : {}),
-        ...(eq.finId ? { finId: eq.finId } : {}),
-        ...(el ? { element: el.name || el.objectType } : {}),
-      }
-    })
-    bulk([...links, ...added], `Linked ${plural(added.length, thing.one, thing.many)}${where} to suggestions of ${pct(AUTO_MIN)} or more. Check them, then save.`)
+    const added = autoMatches.map(({ eq, s }) => newLink(eq, s.guid, byGuid.get(s.guid)))
+    const next = [...links, ...added]
+    setUndo({ before: links, after: next, auto: autoMatches.map(m => foldName(m.eq.name)) })
+    setLinks(next)
+    setAutoKeys(prev => new Map([...prev, ...autoMatches.map(m => [foldName(m.eq.name), m.s.reason] as [string, string])]))
+    setNotice(null)
+    setError(null)
   }
 
   const doImport = () => {
@@ -674,6 +793,11 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
           ? `${elements.length.toLocaleString()} equipment elements in the loaded models`
           : 'No model read yet'
   const camsWithoutRoom = scoped.filter(r => r.link && !r.link.room).length
+  const tabAuto = rows.filter(r => r.link && autoKeys.has(r.key)).length
+  const tabAutoRooms = mode === 'cctv' ? rows.filter(r => r.link?.room && autoRooms.has(r.key)).length : 0
+  const bannerHead = tabAuto
+    ? `${plural(tabAuto, thing.one, thing.many)} linked automatically${tabAutoRooms ? `, ${tabAutoRooms} with the room found in the model` : ''}.`
+    : `Room found automatically for ${plural(tabAutoRooms, 'camera')}.`
   const tabLinks = scoped.flatMap(r => (r.link ? [r.link] : []))
   const missingLinks = scoped.flatMap(r => (r.link && statuses.get(r)!.tone === 'bad' ? [r.link] : []))
   const roomLinks = scoped.flatMap(r => (r.link?.room ? [r.link] : []))
@@ -681,6 +805,7 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
   const missingSpaces = scopedSpaces.flatMap(r => (spaceStatuses.get(r)!.tone === 'bad' ? [r.guid] : []))
 
   const unlinkAll = () => {
+    for (const r of scoped) if (r.link) declinedRef.current.add(r.key)
     const drop = new Set(tabLinks)
     if (drop.size) bulk(links.filter(l => !drop.has(l)), `Unlinked ${plural(drop.size, thing.one, thing.many)}${where}. Save to keep this.`)
   }
@@ -691,6 +816,7 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
   const clearRooms = () => {
     const clear = new Set(roomLinks)
     if (!clear.size) return
+    for (const l of clear) declinedRoomsRef.current.add(foldName(l.equip))
     bulk(links.map(l => {
       if (!clear.has(l)) return l
       const next = { ...l }
@@ -738,103 +864,186 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
     )
   }
 
-  const renderLinkRow = (row: Row) => {
-  const st = statuses.get(row)!
-  const sugg = suggestions.get(row.key) ?? []
-  const pick = picks[row.key] ?? ''
-  const pickGuid = pickedGuid(pick)
-  const roomGuid = pickedRoom(roomPick(row))
-  const shared = row.link ? (linkedBy.get(row.link.guid) ?? []).filter(n => n !== row.link?.equip) : []
-  return (
-    <tr key={`${row.key}:${row.link?.guid ?? ''}`}>
-      <td>
-        <div className="al-name">{row.eq?.name ?? row.link?.equip}</div>
-        <div className="al-sub">{[showLevelHeads ? null : row.eq?.floor, row.eq?.type && row.eq.type !== 'other' ? row.eq.type : null].filter(Boolean).join(' · ')}</div>
-      </td>
-      <td>
-        {row.link
-          ? <input className="al-type" list="al-types" value={row.link.type} onChange={e => setType(row, e.target.value)} />
-          : <span className="al-sub">{isCctvRow(row) ? 'CCTV' : row.eq ? defaultType(row.eq) : ''}</span>}
-      </td>
-      <td>
-        {row.link ? (
-          <div>
-            <div>{label(row.link.guid) ?? row.link.element ?? '—'}</div>
-            <code className="al-guid">{row.link.guid}</code>
-            {shared.length > 0 && <div className="al-sub">Also linked to {shared.join(', ')}</div>}
-          </div>
-        ) : (
-          <div className="al-pick">
-            {sugg.map(s => (
-              <button key={s.guid} className="al-chip" onClick={() => linkRow(row, s.guid)}
-                title={`${s.reason}\n${s.guid}${linkedBy.has(s.guid) ? `\nAlready linked to ${linkedBy.get(s.guid)!.join(', ')}` : ''}`}>
-                <b>{pct(s.score)}</b> {label(s.guid) ?? s.guid}{linkedBy.has(s.guid) ? ' (in use)' : ''}
-              </button>
-            ))}
-            <span className="al-search-row">
-              <input list="al-elements" placeholder="Element name or GlobalId" value={pick}
-                onChange={e => setPicks(prev => ({ ...prev, [row.key]: e.target.value }))} />
-              <button className="ds-btn ds-btn-secondary al-small" disabled={!pickGuid} onClick={() => pickGuid && linkRow(row, pickGuid)}>Link</button>
-            </span>
-          </div>
-        )}
-      </td>
-      {mode === 'cctv' && (
-        <td>
-          {row.link?.room ? (
-            <div>
-              <div>{roomName(row.link.room) ?? 'Not in Spaces'}</div>
-              <code className="al-guid">{row.link.room}</code>
-            </div>
-          ) : row.link ? (
-            spaceLinks.length ? (
-              <span className="al-search-row">
-                <input list="al-rooms" placeholder="Room name or GlobalId" value={roomPick(row)}
-                  onChange={e => setPicks(prev => ({ ...prev, [`room:${row.key}`]: e.target.value }))} />
-                <button className="ds-btn ds-btn-secondary al-small" disabled={!roomGuid} onClick={() => roomGuid && setRoom(row, roomGuid)}>Set</button>
+  /* Elements a row can take: its own type first (cameras for a camera), the same level first, then by name */
+  const renderPicker = (row: Row) => {
+    const type = isCctvRow(row) ? 'CCTV' : row.link?.type || (row.eq ? defaultType(row.eq) : '')
+    const words = typeWords(type)
+    const onlyType = words.length > 0 && !pickerAll
+    const here = levelRank(rowLevel(row))
+    const q = pickerQuery.trim().toLowerCase()
+    const pool = prepared.filter(p => !onlyType || words.some(w => p.hay.includes(` ${w} `)))
+    const hits = pool
+      .filter(p => !q || `${p.el.name} ${p.el.objectType} ${p.el.tag} ${p.el.guid} ${p.el.level ?? ''} ${p.el.modelName}`.toLowerCase().includes(q))
+      .map(p => ({ el: p.el, same: !Number.isNaN(here) && levelRank(p.el.level ?? '') === here, users: (linkedBy.get(p.el.guid) ?? []).filter(n => n !== row.link?.equip) }))
+      .sort((a, b) => Number(b.same) - Number(a.same) || Number(!!a.users.length) - Number(!!b.users.length)
+        || a.el.name.localeCompare(b.el.name, undefined, { numeric: true }))
+    const typeName = type === 'CCTV' ? 'cameras' : `${type} elements`
+    const pasted = isGuid(pickerQuery.trim()) && !byGuid.has(pickerQuery.trim()) ? pickerQuery.trim() : null
+    return (
+      <div className="al-picker">
+        <div className="al-picker-head">
+          <input
+            autoFocus
+            className="al-search"
+            placeholder="Search by name, Revit id or GlobalId"
+            value={pickerQuery}
+            onChange={e => setPickerQuery(e.target.value)}
+          />
+          {words.length > 0 && (
+            <label className="al-picker-only">
+              <input type="checkbox" checked={!pickerAll} onChange={() => setPickerAll(!pickerAll)} />
+              Only {typeName}
+            </label>
+          )}
+          <span className="al-sub">
+            {hits.length > PICKER_LIMIT ? `First ${PICKER_LIMIT} of ${hits.length.toLocaleString()}. Type to narrow.` : `${hits.length.toLocaleString()} found`}
+            {!Number.isNaN(here) ? ` · ${levelLabel(rowLevel(row))} first` : ''}
+          </span>
+          <button className="ds-btn ds-btn-secondary al-small" onClick={() => setPickerFor(null)}>Close</button>
+        </div>
+        <div className="al-picker-list">
+          {hits.slice(0, PICKER_LIMIT).map(h => (
+            <button key={h.el.guid} className="al-option" onClick={() => linkRow(row, h.el.guid)}
+              title={`${h.el.guid}${h.users.length ? `\nAlready linked to ${h.users.join(', ')}` : ''}`}>
+              <span className="al-option-name">{elementLabel(h.el)}</span>
+              <span className="al-sub">
+                {[h.el.level, h.same ? 'same level' : null, fileLabel(h.el.modelName)].filter(Boolean).join(' · ')}
               </span>
-            ) : <span className="al-sub">Add rooms in Spaces first</span>
-          ) : <span className="al-sub">Link the camera first</span>}
-        </td>
-      )}
-      <td>
-        <span className={`al-status al-${st.tone}`}>{st.text}</span>
-        {row.renamedFrom && (
-          <button className="ds-btn ds-btn-secondary al-small" onClick={() => followRename(row)}>Use new name</button>
+              {h.users.length > 0 && <span className="al-option-used">In use by {h.users.join(', ')}</span>}
+            </button>
+          ))}
+          {pasted && (
+            <button className="al-option" onClick={() => linkRow(row, pasted)}>
+              <span className="al-option-name">Use GlobalId {pasted}</span>
+              <span className="al-sub">Not among the elements read from the model; it is checked against the models after linking</span>
+            </button>
+          )}
+          {!hits.length && !pasted && (
+            <div className="al-sub al-empty">
+              {onlyType ? `No ${typeName} match. Untick Only ${typeName} to search every element.` : 'No element matches.'}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  const renderLinkRow = (row: Row) => {
+    const st = statuses.get(row)!
+    const sugg = suggestions.get(row.key) ?? []
+    const roomGuid = pickedRoom(roomPick(row))
+    const shared = row.link ? (linkedBy.get(row.link.guid) ?? []).filter(n => n !== row.link?.equip) : []
+    const linkedEl = row.link ? byGuid.get(row.link.guid) : undefined
+    const picking = pickerFor === row.key
+    return (
+      <Fragment key={`${row.key}:${row.link?.guid ?? ''}`}>
+        <tr className={picking ? 'al-row-picking' : undefined}>
+          <td>
+            <div className="al-name">{row.eq?.name ?? row.link?.equip}</div>
+            <div className="al-sub">{[showLevelHeads ? null : row.eq?.floor, row.eq?.type && row.eq.type !== 'other' ? row.eq.type : null].filter(Boolean).join(' · ')}</div>
+          </td>
+          <td>
+            {row.link
+              ? <input className="al-type" list="al-types" value={row.link.type} onChange={e => setType(row, e.target.value)} />
+              : <span className="al-sub">{isCctvRow(row) ? 'CCTV' : row.eq ? defaultType(row.eq) : ''}</span>}
+          </td>
+          <td>
+            {row.link ? (
+              <div className="al-linked">
+                <div>
+                  <div>{linkedEl ? elementLabel(linkedEl) : row.link.element || '—'}</div>
+                  <div className="al-sub">{[linkedEl?.level, linkedEl ? fileLabel(linkedEl.modelName) : null].filter(Boolean).join(' · ')}</div>
+                  <code className="al-guid">{row.link.guid}</code>
+                  {shared.length > 0 && <div className="al-option-used">Also linked to {shared.join(', ')}</div>}
+                </div>
+                {!picking && (
+                  <button className="ds-btn ds-btn-secondary al-small" onClick={() => openPicker(row)} disabled={!prepared.length}>Change</button>
+                )}
+              </div>
+            ) : (
+              <div className="al-pick">
+                {sugg.map(s => {
+                  const el = byGuid.get(s.guid)
+                  return (
+                    <button key={s.guid} className="al-chip" onClick={() => linkRow(row, s.guid)}
+                      title={`${s.reason}\n${s.guid}${linkedBy.has(s.guid) ? `\nAlready linked to ${linkedBy.get(s.guid)!.join(', ')}` : ''}`}>
+                      <b>{pct(s.score)}</b> {el ? elementLabel(el) : s.guid}
+                      <span className="al-sub">{[el?.level, linkedBy.has(s.guid) ? 'in use' : null].filter(Boolean).join(' · ')}</span>
+                    </button>
+                  )
+                })}
+                {!sugg.length && <span className="al-sub">{prepared.length ? 'No match found in the model' : 'Waiting for the model'}</span>}
+                {!picking && (
+                  <button className="ds-btn ds-btn-secondary al-small al-choose" onClick={() => openPicker(row)} disabled={!prepared.length}>
+                    {sugg.length ? 'Choose another…' : 'Choose element…'}
+                  </button>
+                )}
+              </div>
+            )}
+          </td>
+          {mode === 'cctv' && (
+            <td>
+              {row.link?.room ? (
+                <div>
+                  <div>{roomName(row.link.room) ?? 'Not in Spaces'}</div>
+                  {autoRooms.has(row.key) && <div className="al-sub al-auto">Found from the model</div>}
+                  <code className="al-guid">{row.link.room}</code>
+                </div>
+              ) : row.link ? (
+                spaceLinks.length ? (
+                  <span className="al-search-row">
+                    <input list="al-rooms" placeholder="Room name or GlobalId" value={roomPick(row)}
+                      onChange={e => setPicks(prev => ({ ...prev, [`room:${row.key}`]: e.target.value }))} />
+                    <button className="ds-btn ds-btn-secondary al-small" disabled={!roomGuid} onClick={() => roomGuid && setRoom(row, roomGuid)}>Set</button>
+                  </span>
+                ) : <span className="al-sub">Add rooms in Spaces first</span>
+              ) : <span className="al-sub">Link the camera first</span>}
+            </td>
+          )}
+          <td>
+            <span className={`al-status al-${st.tone}`} title={autoKeys.get(row.key)}>{st.text}</span>
+            {row.renamedFrom && (
+              <button className="ds-btn ds-btn-secondary al-small" onClick={() => followRename(row)}>Use new name</button>
+            )}
+          </td>
+          <td className="al-row-actions">
+            {mode === 'cctv' && row.link?.room && (
+              <button className="ds-btn ds-btn-secondary al-small" onClick={() => setRoom(row, null)}>Clear room</button>
+            )}
+            {row.link && <button className="ds-btn ds-btn-secondary al-small" onClick={() => unlink(row)}>Unlink</button>}
+          </td>
+        </tr>
+        {picking && (
+          <tr className="al-picker-row">
+            <td colSpan={mode === 'cctv' ? 6 : 5}>{renderPicker(row)}</td>
+          </tr>
         )}
-      </td>
-      <td className="al-row-actions">
-        {mode === 'cctv' && row.link?.room && (
-          <button className="ds-btn ds-btn-secondary al-small" onClick={() => setRoom(row, null)}>Clear room</button>
-        )}
-        {row.link && <button className="ds-btn ds-btn-secondary al-small" onClick={() => unlink(row)}>Unlink</button>}
-      </td>
-    </tr>
-  )
+      </Fragment>
+    )
   }
 
   const renderSpaceRow = (row: SpaceRow) => {
-  const st = spaceStatuses.get(row)!
-  return (
-    <tr key={row.guid}>
-      <td>
-        <div className="al-name">{row.label}</div>
-        <code className="al-guid">{row.guid}</code>
-        {row.el?.modelName && <div className="al-sub">{row.el.modelName}</div>}
-      </td>
-      <td>
-        {row.link
-          ? <input className="al-search" style={{ minWidth: 140 }} value={row.link.equip} onChange={e => setHeatName(row.guid, e.target.value)} />
-          : <span className="al-sub">{row.label}</span>}
-      </td>
-      <td><span className={`al-status al-${st.tone}`}>{st.text}</span></td>
-      <td className="al-row-actions">
-        {row.link
-          ? <button className="ds-btn ds-btn-secondary al-small" onClick={() => unlinkSpace(row.guid)}>Remove</button>
-          : <button className="ds-btn ds-btn-secondary al-small" disabled={!row.el} onClick={() => row.el && addSpace(row.el)}>Add</button>}
-      </td>
-    </tr>
-  )
+    const st = spaceStatuses.get(row)!
+    return (
+      <tr key={row.guid}>
+        <td>
+          <div className="al-name">{row.label}</div>
+          <code className="al-guid">{row.guid}</code>
+          {row.el?.modelName && <div className="al-sub">{row.el.modelName}</div>}
+        </td>
+        <td>
+          {row.link
+            ? <input className="al-search" style={{ minWidth: 140 }} value={row.link.equip} onChange={e => setHeatName(row.guid, e.target.value)} />
+            : <span className="al-sub">{row.label}</span>}
+        </td>
+        <td><span className={`al-status al-${st.tone}`}>{st.text}</span></td>
+        <td className="al-row-actions">
+          {row.link
+            ? <button className="ds-btn ds-btn-secondary al-small" onClick={() => unlinkSpace(row.guid)}>Remove</button>
+            : <button className="ds-btn ds-btn-secondary al-small" disabled={!row.el} onClick={() => row.el && addSpace(row.el)}>Add</button>}
+        </td>
+      </tr>
+    )
   }
 
   return (
@@ -872,7 +1081,7 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
                 {mode !== 'space' ? (
                   <span>
                     {finConnected
-                      ? `FIN: ${plural(rows.filter(r => r.eq).length, thing.one, thing.many)}`
+                      ? readingFin ? 'FIN: reading equipment…' : `FIN: ${plural(rows.filter(r => r.eq).length, thing.one, thing.many)}`
                       : 'FIN is not connected. Connect to list its equipment; links can still be imported and edited.'}
                     {finConnected && (
                       <button className="ds-btn ds-btn-secondary al-small" onClick={reloadFin} disabled={loadingFin}>
@@ -1053,6 +1262,13 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
                 </div>
               )}
 
+              {mode !== 'space' && (tabAuto > 0 || tabAutoRooms > 0) && (
+                <p className="al-banner">
+                  <b>{bannerHead}</b>{' '}
+                  Check what is marked in blue, and use Change or the room box on anything wrong. Nothing is kept until you Save.
+                  {canUndo && (undo?.auto?.length || undo?.rooms?.length) ? <button className="al-undo" onClick={undoBulk}>Undo</button> : null}
+                </p>
+              )}
               {notice && (
                 <p className="al-notice">
                   {notice}
@@ -1079,9 +1295,15 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
                       <tr><td colSpan={mode === 'cctv' ? 6 : 5} className="al-sub al-empty">
                         {rows.length
                           ? 'Nothing matches.'
-                          : mode === 'cctv'
-                            ? 'No FIN cameras or camera links yet. A camera is FIN equipment with the cctv tag.'
-                            : 'No FIN equipment or links yet. Connect to FIN, or import links.'}
+                          : !finConnected
+                            ? 'FIN is not connected. Connect to FIN, or import links.'
+                            : readingFin
+                              ? 'Reading equipment from FIN. The first read can take a few seconds.'
+                              : !equipment.length
+                                ? 'FIN sent no equipment for this project. Press Reload FIN to ask again.'
+                                : mode === 'cctv'
+                                  ? 'FIN has no cameras for this project. A camera is FIN equipment with the cctv tag.'
+                                  : 'FIN has no equipment outside the cameras for this project.'}
                       </td></tr>
                     )}
                   </tbody>
@@ -1120,11 +1342,6 @@ function AssetLinksDialog({ initial, projectName, onClose, engineRef }: AssetLin
                 <>
                   <datalist id="al-types">
                     {KNOWN_TYPES.map(t => <option key={t} value={t} />)}
-                  </datalist>
-                  <datalist id="al-elements">
-                    {(elements ?? []).map(e => (
-                      <option key={e.guid} value={e.guid} label={`${e.name || e.objectType} · ${e.category} · ${e.modelName}`} />
-                    ))}
                   </datalist>
                 </>
               )}
