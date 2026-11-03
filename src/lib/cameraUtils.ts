@@ -2,8 +2,14 @@ import * as THREE from 'three'
 import type { FragmentsEngine } from './fragmentsEngine'
 import { useProjectStore } from '@/store/useProjectStore'
 
-/** Radians from straight up or straight down in which the plan's far side fills much of the screen. */
-const STEEP_VIEW_RAD = 1.05
+/** Radians from straight down within which a view counts as from above. */
+const FROM_ABOVE_RAD = THREE.MathUtils.degToRad(50)
+
+/** Speed sign for a sideways drag. From above it is -1, so a right drag turns the plan clockwise
+ *  on screen wherever it is grabbed. Elsewhere the usual turntable, which from below is clockwise already. */
+export function azimuthDragSign(polarAngle: number): number {
+  return Number.isFinite(polarAngle) && polarAngle < FROM_ABOVE_RAD ? -1 : 1
+}
 
 /** A straight-down look has no heading. Nudge it so Front (+z) sits at the top of the screen. */
 export function tiltIfVertical(offset: THREE.Vector3): THREE.Vector3 {
@@ -12,49 +18,6 @@ export function tiltIfVertical(offset: THREE.Vector3): THREE.Vector3 {
   offset.multiplyScalar(1 / dist)
   offset.z += offset.y >= 0 ? -0.14 : 0.14
   return offset.normalize().multiplyScalar(dist)
-}
-
-/**
- * Speed signs so this world point follows the pointer.
- * camera-controls applies a rightward drag as a negative azimuth delta and a
- * downward drag as a negative polar delta when the speed is positive.
- * A surface in front of the orbit target moves the opposite way on screen from
- * a point on the plane through the target, and that flips again between the
- * top, side and bottom of the orbit. The sign is read by stepping this camera,
- * not from a fixed top-view rule. +1 means that positive-speed step already
- * moves `grab` with the drag. `grab` has to be the hit point, in world space.
- */
-export function orbitSpeedSigns(
-  camera: THREE.PerspectiveCamera,
-  target: THREE.Vector3,
-  grab: THREE.Vector3,
-): { azimuth: number; polar: number } {
-  const before = grab.clone().project(camera)
-  if (!Number.isFinite(before.x) || !Number.isFinite(before.y)) return { azimuth: 1, polar: 1 }
-  const sph = new THREE.Spherical().setFromVector3(camera.position.clone().sub(target))
-  const shifted = (dTheta: number, dPhi: number) => {
-    const next = camera.clone()
-    next.position.copy(target).add(new THREE.Vector3().setFromSpherical(new THREE.Spherical(
-      sph.radius,
-      sph.phi + dPhi,
-      sph.theta + dTheta,
-    )))
-    next.up.copy(camera.up)
-    next.lookAt(target)
-    next.updateMatrixWorld(true)
-    return grab.clone().project(next)
-  }
-  /* A right drag with speed +1 decreases theta. A down drag with speed +1 decreases phi. */
-  const right = shifted(-0.02, 0)
-  // At the top pole the phi step is read upward, so it does not cross over to the other side
-  const phiStep = sph.phi > 0.03 ? -0.02 : 0.02
-  const down = shifted(0, phiStep)
-  const dx = right.x - before.x
-  const dy = (down.y - before.y) * Math.sign(-phiStep)
-  return {
-    azimuth: Math.abs(dx) < 1e-4 ? 1 : dx > 0 ? 1 : -1,
-    polar: Math.abs(dy) < 1e-4 ? 1 : dy < 0 ? 1 : -1,
-  }
 }
 
 /**

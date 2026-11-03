@@ -34,7 +34,7 @@ import { PBR_MATERIAL_MAPPINGS } from '../constants/pbrMaterials'
 import { RENDER_DEFAULTS, studioAdjustOf, type RenderSettings, type ToneMappingId } from '../constants/renderSettings'
 import { applyStudioAdjust, DASHBOARD_DARK_SKY, getTemplateScene, type TemplateScene } from '../constants/viewTemplates'
 import { paintStudioModel } from '../constants/studioPalette'
-import { orbitSpeedSigns } from './cameraUtils'
+import { azimuthDragSign } from './cameraUtils'
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { N8AOPass } from 'n8ao'
 
@@ -1864,112 +1864,24 @@ export async function initFragmentsEngine(
 
   const fragments = new FRAGS.FragmentsModels()
 
-  // The surface under the pointer has to move with the pointer. That surface is
-  // often in front of the orbit target, and a turntable step then carries it
-  // the opposite way from a point on the target. Which way flips again between
-  // the top, the side and the bottom, so the speed is read from this camera when
-  // the drag starts and kept until release. Read on every move, it flipped back
-  // and forth once the point could follow no further, and the spin stuck.
+  // A sideways drag turns the plan clockwise in a view from above, wherever it is grabbed. Read when the drag starts and kept until release.
   let removeOrbitFollow = () => {}
   {
     const controls = world.camera.controls as unknown as {
       azimuthRotateSpeed: number
-      polarRotateSpeed: number
-      getTarget: (out: THREE.Vector3) => THREE.Vector3
+      polarAngle: number
+      _domElement?: HTMLElement
     }
     const baseAzimuth = Math.abs(controls.azimuthRotateSpeed || 1)
-    const basePolar = Math.abs(controls.polarRotateSpeed || 1)
-    const centre = new THREE.Vector3()
-    const grab = new THREE.Vector3()
-    const viewDir = new THREE.Vector3()
-    const toGrab = new THREE.Vector3()
-    const raycaster = new THREE.Raycaster()
-    const ndc = new THREE.Vector2()
-    const plane = new THREE.Plane()
-
-    const ignoredHit = (obj: THREE.Object3D) => {
-      let node: THREE.Object3D | null = obj
-      while (node) {
-        if (node.userData?.ekoMeasure || node.userData?.ekoSlice || node.userData?.ekoGhostDepth) return true
-        if (node.name === 'SkyDome' || node.name === 'CloudsDome' || node.name === 'ShadowCatcherPlane') return true
-        node = node.parent
-      }
-      return false
-    }
-
-    const rememberGrab = (e: PointerEvent) => {
-      const cam = world.camera.three as THREE.PerspectiveCamera
-      if (!cam?.isPerspectiveCamera) return false
-      cam.updateMatrixWorld()
-      const rect = viewCanvas.getBoundingClientRect()
-      if (rect.width < 1 || rect.height < 1) return false
-      ndc.set(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1,
-      )
-      raycaster.layers.mask = cam.layers.mask
-      raycaster.setFromCamera(ndc, cam)
-      const roots: THREE.Object3D[] = []
-      for (const model of fragments.models.list.values()) {
-        const obj = (model as { object?: THREE.Object3D }).object
-        if (obj?.visible) roots.push(obj)
-      }
-      let hit: THREE.Intersection | undefined
-      if (roots.length) {
-        try {
-          hit = raycaster.intersectObjects(roots, true).find(item => !ignoredHit(item.object))
-        } catch {
-          // One broken mesh must not throw away the rest of the building.
-          let best: THREE.Intersection | undefined
-          const visit = (obj: THREE.Object3D) => {
-            if (!obj.visible) return
-            const mesh = obj as THREE.Mesh
-            if (mesh.isMesh && !ignoredHit(mesh)) {
-              try {
-                const found = raycaster.intersectObject(mesh, false)[0]
-                if (found && (!best || found.distance < best.distance)) best = found
-              } catch { /* this mesh cannot be picked */ }
-            }
-            for (const child of obj.children) visit(child)
-          }
-          for (const root of roots) visit(root)
-          hit = best
-        }
-      }
-      if (hit) {
-        grab.copy(hit.point)
-        return true
-      }
-      controls.getTarget(centre)
-      cam.getWorldDirection(viewDir)
-      plane.setFromNormalAndCoplanarPoint(viewDir, centre)
-      return raycaster.ray.intersectPlane(plane, grab) != null
-    }
-
-    const applySigns = () => {
-      const cam = world.camera.three as THREE.PerspectiveCamera
-      if (!cam?.isPerspectiveCamera) return
-      cam.updateMatrixWorld()
-      cam.getWorldDirection(viewDir)
-      // A point that has swung behind the camera no longer has a stable screen direction.
-      if (toGrab.subVectors(grab, cam.position).dot(viewDir) <= 0.05) return
-      controls.getTarget(centre)
-      const signs = orbitSpeedSigns(cam, centre, grab)
-      controls.azimuthRotateSpeed = signs.azimuth * baseAzimuth
-      controls.polarRotateSpeed = signs.polar * basePolar
-    }
-
+    const doc = viewCanvas.ownerDocument
+    // The dashboard wall binds the controls to its own layer, so the press is caught on the document
     const onPointerDown = (e: PointerEvent) => {
-      if (e.button !== 0) return
-      controls.azimuthRotateSpeed = baseAzimuth
-      controls.polarRotateSpeed = basePolar
-      if (rememberGrab(e)) applySigns()
+      const el = controls._domElement || viewCanvas
+      if (e.button !== 0 || !(e.target instanceof Node) || !el.contains(e.target)) return
+      controls.azimuthRotateSpeed = azimuthDragSign(controls.polarAngle) * baseAzimuth
     }
-
-    viewCanvas.addEventListener('pointerdown', onPointerDown, { capture: true })
-    removeOrbitFollow = () => {
-      viewCanvas.removeEventListener('pointerdown', onPointerDown, { capture: true })
-    }
+    doc.addEventListener('pointerdown', onPointerDown, { capture: true })
+    removeOrbitFollow = () => doc.removeEventListener('pointerdown', onPointerDown, { capture: true })
   }
 
   world.camera.controls.addEventListener('update', () => {
