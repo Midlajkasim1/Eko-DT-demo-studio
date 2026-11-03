@@ -207,100 +207,14 @@ export function suggest(eq: LinkEquipment, elements: PreparedElement[], limit = 
   return out.sort((a, b) => b.score - a.score).slice(0, limit)
 }
 
-const GUID_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$'
-
-function guidParts(guid: string): { head: string; low: number } {
-  let n = 0n
-  for (const c of guid) n = n * 64n + BigInt(GUID_CHARS.indexOf(c))
-  return { head: (n >> 32n).toString(36), low: Number(n & 0xffffffffn) }
-}
-
-/** Revit element ids recovered from older-export GlobalIds (Revit XORs the id into the last 32 bits) */
-export function matchOlderExport(
-  items: { bimId: string; words: string[] }[],
-  prepared: PreparedElement[],
-): Map<string, { el: ModelElement; id: number; typed: boolean }> {
-  const out = new Map<string, { el: ModelElement; id: number; typed: boolean }>()
-  const byId = new Map<number, PreparedElement[]>()
-  for (const p of prepared) {
-    if (!/^\d+$/.test(p.el.tag)) continue
-    const id = Number(p.el.tag)
-    byId.set(id, [...(byId.get(id) ?? []), p])
-  }
-  if (!byId.size) return out
-  const fits = (p: PreparedElement, words: string[]) => words.some(w => p.hay.includes(` ${w} `))
-  const typedIds = new Map<string, Set<number>>()
-  const typedFor = (words: string[]) => {
-    const key = words.join('|')
-    let set = typedIds.get(key)
-    if (!set) {
-      set = new Set([...byId].filter(([, ps]) => ps.some(p => fits(p, words))).map(([id]) => id))
-      typedIds.set(key, set)
-    }
-    return set
-  }
-  const sessions = new Map<string, { bimId: string; low: number; words: string[] }[]>()
-  for (const it of items) {
-    if (!isGuid(it.bimId) || [...sessions.values()].some(g => g.some(b => b.bimId === it.bimId))) continue
-    const { head, low } = guidParts(it.bimId)
-    sessions.set(head, [...(sessions.get(head) ?? []), { bimId: it.bimId, low, words: it.words }])
-  }
-  const ids = [...byId.keys()]
-  for (const group of sessions.values()) {
-    if (group.length < 2 || group.every(b => !b.words.length)) continue
-    const votes = new Map<number, number>()
-    for (const b of group.slice(0, 20)) {
-      const typed = typedFor(b.words)
-      for (const id of ids) {
-        const key = (b.low ^ id) >>> 0
-        votes.set(key, (votes.get(key) ?? 0) + (typed.has(id) ? 10 : 1))
-      }
-    }
-    let best = 0
-    let bestN = 0
-    let secondN = 0
-    for (const [key, n] of votes) {
-      if (n > bestN) { secondN = bestN; bestN = n; best = key }
-      else if (n > secondN) secondN = n
-    }
-    // Two typed hits and no tie
-    if (bestN < 20 || bestN === secondN) continue
-    const hits = group.flatMap(b => {
-      const id = (b.low ^ best) >>> 0
-      const ps = byId.get(id)
-      return ps ? [{ b, id, ps }] : []
-    })
-    // Ids repeat across files: prefer the file with most hits
-    const perModel = new Map<string, number>()
-    for (const h of hits) for (const m of new Set(h.ps.map(p => p.el.modelName))) perModel.set(m, (perModel.get(m) ?? 0) + 1)
-    for (const h of hits) {
-      const ranked = [...h.ps].sort((a, b) =>
-        Number(fits(b, h.b.words)) - Number(fits(a, h.b.words)) || (perModel.get(b.el.modelName) ?? 0) - (perModel.get(a.el.modelName) ?? 0))
-      out.set(h.b.bimId, { el: ranked[0].el, id: h.id, typed: fits(ranked[0], h.b.words) })
-    }
-  }
-  return out
-}
-
-/** Per FIN equipment: own bimId, then older-export bimId, then name likeness */
+/** Per FIN equipment: its own bimId, then name likeness */
 export function suggestAll(finList: LinkEquipment[], prepared: PreparedElement[], present: Set<string> | null): Map<string, Suggestion[]> {
   const out = new Map<string, Suggestion[]>()
   const known = new Set(prepared.map(p => p.el.guid))
-  const wordsOf = (eq: LinkEquipment) => TYPE_WORDS[eq.cctv ? 'CCTV' : defaultType(eq)] ?? []
-  const stale = finList.flatMap(eq => (isGuid(eq.bimId) && !known.has(eq.bimId) && !present?.has(eq.bimId) ? [{ bimId: eq.bimId, words: wordsOf(eq) }] : []))
-  const older = matchOlderExport(stale, prepared)
   for (const eq of finList) {
     const key = foldName(eq.name)
-    if (isGuid(eq.bimId) && !known.has(eq.bimId) && present?.has(eq.bimId)) {
-      out.set(key, [{ guid: eq.bimId, score: 1, reason: 'FIN bimId tag' }])
-      continue
-    }
-    const hit = isGuid(eq.bimId) ? older.get(eq.bimId) : undefined
-    if (hit) {
-      out.set(key, [{ guid: hit.el.guid, score: hit.typed ? 0.95 : 0.6, reason: `Revit element ${hit.id}, named by FIN’s bimId from an older model export` }])
-      continue
-    }
-    out.set(key, prepared.length ? suggest(eq, prepared) : [])
+    if (isGuid(eq.bimId) && !known.has(eq.bimId) && present?.has(eq.bimId)) out.set(key, [{ guid: eq.bimId, score: 1, reason: 'FIN bimId tag' }])
+    else out.set(key, prepared.length ? suggest(eq, prepared) : [])
   }
   return out
 }
@@ -312,23 +226,6 @@ export function elementLabel(el: { name?: string; objectType?: string; category?
 }
 
 export const typeWords = (type: string): string[] => TYPE_WORDS[type.toUpperCase()] ?? []
-
-/** Older-export GlobalIds mapped to same-type elements, by Revit id when known */
-export function matchStaleGids(items: { gid: string; revitId?: string; kind?: string }[], prepared: PreparedElement[]): Map<string, string> {
-  const out = new Map<string, string>()
-  const byTag = new Map<string, PreparedElement[]>()
-  for (const p of prepared) if (p.el.tag) byTag.set(p.el.tag, [...(byTag.get(p.el.tag) ?? []), p])
-  const rest: { bimId: string; words: string[] }[] = []
-  for (const it of items) {
-    if (!isGuid(it.gid) || out.has(it.gid)) continue
-    const words = it.kind ? typeWords(it.kind) : []
-    const hits = (it.revitId ? byTag.get(String(it.revitId)) ?? [] : []).filter(p => !words.length || words.some(w => p.hay.includes(` ${w} `)))
-    if (hits.length === 1) out.set(it.gid, hits[0].el.guid)
-    else rest.push({ bimId: it.gid, words })
-  }
-  for (const [gid, hit] of matchOlderExport(rest, prepared)) if (hit.typed) out.set(gid, hit.el.guid)
-  return out
-}
 
 /** Links for every unlinked equipment whose best suggestion clears the bar, one element per equipment, best scores first */
 export function bestMatches(

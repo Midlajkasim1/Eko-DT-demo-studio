@@ -489,8 +489,7 @@
      only where the site has that Security view open (a locked or hidden view, Marsa Al Arab's, never opens) */
   const hotspotOf = gid => { const s = E.data.security, open = sub => !(window.EKO_ADDONS && window.EKO_ADDONS.lockFor(E, 'security', sub));
     if(!gid || !s || !window.EKO_SEC) return null;
-    const cur = g => (E.engine && E.engine.currentGid ? E.engine.currentGid(g) : g);
-    const c = (s.cameras || []).find(x => x.gid === gid || (x.gid && cur(x.gid) === gid)); if(c) return open('cams') ? { kind: 'camera', id: c.id } : null;
+    const c = (s.cameras || []).find(x => x.gid === gid); if(c) return open('cams') ? { kind: 'camera', id: c.id } : null;
     const dr = (s.doors || []).find(x => x.gid === gid || x.doorGid === gid); if(dr) return open('access') ? { kind: 'door', id: dr.id } : null;
     const bd = ((s.evac || {}).beds || []).find(x => x.gid === gid); return bd && open('evac') ? { kind: 'bed', id: bd.id } : null; };
 

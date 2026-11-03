@@ -199,7 +199,8 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
     const named = new Set(machines.map(l => foldName(l.equip)))
     const finIds = new Set(machines.flatMap(l => (l.finId ? [l.finId] : [])))
     const open = finL.filter(eq => !named.has(foldName(eq.name)) && !(eq.finId && finIds.has(eq.finId)) && !declinedRef.current.has(foldName(eq.name)))
-    const matches = bestMatches(open, sugg, new Set(machines.map(l => l.guid)), AUTO_MIN)
+    // Only FIN's own bimId links by itself; name likeness stays a suggestion
+    const matches = bestMatches(open, sugg, new Set(machines.map(l => l.guid)), 1)
     const byG = new Map(found.map(e => [e.guid, e]))
     const added = matches.map(({ eq, s }) => newLink(eq, s.guid, byG.get(s.guid)))
 
@@ -878,7 +879,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
     const q = pickerQuery.trim().toLowerCase()
     const pool = prepared.filter(p => !onlyType || words.some(w => p.hay.includes(` ${w} `)))
     const hits = pool
-      .filter(p => !q || `${p.el.name} ${p.el.objectType} ${p.el.tag} ${p.el.guid} ${p.el.level ?? ''} ${p.el.modelName}`.toLowerCase().includes(q))
+      .filter(p => !q || `${p.el.name} ${p.el.objectType} ${p.el.guid} ${p.el.level ?? ''} ${p.el.modelName}`.toLowerCase().includes(q))
       .map(p => ({ el: p.el, same: !Number.isNaN(here) && levelRank(p.el.level ?? '') === here, users: (linkedBy.get(p.el.guid) ?? []).filter(n => n !== row.link?.equip) }))
       .sort((a, b) => Number(b.same) - Number(a.same) || Number(!!a.users.length) - Number(!!b.users.length)
         || a.el.name.localeCompare(b.el.name, undefined, { numeric: true }))
@@ -890,7 +891,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
           <input
             autoFocus
             className="al-search"
-            placeholder="Search by name, Revit id or GlobalId"
+            placeholder="Search by name or GlobalId"
             value={pickerQuery}
             onChange={e => setPickerQuery(e.target.value)}
           />
@@ -1096,7 +1097,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
                   <span className="al-sub">
                     {cameraSource === 'fin'
                       ? 'Only the cameras linked below appear in Security: in the camera grid, on the model and in the counts.'
-                      : 'Every camera of the sample data appears, whether FIN has it or not.'}
+                      : 'Every CCTV camera in the loaded model appears, whether FIN has it or not.'}
                   </span>
                 </div>
               )}

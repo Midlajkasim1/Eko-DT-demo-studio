@@ -307,7 +307,7 @@ export interface ProjectApiSettings {
   dashboardSampleData?: 'medical'
   /** The dashboard's module set. 'extended' adds ESG, Maintenance, and Security and life safety; absent = standard. */
   dashboardModules?: 'extended'
-  /** 'model': every sample camera; absent: only linked FIN cameras */
+  /** 'model': every CCTV element of the loaded model; absent: only linked FIN cameras */
   dashboardCameraSource?: 'model'
   /** Reporting basis. A cost or CO₂ figure whose rate is not set is reported as unavailable. */
   energyTariff?: number

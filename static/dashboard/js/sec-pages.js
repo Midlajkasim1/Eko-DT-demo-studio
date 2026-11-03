@@ -371,7 +371,7 @@ window.EKO_SECP = (function(){
       /* Studio host: a camera is located by its element, anything else stays on the mock plan */
       if(!(E.engine && E.engine.setMode)){
         const eng = E.engine;
-        if(!(d.cam && d.v && eng && eng.matchElements && eng.flyToGid)){ E.set({}); return; }
+        if(!(d.cam && d.v && eng && eng.cameraSetup && eng.flyToGid)){ E.set({}); return; }
         E.state.secSel = d.cam;
         E.go('sec', 'security', null);
         requestAnimationFrame(() => requestAnimationFrame(() => { eng.flyToGid(d.v); if(eng.highlightGid) eng.highlightGid(d.v); }));

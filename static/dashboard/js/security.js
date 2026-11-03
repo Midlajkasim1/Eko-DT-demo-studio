@@ -22,40 +22,16 @@ window.EKO_SEC = (function(){
   const C = () => window.EKO_C, A = () => window.EKO_A;
   const esc = s => C().esc(s), fmt = (v, d) => C().fmt(v, d), icon = (n, s) => C().icon(n, s);
   let E = null;
-  /* sample cameras carry an older-export GlobalId and their Revit id; the Studio maps them to the model */
-  const camAsked = new Set();
-  let camRetryAt = 0;
-  const revitIdOf = id => (String(id || '').match(/(\d{5,})$/) || [])[1];
-  function linkCams(){
-    const eng = E && E.engine, d = E && E.data.security;
-    if(!eng || !eng.matchElements || !d || Date.now() < camRetryAt) return;
-    const items = (d.allCameras || d.cameras || []).filter(c => c.gid && !camAsked.has(c.gid)).map(c => ({ gid: c.gid, revitId: revitIdOf(c.id), kind: 'CCTV' }));
-    if(!items.length) return;
-    camRetryAt = Date.now() + 3000;
-    eng.matchElements(items).then(r => {
-      if(!r || !r.ready) return;
-      items.forEach(i => camAsked.add(i.gid));
-      if(r.matched && window.EKO_V) window.EKO_V.schedulePosition(E);
-      E.set({});
-    }, () => {});
-  }
-  /* linked FIN cameras (default) or every sample camera; a FIN camera keeps its sample twin's demo status */
-  let camKey = null;
+  /* in the Studio the cameras are real: the linked FIN cameras (default) or every CCTV element of the model */
+  let camSetup = null;
   function camerasBySource(){
     const eng = E && E.engine, d = E && E.data.security;
     const setup = eng && eng.cameraSetup ? eng.cameraSetup() : null;
-    if(!d || !setup) return;
-    if(!d.allCameras) d.allCameras = d.cameras || [];
-    const ready = d.allCameras.every(c => !c.gid || camAsked.has(c.gid));
-    const key = setup.source + '|' + (ready ? 1 : 0) + '|' + (setup.cameras || []).map(c => [c.name, c.guid, c.room, c.storey].join(':')).join(',');
-    if(key === camKey) return;
-    camKey = key;
-    d.cameras = setup.source === 'model' ? d.allCameras : (setup.cameras || []).map(l => {
-      const s = d.allCameras.find(c => c.gid && eng.currentGid(c.gid) === l.guid);
-      return Object.assign({}, s || {}, { id: l.name, gid: l.guid, en: l.name, ar: l.name, room: l.room || (s && s.room) || '', storey: (s && s.storey) || l.storey || '', simId: s ? s.id : null });
-    });
+    if(!d || !setup || setup === camSetup) return;
+    camSetup = setup;
+    d.cameras = (setup.cameras || []).map(c => ({ id: c.name, gid: c.guid, en: c.name, ar: c.name, room: c.room, storey: c.storey }));
   }
-  const use = E2 => { if(E2){ E = E2; linkCams(); camerasBySource(); } return E; };
+  const use = E2 => { if(E2){ E = E2; camerasBySource(); } return E; };
   const t = (k, p) => E.t(k, p);
   const D = () => (E && E.data.security) || null;
   const L = (en, ar) => E.lang === 'ar' ? (ar || en) : en;
@@ -403,7 +379,7 @@ window.EKO_SEC = (function(){
       E2.state.dlg = null; E2.state.secDlg = null; E2.state.secSel = id; E2.go('sec', 'security', null);
       requestAnimationFrame(() => requestAnimationFrame(() => { const eng = E2.engine, host = document.getElementById('enginehost');
         if(!eng || !host) return;
-        if(cam && cam.gid && eng.matchElements && eng.flyToGid){ eng.flyToGid(cam.gid); if(eng.highlightGid) eng.highlightGid(cam.gid); return; }
+        if(cam && cam.gid && eng.cameraSetup && eng.flyToGid){ eng.flyToGid(cam.gid); if(eng.highlightGid) eng.highlightGid(cam.gid); return; }
         const r = host.getBoundingClientRect();
         if(eng.frameRect) eng.frameRect([p], { left: r.width * 0.35, top: 40, width: r.width * 0.5, height: r.height - 160 }, { scale: 1.8 }); })); }
   };

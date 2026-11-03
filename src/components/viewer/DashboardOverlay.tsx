@@ -7,8 +7,8 @@ import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import { useAppStore } from '@/store/useAppStore'
 import type { RenderSettings } from '@/constants/renderSettings'
 import { useModelStore } from '@/store/useModelStore'
-import { foldName, indexLinks, indexSpaceLinks, isGuid, levelRank, matchStaleGids, prepareElements, type PreparedElement } from '@/lib/assetLinks'
-import { guidsInModels, listModelElements } from '@/lib/modelElements'
+import { elementLabel, foldName, indexLinks, indexSpaceLinks, isGuid, levelRank, prepareElements, typeWords } from '@/lib/assetLinks'
+import { listModelElements } from '@/lib/modelElements'
 import type { AssetLink } from '@/types'
 import { frameModelFromAbove, resetCameraToHome, tiltIfVertical } from '@/lib/cameraUtils'
 import { frameSphereInView } from '@/lib/viewFraming'
@@ -141,51 +141,53 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     const linkFor = (assetId?: string | null) => (assetId ? links().byFold.get(fold(assetId)) : undefined)
 
-    // Older-export GlobalIds of sample data, mapped to the loaded model
-    const remap = new Map<string, string>()
-    const current = (gid: string) => remap.get(gid) ?? gid
-    let elementScan: { sig: string; job: Promise<PreparedElement[]> } | null = null
-    const levelOf = new Map<string, string>()
-    const matchElements = async (items: { gid: string; revitId?: string; kind?: string }[]) => {
+    // The loaded model's CCTV elements and every equipment element's storey, read once per set of files
+    type CameraScan = { sig: string; cams: { guid: string; name: string; storey: string }[]; storeyOf: Map<string, string> }
+    let cameraScan: { sig: string; done: CameraScan | null } | null = null
+    const storeyCode = (level?: string) => {
+      const rank = levelRank(level ?? '')
+      return Number.isInteger(rank) && rank >= 0 && rank < 100 ? `L${rank}` : ''
+    }
+    const scanCameras = (): CameraScan | null => {
       const list = engine?.fragments?.models?.list
-      if (!engine || !list?.size) return { ready: false, matched: 0 }
-      const fresh = items.filter(i => isGuid(i.gid) && !remap.has(i.gid))
-      if (!fresh.length) return { ready: true, matched: 0 }
-      const present = await guidsInModels(engine, fresh.map(i => i.gid)).catch(() => null)
-      if (!present) return { ready: false, matched: 0 }
-      for (const i of fresh) if (present.has(i.gid)) remap.set(i.gid, i.gid)
-      const stale = fresh.filter(i => !present.has(i.gid))
-      if (!stale.length) return { ready: true, matched: 0 }
+      if (!engine || !list?.size || useLoadingProgressStore.getState().sessionActive) return null
       const sig = [...list.keys()].join('|')
-      if (elementScan?.sig !== sig) {
-        elementScan = { sig, job: listModelElements(engine, 'equip').then(prepareElements) }
-        levelOf.clear()
-      }
-      const prepared = await elementScan.job
-      if (!levelOf.size) for (const p of prepared) levelOf.set(p.el.guid, p.el.level ?? '')
-      const found = matchStaleGids(stale, prepared)
-      for (const [from, to] of found) remap.set(from, to)
-      if (found.size) repositionMarkers()
-      return { ready: true, matched: found.size }
+      if (cameraScan?.sig === sig) return cameraScan.done
+      const scan: { sig: string; done: CameraScan | null } = { sig, done: null }
+      cameraScan = scan
+      const words = typeWords('CCTV')
+      listModelElements(engine, 'equip').then(found => {
+        if (cameraScan !== scan) return
+        const prepared = prepareElements(found)
+        scan.done = {
+          sig,
+          cams: prepared.filter(p => words.some(w => p.hay.includes(` ${w} `))).map(p => ({ guid: p.el.guid, name: elementLabel(p.el), storey: storeyCode(p.el.level) })),
+          storeyOf: new Map(prepared.map(p => [p.el.guid, storeyCode(p.el.level)])),
+        }
+        try { (window as { EKO?: { set?: (patch: object) => void } }).EKO?.set?.({}) } catch { /* the dashboard redraws on its next refresh */ }
+      }, () => { if (cameraScan === scan) cameraScan = null })
+      return null
     }
 
+    let setupMemo: { links: unknown; source: string; scan: unknown; value: object } | null = null
     const cameraSetup = () => {
       const project = useProjectStore.getState().currentProject
       const links = project?.assetLinks ?? []
+      const source = project?.apiSettings?.dashboardCameraSource === 'model' ? 'model' : 'fin'
+      const scan = scanCameras()
+      if (setupMemo && setupMemo.links === links && setupMemo.source === source && setupMemo.scan === scan) return setupMemo.value
       const rooms = new Map(links.filter(l => l.kind === 'space').map(l => [l.guid, l.equip]))
-      const storey = (guid: string) => {
-        const rank = levelRank(levelOf.get(guid) ?? '')
-        return Number.isInteger(rank) && rank >= 0 && rank < 100 ? `L${rank}` : ''
-      }
-      return {
-        source: project?.apiSettings?.dashboardCameraSource === 'model' ? 'model' : 'fin',
-        cameras: links.filter(l => l.kind === 'cctv' && isGuid(l.guid)).map(l => ({
+      const cameras = source === 'model'
+        ? (scan?.cams ?? []).map(c => ({ name: c.name, guid: c.guid, room: '', storey: c.storey }))
+        : links.filter(l => l.kind === 'cctv' && isGuid(l.guid)).map(l => ({
           name: l.equip,
           guid: l.guid,
           room: l.room ? rooms.get(l.room) ?? '' : '',
-          storey: storey(l.guid),
-        })),
-      }
+          storey: scan?.storeyOf.get(l.guid) ?? '',
+        }))
+      const value = { source, cameras }
+      setupMemo = { links, source, scan, value }
+      return value
     }
 
     /* Asset id (with or without the ast- prefix) -> IFC GUID, or null.
@@ -198,12 +200,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const assets: any[] = (window as any).EKO?.data?.assets || []
       const asset = assets.find(a => a.id === assetId || normAssetId(a.id || '') === norm)
       // Simulation engine assets name their element (gid) or room (roomGid) instead of bimId
-      const gid = [asset?.bimId, asset?.gid, asset?.roomGid].find(isGuid)
-      return gid ? current(gid) : null
+      return [asset?.bimId, asset?.gid, asset?.roomGid].find(isGuid) || null
     }
 
     /* Accepts an asset id or a raw IFC GUID */
-    const toBimId = (idOrBimId?: string | null) => bimIdFor(idOrBimId) || (isGuid(idOrBimId) ? current(idOrBimId) : null)
+    const toBimId = (idOrBimId?: string | null) => bimIdFor(idOrBimId) || (isGuid(idOrBimId) ? idOrBimId : null)
 
     const locate = (bimId: string): Promise<Located | null> => {
       const hit = located.get(bimId)
@@ -777,10 +778,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       // Not an equipment point (e.g. a PMU chip): leave it to the adapter's 2D fallback
       if (!point.asset && !point.bimId && !point.alarm) return null
 
-      let bimId = toBimId(point.asset) || (isGuid(point.bimId) ? current(point.bimId) : null)
+      let bimId = toBimId(point.asset) || (isGuid(point.bimId) ? point.bimId : null)
       if (!bimId && point.alarm) {
         const al = (window as any).EKO?.data?.alarms?.find((a: any) => a.id === point.alarm)
-        bimId = toBimId(al?.asset) || (isGuid(al?.bimId) ? current(al.bimId) : null)
+        bimId = toBimId(al?.asset) || (isGuid(al?.bimId) ? al.bimId : null)
       }
       // Only equipment found in the model gets a marker: anything else has no
       // real position and would float at an arbitrary spot.
@@ -2542,9 +2543,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       setViewMode,
       setDashboardOpen,
       bimIdFor,
-      matchElements,
       cameraSetup,
-      currentGid: (gid: string) => (isGuid(gid) ? current(gid) : gid),
       isAlarmed,
       listMapped: () => links().list.map(m => ({ id: m.equip, bimId: m.guid })),
       spaceLinks: () => indexSpaceLinks(useProjectStore.getState().currentProject?.assetLinks),

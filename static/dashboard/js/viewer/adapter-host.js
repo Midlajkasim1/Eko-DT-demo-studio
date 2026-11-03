@@ -77,17 +77,9 @@
         if (gid && h.highlightAsset) h.highlightAsset(gid);
         else if (!gid && h.clearHighlight) h.clearHighlight();
       },
-      matchElements: function (items) {
-        var h = window.EKO_HOST_ENGINE;
-        return h && h.matchElements ? h.matchElements(items) : Promise.resolve({ ready: true, matched: 0 });
-      },
       cameraSetup: function () {
         var h = window.EKO_HOST_ENGINE;
         return h && h.cameraSetup ? h.cameraSetup() : null;
-      },
-      currentGid: function (gid) {
-        var h = window.EKO_HOST_ENGINE;
-        return h && h.currentGid ? h.currentGid(gid) : gid;
       },
       projectAsset: function (assetId) {
         var h = window.EKO_HOST_ENGINE, p = h && h.projectPoint ? h.projectPoint({ asset: assetId }) : null;
