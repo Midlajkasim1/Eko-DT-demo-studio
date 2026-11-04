@@ -485,6 +485,16 @@
       obj[key] = val;
       changed = true;
     }
+    if (!mapsKey(p, 'hourly_energy') && mapsKey(p, 'current_month')) {
+      var energyNow = asNum(p.current_month);
+      if (energyNow != null) {
+        if (pointUnit(p, 'current_month') === 'mwh') energyNow = energyNow * 1000;
+        set(el, 'currentKw', trunc1(energyNow));
+        set(el, 'loadUnit', 'kW');
+        set(m, 'loadNowKw', trunc1(energyNow));
+        if (site.power) site.power.energyFromFin = true;
+      }
+    }
     var load = mapsKey(p, 'hourly_energy') ? asNum(p.hourly_energy) : null;
     if (load != null) {
       var loadMw = pointUnit(p, 'hourly_energy') === 'mw';
@@ -927,10 +937,13 @@
         for (hi = todayHours.length - 1; hi >= 0; hi--) {
           if (todayHours[hi] != null && isFinite(todayHours[hi])) { lastHour = todayHours[hi] * kwhScale; break; }
         }
-        if (!mapsKey(p, 'hourly_energy') && lastHour != null) {
-          set(el, 'currentKw', trunc1(lastHour));
+        var liveNow = mapsKey(p, 'current_month') ? asNum(p.current_month) : null;
+        if (liveNow != null) liveNow = energyMwh ? liveNow * 1000 : liveNow;
+        var currentNow = liveNow != null ? liveNow : lastHour;
+        if (!mapsKey(p, 'hourly_energy') && currentNow != null) {
+          set(el, 'currentKw', trunc1(currentNow));
           set(el, 'loadUnit', 'kW');
-          set(m, 'loadNowKw', trunc1(lastHour));
+          set(m, 'loadNowKw', trunc1(currentNow));
           var facRow = summaryRow(site, 'facility');
           if (facRow) { facRow.d = 1; facRow.u = 'kW'; facRow.metric = 'loadNowKw'; facRow.capEn = null; facRow.capAr = null; facRow.notConfigured = false; }
         }
@@ -946,6 +959,7 @@
         if (prevM < 0) { prevM = 11; prevY -= 1; }
         var prevSum = sumMonth(prevY, prevM);
         if (prevSum != null && site.power) set(site.power, 'prevMonthKwh', trunc1(prevSum));
+        if (site.power) site.power.energyFromFin = true;
       }
 
       function todayHourly(flat) {
@@ -1622,6 +1636,27 @@
   function isSpName(k) {
     return k.indexOf("set") !== -1 || /sp$/.test(k);
   }
+  function nameWords(text) {
+    return String(text || "").split(/[,;/]+/).map(foldPtName).filter(Boolean);
+  }
+  function matchesWords(k, words) {
+    return words.some(function (w) { return w && k.indexOf(w) !== -1; });
+  }
+  function equipPointWords() {
+    var cfg = (injected && injected.equipPoints) || {};
+    return {
+      ahuTemp: nameWords(cfg.ahuTemp),
+      ahuSp: nameWords(cfg.ahuSetpoint),
+      fcuTemp: nameWords(cfg.fcuTemp),
+      fcuSp: nameWords(cfg.fcuSetpoint)
+    };
+  }
+  function spTest(words, tempWords) {
+    return function (k) {
+      if (words.length && matchesWords(k, words)) return true;
+      return tempWords.length ? matchesWords(k, tempWords) && isSpName(k) : false;
+    };
+  }
   function findPt(points, test) {
     for (var i = 0; i < (points || []).length; i++) {
       if (test(foldPtName(points[i].navName), points[i])) return points[i];
@@ -1655,10 +1690,16 @@
     if (id.indexOf("FAHU") === 0 || type.indexOf("FAHU") !== -1) kind = "fahu";
     else if (id.indexOf("AHU") === 0 || type.indexOf("AHU") !== -1) kind = "ahu";
     else if (id.indexOf("FCU") === 0 || type.indexOf("FCU") !== -1) kind = "fcu";
+    var names = equipPointWords();
     var specs = [];
     if (kind === "fcu") {
+      var fcuTemp = names.fcuTemp.length ? names.fcuTemp : ["zonetemp"];
       specs = [
-        makePair(points, "apCmpZone", function (k) { return k.indexOf("zonetemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("zonetemp") !== -1 && isSpName(k); })
+        makePair(points, "apCmpZone", function (k) { return matchesWords(k, fcuTemp) && !isSpName(k); }, spTest(names.fcuSp, fcuTemp))
+      ];
+    } else if (kind === "ahu" && names.ahuTemp.length) {
+      specs = [
+        makePair(points, "apCmpSA", function (k) { return matchesWords(k, names.ahuTemp) && !isSpName(k); }, spTest(names.ahuSp, names.ahuTemp))
       ];
     } else if (kind === "ahu") {
       specs = [
@@ -1833,7 +1874,8 @@
       }
 
       var retry = !!(cached && cached.failedAt && Date.now() - cached.failedAt >= HIST_RETRY_MS);
-      if (primary && primary.actHis && window.DashboardData && window.DashboardData.getPointHistory && (!cached || retry)) {
+      var otherPoint = !!(cached && cached.compare && primary && cached.compare.actName !== primary.actName);
+      if (primary && primary.actHis && window.DashboardData && window.DashboardData.getPointHistory && (!cached || retry || otherPoint)) {
         historyCache[eq.name] = { fetching: true };
         var actP = window.DashboardData.getPointHistory(primary.actId, HIST_DAYS);
         var spP = (primary.spHis && primary.spId)

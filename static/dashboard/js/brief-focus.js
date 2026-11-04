@@ -9,14 +9,14 @@
      2 the focus card appears at the top right (340 px, the glow ring): the section and
        "n of N", ‹ ›, the tag and sentence, the place, the item's one action, Back to Brief;
      3 the camera flies to the element (the viewer's own fly-to) and centres it in the
-       model area left of the card; the rest goes x-ray, its level is outlined in the
+       model area left of the card; the rest goes studio, its level is outlined in the
        glow colour, the other markers dim and the element gets three pulsing rings;
      4 when the fly ends a curved leader line draws from the element to the card. If
        the reader orbits or zooms, the line hides while the camera moves and is redrawn
        (projected with camera.project()) when it stops.
    ‹ › fly between the items. Back to Brief, Esc or the Brief button reverse it all: the
-   line clears, the camera returns to the view before the first locate, the x-ray and
-   dimming end, and the Brief grows back with its scroll and ribbon kept.
+   line clears, the camera returns to the view before the first locate, the style from
+   before the locate returns and the dimming ends, and the Brief grows back with its scroll and ribbon kept.
    Reduced motion: everything jumps, the line appears at once.
    E17 (EKO_E17_Devices_Polish.md item 3): under 1024 px the model is a peek card that
    the focus card covered. There the focus opens the model mode (full screen) and:

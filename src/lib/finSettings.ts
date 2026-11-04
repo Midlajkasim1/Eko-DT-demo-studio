@@ -188,6 +188,12 @@ export function dashboardProjectInfo(meta: { projectId: string; name: string; ap
     /* the project's own boards; null = the built-in board keys, where the project maps them */
     powerBoards: Array.isArray(s.finPowerBoards) && s.finPowerBoards.length ? s.finPowerBoards : null,
     energyFromHourly: s.energyFromHourly === true,
+    equipPoints: {
+      ahuTemp: s.ahuTemp || '',
+      ahuSetpoint: s.ahuSetpoint || '',
+      fcuTemp: s.fcuTemp || '',
+      fcuSetpoint: s.fcuSetpoint || '',
+    },
     energyMonthOwn: pointRefOf(s.finLivePoints?.current_month || '') != null
       && pointRefOf(s.finEndpoints?.Hourly_Energy_Consumption_his || '') != null
       && pointRefOf(s.finLivePoints?.current_month || '') !== pointRefOf(s.finEndpoints?.Hourly_Energy_Consumption_his || ''),

@@ -51,6 +51,34 @@ function fitProblem(entry: CatalogEntry, v: PointView): string | null {
 
 const textOf = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v))
 
+const KEY_NAMES: Record<string, string> = {
+  PMU04_MCC_02_his: 'MCC 02',
+  PMU09_MCC_01_his: 'MCC 01',
+  PMU05_SMDB_KIT_his: 'Kitchen SMDB',
+  PMU06_LVFP_Z7_01_his: 'LVFP zone 7',
+  PMU07_ATS_E_his: 'ATS',
+  PMU08_SWPS02_his: 'Sump pump 02',
+  PMU10_EDB_BS01_his: 'Basement distribution board',
+  PMU11_EDB_GF01_his: 'Ground floor distribution board',
+  WM_BF_Cold_Wtr_his: 'Basement cold water',
+  WM_FF_Sup_Cold_Wtr_his: 'First floor cold water supply',
+  WM_FF_Sup_Hot_Wtr_his: 'First floor hot water supply',
+  WM_FF_Ret_Hot_Wtr_his: 'First floor hot water return',
+  GM_GF_01_his: 'Ground floor gas 01',
+  GM_GF_02_his: 'Ground floor gas 02',
+  GM_GF_03_his: 'Ground floor gas 03',
+}
+
+function keyLabel(key: string): string | null {
+  if (KEY_NAMES[key]) return KEY_NAMES[key]
+  const pmu = /^PMU(\d+)_(.+)_his$/i.exec(key)
+  if (!pmu) return null
+  const words = pmu[2].split('_').filter(Boolean).map(part => (
+    /^\d+$/.test(part) ? part : part.replace(/([a-z])([A-Z])/g, '$1 $2')
+  ))
+  return words.join(' ')
+}
+
 function rowsFrom(block: MappingBlock, value: JsonObject | undefined, extraKeys: string[] = []): Row[] {
   const known = catalogFor(block).map(e => e.key)
   const own = [...extraKeys, ...Object.keys(value ?? {})].filter((k, i, all) => !known.includes(k) && all.indexOf(k) === i)
@@ -197,7 +225,12 @@ export function FinPointMapping({ block, value, onChange, points, results, sugge
       <div key={r.id} className="fpm-item" data-open={isOpen}>
         <div className="fpm-row">
           <div className="fpm-what">
-            {r.own ? (
+            {r.own && keyLabel(r.key) ? (
+              <>
+                <div className="fpm-label">{keyLabel(r.key)}</div>
+                <code className="fpm-key">{r.key}</code>
+              </>
+            ) : r.own ? (
               <input
                 className="fpm-keyin"
                 aria-label="Key"

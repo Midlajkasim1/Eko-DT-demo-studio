@@ -645,7 +645,7 @@ window.EKO_C = (function(){
     }
     /* Sample sites with a month-to-date and a previous month (the medical engine) use that
        page: MW peak and the two months. A live FIN site keeps today and yesterday in kWh. */
-    const simPower = !!(E.sim && el.mtdKwh != null && p.prevMonthKwh != null);
+    const simPower = !!(E.sim && el.mtdKwh != null && p.prevMonthKwh != null && !p.energyFromFin);
     const limMw = p.contractedMw != null ? p.contractedMw : ((E.data.energyModel || {}).contractKw != null ? E.data.energyModel.contractKw / 1000 : null);
     const peakMw = m.peakTodayMw != null ? m.peakTodayMw : (peakKw != null ? peakKw / 1000 : null);
     const limDp = limMw != null && limMw < 1 ? 2 : 1;

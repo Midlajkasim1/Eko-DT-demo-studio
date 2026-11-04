@@ -90,7 +90,7 @@
         return p || { x: 0, y: 0, visible: false };
       },
       onCameraChange: on('camera'),
-      /* E15 Show in the model: the asset in colour on the x-ray style, the floors above it cut, its floor outlined; null undoes each */
+      /* E15 Show in the model: the asset in colour on Studio, floors above it cut, its floor outlined; null restores the style from before */
       setFocus: function (list, colour) {
         var h = window.EKO_HOST_ENGINE;
         if (h && h.focusAsset) h.focusAsset(list && list.length ? list[0] : null, colour);

@@ -89,8 +89,8 @@ export const MAPPING_CATALOG: CatalogEntry[] = [
   hist('After_Hours_Load_his', GROUP_UNUSED, 'After-hours load history', '', ['afterhoursload'], ['kW', 'kWh']),
 ]
 
-export const LIVE_GROUPS = [OVERVIEW, SYSTEMS, ENERGY, POWER, UTIL, GROUP_MARSA, GROUP_UNUSED]
-export const HISTORY_GROUPS = [ENERGY, POWER, WATER, GAS, GROUP_MARSA, GROUP_UNUSED]
+export const LIVE_GROUPS = [OVERVIEW, SYSTEMS, ENERGY, POWER, UTIL, GROUP_UNUSED]
+export const HISTORY_GROUPS = [ENERGY, POWER, WATER, GAS, GROUP_UNUSED]
 
 export const catalogFor = (block: MappingBlock) => MAPPING_CATALOG.filter(e => e.block === block)
 export const catalogEntry = (block: MappingBlock, key: string) => MAPPING_CATALOG.find(e => e.block === block && e.key === key)

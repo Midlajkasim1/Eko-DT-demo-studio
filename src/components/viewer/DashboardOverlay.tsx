@@ -121,9 +121,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     /* The one highlighted equipment and the state it was drawn for */
     let colored: { bimId: string; tone: 'alarm' | 'healthy' | 'amber' } | null = null
     let highlightSeq = 0
-    /* The Brief's Show in the model: the colour its asset is drawn in, the style to go back to, its floor's outline */
+    /* Brief Show in the model: asset colour, the style from before the locate, its floor outline */
     let focusColour: THREE.Color | null = null
     let focusPrev: Pick<RenderSettings, 'templateId' | 'realisticMode' | 'renderLite'> | null = null
+    let focusDock: string | null = null
     let floorOutline: THREE.LineSegments | null = null
 
     const normAssetId = (id: string) => (id.startsWith('ast-') ? id.substring(4) : id)
@@ -1199,8 +1200,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
     }
 
-    /* The Brief's Show in the model (brief-focus.js): the asset in colour on the x-ray style, the floors above
-       its floor cut away, and its floor outlined. Each called with null puts back what the dashboard had. */
+    /* Brief Show in the model: the asset in colour on Studio, floors above cut away, its floor outlined. Null puts the style from before the locate back. */
     const assetFloor = new Map<string, string>()
     const floorOf = async (bimId: string): Promise<string | null> => {
       const known = assetFloor.get(bimId)
@@ -1228,31 +1228,43 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     const focusAsset = async (assetIdOrBimId: string | null, colour?: string) => {
       const store = useAppStore.getState()
+      const eko = (window as any).EKO
       if (!assetIdOrBimId) {
         if (!focusPrev) return
         const prev = focusPrev
+        const dockStyle = focusDock
         focusPrev = null
+        focusDock = null
         focusColour = null
+        if (eko?.state?.dock && dockStyle != null) eko.state.dock.style = dockStyle
         store.setLightingParams(prev)
-        const paint = (window as any).EKO?.state?.paint
+        const paint = eko?.state?.paint
         if (colored) tintGhost(colored.tone)
         if (paint) await highlightAsset(paint)
         else await clearHighlight()
         return
       }
-      if (!focusPrev) focusPrev = { templateId: store.templateId, realisticMode: store.realisticMode, renderLite: store.renderLite }
+      let refreshStyle = false
+      if (!focusPrev) {
+        focusPrev = { templateId: store.templateId, realisticMode: store.realisticMode, renderLite: store.renderLite }
+        const dock = eko?.state?.dock
+        if (dock) {
+          focusDock = dock.style
+          if (dock.style !== 'studio') {
+            dock.style = 'studio'
+            refreshStyle = true
+          }
+        }
+        if (store.templateId !== 'studio') store.setTemplate('studio')
+        if (refreshStyle && eko?.set) eko.set({})
+      }
       focusColour = new THREE.Color(/^#[0-9a-f]{3,8}$/i.test(colour || '') ? colour! : '#7B6CFF')
-      if (store.templateId !== 'xray') store.setTemplate('xray')
       const shown = await highlightAsset(assetIdOrBimId)
       if (colored) tintGhost(colored.tone)
       return shown
     }
-    // While a focus shows x-ray, the dashboard's style is kept for when the focus ends
-    const styleDuringFocus = (id: string): boolean => {
-      if (!focusPrev) return false
-      focusPrev = { ...focusPrev, templateId: id as RenderSettings['templateId'] }
-      return true
-    }
+    // The Style toolbar still changes the picture. Back restores the style from before the locate.
+    const styleDuringFocus = (_id: string): boolean => false
     let cutSeq = 0
     const cutAboveAsset = async (assetIdOrBimId: string | null) => {
       const seq = ++cutSeq
@@ -2769,7 +2781,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       miniMap.dispose()
       clearInterval(resolveTimer)
       fadeArch(false)
-      if (focusPrev) useAppStore.getState().setLightingParams(focusPrev)
+      if (focusPrev) {
+        const dock = (window as any).EKO?.state?.dock
+        if (dock && focusDock != null) dock.style = focusDock
+        useAppStore.getState().setLightingParams(focusPrev)
+      }
       dropOutline()
       outlineMat.dispose()
       void clearHighlight()

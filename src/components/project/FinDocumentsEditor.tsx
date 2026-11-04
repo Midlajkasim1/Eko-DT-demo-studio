@@ -39,9 +39,18 @@ export function FinDocumentsEditor({ value, finProject, finConnected, onChange }
   })
 
   const report = (next: Row[]) => onChange(familiesFromDrafts(next), draftProblem(next, finProject))
+  const named = (row: Row): Row => {
+    if (row.name.trim()) return row
+    const guessed = suggestDocuments([
+      { name: row.omName, ref: row.omRef || '@p:x:r:0' },
+      { name: row.wName, ref: row.wRef || '@p:x:r:0' },
+    ])[0]
+    return guessed ? { ...row, name: guessed.name, tags: row.tags || guessed.tags, codes: row.codes || guessed.codes, types: row.types || guessed.types, names: row.names || guessed.names } : row
+  }
   const commit = (next: Row[]) => {
-    setRows(next)
-    report(next)
+    const filled = next.map(named)
+    setRows(filled)
+    report(filled)
   }
 
   useEffect(() => {
@@ -66,8 +75,10 @@ export function FinDocumentsEditor({ value, finProject, finConnected, onChange }
   }
 
   const takeFile = (row: Row, side: 'om' | 'w', file: FinFile) => {
-    if (side === 'om') edit(row.key, { omRef: file.ref, omName: row.omName.trim() ? row.omName : file.name })
-    else edit(row.key, { wRef: file.ref, wName: row.wName.trim() ? row.wName : file.name })
+    const guessed = suggestDocuments([file])[0]
+    const name = row.name.trim() || guessed?.name || ''
+    if (side === 'om') edit(row.key, { name, tags: row.tags || guessed?.tags || '', codes: row.codes || guessed?.codes || '', types: row.types || guessed?.types || '', names: row.names || guessed?.names || '', omRef: file.ref, omName: row.omName.trim() ? row.omName : file.name })
+    else edit(row.key, { name, tags: row.tags || guessed?.tags || '', codes: row.codes || guessed?.codes || '', types: row.types || guessed?.types || '', names: row.names || guessed?.names || '', wRef: file.ref, wName: row.wName.trim() ? row.wName : file.name })
     setPick(null)
   }
 

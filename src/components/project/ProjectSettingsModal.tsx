@@ -788,6 +788,29 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 </label>
               </div>
 
+              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Equipment charts</h3>
+              <p className="ds-hint">Words in the FIN point name. Commas mean any of them. Blank keeps return air for AHU and zone temp for FCU.</p>
+              <div className="ds-field-row">
+                <div className="ds-field">
+                  <label>AHU temperature</label>
+                  <input type="text" value={settings.ahuTemp || ''} placeholder="sa temp" onChange={e => update('ahuTemp', e.target.value || undefined)} />
+                </div>
+                <div className="ds-field">
+                  <label>AHU setpoint</label>
+                  <input type="text" value={settings.ahuSetpoint || ''} placeholder="sp" onChange={e => update('ahuSetpoint', e.target.value || undefined)} />
+                </div>
+              </div>
+              <div className="ds-field-row">
+                <div className="ds-field">
+                  <label>FCU temperature</label>
+                  <input type="text" value={settings.fcuTemp || ''} placeholder="zone temp, space temp" onChange={e => update('fcuTemp', e.target.value || undefined)} />
+                </div>
+                <div className="ds-field">
+                  <label>FCU setpoint</label>
+                  <input type="text" value={settings.fcuSetpoint || ''} placeholder="sp" onChange={e => update('fcuSetpoint', e.target.value || undefined)} />
+                </div>
+              </div>
+
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Energy history</h3>
               <div className="ds-field">
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>

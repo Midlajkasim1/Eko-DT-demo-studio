@@ -281,10 +281,19 @@
     const imb = V(EL.imbalancePct), imbNow = Math.round(imb[0] + (imb[1] - imb[0]) * e.U('imb' + Math.floor(now / HOUR))), o2 = F.o2Dip, genLate = V(cfg.power.lastRunAgoD) > 30;
     G.forEach(g => { const H = health(g.sysKey || []);
       (g.cards || []).forEach(c => { const L2 = c.labelEn || '';
-        if(/OVERALL HEALTH/.test(L2)){ c.v = H.pct.toFixed(1); c.tone = H.pct >= 95 ? 'ok' : H.pct >= 85 ? 'warn' : 'crit';
-          c.capEn = H.bad ? H.bad + ' of ' + H.n + ' assets with an alarm' : 'All ' + H.n + ' assets without an alarm'; c.capAr = H.bad ? H.bad + ' من ' + H.n + ' أصول عليها إنذار' : 'كل الأصول الـ' + H.n + ' بلا إنذار'; }
-        else if(/AIR HANDLING/.test(L2)){ c.v = ahus.length + ' / ' + ahus.length; c.capEn = 'Total: ' + ahus.length + ', all running'; c.capAr = 'الإجمالي: ' + ahus.length + '، كلها تعمل';
-          c.chipEn = ahuBad ? ahuBad + ' with an alarm' : ''; c.chipAr = ahuBad ? ahuBad + ' عليها إنذار' : ''; c.tone = ahuBad ? 'warn' : 'ok'; c.wash = ahuBad ? 'warn' : ''; }
+        if(/OVERALL HEALTH/.test(L2)){
+          const tags = { hvac: ['HVAC', 'Mechanical'], electrical: ['Electrical', 'EMS'], life: ['Life safety'], security: ['Security'], medgas: ['Medical gas', 'Refrigeration'] };
+          const live = (d.alarms || []).filter(a => String(a.id || '').indexOf('fin-') === 0 && (tags[g.id] || g.sysKey || []).indexOf(a.sys) >= 0);
+          if(live.length){ c.v = String(live.length); c.u = ''; c.capEn = 'Live alarms'; c.capAr = 'إنذارات مباشرة'; c.tone = live.some(a => a.sev === 'critical') ? 'crit' : 'warn'; }
+          else { c.v = H.pct.toFixed(1); c.tone = H.pct >= 95 ? 'ok' : H.pct >= 85 ? 'warn' : 'crit';
+            c.capEn = H.bad ? H.bad + ' of ' + H.n + ' assets with an alarm' : 'All ' + H.n + ' assets without an alarm'; c.capAr = H.bad ? H.bad + ' من ' + H.n + ' أصول عليها إنذار' : 'كل الأصول الـ' + H.n + ' بلا إنذار'; } }
+        else if(/AIR HANDLING/.test(L2)){
+          const real = (d.assets || []).filter(a => /^AHU-\d+$/.test(a.id));
+          const list = real.length ? real : ahus;
+          const liveAhu = (d.alarms || []).filter(a => String(a.id || '').indexOf('fin-') === 0 && /^AHU-\d+/.test(String(a.asset || '')));
+          const badN = liveAhu.length ? new Set(liveAhu.map(a => a.asset)).size : ahuBad;
+          c.v = list.length + ' / ' + list.length; c.capEn = 'Total: ' + list.length + ', all running'; c.capAr = 'الإجمالي: ' + list.length + '، كلها تعمل';
+          c.chipEn = badN ? badN + ' with an alarm' : ''; c.chipAr = badN ? badN + ' عليها إنذار' : ''; c.tone = badN ? 'warn' : 'ok'; c.wash = badN ? 'warn' : ''; }
         else if(/HUMIDITY BAND/.test(L2)){ c.val = inRh.length; c.max = rh.length; c.u = '/ ' + rh.length; const off = rh.length - inRh.length;
           c.wordEn = off ? (off === 1 ? 'One room outside the band' : off + ' rooms outside the band') : 'All rooms in band'; c.wordAr = off ? (off === 1 ? 'غرفة واحدة خارج النطاق' : off + ' غرف خارج النطاق') : 'كل الغرف ضمن النطاق'; c.tone = off ? 'warn' : 'ok'; }
         else if(/OXYGEN/.test(L2)){ c.val = o2.dipBar; const lo = o2.dipBar < o2.limitBar; c.wordEn = lo ? 'Below low alarm' : 'Normal'; c.wordAr = lo ? 'دون الإنذار المنخفض' : 'طبيعي'; c.tone = lo ? 'crit' : 'ok'; }

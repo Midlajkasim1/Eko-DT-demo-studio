@@ -343,6 +343,11 @@ export interface ProjectApiSettings {
   co2Factor?: number
   /** The hourly energy history also fills current load, the hourly chart, and the month totals. */
   energyFromHourly?: boolean
+  /** Words in the FIN point name for the asset chart. Blank keeps return air and zone temp. */
+  ahuTemp?: string
+  ahuSetpoint?: string
+  fcuTemp?: string
+  fcuSetpoint?: string
   /** Names the emission factor in the report basis, e.g. "DEWA grid 2025" */
   co2FactorName?: string
   /** The Power page's distribution boards. Absent: the built-in board keys, shown where the
