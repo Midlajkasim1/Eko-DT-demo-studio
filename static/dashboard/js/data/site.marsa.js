@@ -303,20 +303,20 @@ window.EKO_DATA.marsa = {
     /* D96 — baseline versus actual. baseline null = a gap (model refresh):
        rendered as a gap, named in the caption, never interpolated. No
        weather or occupancy adjustment is applied in this data set, and the
-       caption says so. today: kWh per hour 00→13; week: MWh per day to date;
-       month: MWh per day, last 30 days (today partial). */
+       caption says so. today: kWh per hour 00→13; week: kWh per day to date;
+       month: kWh per day, last 30 days (today partial). */
     "bva": {
       "modelKey": "bvaModel4wk", "adjust": { "weather": false, "occupancy": false },
       "ranges": {
         "today": { "unit": "kWh", "labels": ["00","01","02","03","04","05","06","07","08","09","10","11","12","13"],
           "actual":   [2750,2710,2670,2640,2650,2730,2900,3070,3230,3370,3450,3500,3510,3490],
           "baseline": [2700,2670,2640,2620,2630,2680,2780,2860,2900,2920,2930,2920,2900,2880] },
-        "week": { "unit": "MWh", "labelKeys": true, "labels": ["dayMonday","dayTuesday","dayWednesday","dayThursday","dayFriday"],
-          "actual":   [63.2, 61.8, 64.9, 62.1, 42.7],
-          "baseline": [66.0, 65.5, null, 66.2, 39.0] },
-        "month": { "unit": "MWh", "labels": ["6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","23","24","25","26","27","28","29","30","31","1","2","3","4"],
-          "actual":   [63.1,64.2,65.0,64.6,63.9,52.1,50.4,63.3,64.0,65.8,64.9,63.2,52.6,50.9,63.8,64.4,65.1,63.9,63.0,51.8,50.2,63.5,64.6,65.4,64.7,63.6,52.3,50.7,64.9,42.7],
-          "baseline": [64,65,66,65,64,53,51,64,65,66,65,64,53,51,64,65,66,65,64,53,51,64,65,66,65,64,53,51,66,39] }
+        "week": { "unit": "kWh", "labelKeys": true, "labels": ["dayMonday","dayTuesday","dayWednesday","dayThursday","dayFriday"],
+          "actual":   [63200, 61800, 64900, 62100, 42700],
+          "baseline": [66000, 65500, null, 66200, 39000] },
+        "month": { "unit": "kWh", "labels": ["6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","23","24","25","26","27","28","29","30","31","1","2","3","4"],
+          "actual":   [63100,64200,65000,64600,63900,52100,50400,63300,64000,65800,64900,63200,52600,50900,63800,64400,65100,63900,63000,51800,50200,63500,64600,65400,64700,63600,52300,50700,64900,42700],
+          "baseline": [64000,65000,66000,65000,64000,53000,51000,64000,65000,66000,65000,64000,53000,51000,64000,65000,66000,65000,64000,53000,51000,64000,65000,66000,65000,64000,53000,51000,66000,39000] }
       }
     },
     /* kW per 15-min sample, 00:00→14:00 (reference curve shape). */
@@ -340,13 +340,13 @@ window.EKO_DATA.marsa = {
      receivedMin: minutes since the last reading; spark7: last 7 days.
      ------------------------------------------------------------------------ */
   "meters": [
-    { "id": "E-MAIN", "nameEn": "Main incomer", "nameAr": "المدخل الرئيسي", "domain": "energy", "unit": "kWh", "last": 56621.99, "lastAt": "14:00", "receivedMin": 3, "quality": "ok", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 100, "targetPct": 99, "sparkUnit": "MWh/d", "spark7": [14.9, 15.3, 14.1, 15.8, 16.2, 15.5, 14.3] },
-    { "id": "DB-L1", "nameEn": "Board meter DB-L1", "nameAr": "عداد اللوحة DB-L1", "domain": "energy", "unit": "kWh", "last": 9120, "lastAt": "14:00", "receivedMin": 1, "quality": "ok", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 100, "targetPct": 99, "sparkUnit": "MWh/d", "spark7": [8.9, 9.2, 8.7, 9.4, 9.6, 9.1, 9.1] },
-    { "id": "DB-L2", "nameEn": "Board meter DB-L2", "nameAr": "عداد اللوحة DB-L2", "domain": "energy", "unit": "kWh", "last": 7320, "lastAt": "14:00", "receivedMin": 1, "quality": "ok", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 100, "targetPct": 99, "sparkUnit": "MWh/d", "spark7": [7.1, 7.4, 7.0, 7.5, 7.7, 7.3, 7.3] },
-    { "id": "DB-L3", "nameEn": "Board meter DB-L3", "nameAr": "عداد اللوحة DB-L3", "domain": "energy", "unit": "kWh", "last": 10680, "lastAt": "14:00", "receivedMin": 1, "quality": "ok", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 100, "targetPct": 99, "sparkUnit": "MWh/d", "spark7": [10.1, 10.4, 10.2, 10.9, 11.2, 10.8, 10.7] },
-    { "id": "DB-GF", "nameEn": "Board meter DB-GF", "nameAr": "عداد اللوحة DB-GF", "domain": "energy", "unit": "kWh", "last": 6060, "lastAt": "14:00", "receivedMin": 1, "quality": "ok", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 100, "targetPct": 99, "sparkUnit": "MWh/d", "spark7": [5.9, 6.1, 5.8, 6.2, 6.3, 6.0, 6.1] },
-    { "id": "DB-RF", "nameEn": "Board meter DB-RF", "nameAr": "عداد اللوحة DB-RF", "domain": "energy", "unit": "kWh", "last": 4920, "lastAt": "14:00", "receivedMin": 1, "quality": "ok", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 100, "targetPct": 99, "sparkUnit": "MWh/d", "spark7": [4.8, 5.0, 4.7, 5.1, 5.2, 4.9, 4.9] },
-    { "id": "DB-B1", "nameEn": "Board meter DB-B1", "nameAr": "عداد اللوحة DB-B1", "domain": "energy", "unit": "kWh", "last": 5700, "lastAt": "14:00", "receivedMin": 1, "quality": "ok", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 100, "targetPct": 99, "sparkUnit": "MWh/d", "spark7": [5.5, 5.7, 5.4, 5.8, 5.9, 5.6, 5.7] },
+    { "id": "E-MAIN", "nameEn": "Main incomer", "nameAr": "المدخل الرئيسي", "domain": "energy", "unit": "kWh", "last": 56621.99, "lastAt": "14:00", "receivedMin": 3, "quality": "ok", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 100, "targetPct": 99, "sparkUnit": "kWh/d", "spark7": [14900, 15300, 14100, 15800, 16200, 15500, 14300] },
+    { "id": "DB-L1", "nameEn": "Board meter DB-L1", "nameAr": "عداد اللوحة DB-L1", "domain": "energy", "unit": "kWh", "last": 9120, "lastAt": "14:00", "receivedMin": 1, "quality": "ok", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 100, "targetPct": 99, "sparkUnit": "kWh/d", "spark7": [8900, 9200, 8700, 9400, 9600, 9100, 9100] },
+    { "id": "DB-L2", "nameEn": "Board meter DB-L2", "nameAr": "عداد اللوحة DB-L2", "domain": "energy", "unit": "kWh", "last": 7320, "lastAt": "14:00", "receivedMin": 1, "quality": "ok", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 100, "targetPct": 99, "sparkUnit": "kWh/d", "spark7": [7100, 7400, 7000, 7500, 7700, 7300, 7300] },
+    { "id": "DB-L3", "nameEn": "Board meter DB-L3", "nameAr": "عداد اللوحة DB-L3", "domain": "energy", "unit": "kWh", "last": 10680, "lastAt": "14:00", "receivedMin": 1, "quality": "ok", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 100, "targetPct": 99, "sparkUnit": "kWh/d", "spark7": [10100, 10400, 10200, 10900, 11200, 10800, 10700] },
+    { "id": "DB-GF", "nameEn": "Board meter DB-GF", "nameAr": "عداد اللوحة DB-GF", "domain": "energy", "unit": "kWh", "last": 6060, "lastAt": "14:00", "receivedMin": 1, "quality": "ok", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 100, "targetPct": 99, "sparkUnit": "kWh/d", "spark7": [5900, 6100, 5800, 6200, 6300, 6000, 6100] },
+    { "id": "DB-RF", "nameEn": "Board meter DB-RF", "nameAr": "عداد اللوحة DB-RF", "domain": "energy", "unit": "kWh", "last": 4920, "lastAt": "14:00", "receivedMin": 1, "quality": "ok", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 100, "targetPct": 99, "sparkUnit": "kWh/d", "spark7": [4800, 5000, 4700, 5100, 5200, 4900, 4900] },
+    { "id": "DB-B1", "nameEn": "Board meter DB-B1", "nameAr": "عداد اللوحة DB-B1", "domain": "energy", "unit": "kWh", "last": 5700, "lastAt": "14:00", "receivedMin": 1, "quality": "ok", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 100, "targetPct": 99, "sparkUnit": "kWh/d", "spark7": [5500, 5700, 5400, 5800, 5900, 5600, 5700] },
     { "id": "W-01", "nameEn": "Main inlet water", "nameAr": "مدخل المياه الرئيسي", "domain": "water", "unit": "m³", "last": 380, "lastAt": "14:05", "receivedMin": 8, "quality": "intermittent", "sinceEn": "08:40", "sinceAr": "08:40", "intervalsGot": 53, "intervalsTotal": 56, "uptimePct": 94.2, "targetPct": 99, "sparkUnit": "m³/d", "spark7": [15, 17, 16, 18, 14, 13, 15] },
     { "id": "W-02", "nameEn": "Irrigation", "nameAr": "الري", "domain": "water", "unit": "m³", "last": 31, "lastAt": "14:00", "receivedMin": 5, "quality": "ok", "intervalsGot": 56, "intervalsTotal": 56, "uptimePct": 99.6, "targetPct": 99, "sparkUnit": "m³/d", "spark7": [22, 24, 21, 23, 25, 27, 31] },
     { "id": "MW-03", "nameEn": "Cooling makeup", "nameAr": "مياه تعويض التبريد", "domain": "water", "unit": "m³", "last": 12.4, "lastAt": "12:00", "receivedMin": 1560, "quality": "offline", "sinceEn": "yesterday 12:00", "sinceAr": "أمس 12:00", "sinceAgeH": 26, "intervalsGot": 0, "intervalsTotal": 56, "uptimePct": 0, "targetPct": 99, "sparkUnit": "m³/d", "spark7": [12.0, 12.6, 12.1, 12.4, 12.2, 12.4, null] },

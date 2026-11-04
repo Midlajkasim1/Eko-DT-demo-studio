@@ -377,6 +377,7 @@ cached_power_data: dict = {}
 cached_building_data: dict = {}
 cached_sensor_avg: dict = {"temp": None, "humidity": None, "co2": None}
 cached_power_history: dict = {}
+cached_point_units: dict = {}
 cached_fdd_summary: list = []
 cached_meter_data: dict = {}
 cached_alarm_data: dict = {}
@@ -412,14 +413,12 @@ async def realtime_loop():
             _note_critical_alarms(client.project_name, cached_alarm_data["alarms"],
                                   getattr(client, "last_alarm_read_ok", False))
             cached_facility = _compute_facility_services(realtime)
-            cached_power_history = await client.fetch_power_histories(pw_endpoints)
-            if (
-                "Hourly_Energy_Consumption_his" in cached_power_history
-                and "Total_Power_Consumption_his" not in cached_power_history
-            ):
-                cached_power_history["Total_Power_Consumption_his"] = cached_power_history[
-                    "Hourly_Energy_Consumption_his"
-                ]
+            cached_power_history, hist_units = await client.fetch_power_histories(pw_endpoints)
+            for key, unit in hist_units.items():
+                if unit:
+                    cached_point_units[key] = unit
+            if cached_power_data is not None:
+                cached_power_data["units"] = dict(cached_point_units)
             cached_building_data = {
                 "status": "success",
                 "Building_Info": {
@@ -456,12 +455,15 @@ async def live_loop():
                 *(client.fetch_live_point(pid) for pid in live_ids.values()),
                 return_exceptions=True,
             )
-            live_results = {
-                key: None if isinstance(val, Exception) else val
-                for key, val in zip(live_ids, values)
-            }
-            if "hourly_energy" in live_results and "total_power" not in live_results:
-                live_results["total_power"] = live_results["hourly_energy"]
+            live_results = {}
+            for key, pair in zip(live_ids, values):
+                if isinstance(pair, Exception):
+                    live_results[key] = None
+                    continue
+                val, unit = pair
+                live_results[key] = val
+                if unit:
+                    cached_point_units[key] = unit
             cached_power_data = {
                 "timestamp": datetime.now().isoformat(),
                 **live_results,
@@ -469,7 +471,7 @@ async def live_loop():
                 "avg_temp": cached_sensor_avg.get("temp"),
                 "avg_hum": cached_sensor_avg.get("humidity"),
                 "avg_co2": cached_sensor_avg.get("co2"),
-                "unit": "kWh",
+                "units": dict(cached_point_units),
                 "fdd": cached_fdd_summary,
                 "facilityServices": cached_facility,
             }
@@ -921,13 +923,14 @@ async def _sleep_while_watched(seconds: float) -> bool:
 def _reset_caches():
     """Drop data polled under the previous configuration so it is never served for the next."""
     global cached_equip_data, cached_power_data, cached_building_data, cached_sensor_avg
-    global cached_power_history, cached_fdd_summary, cached_meter_data, cached_alarm_data
+    global cached_power_history, cached_point_units, cached_fdd_summary, cached_meter_data, cached_alarm_data
     global cached_facility, cached_workorders
     cached_equip_data = {}
     cached_power_data = {}
     cached_building_data = {}
     cached_sensor_avg = {"temp": None, "humidity": None, "co2": None}
     cached_power_history = {}
+    cached_point_units = {}
     cached_fdd_summary = []
     cached_meter_data = {}
     cached_alarm_data = {}
@@ -1984,7 +1987,11 @@ async def get_power_history(request: Request, response: Response):
     """Get the historian series. Refreshed once per realtime cycle, not per live poll."""
     _require_user(request)
     _stamp(response)
-    return cached_power_history or {}
+    out = dict(cached_power_history or {})
+    units = {k: cached_point_units[k] for k in out if cached_point_units.get(k)}
+    if units:
+        out["_units"] = units
+    return out
 
 
 @app.get("/api/fin/pmu-live")

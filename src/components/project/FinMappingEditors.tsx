@@ -207,7 +207,7 @@ export function KeyValueEditor({ value, kind, onChange, results, suggestions, su
             autoFocus
             placeholder={kind === 'list'
               ? 'Paste JSON, e.g. { "system_tags": ["ahu", "fcu"] }\nor one KEY=a, b, c per line'
-              : 'Paste JSON, e.g. { "total_power": "point-001" }\nor one KEY=VALUE per line'}
+              : 'Paste JSON, e.g. { "hourly_energy": "point-001" }\nor one KEY=VALUE per line'}
             value={importText}
             onChange={e => setImportText(e.target.value)}
             style={{ ...inputStyle, width: '100%' }}

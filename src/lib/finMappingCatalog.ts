@@ -29,11 +29,13 @@ const live = (key: string, group: string, label: string, shows: string, words: s
 const hist = (key: string, group: string, label: string, shows: string, words: string[], units?: string[]): CatalogEntry =>
   ({ key, block: 'history', group, label, shows, words, units, used: group !== GROUP_UNUSED })
 
-const ENERGY = 'Energy and power'
-const KPIS = 'Energy KPIs'
-const COMFORT = 'Comfort and air'
-const UTIL = 'Water and gas'
-const CHARTS = 'Charts'
+const OVERVIEW = 'Overview'
+const SYSTEMS = 'Systems'
+const ENERGY = 'Energy'
+const POWER = 'Power'
+const UTIL = 'Utilities'
+const WATER = 'Water'
+const GAS = 'Gas'
 
 const BOARDS: [string, string, string][] = [
   ['mcc1', 'Hourly_EC_MCC1_his', 'MCC 1'], ['mcc2', 'Hourly_EC_MCC2_his', 'MCC 2'], ['smdb_kit', 'Hourly_EC_SMDB_KIT_his', 'Kitchen SMDB'],
@@ -41,29 +43,27 @@ const BOARDS: [string, string, string][] = [
 ]
 
 export const MAPPING_CATALOG: CatalogEntry[] = [
-  live('hourly_energy', ENERGY, 'Building load now', 'Load now on the Overview and Energy pages, in kW. An hourly kWh reading also fits: one hour\'s kWh is that hour\'s average kW.',
-    ['hourlyenergyconsumption', 'activepower', 'totalpower', 'hourlyenergy'], ['kW', 'kWh']),
-  live('total_power', ENERGY, 'Total power (fallback)', 'Used for the load now only when Building load now is not mapped, in kW.',
-    ['totalpower', 'activepower', 'hourlyenergyconsumption'], ['kW', 'kWh']),
-  live('peak_demand', ENERGY, 'Peak demand today', 'Today\'s highest demand on the Energy and Power pages, in kW.', ['peakdemand', 'maxdemand'], ['kW']),
-  live('current_month', ENERGY, 'Energy this month', 'Month to date on the Energy page, in kWh.', ['currentmonth', 'monthtodate', 'monthlyenergy', 'mtdenergy'], ['kWh', 'MWh']),
-  live('carbon', ENERGY, 'Carbon emissions', 'Carbon on the Energy page, in kg CO₂ per hour.', ['carbonemissions', 'carbonemission', 'carbon', 'co2emissions'], ['kg', 'kgCO2', 'kgCO₂']),
-  live('energy_performance', KPIS, 'Energy performance', 'Performance on the Energy page, in %.', ['energyperformance'], ['%']),
-  live('energy_deviation', KPIS, 'Energy deviation', 'The energy deviation gauge on the Energy page, in %.', ['energydeviation'], ['%']),
-  live('after_hours_deviation', KPIS, 'Overnight load against normal', 'Overnight card on the Energy page, in %.', ['afterhoursdeviation', 'overnightdeviation'], ['%']),
-  live('kpi_after_hours_ratio', KPIS, 'Overnight status', 'The status word FIN\'s KPI gives the overnight card (for example Normal).', ['kpiafterhoursratio', 'afterhoursratio'], undefined, 'Str'),
-  live('hvac_epr', KPIS, 'HVAC energy performance ratio', 'HVAC performance card on the Energy page.', ['hvacepr', 'hvacenergyperformanceratio'], undefined),
-  live('kpi_hvac_epr', KPIS, 'HVAC performance status', 'The status word FIN\'s KPI gives the HVAC performance card.', ['kpihvacepr'], undefined, 'Str'),
-  live('energy_loss_idle', KPIS, 'Energy lost to idle load', 'Waste on the overnight card, in kWh.', ['energylossidle', 'idleloss'], ['kWh']),
-  live('energy_loss_hvac', KPIS, 'Energy lost to HVAC performance', 'Waste on the HVAC card, in kWh.', ['energylosshvac', 'hvacloss'], ['kWh']),
-  live('cost_impact_idle', KPIS, 'Cost of idle load', 'Cost on the overnight card, in the project currency.', ['costimpactidle']),
-  live('cost_impact_hvac', KPIS, 'Cost of HVAC performance', 'Cost on the HVAC card, in the project currency.', ['costimpacthvac']),
-  live('comfort_compliance', COMFORT, 'Comfort index', 'Comfort on the Overview and Spaces pages, in %.', ['thermalcomfortcompliance', 'comfortcompliance', 'comfortindex', 'comfort'], ['%']),
-  live('iaq_index', COMFORT, 'Indoor air quality index', 'IAQ on the Overview and Spaces pages, 0 to 100.', ['iaqindex', 'iaq', 'indoorairquality']),
-  live('temp_deviation', COMFORT, 'Temperature deviation index', 'HVAC card on the Systems page.', ['tempdeviation', 'temperaturedeviation'], ['°C', 'K', '%']),
-  live('total_water', UTIL, 'Water today', 'Water today on the Overview, in m³.', ['waterconsumption', 'totalwater', 'waterusage'], ['m³', 'm3']),
-  live('total_gas', UTIL, 'Gas today', 'Gas today on the Overview and Gas page, in m³.', ['gasconsumption', 'totalgas'], ['m³', 'm3']),
-  ...BOARDS.map(([k, , name]) => live(k, GROUP_MARSA, name, `Marsa Al Arab's built-in ${name} board, kW now on the Power page. For another site, add your own key and list it under Power Boards.`, [k], ['kW', 'kWh'])),
+  live('hourly_energy', OVERVIEW, 'Load now', 'Overview · kW or MW',
+    ['hourlyenergyconsumption', 'activepower', 'totalpower', 'hourlyenergy'], ['kW', 'MW', 'kWh']),
+  live('comfort_compliance', OVERVIEW, 'Comfort', 'Overview, Spaces · %', ['thermalcomfortcompliance', 'comfortcompliance', 'comfortindex', 'comfort'], ['%']),
+  live('iaq_index', OVERVIEW, 'IAQ', 'Overview, Spaces', ['iaqindex', 'iaq', 'indoorairquality']),
+  live('temp_deviation', SYSTEMS, 'Temperature deviation', 'Systems', ['tempdeviation', 'temperaturedeviation'], ['°C', 'K', '%']),
+  live('current_month', ENERGY, 'Energy this month', 'Energy · kWh or MWh', ['currentmonth', 'monthtodate', 'monthlyenergy', 'mtdenergy'], ['kWh', 'MWh']),
+  live('carbon', ENERGY, 'Carbon', 'Energy · kg CO₂/h', ['carbonemissions', 'carbonemission', 'carbon', 'co2emissions'], ['kg', 'kgCO2', 'kgCO₂']),
+  live('energy_performance', ENERGY, 'Energy performance', 'Energy · %', ['energyperformance'], ['%']),
+  live('energy_deviation', ENERGY, 'Energy deviation', 'Energy · %', ['energydeviation'], ['%']),
+  live('after_hours_deviation', ENERGY, 'Overnight load', 'Energy · %', ['afterhoursdeviation', 'overnightdeviation'], ['%']),
+  live('kpi_after_hours_ratio', ENERGY, 'Overnight status', 'Energy', ['kpiafterhoursratio', 'afterhoursratio'], undefined, 'Str'),
+  live('hvac_epr', ENERGY, 'HVAC performance', 'Energy', ['hvacepr', 'hvacenergyperformanceratio']),
+  live('kpi_hvac_epr', ENERGY, 'HVAC status', 'Energy', ['kpihvacepr'], undefined, 'Str'),
+  live('energy_loss_idle', ENERGY, 'Idle waste', 'Energy · kWh', ['energylossidle', 'idleloss'], ['kWh']),
+  live('energy_loss_hvac', ENERGY, 'HVAC waste', 'Energy · kWh', ['energylosshvac', 'hvacloss'], ['kWh']),
+  live('cost_impact_idle', ENERGY, 'Idle cost', 'Energy', ['costimpactidle']),
+  live('cost_impact_hvac', ENERGY, 'HVAC cost', 'Energy', ['costimpacthvac']),
+  live('peak_demand', POWER, 'Peak demand today', 'Power · kW or MW', ['peakdemand', 'maxdemand'], ['kW', 'MW']),
+  live('total_water', UTIL, 'Water today', 'Utilities · m³', ['waterconsumption', 'totalwater', 'waterusage'], ['m³', 'm3']),
+  live('total_gas', UTIL, 'Gas today', 'Utilities · m³', ['gasconsumption', 'totalgas'], ['m³', 'm3']),
+  ...BOARDS.map(([k, , name]) => live(k, GROUP_MARSA, name, 'Power · kW', [k], ['kW', 'kWh'])),
   live('energy_intensity', GROUP_UNUSED, 'Energy use intensity', '', ['energyuseintensity', 'eui', 'hvaceui'], ['kWh/m²']),
   live('after_hours_load', GROUP_UNUSED, 'After-hours load', '', ['afterhoursload'], ['kW', 'kWh']),
   live('daily_energy', GROUP_UNUSED, 'Energy today', '', ['dailyenergy', 'dailyenergyconsumption'], ['kWh']),
@@ -76,13 +76,12 @@ export const MAPPING_CATALOG: CatalogEntry[] = [
   live('avg_zone_temp_sp', GROUP_UNUSED, 'Average zone set point', '', ['avgzonetempsp'], ['°C']),
   live('ra_co2', GROUP_UNUSED, 'Return air CO₂', '', ['raco2', 'returnairco2'], ['ppm']),
 
-  hist('Hourly_Energy_Consumption_his', CHARTS, 'Energy by hour', 'Energy today, the hourly chart and the 7-day trend. Each sample is that hour\'s kWh.',
-    ['hourlyenergyconsumption', 'energyconsumption', 'hourlyenergy'], ['kWh']),
-  hist('Total_Power_Consumption_his', CHARTS, 'Energy by hour (fallback)', 'Used only when Energy by hour is not mapped, kWh each hour.', ['totalpowerconsumption', 'hourlyenergyconsumption'], ['kWh']),
-  hist('Peak_Demand_his', CHARTS, 'Peak demand history', 'Peak demand by hour, week and month on the Power page, in kW.', ['peakdemand'], ['kW']),
-  hist('Total_Water_Consumption_his', CHARTS, 'Water meter history', 'Water by hour, day and month on the Water page. The meter\'s running total, in m³.', ['waterconsumption', 'totalwaterconsumption'], ['m³', 'm3']),
-  hist('Total_Gas_Consumption_his', CHARTS, 'Gas meter history', 'Gas by hour, day and month on the Gas page. The meter\'s running total, in m³.', ['gasconsumption', 'totalgasconsumption'], ['m³', 'm3']),
-  ...BOARDS.map(([k, h, name]) => hist(h, GROUP_MARSA, name, `Marsa Al Arab's built-in ${name} board, kWh each hour. For another site, add your own key and list it under Power Boards.`, [k], ['kWh'])),
+  hist('Hourly_Energy_Consumption_his', ENERGY, 'Energy by hour', 'Energy · kWh or MWh',
+    ['hourlyenergyconsumption', 'energyconsumption', 'hourlyenergy'], ['kWh', 'MWh']),
+  hist('Peak_Demand_his', POWER, 'Peak demand', 'Power · kW or MW', ['peakdemand'], ['kW', 'MW']),
+  hist('Total_Water_Consumption_his', WATER, 'Water meter', 'Water · m³', ['waterconsumption', 'totalwaterconsumption'], ['m³', 'm3']),
+  hist('Total_Gas_Consumption_his', GAS, 'Gas meter', 'Gas · m³', ['gasconsumption', 'totalgasconsumption'], ['m³', 'm3']),
+  ...BOARDS.map(([k, h, name]) => hist(h, GROUP_MARSA, name, 'Power · kWh', [k], ['kWh'])),
   hist('Energy_Deviation_his', GROUP_UNUSED, 'Energy deviation history', '', ['energydeviation'], ['%']),
   hist('Energy_Use_Intensity_his', GROUP_UNUSED, 'Energy use intensity history', '', ['energyuseintensity', 'hvaceui'], ['kWh/m²']),
   hist('Carbon_Emissions_his', GROUP_UNUSED, 'Carbon emissions history', '', ['carbonemissions'], ['kg']),
@@ -90,8 +89,8 @@ export const MAPPING_CATALOG: CatalogEntry[] = [
   hist('After_Hours_Load_his', GROUP_UNUSED, 'After-hours load history', '', ['afterhoursload'], ['kW', 'kWh']),
 ]
 
-export const LIVE_GROUPS = [ENERGY, KPIS, COMFORT, UTIL, GROUP_MARSA, GROUP_UNUSED]
-export const HISTORY_GROUPS = [CHARTS, GROUP_MARSA, GROUP_UNUSED]
+export const LIVE_GROUPS = [OVERVIEW, SYSTEMS, ENERGY, POWER, UTIL, GROUP_MARSA, GROUP_UNUSED]
+export const HISTORY_GROUPS = [ENERGY, POWER, WATER, GAS, GROUP_MARSA, GROUP_UNUSED]
 
 export const catalogFor = (block: MappingBlock) => MAPPING_CATALOG.filter(e => e.block === block)
 export const catalogEntry = (block: MappingBlock, key: string) => MAPPING_CATALOG.find(e => e.block === block && e.key === key)

@@ -459,8 +459,8 @@ window.EKO_A = (function(){
     if(window.EKO_EP && window.EKO_OPS && window.EKO_EP.applies(E)) return window.EKO_EP.fcstPage(E);   /* E15 */
     const d = E.data.fcst, ar = E.lang === 'ar';
     const heroes = [
-      heroTile(E, E.t('fcstPeakDay'), ar?d.peakDayAr:d.peakDayEn, '', E.t('fcstPeakCap',{v:fmt(d.peakMwh,1),p:d.peakPct})),
-      heroTile(E, E.t('fcstMonthEnd'), fmt(d.monthEndMwh, 1), 'MWh', E.t('fcstMonthCap')),
+      heroTile(E, E.t('fcstPeakDay'), ar?d.peakDayAr:d.peakDayEn, '', E.t('fcstPeakCap',{v:fmt(d.peakMwh * 1000, 0),p:d.peakPct})),
+      heroTile(E, E.t('fcstMonthEnd'), fmt(d.monthEndMwh * 1000, 0), 'kWh', E.t('fcstMonthCap')),
       heroTile(E, E.t('fcstBasis'), ar?d.basisAr:d.basisEn, '', E.t('fcstBasisCap'))];
     const maxV = Math.max(...d.days.map(x=>x[3])) * 1.1;
     const cols = d.days.map((x,di) =>

@@ -146,8 +146,9 @@ window.EKO_R = (function(){
     'derived.wasteAedMtd':        E => { const v = mul(E.data.energyLanding.wasteTotalKwh, E.data.basis.aedPerKwh);
       return { win:'fixed', value:v, unit:cur(E), d:1, labelKey:'rpF.wasteMtd', sources:['model.opt'], basis:basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
     /* derived: emission */
-    'derived.co2TodayT':          E => { const v = mul(E.data.metrics.energyTodayMwh, E.data.basis.co2KgPerKwh);
-      return { win:'today', value:v, unit:'t CO₂', d:1, labelKey:'rpF.co2Today', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.mwhTimesFactor' }) }; },
+    'derived.co2TodayT':          E => { const kwh = E.data.metrics.energyTodayKwh != null ? E.data.metrics.energyTodayKwh : (E.data.metrics.energyTodayMwh != null ? E.data.metrics.energyTodayMwh * 1000 : null);
+      const v = mul(kwh, E.data.basis.co2KgPerKwh, 0.001);
+      return { win:'today', value:v, unit:'t CO₂', d:1, labelKey:'rpF.co2Today', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.kwhTimesFactor' }) }; },
     'derived.co2MtdT':            E => { const v = mul(E.data.energyLanding.mtdKwh, E.data.basis.co2KgPerKwh, 0.001);
       return { win:'fixed', value:v, unit:'t CO₂', d:1, labelKey:'pwCarbon', sources:['meters.main'], basis:basisFor(E, Object.assign({ sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.kwhTimesFactor' }, mtd(E))) }; },
     'derived.co2PrevMonthT':      E => { const v = mul(E.data.power.prevMonthKwh, E.data.basis.co2KgPerKwh, 0.001);
@@ -187,7 +188,7 @@ window.EKO_R = (function(){
     'incident.ageH': (E, per, params) => { const a = E.data.alarms.find(x => x.id === params.alarmId); if(!a) return null;
       return { win:'fixed', value:a.ageH, unit:'h', d:a.ageH < 1 ? 1 : 0, labelKey:'rpF.alarmAge', sources:['alarms'], basis:basisFor(E, Object.assign({ sources:['alarms'] }, at(E))) }; },
     /* forecast (sub-module locked on this site: the section says so) */
-    'fcst.monthEndMwh': E => ({ win:'fixed', value:E.data.fcst.monthEndMwh, unit:'MWh', d:0, labelKey:'rpF.monthEnd', sources:['model.fcst'], basis:basisFor(E, { sources:['model.fcst'], from:null, to:null, windowKey:'rpWin.monthEnd', windowParams:{} }) })
+    'fcst.monthEndMwh': E => ({ win:'fixed', value:E.data.fcst.monthEndMwh == null ? null : E.data.fcst.monthEndMwh * 1000, unit:'kWh', d:0, labelKey:'rpF.monthEnd', sources:['model.fcst'], basis:basisFor(E, { sources:['model.fcst'], from:null, to:null, windowKey:'rpWin.monthEnd', windowParams:{} }) })
   };
   const hoursOf = per => per.kind === 'last' ? per.h : per.kind === 'days' ? per.n * 24 : per.kind === 'month' || per.kind === 'prevMonth' ? 24 * 31 : 24;
 

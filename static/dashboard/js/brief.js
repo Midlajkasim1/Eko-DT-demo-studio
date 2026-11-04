@@ -1185,7 +1185,7 @@ window.EKO_BRIEF = (function(){
         text: t('br14d.pred', { a: x.asset, point: x.pointShort || lc14(app, x.point), n: Math.round(x.days) }), icon: t('br14d.icDays', { n: Math.round(x.days) }), pill: t('br14d.range', { lo: x.daysLo, hi: x.daysHi }),
         act: w ? { act: 'woOpen', data: { asset: x.asset }, label: t('br14c.openWo', { wo: w.id }) } : { act: 'e14Predict', data: { v: x.asset }, label: t('br14c.openPred') } }); });
     if(per === 'executive' || per === 'fm'){ const X = window.EKO_PERSONA && window.EKO_PERSONA.execLine ? window.EKO_PERSONA.execLine(app) : null;
-      if(X && X.M && X.M.gap > 0) coming.push({ key: 'budget', kind: 'budget', icon: 'MWh', pill: t('br14d.forecast'), text: t('br14c.budget', { m: X.mName, d: C().fmt(X.M.gap, 0) }) + (money14(app) && (app.data.basis || {}).aedPerKwh ? t('br14c.budgetAed', { aed: C().fmt(X.M.gap * 1000 * app.data.basis.aedPerKwh, 0) }) : ''),
+      if(X && X.M && X.M.gap > 0) coming.push({ key: 'budget', kind: 'budget', icon: 'kWh', pill: t('br14d.forecast'), text: t('br14c.budget', { m: X.mName, d: C().fmt(X.M.gap * 1000, 0) }) + (money14(app) && (app.data.basis || {}).aedPerKwh ? t('br14c.budgetAed', { aed: C().fmt(X.M.gap * 1000 * app.data.basis.aedPerKwh, 0) }) : ''),
         act: { act: 'goSub', data: { page: 'fcst', mod: 'energy', sub: 'fcst' }, label: t('br14c.openFcst') } }); }
     (p.lookahead ? p.lookahead.items : []).forEach(x => {
       if(coming.length >= 3) return;

@@ -117,12 +117,12 @@ function PointPicker({ block, entry, views, current, onPick, onClose }: PickerPr
       <input
         autoFocus
         className="fpm-search"
-        placeholder="Search equipment, point or unit, e.g. AHU_01 temp"
+        placeholder="Search equipment or point"
         value={query}
         onChange={e => setQuery(e.target.value)}
       />
       {!views.length && (
-        <p className="fpm-note">FIN points are not loaded. Connect to FIN and choose the FIN project in FIN Config, or type the point ID below.</p>
+        <p className="fpm-note">Points not loaded. Choose the FIN project, or type a point ID.</p>
       )}
       {!terms.length && best.length > 0 && (
         <>
@@ -314,18 +314,14 @@ export function FinPointMapping({ block, value, onChange, points, results, sugge
         return (
           <details key={g} className="fpm-group" open={anySet || terms.length > 0}>
             <summary className="fpm-gh">{g} ({list.length})</summary>
-            <p className="fpm-note">
-              {g === GROUP_UNUSED
-                ? 'The backend lists these keys, but no dashboard page reads them yet. Mapping one changes nothing for now.'
-                : 'Only Marsa Al Arab has these boards. For this site, add your own key below and list it under Power Boards.'}
-            </p>
+            <p className="fpm-note">{g === GROUP_UNUSED ? 'Not on a page yet.' : 'Marsa Al Arab boards.'}</p>
             {body}
           </details>
         )
       })}
       <section className="fpm-group">
         <h4 className="fpm-gh">Your own keys</h4>
-        <p className="fpm-note">A key of your own, for example a distribution board you then list under Power Boards.</p>
+        <p className="fpm-note">Your own key. List a board under Power Boards.</p>
         {ownRows.filter(visible).map(row)}
         <button type="button" className="ds-btn ds-btn-secondary fpm-btn"
           onClick={() => { const id = newRowId(); commit([...rows, { id, key: '', text: '', own: true }]); setOpen(id) }}>

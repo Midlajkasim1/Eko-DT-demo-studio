@@ -355,8 +355,9 @@
     return { en: s, ar: s, tone: tone };
   }
 
-  function toMw(v) {
-    return v > 50 ? v / 1000 : v;
+  function pointUnit(p, key) {
+    var u = p && p.units && p.units[key];
+    return String(u || '').replace(/\s+/g, '').toLowerCase();
   }
 
   /* Distribution boards: Eko-DT's board keys, as listed in Data Mapping (a live key and an hourly
@@ -423,7 +424,7 @@
   function holdSample(site, p) {
     var pw = site.power || {}, el = site.energyLanding;
     var boardsLive = mappedBoards(p).length > 0;
-    var todayLive = boardsLive || historyHas(p, 'Hourly_Energy_Consumption_his') || historyHas(p, 'Total_Power_Consumption_his');
+    var todayLive = boardsLive || historyHas(p, 'Hourly_Energy_Consumption_his');
     var waterLive = historyHas(p, 'Total_Water_Consumption_his');
     var held = [], blank = [];
     function hold(obj, keys, live) {
@@ -437,8 +438,8 @@
       if (!live.length) return hold(obj, keys, false);
       if (live.every(function (k) { return asNum(p[k]) == null; })) keys.forEach(function (k) { blank.push([obj, k, obj[k]]); });
     }
-    own(['hourly_energy', 'total_power'], site.metrics, ['loadNowMw']);
-    own(['hourly_energy', 'total_power'], el, ['currentKw']);
+    own(['hourly_energy'], site.metrics, ['loadNowMw', 'loadNowKw']);
+    own(['hourly_energy'], el, ['currentKw']);
     own(['peak_demand'], site.metrics, ['peakTodayKw', 'peakTodayMw']);
     own(['peak_demand'], pw.subview, ['peakKw']);
     own(['carbon'], el, ['carbonKgH']);
@@ -483,12 +484,23 @@
       obj[key] = val;
       changed = true;
     }
-    var loadKw = asNum(p.hourly_energy != null ? p.hourly_energy : p.total_power);
-    if (loadKw != null) { set(m, "loadNowMw", trunc1(toMw(loadKw))); set(el, "currentKw", trunc1(loadKw)); }
+    var load = mapsKey(p, 'hourly_energy') ? asNum(p.hourly_energy) : null;
+    if (load != null) {
+      var loadMw = pointUnit(p, 'hourly_energy') === 'mw';
+      var loadKw = loadMw ? load * 1000 : load;
+      set(m, 'loadNowMw', trunc1(loadMw ? load : load / 1000));
+      set(m, 'loadNowKw', trunc1(loadKw));
+      set(el, 'currentKw', trunc1(loadKw));
+      set(el, 'loadUnit', loadMw ? 'MW' : 'kW');
+      var fac = summaryRow(site, 'facility');
+      if (fac) { fac.d = 1; fac.u = loadMw ? 'MW' : 'kW'; fac.metric = loadMw ? 'loadNowMw' : 'loadNowKw'; }
+    }
     var peak = asNum(p.peak_demand);
     if (peak != null && peak > 0) {
-      set(m, "peakTodayKw", trunc1(peak));
-      set(m, "peakTodayMw", trunc1(peak / 1000));
+      var peakMw = pointUnit(p, 'peak_demand') === 'mw';
+      set(m, 'peakTodayKw', trunc1(peakMw ? peak * 1000 : peak));
+      set(m, 'peakTodayMw', trunc1(peakMw ? peak : peak / 1000));
+      set(el, 'peakUnit', peakMw ? 'MW' : 'kW');
     } else {
       m.peakTodayKw = null;
       m.peakTodayMw = null;
@@ -530,7 +542,12 @@
       }
     }
     var mtd = asNum(p.current_month);
-    if (mtd != null) set(el, "mtdKwh", trunc1(mtd));
+    if (mtd != null) {
+      var monthMwh = pointUnit(p, 'current_month') === 'mwh';
+      set(el, 'mtdKwh', trunc1(monthMwh ? mtd * 1000 : mtd));
+      set(el, 'mtdMwh', trunc1(monthMwh ? mtd : mtd / 1000));
+      set(el, 'mtdUnit', monthMwh ? 'MWh' : 'kWh');
+    }
     var perf = asNum(p.energy_performance);
     if (perf != null && perf >= 0 && perf <= 500) {
       set(el, "performancePct", trunc1(perf));
@@ -715,7 +732,6 @@
       }
 
       var enSpark = extractDaily("Hourly_Energy_Consumption_his");
-      if (!enSpark.length) enSpark = extractDaily("Total_Power_Consumption_his");
       var wtSpark = extractDaily("Total_Water_Consumption_his");
       if (site.summary) { applySparkAndDelta(summaryRow(site, "water"), wtSpark); changed = true; }
       var gsSpark = extractDaily("Total_Gas_Consumption_his");
@@ -847,18 +863,17 @@
       /* FIN nav name is Hourly_Energy_Consumption. Each sample is that hour's
          kWh. Energy today is midnight through the current hour, Dubai time.
          Yesterday uses the same hours so the percent and the spark match. */
-      var hourlyFlat = flattenHist(
-        p.power_history.Hourly_Energy_Consumption_his || p.power_history.Total_Power_Consumption_his
-      );
+      var hourlyFlat = flattenHist(p.power_history.Hourly_Energy_Consumption_his);
       var nowP = nowParts();
       var yestP = shiftDay(nowP.y, nowP.m, nowP.d, -1);
       var todayHours = hoursThrough(hourlyFlat, nowP.y, nowP.m, nowP.d, nowP.h);
       var yestHours = hoursThrough(hourlyFlat, yestP.y, yestP.m, yestP.d, nowP.h);
       var todayKwh = sumKnown(todayHours);
       var yestKwh = sumKnown(yestHours);
+      var energyMwh = pointUnit(p, 'Hourly_Energy_Consumption_his') === 'mwh';
       if (todayKwh != null && todayKwh > 0) {
-        set(m, "energyTodayKwh", trunc1(todayKwh));
-        set(m, "energyTodayMwh", todayKwh / 1000);
+        set(m, "energyTodayKwh", trunc1(energyMwh ? todayKwh * 1000 : todayKwh));
+        set(m, "energyTodayMwh", trunc1(energyMwh ? todayKwh : todayKwh / 1000));
       } else {
         m.energyTodayKwh = null;
         m.energyTodayMwh = null;
@@ -866,6 +881,11 @@
       // real mode's basis.asOf is already the live site clock (a getter, applyReportingBasis)
       if (site.basis && !realMode) site.basis.asOf = String(nowP.h).padStart(2, "0") + ":00";
       var energyRow = summaryRow(site, "energy");
+      if (energyRow && historyHas(p, 'Hourly_Energy_Consumption_his')) {
+        energyRow.d = 1;
+        energyRow.u = energyMwh ? 'MWh' : 'kWh';
+        energyRow.metric = energyMwh ? 'energyTodayMwh' : 'energyTodayKwh';
+      }
       if (energyRow) {
         energyRow.spark = todayHours;
         energyRow.sparkCompare = yestHours;

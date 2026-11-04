@@ -280,8 +280,15 @@
     return order.map(function (k) { return merged[k]; });
   }
 
-  function alarmDetailFromTable(body) {
-    var texts = [];
+  // 16°C, 800ppm, 250Pa: a number FIN wrote with its unit. Not a fault sentence.
+  var MEAS = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?(?:[°%][A-Za-z0-9/%°³².]*|[A-Za-z][A-Za-z0-9/%°³².]*)?$/;
+
+  function foldLabel(text) {
+    return String(text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function alarmDetailFromTable(body, message) {
+    var sentences = [];
     var numbers = [];
     String(body || '').split('\n').forEach(function (line) {
       line = line.trim();
@@ -293,30 +300,51 @@
       if (raw.charAt(0) === '"' && raw.charAt(raw.length - 1) === '"') raw = raw.slice(1, -1);
       raw = decodeZinc(raw).trim();
       if (!raw || raw === 'T' || raw === 'F' || raw === 'true' || raw === 'false' || raw === 'M') return;
-      var n = Number(raw);
-      if (raw !== '' && isFinite(n) && /^-?\d+(?:\.\d+)?$/.test(raw)) numbers.push([name, n]);
-      else texts.push(raw);
+      if (MEAS.test(raw)) {
+        var shown = raw;
+        var n = Number(raw);
+        if (raw !== '' && isFinite(n) && /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(raw)) shown = trunc2(n);
+        numbers.push([name, shown]);
+        return;
+      }
+      if (/normal\.?$/i.test(raw)) return;
+      if (raw.indexOf(' ') < 0 && raw.toLowerCase().indexOf('fault') < 0) return;
+      sentences.push([name, raw]);
     });
-    var fault = texts.filter(function (t) { return !/normal\.?$/i.test(t.trim()); });
-    if (fault.length) return clipDecimals(fault[fault.length - 1]);
-    if (numbers.length) return clipDecimals(numbers[0][0] + ' ' + trunc2(numbers[0][1]));
-    return texts.length ? clipDecimals(texts[texts.length - 1]) : '';
+    if (sentences.length) {
+      var want = foldLabel(message);
+      if (want) {
+        var hit = sentences.filter(function (pair) {
+          var name = foldLabel(pair[0]);
+          return name && want.indexOf(name) >= 0;
+        });
+        if (hit.length) {
+          hit.sort(function (a, b) { return foldLabel(a[0]).length - foldLabel(b[0]).length; });
+          return clipDecimals(hit[hit.length - 1][1]);
+        }
+      }
+      return clipDecimals(sentences[sentences.length - 1][1]);
+    }
+    if (numbers.length) return clipDecimals(numbers[0][0] + ' ' + numbers[0][1]);
+    return '';
   }
 
   function attachAlarmDetails(text, rows) {
     if (!text || !rows || !rows.length) return;
-    var details = {};
+    var bodies = {};
     String(text).split(/(?=^@)/m).forEach(function (chunk) {
       if (chunk.charAt(0) !== '@') return;
       var idTok = chunk.split(' ')[0].trim();
       var found = chunk.match(/name,sourceRef,value\s*\n([\s\S]*?)\n\s*>>/);
       if (!found || !idTok) return;
-      var detail = alarmDetailFromTable(found[1]);
-      if (detail) details[idTok] = detail;
+      bodies[idTok] = found[1];
     });
     rows.forEach(function (row) {
       var val = safeGet(row.id, 'val');
-      if (val && details[val]) row.detail = details[val];
+      var body = val && bodies[val];
+      if (!body) return;
+      var detail = alarmDetailFromTable(body, row.message || '');
+      if (detail) row.detail = detail;
     });
   }
 
@@ -993,11 +1021,13 @@
       return finText(evalPath(cfg.project, 'readById(@' + fillProject(cfg.livePoints[key], cfg.project) + ')'));
     });
     if (values.some(unauth)) return { unauthorized: true };
-    var live = { timestamp: nowIso(), unit: 'kWh', fdd: this.fdd, facilityServices: this.facility };
+    var live = { timestamp: nowIso(), fdd: this.fdd, facilityServices: this.facility, units: {} };
     keys.forEach(function (key, i) {
-      live[key] = typeof values[i] === 'string' ? parseLiveValue(values[i]) : null;
+      var text = typeof values[i] === 'string' ? values[i] : '';
+      live[key] = text ? parseLiveValue(text) : null;
+      var unit = text.match(/unit:"([^"]+)"/);
+      if (unit) live.units[key] = unit[1].replace(/ Dubai/g, '').trim();
     });
-    if (live.hourly_energy != null && live.total_power == null) live.total_power = live.hourly_energy;
     live.carbon_emission = live.carbon != null ? live.carbon : null;
     live.avg_temp = this.sensor.temp;
     live.avg_hum = this.sensor.humidity;
@@ -1017,12 +1047,13 @@
     });
     if (texts.some(unauth)) return { unauthorized: true };
     var history = {};
+    var units = {};
     keys.forEach(function (key, i) {
-      history[key] = aggregateHistory(parseHistory(typeof texts[i] === 'string' ? texts[i] : '').rows);
+      var parsed = parseHistory(typeof texts[i] === 'string' ? texts[i] : '');
+      history[key] = aggregateHistory(parsed.rows);
+      if (parsed.unit) units[key] = parsed.unit;
     });
-    if (history.Hourly_Energy_Consumption_his && !history.Total_Power_Consumption_his) {
-      history.Total_Power_Consumption_his = history.Hourly_Energy_Consumption_his;
-    }
+    if (Object.keys(units).length) history._units = units;
     return history;
   };
 

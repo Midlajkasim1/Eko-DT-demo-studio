@@ -250,26 +250,11 @@ const mappingStatesFrom = (s: ProjectApiSettings): MappingStates =>
 // What each Data Mapping block controls. No other site's values are offered here: a project's
 // mapping is only what the user enters for it.
 const MAPPING_SECTIONS: { field: MappingField; hint: string }[] = [
-  {
-    field: 'finLivePoints',
-    hint: 'Each dashboard reading takes one FIN point. Pick the point that measures it: the dashboard shows its value, or -- when FIN has none.',
-  },
-  {
-    field: 'finEndpoints',
-    hint: 'The charts read a FIN point\'s history. Pick a point that keeps history and Eko-DT writes the history query for it.',
-  },
-  {
-    field: 'finEquipmentClasses',
-    hint: 'Which equipment tags count as plant systems or meters, and the order used to pick an equipment type.',
-  },
-  {
-    field: 'finMeterProfile',
-    hint: 'The name prefix that identifies power meters, and the point-name aliases for each meter metric.',
-  },
-  {
-    field: 'finSeverityBands',
-    hint: 'How a FIN alarm priority maps to critical / warning / info. "desc": a higher number is more severe.',
-  },
+  { field: 'finLivePoints', hint: 'One FIN point each. Empty shows --.' },
+  { field: 'finEndpoints', hint: 'One history point each.' },
+  { field: 'finEquipmentClasses', hint: 'Equipment tags for systems and meters.' },
+  { field: 'finMeterProfile', hint: 'Meter name prefix and point aliases.' },
+  { field: 'finSeverityBands', hint: 'Alarm priority: critical, warning, info.' },
 ]
 
 const DEFAULT_DASHBOARD_CONFIG = {
@@ -790,8 +775,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
           {/* Kept mounted (just hidden) so rows being edited survive a switch of tab */}
           {(
             <div className="ds-pane" style={activeTab === 'data' ? undefined : { display: 'none' }}>
-              <h3 className="ds-section-title">Standalone Mode (Direct API)</h3>
-              <p className="ds-hint">Enable this to bypass the Python backend and fetch data directly from FIN (useful when hosting this viewer inside the FIN framework).</p>
+              <h3 className="ds-section-title">Direct FIN</h3>
               <div className="ds-field">
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                   <input 
@@ -800,29 +784,26 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                     onChange={e => update('finDirectMode', e.target.checked)} 
                     style={{ width: 'auto' }}
                   />
-                  Use Direct FIN API (No Backend)
+                  Direct FIN API
                 </label>
               </div>
 
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Mapping validation</h3>
               {MAPPING_FIELDS.every(f => !mappings[f].value) && (
-                <p className="ds-hint">
-                  — Not Configured. No project-specific mappings configured for this {isFin ? 'FIN ' : ''}project.
-                </p>
+                <p className="ds-hint">No mappings yet.</p>
               )}
               {!selectedFinProject && (
-                <p className="ds-hint">No FIN project selected. Choose one in FIN Config to load its points here.</p>
+                <p className="ds-hint">Choose a FIN project in FIN Config.</p>
               )}
               {selectedFinProject && finConnected && resources?.project !== selectedFinProject && (
-                <p className="ds-hint" data-testid="fin-resources-status">Loading the points of FIN project {selectedFinProject}...</p>
+                <p className="ds-hint" data-testid="fin-resources-status">Loading points…</p>
               )}
               {selectedFinProject && finConnected && resources?.project === selectedFinProject && (
                 <p className="ds-hint" data-testid="fin-resources-status">
                   {resources.state === 'ready' && (
-                    `${resources.items.length} points available from FIN project ${resources.project}${resources.truncated ? ' (list cut short)' : ''}. ` +
-                    'Click a reading to choose its point. Best matches are offered, and which point is which stays your decision.'
+                    `${resources.items.length} points${resources.truncated ? ', list cut short' : ''}.`
                   )}
-                  {resources.state === 'error' && `Could not load the points of ${resources.project}: ${resources.message}. Mappings can still be typed.`}
+                  {resources.state === 'error' && `Could not load points. Type a point ID.`}
                 </p>
               )}
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '8px' }}>
@@ -836,26 +817,18 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 >
                   {validating ? 'Validating…' : 'Validate Mapping'}
                 </button>
-                {!finConnected && <span className="ds-hint" style={{ margin: 0 }}>Connect to FIN to validate.</span>}
+                {!finConnected && <span className="ds-hint" style={{ margin: 0 }}>Connect to FIN first.</span>}
                 {finConnected && validateBlocked && (
-                  <span className="ds-hint" style={{ margin: 0 }}>
-                    Save Settings first: validation checks the FIN project this session serves
-                    ({finStatus?.project_name || 'none'}), not the one just selected.
-                  </span>
+                  <span className="ds-hint" style={{ margin: 0 }}>Save Settings first.</span>
                 )}
                 {validation && (
-                  <span className="ds-hint" style={{ margin: 0 }}>
-                    Checked against FIN project {validation.project_name}. Nothing was changed.
-                  </span>
+                  <span className="ds-hint" style={{ margin: 0 }}>Checked. Nothing changed.</span>
                 )}
               </div>
               {validateError && <div style={{ color: 'var(--red)', fontSize: '12px', marginBottom: '8px' }}>{validateError}</div>}
 
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Import and export</h3>
-              <p className="ds-hint">
-                The mapping CSV lists every reading and chart with the point it reads; fill fin_point_id, or fin_point_name as
-                EQUIPMENT › Point, and import it back. A blank cell leaves that mapping as it is. Save Settings keeps the result.
-              </p>
+              <p className="ds-hint">CSV of readings and points. A blank cell stays as it is.</p>
               <div className="fpm-csv">
                 <button type="button" className="ds-btn ds-btn-secondary fpm-btn" onClick={downloadMappingCsv}>Download mapping CSV</button>
                 <button type="button" className="ds-btn ds-btn-secondary fpm-btn" disabled={!finPoints?.length}
@@ -911,9 +884,9 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
 
               <MappingSection
                 title="O&M and warranty"
-                hint="Each group is one kind of equipment. The asset drawer opens its O&M manual and its warranty when the equipment matches. Save Settings stores the list on this project, and om-warranty.json is not read for it after that. Leave this unset and that file stays the catalog for the site it belongs to."
+                hint="Equipment groups and their manuals."
                 hasValue={!!settings.finDocuments?.length || !!docsError}
-                unsetText="Not set for this project. Marsa Al Arab's manuals stay in om-warranty.json until they are copied here and saved. Another FIN project gets no manuals from that file."
+                unsetText="Not set. Marsa Al Arab still uses om-warranty.json."
                 error={docsError ?? undefined}
                 onLoad={() => { update('finDocuments', undefined); setDocsError(null); setDocsRev(r => r + 1) }}
               >
@@ -928,11 +901,9 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
 
               <MappingSection
                 title="Power Boards"
-                hint={"The distribution boards on the Power page. Each board names a key of this project's Live readings"
-                  + ' (and, optionally, a Chart history key and a meter); FIN point IDs stay in those mappings.'
-                  + ' Not set: the built-in boards (MCC 1, MCC 2, …) where this project maps their keys.'}
+                hint="Boards on the Power page. Each board uses a live reading key."
                 hasValue={!!settings.finPowerBoards?.length}
-                unsetText="No boards set for this project: the built-in boards are shown where this project maps their keys."
+                unsetText="No boards set. Built-in boards show where their keys are mapped."
                 error={boardsError ?? undefined}
                 onLoad={() => { update('finPowerBoards', undefined); setBoardsRev(r => r + 1) }}
               >

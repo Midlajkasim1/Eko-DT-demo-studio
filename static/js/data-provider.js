@@ -162,6 +162,7 @@
     connected: false,
     power: null,
     powerHistory: null,
+    historyUnits: null,
     equipment: null,
     alarms: null,
     meters: null,
@@ -200,7 +201,9 @@
   // Consumers read power_history off the live payload, so it is spliced back in
   // here rather than re-sent with every 5 s poll
   function withHistory(live) {
-    return state.powerHistory ? { ...live, power_history: state.powerHistory } : live;
+    if (!state.powerHistory) return live;
+    var units = Object.assign({}, live && live.units, state.historyUnits);
+    return Object.assign({}, live, { power_history: state.powerHistory, units: units });
   }
 
   // Every poll checks, after its await, that this poller was not stopped meanwhile: a stopped
@@ -231,7 +234,10 @@
     if (generation !== state.generation) return;
     if ([equipment, alarms, meters, history, documents, workorders, alarmHistory].some(function (d) { return d && d.otherProject; })) retrySoon(generation);
     if (usable(history)) {
-      state.powerHistory = history;
+      state.historyUnits = history._units || null;
+      var series = Object.assign({}, history);
+      delete series._units;
+      state.powerHistory = series;
       if (state.power) {
         state.power = withHistory(state.power);
         emit('power', state.power);
@@ -303,6 +309,7 @@
     state.generation++;
     state.timers.forEach(clearInterval);
     state.timers = [];
+    state.historyUnits = null;
     if (catchUp) { clearTimeout(catchUp); catchUp = null; }
     releaseWatch();
   }
