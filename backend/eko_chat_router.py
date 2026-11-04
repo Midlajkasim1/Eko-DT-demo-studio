@@ -65,7 +65,19 @@ NUMBER_WORDS = {"a": 1, "an": 1, "one": 1, "single": 1, "two": 2, "three": 3, "f
 NOT_A_TYPE = {"alarm", "alert", "notification", "equipment", "asset", "item", "system", "unit", "thing", "point", "all",
               "one", "other", "help", "reading", "value", "metric", "fault", "problem", "status", "option"}
 ASSETS = r"(?:equipment|assets?|equipment assets?)"
+# the verbs that ask for a list ("read the equipment list", "view all assets"), and the words that may sit between verb and noun
+LISTV = r"(?:show(?: me)?|list|display|get|give me|read|view|see|fetch|print|pull up|bring up)"
+FILLER = r"(?:(?:all|the|every|complete|full|entire|whole|available|installed|current|existing) )*"
+# words that can stand before "equipment" without being an equipment type: no type filter is made from them
+NOT_KIND_WORDS = {"the", "all", "a", "an", "my", "our", "this", "that", "these", "those", "every", "each", "any", "some", "other",
+                  "critical", "warning", "info", "faulty", "broken", "offline", "online", "running", "stopped", "active", "open",
+                  "alarm", "alarming", "unhealthy", "available", "installed", "current", "existing", "total", "overall",
+                  "complete", "full", "entire", "whole", "list", "register", "inventory", "latest", "recent", "new",
+                  "energy", "power", "water", "gas", "electricity", "temperature", "humidity", "load", "demand", "consumption", "usage",
+                  "carbon", "cost", "emission", "building", "site", "project", "floor", "room", "space", "ppm"}
 HERE = r"(?: (?:in|of|for|from) (?:this|the|our|your)(?: (?:currently selected|selected|current|open|active))? (?:project|building|site))?"
+ASK = r"(?:(?:give me|tell me|show me|what is|what's) )?"
+PROJ = r"(?: (?:for|in|about))?(?: (?:this|the|my|our))?(?: (?:project|building|site))?"
 
 # (rule id, intent, anchored pattern). <eq> stands for the one explicit equipment id in the question.
 RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat + "$")) for rid, intent, pat in [
@@ -140,7 +152,111 @@ RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat +
      r"(?:show(?: me)? |list |display |get |give me )(?:all )?(?:the )?(?:(?:available|installed) )?(?P<kind>[a-z]{2,8}?)s?" + HERE),
     ("equipment.type.count", "find_equipment",
      r"how many (?P<kind>[a-z]{2,8}?)s?(?: (?:are there|do we have|are available|are installed|exist))?" + HERE),
+    # a class written out in full next to the noun: "list electrical equipment", "show all the HVAC assets", "how many electrical assets".
+    # The type is the word the user wrote (never one this code or a model picked); NOT_KIND_WORDS are not types, so those go on
+    # to the model instead of becoming a filter that matches nothing.
+    ("equipment.kind.list", "find_equipment",
+     LISTV + r" " + FILLER + r"(?P<kind>[a-z][a-z-]{1,19}) " + ASSETS + r"(?: list)?" + HERE),
+    ("equipment.kind.count", "find_equipment",
+     r"how many (?P<kind>[a-z][a-z-]{1,19}) " + ASSETS + r"(?: (?:are |is )?(?:there|available|installed|do we have))*" + HERE),
 ]]
+
+# Whole-inventory questions: every item of the open project, no filter. Tried even for a question the "complex" test would refuse,
+# because "total" there means the count of everything ("total assets"), not a sum or a ranking. Whole-question templates like RULES.
+INVENTORY_RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat + "$")) for rid, intent, pat in [
+    ("equipment.list.read", "find_equipment",
+     LISTV + r" " + FILLER + ASSETS + r"(?: (?:list|register|inventory))?" + HERE),
+    ("equipment.list.noun", "find_equipment",
+     FILLER + ASSETS + r" (?:list|register|inventory)" + HERE),
+    ("equipment.list.of", "find_equipment",
+     r"(?:" + LISTV + r" )?(?:me )?(?:a |the )?list of " + FILLER + ASSETS + HERE),
+    ("equipment.count.total", "find_equipment",
+     r"(?:what(?:'s| is) )?(?:the )?(?:total|overall) (?:(?:number|count) of )?" + FILLER + ASSETS + r"(?: count)?" + HERE),
+    ("equipment.count.noun", "find_equipment",
+     r"(?:what(?:'s| is) )?(?:the )?(?:" + ASSETS + r" count|(?:number|count) of " + FILLER + ASSETS + r")" + HERE),
+    ("equipment.count.verb", "find_equipment",
+     r"count " + FILLER + ASSETS + HERE),
+    ("equipment.count.howmany", "find_equipment",
+     r"how many " + ASSETS + r"(?: (?:are |is )?(?:there|do we have|we have))? (?:in total|altogether|overall)" + HERE),
+    # the count of one class written as a word: "total number of AHUs", "total FCUs", "AHU count", "count the ahus"
+    ("equipment.kind.count.number", "find_equipment",
+     ASK + r"(?:the )?(?:total )?(?:number|count) of (?:all )?(?:the )?(?P<kind>[a-z]{2,8}?)s?" + HERE),
+    ("equipment.kind.count.total", "find_equipment",
+     ASK + r"(?:the )?total (?P<kind>[a-z]{2,8}?)s?" + HERE),
+    ("equipment.kind.count.noun", "find_equipment",
+     ASK + r"(?:the )?(?P<kind>[a-z]{2,8}?)s? count" + HERE),
+    ("equipment.kind.count.verb", "find_equipment",
+     r"count (?:all )?(?:the )?(?P<kind>[a-z]{2,8}?)s?" + HERE),
+    # what the assistant can do for this project (answered from the project's own mappings, see eko_chat.get_capabilities)
+    ("capabilities.overview", "get_capabilities",
+     r"(?:what|which) (?:can|could) (?:you|eko) (?:do|answer|help(?: me)? with|tell me|show me|support)" + PROJ),
+    ("capabilities.overview.tell", "get_capabilities",
+     r"tell me what (?:you|eko) (?:can|could) (?:do|answer|help(?: me)? with)" + PROJ),
+    ("capabilities.overview.tell2", "get_capabilities",
+     r"tell me what (?:can|could) (?:you|eko) (?:do|answer|help(?: me)? with)" + PROJ),
+    ("capabilities.overview.ask", "get_capabilities",
+     r"what (?:can|could) i (?:ask|do|see|know)(?: you)?(?: about| for)?" + PROJ),
+    ("capabilities.overview.kinds", "get_capabilities",
+     r"what (?:questions|things|kinds of questions) (?:can|could) i ask(?: you)?(?: about)?" + PROJ),
+    ("capabilities.overview.data", "get_capabilities",
+     r"(?:what|which) (?:data|information|capabilities|features) (?:is|are|do you have|do you support|can you (?:show|access|read|see))"
+     r"(?: available| mapped| supported)?(?: for| in| about)?" + PROJ),
+    ("capabilities.overview.help", "get_capabilities",
+     r"(?:help|capabilities|features|what do you support|what do you know|what are your capabilities|what are you able to do|"
+     r"what are your features|(?:show|list|give me) (?:me )?(?:the |your )?(?:capabilities|features|supported questions))"),
+    ("capabilities.overview.mapped", "get_capabilities",
+     r"what is (?:mapped|available)" + PROJ),
+]]
+
+# what the question names but nothing answers yet: (capability id, pattern on the normalised question). NOT used by route(): a question like this
+# still goes to the model when there is one. Only where a question would otherwise end as "unsupported" (no model, or the model did not answer)
+# does eko_chat.topic_reply say which capability it is and why it is not available, from get_capabilities(about=id).
+UNSUPPORTED_TOPICS: list[tuple[str, re.Pattern]] = [(cid, re.compile(pat)) for cid, pat in [
+    ("studio.theme", r"\b(?:dark|light|auto) (?:mode|theme)\b|\btheme\b|\bappearance\b"),
+    ("studio.navigate", r"^(?:open|go to|goto|navigate to|take me to|switch to|bring up) (?:the )?[a-z ]{2,40}? (?:page|dashboard|module|screen|view|tab)$"),
+    ("studio.filter", r"^(?:filter|sort|group)\b|\b(?:apply|set|clear|reset) (?:a |the )?filters?\b"),
+    ("control.write", r"^(?:turn|switch|power) (?:on|off)\b|^(?:start|stop|restart|reset|set|change|adjust|raise|lower|increase|decrease|"
+                      r"acknowledge|ack|silence|mute|disable|enable|delete|remove|edit|update|write|override)\b"),
+    ("energy.compare", r"\b(?:compare|compared|comparison|versus|vs)\b.*\b(?:energy|power|consumption|usage)\b|"
+                       r"\b(?:energy|power|consumption|usage)\b.*\b(?:compare|compared|comparison|versus|vs)\b"),
+    ("energy.trend", r"\b(?:energy|power|consumption|usage)\b.*\b(?:trend|trends|weekly|monthly|last week|last month|this week|over time|history)\b"),
+    ("alarms.history_summary", r"\b(?:alarm|alert)s? history\b|\b(?:alarm|alert)s?\b.*\b(?:history|historical|trend|per day|by day|each day|last week|last month|this week)\b"),
+    ("utilities.water_gas", r"\b(?:water|gas)\b.*\b(?:consumption|usage|use|meter|reading)\b"),
+    ("maintenance.workorders", r"\b(?:work ?orders?|maintenance (?:jobs?|tasks?|requests?|schedule)|cmms)\b"),
+    ("documents.om", r"\b(?:warranty|warranties|o&m|o and m|manuals?|documents?)\b"),
+    ("meters.power", r"\b(?:power meters?|meter readings?|meters?|pmu|voltage|power factor)\b"),
+]]
+
+
+# A question the words of which fit more than one reading: asked back in one short sentence instead of guessed. (pattern on the normalised
+# question, the question to ask). Used where a question would otherwise end as "unsupported", like UNSUPPORTED_TOPICS.
+CLARIFICATIONS: list[tuple[re.Pattern, str]] = [(re.compile(pat), ask) for pat, ask in [
+    (r"^(?:(?:what is|what's|show|get|check|tell me|read)(?: me)? )?(?:the )?(?:current |present |live )?(?:temperature|temp)(?: reading| level)?" + NOW + "$",
+     "Which temperature do you mean? I can read this project's average indoor (zone) temperature: ask \"what is the indoor temperature\". "
+     "Outdoor and supply-air temperatures are not read."),
+]]
+
+
+def clarification_for(question: Any) -> Optional[str]:
+    """The short question to ask back when the wording fits more than one reading, or None."""
+    if not isinstance(question, str) or not question.strip() or len(question) > MAX_MESSAGE_CHARS or UNSAFE.search(question):
+        return None
+    text = _normalize(question)
+    for pattern, ask in CLARIFICATIONS:
+        if pattern.match(text):
+            return ask
+    return None
+
+
+def unsupported_topic(question: Any) -> Optional[str]:
+    """The capability id a question asks for that nothing answers (UNSUPPORTED_TOPICS), or None."""
+    if not isinstance(question, str) or not question.strip() or len(question) > MAX_MESSAGE_CHARS or UNSAFE.search(question):
+        return None
+    text = _normalize(question)
+    for cid, pattern in UNSUPPORTED_TOPICS:
+        if pattern.search(text):
+            return cid
+    return None
 
 
 # Metric questions (indoor environment, energy over a period, HVAC online state). Whole-question templates like RULES, but tried
@@ -242,13 +358,14 @@ def route(question: Any) -> dict:
     text = question if equipment is None else question.replace(equipment, "<eq>")
     text = _normalize(text)
     complex_q = bool(text.count("?") or text.count(",") or COMPLEX.search(text))
-    for rid, intent, pattern in ([] if complex_q else RULES):
+    for rid, intent, pattern in ([] if complex_q else RULES) + INVENTORY_RULES:
         m = pattern.match(text)
         if not m:
             continue
         gd = m.groupdict()
         kind = (gd.get("kind") or "").lower()
-        if kind in NOT_A_TYPE:
+        both = {kind, kind + "s"}     # the pattern takes a trailing "s" as a plural: "gas" is read as "ga" + s, "status" as "statu" + s
+        if both & NOT_A_TYPE or (rid.startswith("equipment.kind.") and both & NOT_KIND_WORDS):
             continue
         params: dict = {}
         if "<eq>" in pattern.pattern:
@@ -331,6 +448,50 @@ def _shown(r: dict) -> str:
     return f" Showing {r.get('returned', 0)} of {r.get('total', 0)}." if r.get("truncated") else ""
 
 
+_DATA_KIND = {"live": "a current FIN read", "historical": "FIN's hourly history", "stored": "Eko-DT's own notification store"}
+_READ_STATE = {"stale": "is stale (older than the allowed age)", "not_read": "has not been read from FIN yet"}
+
+
+def _capabilities_text(r: dict) -> str:
+    """What the assistant can do for this project, in words, copied from the get_capabilities result."""
+    from eko_chat_capabilities import AVAILABLE, NOT_SUPPORTED, UNMAPPED, where
+    project = (r.get("project") or {}).get("name") or "this project"
+    a = r.get("about")
+    if a:
+        label, status = a.get("label"), a.get("status")
+        if status == NOT_SUPPORTED:
+            if a.get("reason") == "read_only":
+                return f"{a.get('note') or label + ' is not something Eko-Chat does.'}"
+            return f"{label} is not supported yet." + (f" {a['note']}" if a.get("note") else "") + " Ask \"what can you do\" for what is available."
+        if status == UNMAPPED:
+            need = "; ".join(where(m) for m in a.get("missing") or [])
+            return f"{label} is not available for {project}: nothing is mapped for it. Map {need}."
+        text = f"{label} is available for {project}, from {_DATA_KIND.get(a.get('data'), 'the project data')}."
+        if a.get("examples"):
+            text += f" For example: \"{a['examples'][0]}\"."
+        if a.get("read") in _READ_STATE:
+            text += f" Its data {_READ_STATE[a['read']]}."
+        return text + "".join(" " + m for m in a.get("limitations") or []) + (f" {a['note']}" if a.get("note") else "")
+    rows = r.get("capabilities") or []
+    counts = r.get("counts") or {}
+    by_area = [f"{x['label']} ({x.get('available', 0)})" for x in r.get("areas") or [] if x.get("available")]
+    text = (f"For {project} I can answer {counts.get(AVAILABLE, 0)} kinds of question, read-only from its FIN data: " + ", ".join(by_area) + ".")
+    unmapped = [x for x in rows if x.get("status") == UNMAPPED]
+    if unmapped:
+        text += " Not available because nothing is mapped for this project: " + "; ".join(
+            f"{x['label']} (needs {', '.join(m['key'] or m['mapping'] for m in x['missing'])})" for x in unmapped) + "."
+    todo = [x["label"] for x in rows if x.get("status") == NOT_SUPPORTED and x.get("reason") == "planned"]
+    if todo:
+        text += " Not supported yet: " + ", ".join(todo) + "."
+    limits = sorted({m for x in rows if x.get("status") == AVAILABLE for m in x.get("limitations") or []})
+    if limits:
+        text += " Limits: " + " ".join(limits)
+    odd = [f"{k} {_READ_STATE[v['state']]}" for k, v in (r.get("reads") or {}).items() if v.get("state") in _READ_STATE]
+    if odd:
+        text += " Data state: " + "; ".join(odd) + "."
+    return text
+
+
 def direct_text(out: dict, rule: str = "") -> str:
     """The answer sentence for an execute() result."""
     intent, params, r = out.get("intent"), out.get("parameters") or {}, out.get("result") or {}
@@ -365,6 +526,8 @@ def direct_text(out: dict, rule: str = "") -> str:
             return f"No equipment of type {kind} was found in this project's data."
         lead = f"Equipment of type {kind}: {total}." if kind else f"Equipment items: {total}."
         return lead + (f" Including {_names(names)}." if names else "") + _shown(r)
+    if intent == "get_capabilities":
+        return _capabilities_text(r)
     if intent == "get_equipment_status":
         if not r.get("found"):
             cands = r.get("candidates") or []

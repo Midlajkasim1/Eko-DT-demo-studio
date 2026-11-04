@@ -181,6 +181,19 @@ with it is built by code from the tool result. Code: `eko_chat.py`, `eko_chat_ro
   400 (`project_required`) or 409 (`project_mismatch`, `session_project_mismatch`, `project_not_validated`) as JSON
   `{"detail": {"error", "message"}}`. A disabled chat answers 503 first, whoever asks. The browser client sends the header from the project the
   Studio opened and refuses an answer that comes back for any other project.
+  Any project that passes those checks may use chat (Marsa Al Arab, EKO HOSPITAL, ...), and the tools read **that** project's own caches and
+  mappings; a block it did not map is reported as not mapped, never filled from another project (`power_boards` included: config.json's boards
+  belong to its own site only). `chat.allowed_projects` (a list of FIN project names) is an optional operator allow-list: absent, nobody is
+  excluded; present, a project not in it answers 403 `project_not_supported`, and so does an empty list or a value that is not a list.
+  `config.json` ships `["marsaAlArab", "ekoHospital"]`, so a third project needs its FIN project name added there. Names match exactly (case included).
+- **Capabilities.** `eko_chat_capabilities.py` is the inventory of what Eko-Chat covers (equipment, alarms, notifications, indoor environment,
+  energy, HVAC, building overview) and of what it does not (comparisons and trends, water and gas, power meters, work orders, documents, Studio
+  controls, and anything that writes). For the open project it reports each capability as `available`, `unmapped` (naming the Dashboard Settings >
+  Data Mapping entry it needs, from the project's own mappings; never a point ID) or `not_supported` (`planned` or `read_only`), and whether the
+  data behind it is live, historical (FIN's hourly series) or stored (Eko-DT's notification store), and fresh, stale or not read yet. Ask
+  "what can you do" (tool `get_capabilities`). A question that names something not supported (a theme change, a comparison, a work order, a
+  request to turn something off) is answered with the real reason, where there is no model or the model does not answer; the rules never act on it.
+  A wording that fits two readings (a bare "temperature") is asked back in one sentence.
 - **Logging.** Tool-selection diagnostics (`CHAT_DEBUG` in `eko_chat.py`) are off: they would print each user's question to the server log.
 - **Load test.** `scripts/eko_chat_load_test.py` needs `--cookie` (the `eko_session` value, or `EKO_SESSION_COOKIE`) and `--project`.
 - **Export.** `eko_chat.py`, `eko_chat_router.py` and `eko_chat_llm.py` are in the backend export list (`src/lib/backendExport.ts`): `main.py` imports them.
@@ -242,7 +255,7 @@ call the model (`/api/chat/stats` shows the runs).
 ```powershell
 cd backend
 $env:EKO_NOTIFICATION_DB = "$env:TEMP\eko-test-notifications.db"      # keeps the tests off the real notification history
-python -m unittest tests.test_eko_chat_rules tests.test_eko_chat_metrics
+python -m unittest tests.test_eko_chat_rules tests.test_eko_chat_metrics tests.test_eko_chat_projects tests.test_eko_chat_inventory tests.test_eko_chat_capabilities tests.test_fin_projects
 cd ..
 python scripts/eko_chat_llm_benchmark.py                 # live: cold start, intent latency, end-to-end, accuracy (needs Ollama + the model)
 python scripts/eko_chat_llm_benchmark.py --unavailable   # how the chat behaves with Ollama off

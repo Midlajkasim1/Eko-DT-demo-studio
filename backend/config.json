@@ -11,7 +11,11 @@
     "base_url": "http://localhost:11434/v1",
     "model": "qwen3:4b",
     "api_key_env": "EKO_CHAT_API_KEY",
-    "timeout_s": 60
+    "timeout_s": 60,
+    "allowed_projects": [
+      "marsaAlArab",
+      "ekoHospital"
+    ]
   },
   "polling": {
     "live_ms": 5000,

@@ -33,6 +33,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Optional, Protocol
 
 import httpx
+import eko_chat_capabilities as caps
 from fin_client import AM_PM_LOOKUP, MONTHS_ORDER
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -76,6 +77,7 @@ class DataView:
     power_history_at: Optional[str] = None                # when power_history was last read from FIN
     power_boards: list = field(default_factory=list)      # [{"name", "live", "history"}] distribution boards the project maps
     site_now: Optional[datetime] = None                   # the site's wall clock (naive); None: Asia/Dubai, as main.py reads it
+    mapped: dict = field(default_factory=dict)            # the Data Mapping NAMES the project has (finLivePoints / finEndpoints keys; others set or not), never a point ID
 
 
 def _unavailable(reason: str, message: str, view: Optional[DataView] = None) -> dict:
@@ -130,6 +132,26 @@ def _cache_problem(problem: str, as_of: Optional[str], view: DataView) -> dict:
 def _fold(text: Any) -> str:
     """Name key that ignores case, spaces, dashes and underscores ("FCU ANC09 GF 02" == "FCU-ANC09-GF-02")."""
     return re.sub(r"[^A-Z0-9]", "", str(text or "").upper())
+
+
+# The narrowing filters a model may pass to a tool, which must be words the user wrote (the hybrid mode asks the same of its intents)
+ASKED_FILTERS = {"find_equipment": ("type", "floor", "name"), "get_hvac_status": ("type",)}
+
+
+def unasked_filters(tool: Any, args: Any, message: str) -> list[str]:
+    """The filters in args that the question does not contain ("type": "electrical" for "read the equipment list"); [] when all are written."""
+    if not isinstance(tool, str) or not isinstance(args, dict):
+        return []
+    asked = _fold(message)
+    out = []
+    for key in ASKED_FILTERS.get(tool, ()):
+        value = args.get(key)
+        if value in (None, ""):
+            continue
+        folded = _fold(value) if isinstance(value, str) else ""
+        if not folded or folded not in asked:
+            out.append(key)
+    return out
 
 
 def _loose(folded: str) -> str:
@@ -457,7 +479,9 @@ def _live_reading(key: str, label: str, unit: str, bounds: Optional[tuple], view
     """(reading, miss) for one configured live point; exactly one of them is set."""
     miss = lambda reason, why: (None, {"name": label, "reason": reason, "message": f"{label}: {why}"})   # noqa: E731
     if key not in view.power:
-        return miss("not_configured", f"this project has no live point mapped for it ({key})")
+        got = miss("not_configured", f"this project has no live point mapped for it ({key}); map it under {caps.where({'mapping': 'finLivePoints', 'key': key})}")
+        got[1].update(mapping="finLivePoints", key=key)
+        return got
     raw = view.power.get(key)
     value = _finite(raw)
     if value is None:
@@ -575,6 +599,13 @@ def _series(view: DataView, keys: tuple) -> tuple[Optional[str], dict]:
     return None, {}
 
 
+def _series_hint(view: DataView) -> str:
+    """When the project maps no hourly energy series at all, say so and where to map it (nothing when the mapping is unknown or present)."""
+    if not view.mapped or set(ENERGY_SERIES) & caps.mapped_names(view.mapped, "finEndpoints"):
+        return ""
+    return f" No energy series is mapped: add {' or '.join(ENERGY_SERIES)} under {caps.where({'mapping': 'finEndpoints', 'key': None})}."
+
+
 def get_energy(args: dict, view: DataView) -> dict:
     problem = _session_problem(view)
     if problem:
@@ -604,7 +635,7 @@ def get_energy(args: dict, view: DataView) -> dict:
     if by == "building":
         key, points = _series(view, ENERGY_SERIES)
         if key is None:
-            return _unavailable("metric_unavailable", "Energy consumption: FIN returned no hourly energy series for this project.", view)
+            return _unavailable("metric_unavailable", "Energy consumption: FIN returned no hourly energy series for this project." + _series_hint(view), view)
         total = _day_total(points, day, last, open_hour)
         if total["value"] is None:
             return _unavailable("metric_unavailable", f"Energy consumption {period}: the hourly series has no usable sample for {base['date']}.", view)
@@ -619,13 +650,44 @@ def get_energy(args: dict, view: DataView) -> dict:
         else:
             boards.append({"name": b["name"], **got})
     if not boards:
-        why = ("no distribution board is mapped for this project" if not view.power_boards else
+        why = ("no distribution board is mapped for this project (boards come from the backend's power_boards setting; a project's own boards are not sent to it yet)"
+               if not view.power_boards else
                "none of the mapped boards has an hourly sample for " + base["date"])
         return _unavailable("metric_unavailable", f"Energy by equipment: energy is measured per distribution board only, and {why}. "
                                                     "Individual equipment (AHU, FCU) energy is not measured.", view)
     boards.sort(key=lambda b: -b["value"])
     return {**base, "metric": "Energy by distribution board", "boards": boards, "boards_without_data": absent,
             "note": "Boards are distribution boards, not individual equipment: per-equipment energy is not measured."}
+
+
+def _read_states(view: DataView) -> dict:
+    """How fresh the data behind each kind of answer is: fresh, stale (older than STALE_AFTER_S) or not_read (the backend has not read it yet)."""
+    names = {"fresh": "fresh", "stale": "stale", "no_data_yet": "not_read"}
+    out = {}
+    for name, cache in (("equipment", view.equipment), ("alarms", view.alarms), ("power", view.power),
+                        ("history", {"timestamp": view.power_history_at})):
+        ok, as_of, problem = _freshness(cache, view)
+        out[name] = {"state": "fresh" if ok else names[problem], "as_of": as_of}
+    out["store"] = {"state": "stored", "as_of": None}      # Eko-DT's own notification store: not a FIN read
+    return out
+
+
+def get_capabilities(args: dict, view: DataView) -> dict:
+    """What Eko-Chat can answer for THIS project: from its Data Mapping names (never a point ID), not from a fixed list."""
+    problem = _session_problem(view)
+    if problem:
+        return problem
+    rows = caps.evaluate(view.mapped, view.power_boards)
+    reads = _read_states(view)
+    for r in rows:
+        r["read"] = reads[r["reads"]]["state"] if r.get("reads") else None
+    out = {"available": True, "project": _project(view), "reads": reads, **caps.summary(rows)}
+    about = args.get("about")
+    if about:
+        out["about"] = next(r for r in rows if r["id"] == about)
+    else:       # compact: the examples are for one capability asked about
+        out["capabilities"] = [{k: v for k, v in r.items() if k not in ("examples", "tool", "reads")} for r in rows]
+    return out
 
 
 def get_hvac_status(args: dict, view: DataView) -> dict:
@@ -672,10 +734,10 @@ TOOLS: dict[str, dict] = {
     },
     "find_equipment": {
         "fn": find_equipment,
-        "description": "List equipment matching optional filters. Returns compact records (no points).",
+        "description": "List equipment matching optional filters. Returns compact records (no points). To list ALL equipment, or to count it, pass no filter.",
         "parameters": {"type": "object", "additionalProperties": False, "properties": {
             "name": dict(_NAME, description="Text contained in the equipment name (case, spaces and dashes ignored)."),
-            "type": dict(_NAME, description="Equipment type, category, tag or name prefix, e.g. fcu, ahu, ef, meter."),
+            "type": dict(_NAME, description="Only when the user wrote an equipment type, category, tag or name prefix (e.g. fcu, ahu, ef, meter); otherwise leave it out."),
             "floor": dict(_NAME, description="Text contained in the floor name."),
             "in_alarm": {"type": "boolean"},
             "limit": _LIMIT,
@@ -710,6 +772,14 @@ TOOLS: dict[str, dict] = {
         "description": "Energy consumed (kWh) today, yesterday or this month, or ranked by distribution board. Never instantaneous power.",
         "parameters": {"type": "object", "additionalProperties": False, "properties": {
             "period": {"type": "string", "enum": PERIODS}, "by": {"type": "string", "enum": ["building", "board"]}}},
+    },
+    "get_capabilities": {
+        "fn": get_capabilities,
+        "description": "What Eko-Chat can answer for the open project: each capability's status (available, unmapped with the Data Mapping entries it "
+                       "needs, or not supported), its data kind (live, historical or stored) and whether the data behind it is fresh, stale or not read "
+                       "yet. Pass about to ask about one capability.",
+        "parameters": {"type": "object", "additionalProperties": False, "properties": {
+            "about": {"type": "string", "enum": list(caps.IDS), "description": "One capability id, to ask whether it is available."}}},
     },
     "get_hvac_status": {
         "fn": get_hvac_status,
@@ -902,6 +972,24 @@ def build_card(tool: str, args: Optional[dict], result: dict) -> Optional[dict]:
                            unread=result.get("unread", 0)),
             interpreted_as=_text("notifications", "Your notifications on this project{f}", f=_filters_text(filters)),
             columns=["severity", "type", "asset", "created", "read"], rows=rows, total=result.get("total", 0))
+    elif tool == "get_capabilities":
+        filters = _filters(args, ["about"])
+        if result.get("about"):
+            a = result["about"]
+            rows = [[a.get("label"), a.get("status"), a.get("data") or "", "; ".join(
+                caps.where(m) for m in a.get("missing") or [])]]
+            headline = _text("capability", "{label}: {status}", label=a.get("label"), status=a.get("status"))
+            interpreted = _text("capability", "One capability of this project{f}", f=_filters_text(filters))
+        else:
+            counts = result.get("counts") or {}
+            rows = [[x.get("label"), x.get("available", 0), x.get("unmapped", 0), x.get("not_supported", 0)] for x in result.get("areas") or []]
+            headline = _text("capabilities", "Capabilities for {project}: {available} available, {unmapped} not mapped, {not_supported} not supported",
+                             project=project or "", available=counts.get("available", 0), unmapped=counts.get("unmapped", 0),
+                             not_supported=counts.get("not_supported", 0))
+            interpreted = _text("capabilities", "What Eko-Chat can answer from this project's mappings{f}", f="")
+        card.update(headline=headline, interpreted_as=interpreted,
+                    columns=["capability", "status", "data", "needs"] if result.get("about") else ["area", "available", "unmapped", "not_supported"],
+                    rows=rows[:MAX_CARD_ROWS], total=len(rows))
     else:  # get_building_snapshot
         filters = []
         rows = []
@@ -1351,6 +1439,11 @@ async def conversation(adapter: LLMAdapter, message: str, view_fn: Callable[[], 
                 result = {"available": False, "reason": "malformed_tool_call", "message": "The tool call has no tool name."}
             elif problem:
                 result = {"available": False, "reason": "invalid_arguments", "details": [problem]}
+            elif unasked_filters(name, args, message):
+                # a filter the user did not write is the model's invention ("read the equipment list" became type "electrical" and
+                # matched nothing): refuse it, and the model asks again without it
+                result = {"available": False, "reason": "invalid_arguments",
+                          "details": [f"{k} is not in the question; leave it out unless the user names it" for k in unasked_filters(name, args, message)]}
             else:
                 result = run_tool(name, args, view_fn())       # a fresh view for every call
             _debug("tool result", f"{label} " + ("available" if result.get("available")
@@ -1490,7 +1583,8 @@ HELP_TEXT = ("I can answer these questions from this project's live FIN data: "
              "equipment (list it, count it, the status of one item by name, how many systems are online), "
              "alarms and alerts (open, critical or warning, latest, on one item by name), and "
              "notifications (recent, unread, acknowledgements). "
-             "Ask one thing at a time and name the equipment, for example \"status of <equipment name>\".")
+             "Ask one thing at a time and name the equipment, for example \"status of <equipment name>\". "
+             "Ask \"what can you do\" to see what is available for this project.")
 
 
 NOT_VERIFIED = "The answer could not be checked against the data, so it was not shown. Please try again."
@@ -1501,6 +1595,28 @@ def unsupported(reason: Optional[str] = None) -> dict:
     A rule that matched but whose answer failed its own checks (direct_*) is said so, not passed off as an unknown question."""
     return {"answer": NOT_VERIFIED if str(reason).startswith("direct_") else HELP_TEXT, "answer_source": "code", "route": "unsupported", "grounded": True,
             "tool_calls": [], "card": None, "model": None}
+
+
+def topic_reply(message: str, view_fn: Callable[[], DataView]) -> Optional[dict]:
+    """For a question that asks for a capability nothing answers (a theme change, a comparison, a work order, a write): which capability it is
+    and why it is not available, from get_capabilities(about=...). None when the question names no such capability. Read-only: it runs only
+    get_capabilities, and a question to change anything is answered, never acted on."""
+    from eko_chat_router import clarification_for, direct_text, execute, unsupported_topic    # imported here: the router imports this module
+    ask = clarification_for(message)
+    if ask:       # the wording fits more than one reading: one short question back, nothing guessed and no tool run
+        return {"answer": ask, "answer_source": "code", "route": "clarification", "grounded": True, "tool_calls": [], "card": None, "model": None}
+    topic = unsupported_topic(message)
+    if topic is None:
+        return None
+    out = execute({"route": "direct", "intent": "get_capabilities", "parameters": {"about": topic}}, view_fn())
+    if out.get("route") != "direct":
+        return None
+    result = out["result"]
+    entry = {"name": "get_capabilities", "arguments": out["parameters"], "available": bool(result.get("available"))}
+    if not result.get("available"):
+        entry["reason"] = result.get("reason")
+    return {"answer": direct_text(out, "capabilities.about"), "answer_source": "code", "route": "unsupported", "grounded": True,
+            "tool_calls": [entry], "card": out["card"], "model": None}
 
 
 async def stream_direct(resp: dict, project: dict):
@@ -1551,10 +1667,12 @@ def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
             fallback["reason"] = "fast_router_off"
             _debug_kv(route="llm_fallback", reason="fast_router_off")
         if direct is None and rules_only:
-            direct = unsupported(fallback.get("reason"))
+            direct = topic_reply(req.message, vf) or unsupported(fallback.get("reason"))
         if direct is None and cfg.get("provider") == HYBRID:
             # the rules did not know it: one model call reads the intent, the existing tool answers (see eko_chat_llm)
             direct = await hybrid(cfg, req.message, vf, fallback.get("reason"), bool(req.stream), t0)
+            if direct.get("route") == "unsupported":    # the model did not answer it: ask back or say which capability it is, when it names one
+                direct = topic_reply(req.message, vf) or direct
         if direct is not None:
             if req.stream:
                 return StreamingResponse(stream_direct(direct, _project(view)), media_type="text/event-stream",

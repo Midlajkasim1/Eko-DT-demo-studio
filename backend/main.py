@@ -2481,7 +2481,20 @@ def _chat_view() -> eko_chat.DataView:
         power_history=cached_power_history,
         power_history_at=cached_power_history_at,
         power_boards=CONFIG.get("power_boards") or [],
+        mapped=_chat_mapped(),
     )
+
+
+def _chat_mapped() -> dict:
+    """The Data Mapping NAMES the open project has, for Eko-Chat's capability report: key names and yes/no, never a point ID or an expression."""
+    def keys(block: str) -> list:
+        value = CONFIG.get(block)
+        return sorted(k for k in value if isinstance(k, str) and not k.startswith("_")) if isinstance(value, dict) else []
+    bands = CONFIG.get("severity_bands") if isinstance(CONFIG.get("severity_bands"), dict) else {}
+    number = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)   # noqa: E731
+    return {"finLivePoints": keys("live_point_ids"), "finEndpoints": keys("power_endpoints"),
+            "finEquipmentClasses": bool(keys("equipment_classes")), "finMeterProfile": bool(keys("meter_profile")),
+            "finSeverityBands": number(bands.get("critical")) or number(bands.get("warning"))}
 
 
 def _chat_alarm_records() -> list:
