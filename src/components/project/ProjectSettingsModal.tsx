@@ -29,6 +29,8 @@ import {
 } from '@/lib/finSettings'
 import type { JsonObject } from '@/lib/mappingRows'
 import { validateMappings, type ValidationResponse } from '@/lib/mappingValidation'
+import { FinPointMapping } from '@/components/project/FinPointMapping'
+import { importMappingCsv, mappingCsv, pointListCsv, pointViews } from '@/lib/finMappingCatalog'
 import type { HeatmapSetup, ProjectApiSettings } from '@/types'
 
 interface ProjectSettingsModalProps {
@@ -249,11 +251,11 @@ const mappingStatesFrom = (s: ProjectApiSettings): MappingStates =>
 const MAPPING_SECTIONS: { field: MappingField; hint: string }[] = [
   {
     field: 'finLivePoints',
-    hint: 'Maps dashboard metrics (e.g. total_power) to FIN point IDs. Use {project} for the FIN project name.',
+    hint: 'Each dashboard reading takes one FIN point. Pick the point that measures it: the dashboard shows its value, or -- when FIN has none.',
   },
   {
     field: 'finEndpoints',
-    hint: 'Maps history queries (e.g. Total_Power_Consumption_his) to FIN API expressions.',
+    hint: 'The charts read a FIN point\'s history. Pick a point that keeps history and Eko-DT writes the history query for it.',
   },
   {
     field: 'finEquipmentClasses',
@@ -334,6 +336,8 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   const [validation, setValidation] = useState<ValidationResponse | null>(null)
   const [validating, setValidating] = useState(false)
   const [validateError, setValidateError] = useState<string | null>(null)
+  const [csvNotice, setCsvNotice] = useState<string | null>(null)
+  const csvInput = useRef<HTMLInputElement>(null)
   const finConnected = useFinStore(s => s.isConnected)
   const finStatus = useFinStore(s => s.status)
   const openProjectId = useRef<string | undefined>(undefined)
@@ -495,6 +499,30 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   const loadMapping = (field: MappingField, value: JsonObject | undefined) => {
     setMapping(field, { value })
     setRevs(prev => ({ ...prev, [field]: prev[field] + 1 }))
+  }
+
+  const finPoints = resources?.state === 'ready' && resources.project === selectedFinProject ? resources.items : undefined
+  const csvName = (what: string) => `${(selectedFinProject || currentProject.name || 'project').replace(/[^\w-]+/g, '_')}-${what}.csv`
+  const saveCsv = (name: string, text: string) => {
+    const url = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+  const downloadMappingCsv = () => saveCsv(csvName('fin-mapping'), mappingCsv(mappings.finLivePoints.value, mappings.finEndpoints.value,
+    pointViews(finPoints), { live: schema.finLivePoints, history: schema.finEndpoints }))
+  const downloadPointsCsv = () => saveCsv(csvName('fin-points'), pointListCsv(pointViews(finPoints)))
+  const importCsv = async (file: File) => {
+    const r = importMappingCsv(await file.text(), pointViews(finPoints))
+    if (r.error) { setCsvNotice(`Not imported: ${r.error}`); return }
+    if (Object.keys(r.live).length) loadMapping('finLivePoints', { ...(mappings.finLivePoints.value ?? {}), ...r.live })
+    if (Object.keys(r.history).length) loadMapping('finEndpoints', { ...(mappings.finEndpoints.value ?? {}), ...r.history })
+    const missing = r.unresolved.length
+      ? ` Not found by name${finPoints ? '' : ' (the FIN point list is not loaded)'}: ${r.unresolved.join('; ')}.`
+      : ''
+    setCsvNotice(`${r.applied} ${r.applied === 1 ? 'mapping' : 'mappings'} imported from ${file.name}.${missing} Save Settings to keep them.`)
   }
 
   const handleSave = async () => {
@@ -782,7 +810,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 <p className="ds-hint" data-testid="fin-resources-status">
                   {resources.state === 'ready' && (
                     `${resources.items.length} points available from FIN project ${resources.project}${resources.truncated ? ' (list cut short)' : ''}. ` +
-                    'In FIN Live Points, click a Value field and choose a point; which point is which stays your decision.'
+                    'Click a reading to choose its point. Best matches are offered, and which point is which stays your decision.'
                   )}
                   {resources.state === 'error' && `Could not load the points of ${resources.project}: ${resources.message}. Mappings can still be typed.`}
                 </p>
@@ -813,6 +841,22 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
               </div>
               {validateError && <div style={{ color: 'var(--red)', fontSize: '12px', marginBottom: '8px' }}>{validateError}</div>}
 
+              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Import and export</h3>
+              <p className="ds-hint">
+                The mapping CSV lists every reading and chart with the point it reads; fill fin_point_id, or fin_point_name as
+                EQUIPMENT › Point, and import it back. A blank cell leaves that mapping as it is. Save Settings keeps the result.
+              </p>
+              <div className="fpm-csv">
+                <button type="button" className="ds-btn ds-btn-secondary fpm-btn" onClick={downloadMappingCsv}>Download mapping CSV</button>
+                <button type="button" className="ds-btn ds-btn-secondary fpm-btn" disabled={!finPoints?.length}
+                  title={finPoints?.length ? undefined : 'Load the FIN project\'s points first (FIN Config)'} onClick={downloadPointsCsv}>
+                  Download FIN point list
+                </button>
+                <button type="button" className="ds-btn ds-btn-secondary fpm-btn" onClick={() => csvInput.current?.click()}>Import mapping CSV</button>
+                <input ref={csvInput} type="file" accept=".csv,text/csv" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importCsv(f) }} />
+              </div>
+              {csvNotice && <p className="ds-hint" style={{ marginTop: 0 }} data-testid="csv-notice">{csvNotice}</p>}
+
               {MAPPING_SECTIONS.map(section => {
                 const { field } = section
                 const editorKey = `${currentProject.projectId}-${field}-${revs[field]}`
@@ -827,7 +871,17 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                     onLoad={value => loadMapping(field, value)}
                     result={validation?.blocks[field]}
                   >
-                    {field === 'finMeterProfile' ? (
+                    {field === 'finLivePoints' || field === 'finEndpoints' ? (
+                      <FinPointMapping
+                        key={`${editorKey}-${schema[field]?.length ?? 0}`}
+                        block={field === 'finLivePoints' ? 'live' : 'history'}
+                        value={mappings[field].value}
+                        onChange={onChange}
+                        points={finPoints}
+                        results={validation?.blocks[field]?.items}
+                        suggestedKeys={schema[field]}
+                      />
+                    ) : field === 'finMeterProfile' ? (
                       <MeterProfileEditor key={editorKey} value={mappings[field].value} onChange={onChange} results={validation?.blocks[field]?.items} suggestedKeys={schema.finMeterProfile} />
                     ) : field === 'finSeverityBands' ? (
                       <SeverityEditor key={editorKey} value={mappings[field].value} onChange={onChange} />
@@ -835,9 +889,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                       <KeyValueEditor
                         key={editorKey}
                         value={mappings[field].value}
-                        kind={field === 'finEquipmentClasses' ? 'list' : 'string'}
-                        suggestions={field === 'finLivePoints' && resources?.state === 'ready' && resources.project === selectedFinProject
-                          ? resources.items : undefined}
+                        kind="list"
                         suggestedKeys={schema[field]}
                         onChange={onChange}
                         results={validation?.blocks[field]?.items}
@@ -849,8 +901,8 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
 
               <MappingSection
                 title="Power Boards"
-                hint={"The distribution boards on the Power page. Each board names keys of this project's FIN Live Points Mapping"
-                  + ' (and, optionally, FIN Historical Endpoints and a meter); FIN point IDs stay in those mappings.'
+                hint={"The distribution boards on the Power page. Each board names a key of this project's Live readings"
+                  + ' (and, optionally, a Chart history key and a meter); FIN point IDs stay in those mappings.'
                   + ' Not set: the built-in boards (MCC 1, MCC 2, …) where this project maps their keys.'}
                 hasValue={!!settings.finPowerBoards?.length}
                 unsetText="No boards set for this project: the built-in boards are shown where this project maps their keys."

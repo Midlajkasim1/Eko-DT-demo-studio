@@ -18,8 +18,8 @@ export const MAPPING_FIELDS: MappingField[] = [
 ]
 
 export const MAPPING_TITLES: Record<MappingField, string> = {
-  finLivePoints: 'FIN Live Points Mapping',
-  finEndpoints: 'FIN Historical Endpoints',
+  finLivePoints: 'Live readings (FIN Live Points)',
+  finEndpoints: 'Chart history (FIN Historical Endpoints)',
   finEquipmentClasses: 'Equipment Classes',
   finMeterProfile: 'Meter Profile',
   finSeverityBands: 'Severity Configuration',
@@ -135,9 +135,9 @@ export function powerBoardsProblem(
     const folded = b.name.toLowerCase()
     if (seen.has(folded)) return `${at}: another board already has this name.`
     seen.add(folded)
-    if (!b.liveKey) return `${at}: choose its live key from FIN Live Points Mapping.`
-    if (!keys.live.includes(b.liveKey)) return `${at}: "${b.liveKey}" is not a key of this project's FIN Live Points Mapping.`
-    if (b.historyKey && !keys.history.includes(b.historyKey)) return `${at}: "${b.historyKey}" is not a key of this project's FIN Historical Endpoints.`
+    if (!b.liveKey) return `${at}: choose its live key from Live readings.`
+    if (!keys.live.includes(b.liveKey)) return `${at}: "${b.liveKey}" is not a key of this project's Live readings.`
+    if (b.historyKey && !keys.history.includes(b.historyKey)) return `${at}: "${b.historyKey}" is not a key of this project's Chart history.`
     if (b.meter && meterPrefix && !b.meter.toUpperCase().startsWith(meterPrefix.toUpperCase())) {
       return `${at}: meter "${b.meter}" does not match this project's meter prefix "${meterPrefix}".`
     }

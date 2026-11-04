@@ -15,6 +15,8 @@ export interface FinResource {
   navName: string | null
   equip: string | null
   unit: string | null
+  /** Number, Bool or Str; absent from a backend that does not send it */
+  kind?: string | null
   his: boolean
 }
 

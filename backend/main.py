@@ -1464,13 +1464,19 @@ async def get_fin_resources(request: Request, project: str):
         if not pid:
             continue
         equip = safe_get(row.get("equipRef"), "dis")
+        nav = row.get("navName") if isinstance(row.get("navName"), str) else None
+        name = safe_get(row.get("id"), "dis") or row.get("dis") or nav or pid
+        # an unexpanded display macro ("$pointRef AlarmStatus") names nothing on its own
+        if "$" in str(name):
+            name = " ".join(x for x in (equip, nav) if x) or pid
         items.append({
             "id": pid,
             "ref": pid.replace(f":{project}:", ":{project}:", 1) if f":{project}:" in pid else pid,
-            "name": safe_get(row.get("id"), "dis") or row.get("dis") or row.get("navName") or pid,
-            "navName": row.get("navName") if isinstance(row.get("navName"), str) else None,
+            "name": name,
+            "navName": nav,
             "equip": equip or None,
             "unit": row.get("unit") if isinstance(row.get("unit"), str) else None,
+            "kind": row.get("kind") if row.get("kind") in ("Bool", "Number", "Str") else None,
             "his": row.get("his") is True,
         })
     return {"project": project, "resources": items, "truncated": len(rows) > MAX_RESOURCES}
