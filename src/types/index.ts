@@ -341,6 +341,8 @@ export interface ProjectApiSettings {
   tariffName?: string
   /** kg CO₂ per kWh */
   co2Factor?: number
+  /** The hourly energy history also fills current load, the hourly chart, and the month totals. */
+  energyFromHourly?: boolean
   /** Names the emission factor in the report basis, e.g. "DEWA grid 2025" */
   co2FactorName?: string
   /** The Power page's distribution boards. Absent: the built-in board keys, shown where the

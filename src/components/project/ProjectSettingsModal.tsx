@@ -788,6 +788,20 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 </label>
               </div>
 
+              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Energy history</h3>
+              <div className="ds-field">
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={settings.energyFromHourly === true}
+                    onChange={e => update('energyFromHourly', e.target.checked || undefined)}
+                    style={{ width: 'auto' }}
+                  />
+                  Use the hourly history for consumption
+                </label>
+                <p className="ds-hint">Current load, the hourly chart, and this month and last month come from Energy by hour. A point mapped on its own still wins.</p>
+              </div>
+
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Mapping validation</h3>
               {MAPPING_FIELDS.every(f => !mappings[f].value) && (
                 <p className="ds-hint">No mappings yet.</p>
@@ -901,9 +915,9 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
 
               <MappingSection
                 title="Power Boards"
-                hint="Boards on the Power page. Each board uses a live reading key."
+                hint="Boards for this project. Add a row, name the board, and pick its live reading."
                 hasValue={!!settings.finPowerBoards?.length}
-                unsetText="No boards set. Built-in boards show where their keys are mapped."
+                unsetText="No boards for this project yet. Add them here. The sample boards stay until you do."
                 error={boardsError ?? undefined}
                 onLoad={() => { update('finPowerBoards', undefined); setBoardsRev(r => r + 1) }}
               >

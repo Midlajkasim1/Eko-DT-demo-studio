@@ -265,7 +265,7 @@
     { const hv = G.find(g => g.id === 'hvac');
       if(hv && (hv.sysKey || []).some(k => k !== 'HVAC') && !G.some(g => g.id === 'medgas')){
         const ox = (hv.cards || []).filter(c => /OXYGEN/.test(c.labelEn || ''));
-        hv.sysKey = ['HVAC']; hv.cards = (hv.cards || []).filter(c => !/OXYGEN/.test(c.labelEn || ''));
+        hv.sysKey = ['HVAC', 'Mechanical']; hv.cards = (hv.cards || []).filter(c => !/OXYGEN/.test(c.labelEn || ''));
         G.splice(G.indexOf(hv) + 1, 0, { id: 'medgas', hue: '#6D8FBE', sysKey: ['Medical gas', 'Refrigeration'], labelEn: 'Medical gas and cold chain', labelAr: 'الغازات الطبية وسلسلة التبريد',
           cards: [{ kind: 'stat', labelEn: 'OVERALL HEALTH', labelAr: 'الحالة العامة', v: '100', u: '%', capEn: '', capAr: '', tone: 'ok' }].concat(ox.map(c => Object.assign({}, c, { subOnly: false })),
             [{ kind: 'stat', labelEn: 'MEDICATION FRIDGE', labelAr: 'ثلاجة الأدوية', v: '', u: '°C', capEn: '', capAr: '', tone: 'ok', fridge: true }]) }); } }

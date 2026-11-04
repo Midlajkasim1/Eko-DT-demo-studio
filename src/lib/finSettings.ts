@@ -1,4 +1,5 @@
 import type { PowerBoard, ProjectApiSettings } from '@/types'
+import { MAPPING_CATALOG } from '@/lib/finMappingCatalog'
 import type { JsonObject } from '@/lib/mappingRows'
 
 /** The apiSettings fields edited as JSON in Dashboard Settings → Data Mapping */
@@ -118,8 +119,11 @@ export function boardKeyOptions(
 ): { live: string[]; history: string[]; standard: boolean; unverifiedStandard: boolean } {
   const standard = !!schema.standardProject && schema.standardProjectId === projectId && finProjectName === schema.standardProject
   const unverifiedStandard = !standard && !!finProjectName && finProjectName === schema.standardProfile
+  const catalogLive = MAPPING_CATALOG.filter(e => e.block === 'live').map(e => e.key)
+  const catalogHistory = MAPPING_CATALOG.filter(e => e.block === 'history').map(e => e.key)
+  const join = (catalog: string[], saved?: JsonObject) => [...new Set([...catalog, ...Object.keys(saved ?? {})])]
   if (standard) return { live: schema.finLivePoints ?? [], history: schema.finEndpoints ?? [], standard, unverifiedStandard }
-  return { live: Object.keys(own.live ?? {}), history: Object.keys(own.history ?? {}), standard, unverifiedStandard }
+  return { live: join(catalogLive, own.live), history: join(catalogHistory, own.history), standard, unverifiedStandard }
 }
 
 /** The first problem with the boards, or null when they can be saved */
@@ -179,6 +183,7 @@ export function dashboardProjectInfo(meta: { projectId: string; name: string; ap
     modules: s.dashboardModules === 'extended' ? 'extended' : 'standard',
     /* the project's own boards; null = the built-in board keys, where the project maps them */
     powerBoards: Array.isArray(s.finPowerBoards) && s.finPowerBoards.length ? s.finPowerBoards : null,
+    energyFromHourly: s.energyFromHourly === true,
     site: {
       name: meta.name,
       displayName: s.finDisplayName || '',

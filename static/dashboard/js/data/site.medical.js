@@ -91,11 +91,11 @@ window.EKO_DATA.medical = {
    "dom": "#2DD4BF",
    "icon": "bolt",
    "label": "kFacilityLoad",
-   "metric": "facilityLoadMw",
+   "metric": "loadNowKw",
    "d": 1,
-   "u": "MW",
-   "capEn": "dialysis sessions running",
-   "capAr": "جلسات غسيل الكلى جارية",
+   "u": "kW",
+   "capEn": null,
+   "capAr": null,
    "capTone": "t3"
   },
   {
@@ -101774,6 +101774,7 @@ window.EKO_DATA.medical = {
     "hue": "#C56A6A",
     "sysKey": [
      "HVAC",
+     "Mechanical",
      "Medical gas",
      "Refrigeration"
     ],

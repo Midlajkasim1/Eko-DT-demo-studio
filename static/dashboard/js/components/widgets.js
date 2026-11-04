@@ -655,7 +655,8 @@ window.EKO_C = (function(){
     const loadShown = loadUnit === 'MW' ? m.loadNowMw : el.currentKw;
     const mtdUnit = el.mtdUnit === 'MWh' ? 'MWh' : 'kWh';
     const mtdShown = mtdUnit === 'MWh' ? el.mtdMwh : el.mtdKwh;
-    const peakUnit = el.peakUnit === 'MW' ? 'MW' : (simPower ? 'MW' : 'kW');
+    const peakUnit = el.peakUnit === 'MW' ? 'MW' : 'kW';
+    const carbonLive = el.carbonKgH != null;
     const monthChart = p.heroCharts && p.heroCharts.month && Array.isArray(p.heroCharts.month.spark) && p.heroCharts.month.spark.length ? p.heroCharts.month : null;
     const simPeakChart = (simPower && p.heroCharts && p.heroCharts.peak && limMw && peakMw != null)
       ? Object.assign({}, p.heroCharts.peak, { value: peakMw / limMw * 100, noteEn: E.t('pwContractedMwCap', { v: fmt(limMw, limDp) }), noteAr: E.t('pwContractedMwCap', { v: fmt(limMw, limDp) }) })
@@ -665,8 +666,8 @@ window.EKO_C = (function(){
       ${hero(E.t('pwCurrentCons'), loadShown != null ? E.t('pwAboveChip') : '', loadShown != null ? 'warn' : '', nd(loadShown,1), loadShown != null ? loadUnit : '', E.t('pwBaselineKwCap',{v:fmt(el.baselineKw,1)}), el.currentKw != null && p.heroCharts && p.heroCharts.current ? bullet(p.heroCharts.current,'L') : '')}
       ${hero(E.t('pwMtd'), E.t('pwLiveCap'), 'ok', nd(mtdShown, heroDp), mtdShown != null ? mtdUnit : '', E.t('capMainMeters',{time:b.asOf||''})+' · '+E.t('pwFcstEod',{v:m.todayForecastEodMwh == null ? E.t('emptyDash') : fmt(m.todayForecastEodMwh * 1000, 1)}), monthChart ? spark(monthChart) : '')}
       ${hero(E.t('pwPrevMonth'), '', '', nd(p.prevMonthKwh, heroDp), 'kWh', E.t('pwPrevMonthCap'))}
-      ${hero(E.t('pwCarbon'), '', '', nd(carbonT,1), carbonT != null ? 't' : '', carbonT != null ? E.t('pwCarbonMtd',{r:fmt(b.co2KgPerKwh,2)}) : '')}
-      ${hero(E.t('pwPeak'), peakPctMw != null ? E.t('pwPctLimit',{p:peakPctMw}) : '', peakPctMw != null ? 'crit' : '', nd(peakUnit === 'MW' ? peakMw : peakKw, 1), (peakUnit === 'MW' ? peakMw : peakKw) != null ? peakUnit : '', limMw != null ? E.t('pwContractedMwCap',{v:fmt(limMw,limDp)}) : '', simPeakChart ? bullet(simPeakChart,'P') : '')}
+      ${hero(E.t('pwCarbon'), '', '', carbonLive ? nd(el.carbonKgH,1) : nd(carbonT,1), carbonLive ? 'kg' : (carbonT != null ? 't' : ''), carbonLive ? '' : (carbonT != null ? E.t('pwCarbonMtd',{r:fmt(b.co2KgPerKwh,2)}) : ''))}
+      ${hero(E.t('pwPeak'), peakUnit === 'MW' && peakPctMw != null ? E.t('pwPctLimit',{p:peakPctMw}) : '', peakUnit === 'MW' && peakPctMw != null ? 'crit' : '', nd(peakUnit === 'MW' ? peakMw : peakKw, 1), (peakUnit === 'MW' ? peakMw : peakKw) != null ? peakUnit : '', peakUnit === 'MW' && limMw != null ? E.t('pwContractedMwCap',{v:fmt(limMw,limDp)}) : '', peakUnit === 'MW' && simPeakChart ? bullet(simPeakChart,'P') : '')}
     </div>` : `<div class="pwhero">
       ${hero(E.t('pwCurrentCons'), loadShown != null ? E.t('pwAboveChip') : '', loadShown != null ? 'warn' : '', nd(loadShown,1), loadShown != null ? loadUnit : '', E.t('pwBaselineKwCap',{v:fmt(el.baselineKw,1)}), el.currentKw != null ? bullet(p.heroCharts.current,'L') : '')}
       ${hero(E.t('pwHeroNow.'+tr), '', '', nd(heroNow, 1), heroNow != null ? 'kWh' : '', E.t('pwHeroNowCap.'+tr))}
@@ -796,7 +797,7 @@ window.EKO_C = (function(){
           ${xAxis(hours)}</div></div>
       <div class="pwlegend">${zhNames.map((z,i2)=>`<span><i class="zdot" style="background:${zhHues[i2]}"></i>${esc(z)}</span>`).join('')}</div></article>`;
     const psAll = { hourly: p.peakLast24, today: p.peakSeries, weekly: p.peakWeekly, monthly: p.peakMonthly };
-    const simPeakMw = simPower && tr === 'today' && Array.isArray(p.peakSeriesMw) && p.peakSeriesMw.length;
+    const simPeakMw = simPower && tr === 'today' && !p.peakFromFin && Array.isArray(p.peakSeriesMw) && p.peakSeriesMw.length;
     const ps = simPeakMw ? p.peakSeriesMw : ((psAll[tr] && psAll[tr].length) ? psAll[tr] : []);
     const pkUnit = simPeakMw ? 'MW' : 'kW';
     const n3 = ps.length;

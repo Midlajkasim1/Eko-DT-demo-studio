@@ -424,6 +424,7 @@
   function holdSample(site, p) {
     var pw = site.power || {}, el = site.energyLanding;
     var boardsLive = mappedBoards(p).length > 0;
+    var hourlyChart = !!(injected && injected.energyFromHourly && historyHas(p, 'Hourly_Energy_Consumption_his'));
     var todayLive = boardsLive || historyHas(p, 'Hourly_Energy_Consumption_his');
     var waterLive = historyHas(p, 'Total_Water_Consumption_his');
     var held = [], blank = [];
@@ -458,7 +459,7 @@
     hold(summaryRow(site, 'energy'), ['spark', 'sparkCompare', 'deltaEn', 'deltaAr'], todayLive);
     hold(pw.bva && pw.bva.ranges, ['today'], todayLive);
     hold(pw, ['boards', 'zones', 'zonesAr', 'zoneHues', 'zoneHourly', 'zoneLast24', 'zoneWeekly', 'zoneMonthly', 'zoneWTD',
-      'zoneMTD', 'zoneYesterday', 'zonePrevWeek', 'zonePrevMonth', 'pmuFlats', 'weekRange', 'trendX'], boardsLive);
+      'zoneMTD', 'zoneYesterday', 'zonePrevWeek', 'zonePrevMonth', 'pmuFlats', 'weekRange', 'trendX'], boardsLive || hourlyChart);
     hold(site, ['timeline24'], boardsLive);
     hold(pw, ['peakLast24', 'peakWeekly', 'peakMonthly', 'peakSeries', 'peakAvgKw'], historyHas(p, 'Peak_Demand_his'));
     hold(site.water, ['todayM3', 'avgDrawM3Day', 'sparkToday', 'hourly', 'todayH', 'weekly', 'monthly'], waterLive);
@@ -913,6 +914,40 @@
         changed = true;
       }
 
+      if (injected && injected.energyFromHourly && historyHas(p, 'Hourly_Energy_Consumption_his')) {
+        var kwhScale = energyMwh ? 1000 : 1;
+        function sumMonth(y, mo) {
+          var s = 0, n = 0;
+          hourlyFlat.forEach(function (pt) {
+            if (pt.y === y && pt.m === mo && pt.val != null && isFinite(pt.val)) { s += pt.val; n++; }
+          });
+          return n ? s * kwhScale : null;
+        }
+        var lastHour = null, hi;
+        for (hi = todayHours.length - 1; hi >= 0; hi--) {
+          if (todayHours[hi] != null && isFinite(todayHours[hi])) { lastHour = todayHours[hi] * kwhScale; break; }
+        }
+        if (!mapsKey(p, 'hourly_energy') && lastHour != null) {
+          set(el, 'currentKw', trunc1(lastHour));
+          set(el, 'loadUnit', 'kW');
+          set(m, 'loadNowKw', trunc1(lastHour));
+          var facRow = summaryRow(site, 'facility');
+          if (facRow) { facRow.d = 1; facRow.u = 'kW'; facRow.metric = 'loadNowKw'; facRow.capEn = null; facRow.capAr = null; facRow.notConfigured = false; }
+        }
+        if (!mapsKey(p, 'current_month')) {
+          var monthSum = sumMonth(nowP.y, nowP.m);
+          if (monthSum != null) {
+            set(el, 'mtdKwh', trunc1(monthSum));
+            set(el, 'mtdMwh', trunc1(monthSum / 1000));
+            set(el, 'mtdUnit', 'kWh');
+          }
+        }
+        var prevM = nowP.m - 1, prevY = nowP.y;
+        if (prevM < 0) { prevM = 11; prevY -= 1; }
+        var prevSum = sumMonth(prevY, prevM);
+        if (prevSum != null && site.power) set(site.power, 'prevMonthKwh', trunc1(prevSum));
+      }
+
       function todayHourly(flat) {
         var now = nowParts();
         var n = Math.min(24, Math.max(1, now.h + 1));
@@ -1092,6 +1127,13 @@
       }
 
       var boardList = mappedBoards(p);
+      var fromHourly = !!(injected && injected.energyFromHourly && hourlyFlat && hourlyFlat.length && !boardList.length);
+      if (fromHourly) {
+        var buildingFlat = hourlyFlat.map(function (pt) {
+          return { y: pt.y, m: pt.m, d: pt.d, h: pt.h, val: pt.val * (energyMwh ? 1000 : 1) };
+        });
+        boardList = [{ name: 'Building', hue: '#4EA3E8', his: 'Hourly_Energy_Consumption_his', live: 'hourly_energy', pmu: null }];
+      }
       /* Demo figures (or the standalone prototype) with no board mapped: the sample boards stay */
       var ZONE_FIELDS = ["zones", "zonesAr", "zoneHues", "zoneHourly", "zoneLast24", "zoneWeekly", "zoneMonthly",
         "zoneWTD", "zoneMTD", "zoneYesterday", "zonePrevWeek", "zonePrevMonth", "pmuFlats"];
@@ -1101,7 +1143,7 @@
         ZONE_FIELDS.forEach(function (k) { if (k in site.power) sampleBoards[k] = site.power[k]; });
       }
       if (site.power) {
-        var flats = boardList.map(function (b) { return flattenHist(p.power_history[b.his]); });
+        var flats = fromHourly ? [buildingFlat] : boardList.map(function (b) { return flattenHist(p.power_history[b.his]); });
         site.power.pmuFlats = {};
         if (boardMeterLinks) {
           boardList.forEach(function (b, i) { if (b.pmu) site.power.pmuFlats[meterKey(b.pmu)] = flats[i]; });
@@ -1204,6 +1246,7 @@
         changed = true;
         var peakToday = todayHourly(peakFlat);
         site.power.peakSeries = align(peakToday, todayLen);
+        if (peakFlat.length || mapsKey(p, 'peak_demand')) site.power.peakFromFin = true;
         if (peakToday.length) {
           var pkSum = 0;
           peakToday.forEach(function (v) { pkSum += v; });
@@ -1451,6 +1494,15 @@
       if (el && el.currentKw != null) sv.loadNowKw = el.currentKw;
     }
     if (restoreSample) restoreSample();
+    function clearMock(row) {
+      if (!row) return;
+      row.notConfigured = false;
+      row.capEn = null;
+      row.capAr = null;
+    }
+    if (mapsKey(p, 'hourly_energy')) clearMock(summaryRow(site, 'facility'));
+    if (mapsKey(p, 'total_water') || historyHas(p, 'Total_Water_Consumption_his')) clearMock(summaryRow(site, 'water'));
+    if (mapsKey(p, 'total_gas') || historyHas(p, 'Total_Gas_Consumption_his')) clearMock(summaryRow(site, 'gas'));
     countUtilityAndEmsMeters(site, site.assets);
     if (changed) paint();
   }
