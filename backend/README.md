@@ -193,7 +193,13 @@ with it is built by code from the tool result. Code: `eko_chat.py`, `eko_chat_ro
   data behind it is live, historical (FIN's hourly series) or stored (Eko-DT's notification store), and fresh, stale or not read yet. Ask
   "what can you do" (tool `get_capabilities`). A question that names something not supported (a theme change, a comparison, a work order, a
   request to turn something off) is answered with the real reason, where there is no model or the model does not answer; the rules never act on it.
-  A wording that fits two readings (a bare "temperature") is asked back in one sentence.
+  A wording that fits two readings (a bare "temperature") is asked back in one sentence, before any rule or model could pick one; an explicit
+  outdoor or supply-air temperature is answered as not read, before any model (a model would give the indoor value). "What is unavailable / not
+  mapped / missing / unsupported in this project" is answered by rules from the same report (`get_capabilities` with `show: "unavailable"`).
+- **Failed reads.** A read that fails is told to the browser as a tool event `{tool, status: "failed", reason, missing?}`. `reason` is one of
+  `SAFE_REASONS` in `eko_chat.py` (anything else is an internal error); `missing` holds Data Mapping NAMES only (`{mapping, key}`, at most 6, never a
+  point ID, expression or exception text), so the dashboard can say "not mapped: Live Points: avg_zone_temp". Every reason, tool and mapping name has
+  an English and an Arabic text in `static/dashboard/js/i18n/en.js` and `ar.js`.
 - **Logging.** Tool-selection diagnostics (`CHAT_DEBUG` in `eko_chat.py`) are off: they would print each user's question to the server log.
 - **Load test.** `scripts/eko_chat_load_test.py` needs `--cookie` (the `eko_session` value, or `EKO_SESSION_COOKIE`) and `--project`.
 - **Export.** `eko_chat.py`, `eko_chat_router.py` and `eko_chat_llm.py` are in the backend export list (`src/lib/backendExport.ts`): `main.py` imports them.
@@ -255,7 +261,7 @@ call the model (`/api/chat/stats` shows the runs).
 ```powershell
 cd backend
 $env:EKO_NOTIFICATION_DB = "$env:TEMP\eko-test-notifications.db"      # keeps the tests off the real notification history
-python -m unittest tests.test_eko_chat_rules tests.test_eko_chat_metrics tests.test_eko_chat_projects tests.test_eko_chat_inventory tests.test_eko_chat_capabilities tests.test_fin_projects
+python -m unittest tests.test_eko_chat_rules tests.test_eko_chat_metrics tests.test_eko_chat_projects tests.test_eko_chat_inventory tests.test_eko_chat_capabilities tests.test_eko_chat_messages tests.test_fin_projects
 cd ..
 python scripts/eko_chat_llm_benchmark.py                 # live: cold start, intent latency, end-to-end, accuracy (needs Ollama + the model)
 python scripts/eko_chat_llm_benchmark.py --unavailable   # how the chat behaves with Ollama off

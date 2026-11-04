@@ -80,10 +80,12 @@ class DataView:
     mapped: dict = field(default_factory=dict)            # the Data Mapping NAMES the project has (finLivePoints / finEndpoints keys; others set or not), never a point ID
 
 
-def _unavailable(reason: str, message: str, view: Optional[DataView] = None) -> dict:
+def _unavailable(reason: str, message: str, view: Optional[DataView] = None, missing: Optional[list] = None) -> dict:
     out = {"available": False, "reason": reason, "message": message}
     if view is not None:
         out["project"] = _project(view)
+    if missing:
+        out["missing"] = _clean_missing(missing)
     return out
 
 
@@ -479,7 +481,7 @@ def _live_reading(key: str, label: str, unit: str, bounds: Optional[tuple], view
     """(reading, miss) for one configured live point; exactly one of them is set."""
     miss = lambda reason, why: (None, {"name": label, "reason": reason, "message": f"{label}: {why}"})   # noqa: E731
     if key not in view.power:
-        got = miss("not_configured", f"this project has no live point mapped for it ({key}); map it under {caps.where({'mapping': 'finLivePoints', 'key': key})}")
+        got = miss("not_configured", f"this project has no live point mapped for it ({key}); map it under {caps.where({'mapping': 'finLivePoints', 'key': None})}")
         got[1].update(mapping="finLivePoints", key=key)
         return got
     raw = view.power.get(key)
@@ -539,7 +541,8 @@ def get_environment(args: dict, view: DataView) -> dict:
             got, miss = _point_average(metric, view)
             readings.append(got) if got else misses.append(miss)
     if not readings:
-        out = _unavailable("metric_unavailable", "; ".join(m["message"] for m in misses) or "No source is mapped for this metric.", view)
+        out = _unavailable("metric_unavailable", "; ".join(m["message"] for m in misses) or "No source is mapped for this metric.", view,
+                           missing=[{"mapping": m["mapping"], "key": m.get("key")} for m in misses if m.get("mapping")])
         out["metric"], out["unavailable"] = metric, misses
         return out
     return {"available": True, "project": _project(view), "metric": metric, "as_of": readings[0].get("as_of"), "readings": readings,
@@ -599,6 +602,13 @@ def _series(view: DataView, keys: tuple) -> tuple[Optional[str], dict]:
     return None, {}
 
 
+def _series_missing(view: DataView) -> list:
+    """The energy series entries to map, when the project maps none of them (empty when the mapping is unknown or present)."""
+    if not view.mapped or set(ENERGY_SERIES) & caps.mapped_names(view.mapped, "finEndpoints"):
+        return []
+    return [{"mapping": "finEndpoints", "key": k} for k in ENERGY_SERIES]
+
+
 def _series_hint(view: DataView) -> str:
     """When the project maps no hourly energy series at all, say so and where to map it (nothing when the mapping is unknown or present)."""
     if not view.mapped or set(ENERGY_SERIES) & caps.mapped_names(view.mapped, "finEndpoints"):
@@ -618,7 +628,8 @@ def get_energy(args: dict, view: DataView) -> dict:
             return _cache_problem(why, as_of, view)
         got, miss = _live_reading("current_month", "Energy consumption this month", ENERGY_UNIT, (0, float("inf")), view)
         if miss:
-            return _unavailable("metric_unavailable", miss["message"], view)
+            return _unavailable("metric_unavailable", miss["message"], view,
+                                missing=[{"mapping": miss["mapping"], "key": miss.get("key")}] if miss.get("mapping") else None)
         return {"available": True, "project": _project(view), "by": "building", "period": "month", "month": f"{now.year}-{now.month:02d}",
                 "metric": got["name"], "value": got["value"], "unit": ENERGY_UNIT, "as_of": got["as_of"],
                 "method": "FIN's own month-to-date point (current_month); not recalculated here"}
@@ -635,7 +646,8 @@ def get_energy(args: dict, view: DataView) -> dict:
     if by == "building":
         key, points = _series(view, ENERGY_SERIES)
         if key is None:
-            return _unavailable("metric_unavailable", "Energy consumption: FIN returned no hourly energy series for this project." + _series_hint(view), view)
+            return _unavailable("metric_unavailable", "Energy consumption: FIN returned no hourly energy series for this project." + _series_hint(view), view,
+                                missing=_series_missing(view))
         total = _day_total(points, day, last, open_hour)
         if total["value"] is None:
             return _unavailable("metric_unavailable", f"Energy consumption {period}: the hourly series has no usable sample for {base['date']}.", view)
@@ -654,7 +666,8 @@ def get_energy(args: dict, view: DataView) -> dict:
                if not view.power_boards else
                "none of the mapped boards has an hourly sample for " + base["date"])
         return _unavailable("metric_unavailable", f"Energy by equipment: energy is measured per distribution board only, and {why}. "
-                                                    "Individual equipment (AHU, FCU) energy is not measured.", view)
+                                                    "Individual equipment (AHU, FCU) energy is not measured.", view,
+                            missing=None if view.power_boards else [{"mapping": "power_boards", "key": None}])
     boards.sort(key=lambda b: -b["value"])
     return {**base, "metric": "Energy by distribution board", "boards": boards, "boards_without_data": absent,
             "note": "Boards are distribution boards, not individual equipment: per-equipment energy is not measured."}
@@ -686,7 +699,13 @@ def get_capabilities(args: dict, view: DataView) -> dict:
     if about:
         out["about"] = next(r for r in rows if r["id"] == about)
     else:       # compact: the examples are for one capability asked about
-        out["capabilities"] = [{k: v for k, v in r.items() if k not in ("examples", "tool", "reads")} for r in rows]
+        compact = [{k: v for k, v in r.items() if k not in ("examples", "tool", "reads")} for r in rows]
+        if args.get("show") == "unavailable":      # only what cannot be answered here: not mapped for this project, or not supported
+            out["show"] = "unavailable"
+            out["capabilities"] = [r for r in compact if r["status"] != caps.AVAILABLE]
+            out["limitations"] = sorted({m for r in compact if r["status"] == caps.AVAILABLE for m in r["limitations"]})
+        else:
+            out["capabilities"] = compact
     return out
 
 
@@ -779,7 +798,8 @@ TOOLS: dict[str, dict] = {
                        "needs, or not supported), its data kind (live, historical or stored) and whether the data behind it is fresh, stale or not read "
                        "yet. Pass about to ask about one capability.",
         "parameters": {"type": "object", "additionalProperties": False, "properties": {
-            "about": {"type": "string", "enum": list(caps.IDS), "description": "One capability id, to ask whether it is available."}}},
+            "about": {"type": "string", "enum": list(caps.IDS), "description": "One capability id, to ask whether it is available."},
+            "show": {"type": "string", "enum": ["all", "unavailable"], "description": "unavailable: only what is not mapped or not supported."}}},
     },
     "get_hvac_status": {
         "fn": get_hvac_status,
@@ -974,7 +994,14 @@ def build_card(tool: str, args: Optional[dict], result: dict) -> Optional[dict]:
             columns=["severity", "type", "asset", "created", "read"], rows=rows, total=result.get("total", 0))
     elif tool == "get_capabilities":
         filters = _filters(args, ["about"])
-        if result.get("about"):
+        if result.get("show") == "unavailable":
+            counts = result.get("counts") or {}
+            rows = [[x.get("label"), x.get("status"), x.get("data") or "", "; ".join(caps.where(m) for m in x.get("missing") or [])]
+                    for x in result.get("capabilities") or []]
+            headline = _text("capabilitiesUnavailable", "Not available in {project}: {unmapped} not mapped, {not_supported} not supported",
+                             project=project or "", unmapped=counts.get("unmapped", 0), not_supported=counts.get("not_supported", 0))
+            interpreted = _text("capabilitiesUnavailable", "What this project cannot answer: not mapped, or not supported{f}", f="")
+        elif result.get("about"):
             a = result["about"]
             rows = [[a.get("label"), a.get("status"), a.get("data") or "", "; ".join(
                 caps.where(m) for m in a.get("missing") or [])]]
@@ -988,7 +1015,7 @@ def build_card(tool: str, args: Optional[dict], result: dict) -> Optional[dict]:
                              not_supported=counts.get("not_supported", 0))
             interpreted = _text("capabilities", "What Eko-Chat can answer from this project's mappings{f}", f="")
         card.update(headline=headline, interpreted_as=interpreted,
-                    columns=["capability", "status", "data", "needs"] if result.get("about") else ["area", "available", "unmapped", "not_supported"],
+                    columns=["capability", "status", "data", "needs"] if (result.get("about") or result.get("show")) else ["area", "available", "unmapped", "not_supported"],
                     rows=rows[:MAX_CARD_ROWS], total=len(rows))
     else:  # get_building_snapshot
         filters = []
@@ -1191,11 +1218,34 @@ def _tool_label(name: Any) -> str:
 
 # reason codes a failed tool may report to the browser; anything else is shown as tool_error
 SAFE_REASONS = {"unknown_tool", "invalid_arguments", "malformed_tool_call", "tool_error",
-                "fin_not_connected", "no_active_project", "no_data_yet", "stale"}
+                "fin_not_connected", "no_active_project", "no_data_yet", "stale",
+                # the other reasons a tool or the fast route reports (each has a text in the dashboard's en.js and ar.js): "not available for this
+                # project" is told as that, with the Data Mapping names it needs, and never as an internal error
+                "metric_unavailable", "period_not_supported", "online_state_unavailable", "no_sensors", "ambiguous",
+                "notifications_unavailable", "notifications_failed", "alarm_history_unavailable", "direct_rejected", "direct_ungrounded"}
 
 
 def _safe_reason(reason: Any) -> str:
-    return reason if reason in SAFE_REASONS else "tool_error"
+    return reason if isinstance(reason, str) and reason in SAFE_REASONS else "tool_error"
+
+
+_MISSING_KEY = re.compile(r"^[A-Za-z0-9_.\- ]{1,64}$")
+
+
+def _clean_missing(items: Any) -> list:
+    """The Data Mapping NAMES a failed read needs, for the browser: [{"mapping": "finLivePoints", "key": "iaq_index"}], at most 6. Anything that is
+    not a known mapping block with a plain key is dropped, so no point ID, expression, exception text or secret can ride along."""
+    out = []
+    for m in items if isinstance(items, list) else []:
+        if not isinstance(m, dict) or m.get("mapping") not in caps.MAPPING_LABEL:
+            continue
+        key = m.get("key")
+        if key is not None and not (isinstance(key, str) and _MISSING_KEY.match(key)):
+            continue
+        out.append({"mapping": m["mapping"], "key": key})
+        if len(out) == 6:
+            break
+    return out
 
 
 # ─── LLM concurrency gate and timing (speed phase 3) ─────────────────────────
@@ -1455,12 +1505,17 @@ async def conversation(adapter: LLMAdapter, message: str, view_fn: Callable[[], 
                 last_ok = (name, args, result)
                 yield "tool", {"tool": label, "status": "completed"}
             else:
-                yield "tool", {"tool": label, "status": "failed", "reason": _safe_reason(result.get("reason"))}
+                event = {"tool": label, "status": "failed", "reason": _safe_reason(result.get("reason"))}
+                if result.get("missing"):
+                    event["missing"] = _clean_missing(result["missing"])
+                yield "tool", event
             entry = {"name": name if isinstance(name, str) else None,
                      "arguments": args if isinstance(args, dict) else None,
                      "available": bool(result.get("available"))}
             if not result.get("available"):
                 entry["reason"] = result.get("reason")
+                if result.get("missing"):
+                    entry["missing"] = result["missing"]
             trace.append(entry)
             messages.append({"role": "tool", "tool_call_id": c.get("id"), "content": text})
 
@@ -1495,6 +1550,8 @@ def _browser_trace(trace: list) -> list:
         entry = {"tool": _tool_label(t.get("name")), "status": "completed" if t.get("available") else "failed"}
         if not t.get("available"):
             entry["reason"] = _safe_reason(t.get("reason"))
+            if t.get("missing"):
+                entry["missing"] = _clean_missing(t["missing"])
         out.append(entry)
     return out
 
@@ -1569,6 +1626,8 @@ def try_direct(message: str, view_fn: Callable[[], DataView], info: Optional[dic
                 entry = {"name": out["intent"], "arguments": out["parameters"], "available": bool(result.get("available"))}
                 if not result.get("available"):
                     entry["reason"] = result.get("reason")
+                    if result.get("missing"):
+                        entry["missing"] = result["missing"]
                 return {"answer": text, "answer_source": "code", "route": "direct", "grounded": True,
                         "tool_calls": [entry], "card": out["card"], "model": None}
     record(decision)
@@ -1597,15 +1656,25 @@ def unsupported(reason: Optional[str] = None) -> dict:
             "tool_calls": [], "card": None, "model": None}
 
 
-def topic_reply(message: str, view_fn: Callable[[], DataView]) -> Optional[dict]:
-    """For a question that asks for a capability nothing answers (a theme change, a comparison, a work order, a write): which capability it is
-    and why it is not available, from get_capabilities(about=...). None when the question names no such capability. Read-only: it runs only
-    get_capabilities, and a question to change anything is answered, never acted on."""
-    from eko_chat_router import clarification_for, direct_text, execute, unsupported_topic    # imported here: the router imports this module
+# Readings that are decided before any model is asked: a model would pick the indoor temperature for an outdoor or supply-air question
+PRE_MODEL_TOPICS = {"environment.outdoor_temperature", "environment.supply_air_temperature"}
+
+
+def clarification_reply(message: str) -> Optional[dict]:
+    """One short question back when the wording fits more than one reading (a bare "temperature"): nothing guessed, no tool run, no model."""
+    from eko_chat_router import clarification_for       # imported here: the router imports this module
     ask = clarification_for(message)
-    if ask:       # the wording fits more than one reading: one short question back, nothing guessed and no tool run
-        return {"answer": ask, "answer_source": "code", "route": "clarification", "grounded": True, "tool_calls": [], "card": None, "model": None}
-    topic = unsupported_topic(message)
+    if not ask:
+        return None
+    return {"answer": ask, "answer_source": "code", "route": "clarification", "grounded": True, "tool_calls": [], "card": None, "model": None}
+
+
+def topic_reply(message: str, view_fn: Callable[[], DataView], only: Optional[set] = None) -> Optional[dict]:
+    """For a question that asks for a capability nothing answers (a theme change, a comparison, a work order, a write): which capability it is
+    and why it is not available, from get_capabilities(about=...). None when the question names no such capability (or, with `only`, none of
+    those). Read-only: it runs only get_capabilities, and a question to change anything is answered, never acted on."""
+    from eko_chat_router import direct_text, execute, unsupported_topic    # imported here: the router imports this module
+    topic = unsupported_topic(message, only)
     if topic is None:
         return None
     out = execute({"route": "direct", "intent": "get_capabilities", "parameters": {"about": topic}}, view_fn())
@@ -1661,11 +1730,15 @@ def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
         cfg = effective(cfg)
         rules_only = cfg.get("provider") == RULES_PROVIDER
         direct = None
-        if rules_only or cfg.get("fast_router", True) is not False:
-            direct = try_direct(req.message, vf, fallback)
+        rules_on = rules_only or cfg.get("fast_router", True) is not False       # chat.fast_router=false hands everything to the model, as before
+        if rules_on:
+            # a wording that fits more than one reading is asked back first, before any rule or model could pick one
+            direct = clarification_reply(req.message) or try_direct(req.message, vf, fallback)
         else:
             fallback["reason"] = "fast_router_off"
             _debug_kv(route="llm_fallback", reason="fast_router_off")
+        if direct is None and rules_on:
+            direct = topic_reply(req.message, vf, PRE_MODEL_TOPICS)      # outdoor / supply-air: decided by code, before a model could answer with the indoor value
         if direct is None and rules_only:
             direct = topic_reply(req.message, vf) or unsupported(fallback.get("reason"))
         if direct is None and cfg.get("provider") == HYBRID:

@@ -206,12 +206,37 @@ INVENTORY_RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("
      r"what are your features|(?:show|list|give me) (?:me )?(?:the |your )?(?:capabilities|features|supported questions))"),
     ("capabilities.overview.mapped", "get_capabilities",
      r"what is (?:mapped|available)" + PROJ),
+    # what is NOT available for this project (not mapped, or not supported): the same tool, narrowed to those
+    ("capabilities.unavailable", "get_capabilities",
+     r"(?:what|which) (?:information|data|capabilities|features|things|questions|functions?|items|metrics|readings) "
+     r"(?:is|are|do(?:es)? not|aren't|isn't) ?(?:not |un|n't )?(?:available|mapped|supported|accessible|configured|answerable|covered)(?: yet)?" + PROJ),
+    ("capabilities.unavailable.what", "get_capabilities",
+     r"(?:what|which)(?: [a-z]+)? (?:is|are|isn't|aren't) (?:not |un|currently not )(?:available|mapped|supported|accessible|configured|covered)(?: yet)?" + PROJ),
+    ("capabilities.unavailable.missing", "get_capabilities",
+     r"(?:what|which) (?:information|data|capabilities|features|things|metrics|readings|mappings)? ?(?:is|are) (?:missing|lacking|not set up)" + PROJ),
+    ("capabilities.unavailable.what_missing", "get_capabilities",
+     r"what(?:'s| is) missing" + PROJ),
+    ("capabilities.unavailable.cannot", "get_capabilities",
+     r"what (?:can't|cannot|can not|couldn't|could not) (?:you )?(?:access|read|see|do|answer|show|help(?: me)? with|support|know|tell me)" + PROJ),
+    ("capabilities.unavailable.dont", "get_capabilities",
+     r"what (?:don't you|do you not|do you lack) (?:support|access|know|have|cover)" + PROJ),
+    ("capabilities.unavailable.show", "get_capabilities",
+     r"(?:show|list|give me|display|tell me)(?: me)? (?:the |all )?(?:unavailable|unmapped|unsupported|missing|not mapped|not supported|not available)"
+     r"(?: (?:capabilities|features|data|information|items|questions|metrics|readings|mappings))?" + PROJ),
+    ("capabilities.unavailable.any", "get_capabilities",
+     r"(?:are there |is there |do we have )?(?:any )?(?:unavailable|unmapped|unsupported|missing) (?:capabilities|features|data|information|mappings)" + PROJ),
+    ("capabilities.unavailable.limits", "get_capabilities",
+     r"what (?:are )?(?:the )?(?:limits|limitations)" + PROJ),
 ]]
 
 # what the question names but nothing answers yet: (capability id, pattern on the normalised question). NOT used by route(): a question like this
 # still goes to the model when there is one. Only where a question would otherwise end as "unsupported" (no model, or the model did not answer)
 # does eko_chat.topic_reply say which capability it is and why it is not available, from get_capabilities(about=id).
 UNSUPPORTED_TOPICS: list[tuple[str, re.Pattern]] = [(cid, re.compile(pat)) for cid, pat in [
+    ("environment.outdoor_temperature", r"\b(?:outdoors?|outside|ambient|external|exterior)\b.*\b(?:temperature|temp)\b|"
+                                         r"\b(?:temperature|temp)\b.*\b(?:outdoors?|outside)\b"),
+    ("environment.supply_air_temperature", r"\b(?:supply|discharge)[ -]?air\b.*\btemp(?:erature)?\b|\bsupply[ -]?(?:air )?temp(?:erature)?\b|"
+                                            r"\btemp(?:erature)? of (?:the )?supply\b"),
     ("studio.theme", r"\b(?:dark|light|auto) (?:mode|theme)\b|\btheme\b|\bappearance\b"),
     ("studio.navigate", r"^(?:open|go to|goto|navigate to|take me to|switch to|bring up) (?:the )?[a-z ]{2,40}? (?:page|dashboard|module|screen|view|tab)$"),
     ("studio.filter", r"^(?:filter|sort|group)\b|\b(?:apply|set|clear|reset) (?:a |the )?filters?\b"),
@@ -248,13 +273,13 @@ def clarification_for(question: Any) -> Optional[str]:
     return None
 
 
-def unsupported_topic(question: Any) -> Optional[str]:
-    """The capability id a question asks for that nothing answers (UNSUPPORTED_TOPICS), or None."""
+def unsupported_topic(question: Any, only: Optional[set] = None) -> Optional[str]:
+    """The capability id a question asks for that nothing answers (UNSUPPORTED_TOPICS), or None. `only` limits the search to those ids."""
     if not isinstance(question, str) or not question.strip() or len(question) > MAX_MESSAGE_CHARS or UNSAFE.search(question):
         return None
     text = _normalize(question)
     for cid, pattern in UNSUPPORTED_TOPICS:
-        if pattern.search(text):
+        if (only is None or cid in only) and pattern.search(text):
             return cid
     return None
 
@@ -278,7 +303,7 @@ METRIC_RULES: list[tuple[str, str, dict, re.Pattern]] = [(rid, intent, fixed, re
     ("env.co2", "get_environment", {"metric": "co2"},
      LEAD + CUR + r"(?:indoor |average |building |room )?(?:co2|co₂|carbon dioxide)(?: level| levels| reading| concentration| value)?" + NOW),
     ("env.temperature", "get_environment", {"metric": "temperature"},
-     LEAD + CUR + r"(?:indoor|average|zone|building|room) temperature(?: level| reading| value)?" + NOW),   # a bare "temperature" could be outdoor or supply air
+     LEAD + CUR + r"(?:(?:indoor|average|mean|zone|building|room) ){1,2}temperature(?: level| reading| value)?" + NOW),   # a bare "temperature" could be outdoor or supply air
     ("env.humidity", "get_environment", {"metric": "humidity"},
      LEAD + CUR + r"(?:indoor |average |building |room |relative )?humidity(?: level| reading| value)?" + NOW),
     ("env.comfort", "get_environment", {"metric": "comfort"},
@@ -383,6 +408,8 @@ def route(question: Any) -> dict:
             params["history"] = True
         if rid.startswith("equipment.in_alarm"):
             params["in_alarm"] = True
+        if rid.startswith("capabilities.unavailable"):
+            params["show"] = "unavailable"
         if rid == "notifications.unread":
             params["view"] = "unread"
         if _validate(params, TOOLS[intent]["parameters"]):
@@ -429,6 +456,7 @@ _UNAVAILABLE = {
     "no_active_project": "No FIN project is active, so live building data is not available.",
     "no_data_yet": "The backend has not read this data from FIN yet. Please try again shortly.",
     "stale": "The latest reading of this data is too old to be shown as current.",
+    "tool_error": "This data could not be read right now.",       # never the exception's name or text
 }
 
 
@@ -474,6 +502,8 @@ def _capabilities_text(r: dict) -> str:
         return text + "".join(" " + m for m in a.get("limitations") or []) + (f" {a['note']}" if a.get("note") else "")
     rows = r.get("capabilities") or []
     counts = r.get("counts") or {}
+    if r.get("show") == "unavailable":
+        return _unavailable_text(r, project, rows, counts)
     by_area = [f"{x['label']} ({x.get('available', 0)})" for x in r.get("areas") or [] if x.get("available")]
     text = (f"For {project} I can answer {counts.get(AVAILABLE, 0)} kinds of question, read-only from its FIN data: " + ", ".join(by_area) + ".")
     unmapped = [x for x in rows if x.get("status") == UNMAPPED]
@@ -486,6 +516,29 @@ def _capabilities_text(r: dict) -> str:
     limits = sorted({m for x in rows if x.get("status") == AVAILABLE for m in x.get("limitations") or []})
     if limits:
         text += " Limits: " + " ".join(limits)
+    odd = [f"{k} {_READ_STATE[v['state']]}" for k, v in (r.get("reads") or {}).items() if v.get("state") in _READ_STATE]
+    if odd:
+        text += " Data state: " + "; ".join(odd) + "."
+    return text
+
+
+def _unavailable_text(r: dict, project: str, rows: list, counts: dict) -> str:
+    """What this project cannot answer, from the get_capabilities(show=unavailable) result: not mapped (and what to map), not supported yet, never."""
+    from eko_chat_capabilities import UNMAPPED, where
+    unmapped = [x for x in rows if x.get("status") == UNMAPPED]
+    planned = [x for x in rows if x.get("status") != UNMAPPED and x.get("reason") == "planned"]
+    never = [x for x in rows if x.get("status") != UNMAPPED and x.get("reason") == "read_only"]
+    if unmapped:
+        text = (f"In {project}, {counts.get('unmapped', 0)} things the assistant can answer are not available because nothing is mapped for them: "
+                + "; ".join(f"{x['label']} (map {'; '.join(where(m) for m in x.get('missing') or [])})" for x in unmapped) + ".")
+    else:
+        text = f"In {project}, nothing the assistant can answer is missing a mapping."
+    if planned:
+        text += " Not supported yet: " + ", ".join(x["label"] for x in planned) + "."
+    if never:
+        text += " Never done by Eko-Chat (it is read-only): " + ", ".join(x["label"] for x in never) + "."
+    if r.get("limitations"):
+        text += " Limits on what is available: " + " ".join(r["limitations"])
     odd = [f"{k} {_READ_STATE[v['state']]}" for k, v in (r.get("reads") or {}).items() if v.get("state") in _READ_STATE]
     if odd:
         text += " Data state: " + "; ".join(odd) + "."

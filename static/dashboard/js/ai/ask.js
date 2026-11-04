@@ -321,6 +321,7 @@ window.EKO_AI = (function(){
     if(typeof v === 'boolean') return t(v ? 'ai.card.yes' : 'ai.card.no');
     if(col === 'metric') return tOr('ai.card.m.' + v, String(v));
     if(col === 'severity') return tOr('ai.card.sev.' + v, String(v));
+    if(col === 'status' || col === 'data') return tOr('ai.card.cap.' + v, String(v));   /* a capability's status and data kind; any other value stays as sent */
     return String(v);
   }
   function cardHeadline(c){ return c && c.headline ? cardText(c.headline, 'h') : ''; }
@@ -333,10 +334,23 @@ window.EKO_AI = (function(){
     const more = c.truncated ? `<p class="tCap">${esc(t('ai.card.more', { n: rows.length, total: c.total }))}</p>` : '';
     return `<div class="aicard"><p><b>${esc(cardHeadline(c))}</b></p>${table}${more}${c.interpreted_as ? `<p class="aisrc">${esc(cardInterpreted(c))}</p>` : ''}</div>`;
   }
+  /* " · not mapped: Live Points: avg_zone_temp, avg_zone_temp_sp": the Data Mapping names a failed read needs (names only, grouped by block) */
+  function missingText(list){
+    if(!Array.isArray(list) || !list.length) return '';
+    const groups = [];
+    list.forEach(m => {
+      if(!m || typeof m.mapping !== 'string') return;
+      let g = groups.find(x => x.mapping === m.mapping);
+      if(!g) groups.push(g = { mapping: m.mapping, keys: [] });
+      if(typeof m.key === 'string' && m.key) g.keys.push(m.key);
+    });
+    if(!groups.length) return '';
+    return ' · ' + t('ai.tool.notMapped', { list: groups.map(g => tOr('ai.mapping.' + g.mapping, g.mapping) + (g.keys.length ? ': ' + g.keys.join(', ') : '')).join('; ') });
+  }
   function toolText(x){
     if(x.tool === 'unknown') return t('ai.tool.unknown');
     const name = tOr('ai.toolName.' + x.tool, x.tool);
-    if(x.status === 'failed') return t('ai.tool.failed', { name, reason: tOr('ai.reason.' + x.reason, x.reason || '') });
+    if(x.status === 'failed') return t('ai.tool.failed', { name, reason: tOr('ai.reason.' + x.reason, x.reason || '') }) + missingText(x.missing);
     return t(x.status === 'completed' ? 'ai.tool.completed' : 'ai.tool.running', { name });
   }
   function toolsHtml(a){ return a.tools && a.tools.length ? `<div class="aitools tCap">${a.tools.map(x => `<div data-status="${esc(x.status)}">${esc(toolText(x))}</div>`).join('')}</div>` : ''; }

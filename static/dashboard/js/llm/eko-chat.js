@@ -2,7 +2,7 @@
    EKO-CHAT CLIENT (Phase 3) — Ask EKO's only way to the model.
    POST /api/chat { message, stream:true } and read the Server-Sent Events:
      start  { model, project }
-     tool   { tool, status:'running'|'completed'|'failed', reason? }
+     tool   { tool, status:'running'|'completed'|'failed', reason?, missing? }   missing: the Data Mapping names a failed read needs
      token  { text }                 the grounded answer, a piece at a time
      done   { answer, grounded, card, tool_calls, model, project, timestamp }
      error  { error, message }
@@ -99,7 +99,8 @@
       const d = ev.data;
       if((ev.event === 'start' || ev.event === 'done') && wrongProject(d)){ final = fail('project'); return; }   /* another project's answer is never shown */
       if(ev.event === 'start') call('start', { model: d.model || '', project: d.project || null });
-      else if(ev.event === 'tool') call('tool', { tool: String(d.tool || 'unknown'), status: String(d.status || ''), reason: d.reason || null });
+      else if(ev.event === 'tool') call('tool', { tool: String(d.tool || 'unknown'), status: String(d.status || ''), reason: d.reason || null,
+                                                  missing: Array.isArray(d.missing) ? d.missing : null });
       else if(ev.event === 'token') call('token', { text: String(d.text == null ? '' : d.text) });
       else if(ev.event === 'done'){ call('done', d); final = { status:'done', result:d }; }
       else if(ev.event === 'error') final = fail(errorCode(d.error), d.message);
