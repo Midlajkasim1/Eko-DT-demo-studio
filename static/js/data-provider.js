@@ -31,6 +31,9 @@
       severityBands: fin.severityBands || raw.severity_bands || null,
       equipmentClasses: fin.equipmentClasses || raw.equipment_classes || null,
       realtimeEndpoints: fin.realtimeEndpoints || raw.realtime_endpoints || null,
+      documents: Array.isArray(fin.documents) ? fin.documents
+        : (Array.isArray(raw.documents) ? raw.documents
+          : (raw.documents && Array.isArray(raw.documents.families) ? raw.documents.families : undefined)),
       // The Eko-DT project this dashboard shows. Only the Studio and the exported viewer know it.
       projectId: raw.projectId || '',
     };
@@ -44,6 +47,7 @@
     });
     if (site.realtimeMs) next.realtimeMs = site.realtimeMs;
     if (!next.project && site.project) next.project = site.project;
+    if (!Array.isArray(next.documents) && Array.isArray(site.documents)) next.documents = site.documents;
     return next;
   }
 

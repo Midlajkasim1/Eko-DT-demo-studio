@@ -888,7 +888,8 @@
       meterProfile: filled(raw.meterProfile) ? raw.meterProfile : DEFAULT_METER,
       severityBands: filled(raw.severityBands) ? raw.severityBands : DEFAULT_BANDS,
       equipmentClasses: filled(raw.equipmentClasses) ? raw.equipmentClasses : DEFAULT_CLASSES,
-      realtimeEndpoints: filled(raw.realtimeEndpoints) ? raw.realtimeEndpoints : DEFAULT_RT
+      realtimeEndpoints: filled(raw.realtimeEndpoints) ? raw.realtimeEndpoints : DEFAULT_RT,
+      documents: Array.isArray(raw.documents) ? raw.documents : undefined
     };
   }
 
@@ -1100,22 +1101,8 @@
     return { days: days, retained: daysList.length > 0, byDay: daysList, last24: last24 };
   };
 
-  Session.prototype.documents = async function () {
-    if (this._docs !== undefined) return this._docs;
-    var raw = null;
-    var urls = ['om-warranty.json', '/backend/om-warranty.json'];
-    for (var i = 0; i < urls.length; i++) {
-      try {
-        var res = await fetch(urls[i], { cache: 'no-store' });
-        if (!res.ok) continue;
-        var json = await res.json();
-        if (json && Array.isArray(json.families)) { raw = json; break; }
-      } catch (e) { /* catalog is optional */ }
-    }
-    if (!raw) return null;
-    var project = String(this.cfg.project || '').trim();
-    if (!project) return null;
-    this._docs = {
+  function catalogFrom(raw, project) {
+    return {
       families: raw.families.filter(function (fam) { return fam && typeof fam === 'object'; }).map(function (fam) {
         var item = {
           id: String(fam.id || ''),
@@ -1139,6 +1126,31 @@
         return item;
       })
     };
+  }
+
+  Session.prototype.documents = async function () {
+    var live = typeof window !== 'undefined' && window.INJECTED_PROJECT_CONFIG && window.INJECTED_PROJECT_CONFIG.fin;
+    var own = live && Object.prototype.hasOwnProperty.call(live, 'documents')
+      ? (Array.isArray(live.documents) ? live.documents : null)
+      : (this.cfg && Array.isArray(this.cfg.documents) ? this.cfg.documents : null);
+    var project = String(this.cfg.project || '').trim();
+    if (Array.isArray(own)) {
+      if (!project) return null;
+      return catalogFrom({ families: own }, project);
+    }
+    if (this._docs !== undefined) return this._docs;
+    var raw = null;
+    var urls = ['om-warranty.json', '/backend/om-warranty.json'];
+    for (var i = 0; i < urls.length; i++) {
+      try {
+        var res = await fetch(urls[i], { cache: 'no-store' });
+        if (!res.ok) continue;
+        var json = await res.json();
+        if (json && Array.isArray(json.families)) { raw = json; break; }
+      } catch (e) { /* catalog is optional */ }
+    }
+    if (!raw || !project) return null;
+    this._docs = catalogFrom(raw, project);
     return this._docs;
   };
 

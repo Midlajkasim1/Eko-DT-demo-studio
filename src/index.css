@@ -2101,6 +2101,18 @@ details > summary.fpm-gh { cursor: pointer; }
   .fpm-side { padding-top: 0; }
 }
 
+.fdoc { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin: 0 0 12px; background: var(--bg-raised); }
+.fdoc-h { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 8px; }
+.fdoc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fdoc-doc { margin-top: 10px; }
+.fdoc-doc h4 { margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-secondary); }
+.fdoc-ref { display: flex; gap: 8px; align-items: center; }
+.fdoc-ref input { flex: 1; min-width: 0; font-family: var(--font-mono); }
+@media (max-width: 720px) {
+  .fdoc-grid { grid-template-columns: 1fr; }
+  .fdoc-ref { flex-wrap: wrap; }
+}
+
 .asset-links-modal {
   max-width: 1120px;
   width: calc(100% - 32px);

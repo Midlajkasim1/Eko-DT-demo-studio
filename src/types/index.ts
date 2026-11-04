@@ -295,6 +295,27 @@ export interface HeatmapSetup {
   walkRooms?: string[]
 }
 
+/** One O&M or warranty PDF. `ref` is the FIN record, "@p:project:r:id". */
+export interface FinManual {
+  name: string
+  nameAr?: string
+  ref: string
+}
+
+/** Equipment that share one O&M manual and one warranty. Match words are the same ones
+ *  om-warranty.json uses: tags, codes in the asset id, and words in the type or the id. */
+export interface FinDocumentFamily {
+  id: string
+  /** The name typed in Dashboard Settings. The id stays put when this is renamed. */
+  label?: string
+  tags: string[]
+  codes: string[]
+  types: string[]
+  names: string[]
+  om?: FinManual
+  warranty?: FinManual
+}
+
 /** Per-project FIN settings live here. A field a project does not set falls back to the
  *  backend config.json default, so projects saved before a field existed keep working. */
 export interface ProjectApiSettings {
@@ -339,6 +360,9 @@ export interface ProjectApiSettings {
   finMeterProfile?: FinMeterProfile
   finSeverityBands?: FinSeverityBands
   finEquipmentClasses?: FinEquipmentClasses
+  /** O&M and warranty manuals for this project. Saved: the dashboard uses this list and does not
+   *  read om-warranty.json. Absent: that file stays the catalog for the site it belongs to. */
+  finDocuments?: FinDocumentFamily[]
   finRealtimeEndpoints?: Record<string, string>
   finRealtimeMs?: number
   weatherApiKey?: string

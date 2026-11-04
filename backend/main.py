@@ -123,6 +123,9 @@ def project_overrides(settings: Optional[dict]) -> dict:
     interval = settings.get("finInterval")
     if isinstance(interval, (int, float)) and not isinstance(interval, bool) and interval > 0:
         out["polling.live_ms"] = interval
+    # A saved list, including an empty one, replaces om-warranty.json. Absent keeps the file.
+    if isinstance(settings.get("finDocuments"), list):
+        out["document_families"] = clean_document_families(settings.get("finDocuments"))
     return out
 
 
@@ -206,6 +209,71 @@ def _block_source(key: str) -> str:
     return "not_configured" if ACTIVE_ISOLATED else "default"
 
 
+_DOC_REF_RE = re.compile(r"@p:[A-Za-z0-9_]+:r:[0-9a-fA-F-]+")
+
+
+def _str_list(value) -> list:
+    if isinstance(value, str):
+        value = re.split(r"[,;\n]+", value)
+    if not isinstance(value, list):
+        return []
+    out = []
+    for item in value:
+        text = str(item).strip()
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
+def _manual(value) -> Optional[dict]:
+    if not isinstance(value, dict):
+        return None
+    ref = str(value.get("ref") or "").strip()
+    name = str(value.get("name") or "").strip()
+    if not name or not _DOC_REF_RE.fullmatch(ref):
+        return None
+    doc = {"name": name, "ref": ref}
+    name_ar = str(value.get("nameAr") or "").strip()
+    if name_ar:
+        doc["nameAr"] = name_ar
+    return doc
+
+
+def clean_document_families(raw) -> list:
+    """Families the dashboard can match. A group with no usable manual is dropped."""
+    if not isinstance(raw, list):
+        return []
+    families = []
+    seen = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        fam_id = str(item.get("id") or "").strip()
+        if not fam_id or fam_id in seen:
+            continue
+        om = _manual(item.get("om"))
+        warranty = _manual(item.get("warranty"))
+        if not om and not warranty:
+            continue
+        seen.add(fam_id)
+        fam = {
+            "id": fam_id,
+            "tags": _str_list(item.get("tags")),
+            "codes": _str_list(item.get("codes")),
+            "types": _str_list(item.get("types")),
+            "names": _str_list(item.get("names")),
+        }
+        label = str(item.get("label") or "").strip()
+        if label:
+            fam["label"] = label
+        if om:
+            fam["om"] = om
+        if warranty:
+            fam["warranty"] = warranty
+        families.append(fam)
+    return families
+
+
 def _documents_path() -> str:
     name = CONFIG.get("documents_file") or "om-warranty.json"
     if os.path.isabs(name):
@@ -230,13 +298,22 @@ def _ref_project(ref: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
-def _catalog_doc(ref: str) -> Optional[dict]:
+def _stored_document_families() -> list:
+    """The list this project saved, or om-warranty.json when it saved none."""
+    if "document_families" in ACTIVE_OVERRIDES:
+        raw = CONFIG.get("document_families")
+        return raw if isinstance(raw, list) else []
     try:
         with open(_documents_path(), "r", encoding="utf-8") as handle:
             raw = json.load(handle)
     except (OSError, json.JSONDecodeError):
-        return None
-    for fam in raw.get("families") or []:
+        return []
+    families = raw.get("families") if isinstance(raw, dict) else None
+    return families if isinstance(families, list) else []
+
+
+def _catalog_doc(ref: str) -> Optional[dict]:
+    for fam in _stored_document_families():
         if not isinstance(fam, dict):
             continue
         for kind in ("om", "warranty"):
@@ -256,15 +333,10 @@ def _pdf_filename(name: str) -> str:
 def load_documents() -> dict:
     """Re-read the catalog each call so an edit shows up on the next poll.
 
-    A manual is a record of ONE FIN project, so only the active project's are listed: another
-    project's equipment is never matched to this site's manuals."""
-    try:
-        with open(_documents_path(), "r", encoding="utf-8") as handle:
-            raw = json.load(handle)
-    except (OSError, json.JSONDecodeError):
-        return {"families": []}
+    A project that saved its own list does not read om-warranty.json. A manual is a record of
+    ONE FIN project, so only the active project's are listed."""
     families = []
-    for fam in raw.get("families") or []:
+    for fam in _stored_document_families():
         if not isinstance(fam, dict):
             continue
         item = {
@@ -1480,6 +1552,60 @@ async def get_fin_resources(request: Request, project: str):
             "his": row.get("his") is True,
         })
     return {"project": project, "resources": items, "truncated": len(rows) > MAX_RESOURCES}
+
+
+_FILE_QUERIES = ("readAll(file)", "readAll(pdf)", "readAll(doc)")
+MAX_FILES = 2000
+
+
+@app.get("/api/fin/files")
+async def get_fin_files(request: Request, project: str):
+    """The files of ONE FIN project, so O&M and warranty can be picked by name.
+
+    Read-only, and keyed by the project asked about. The three queries are fixed; nothing
+    the browser sends is evaluated.
+    """
+    _require_user(request)
+    if not PROJECT_ID_RE.match(project):
+        raise HTTPException(status_code=400, detail="Not a FIN project identifier.")
+    if client is None or not client.is_authenticated:
+        raise HTTPException(status_code=401, detail="Connect to FIN first.")
+    found: dict = {}
+    truncated = False
+    any_ok = False
+    last_status: Optional[int] = None
+    for expr in _FILE_QUERIES:
+        if len(found) >= MAX_FILES:
+            truncated = True
+            break
+        endpoint = f"/api/{quote(project, safe='')}/eval?expr={quote(expr, safe='')}"
+        status, text = await client.fetch_probe(endpoint)
+        last_status = status
+        if status != 200 or text is None or _is_error_grid(text):
+            continue
+        any_ok = True
+        rows = parse_zinc_csv(text)
+        if len(found) + len(rows) > MAX_FILES:
+            truncated = True
+        for row in rows:
+            if len(found) >= MAX_FILES:
+                break
+            pid = str(safe_get(row.get("id"), "val") or "")
+            if not pid:
+                continue
+            ref = pid if pid.startswith("@") else "@" + pid
+            if not _DOC_REF_RE.fullmatch(ref) or ref in found:
+                continue
+            dis = safe_get(row.get("id"), "dis")
+            if not dis and isinstance(row.get("dis"), str):
+                dis = row.get("dis")
+            if not dis and isinstance(row.get("navName"), str):
+                dis = row.get("navName")
+            found[ref] = {"ref": ref, "name": str(dis or ref)}
+    if not any_ok and not found:
+        raise _fin_failure(last_status, None, "files")
+    files = sorted(found.values(), key=lambda item: str(item["name"]).lower())
+    return {"project": project, "files": files, "truncated": truncated}
 
 
 @app.get("/api/fin/mapping-schema")

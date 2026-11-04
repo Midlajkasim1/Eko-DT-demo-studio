@@ -30,6 +30,7 @@ import {
 import type { JsonObject } from '@/lib/mappingRows'
 import { validateMappings, type ValidationResponse } from '@/lib/mappingValidation'
 import { FinPointMapping } from '@/components/project/FinPointMapping'
+import { FinDocumentsEditor } from '@/components/project/FinDocumentsEditor'
 import { importMappingCsv, mappingCsv, pointListCsv, pointViews } from '@/lib/finMappingCatalog'
 import type { HeatmapSetup, ProjectApiSettings } from '@/types'
 
@@ -328,6 +329,8 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   const [mappings, setMappings] = useState<MappingStates>(() => mappingStatesFrom({}))
   // remounts the Power boards editor when its content is replaced (opening a project, Clear)
   const [boardsRev, setBoardsRev] = useState(0)
+  const [docsRev, setDocsRev] = useState(0)
+  const [docsError, setDocsError] = useState<string | null>(null)
   const [revs, setRevs] = useState<Record<MappingField, number>>(
     () => Object.fromEntries(MAPPING_FIELDS.map(f => [f, 0])) as Record<MappingField, number>
   )
@@ -400,6 +403,8 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
       setMappings(mappingStatesFrom(savedSettings))
       setRevs(prev => Object.fromEntries(MAPPING_FIELDS.map(f => [f, prev[f] + 1])) as typeof prev)
       setBoardsRev(r => r + 1)
+      setDocsRev(r => r + 1)
+      setDocsError(null)
       setSaveError(null)
       setValidation(null)
       setValidateError(null)
@@ -554,6 +559,11 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
         setSaveError(`Not saved. ${problem}`)
         return
       }
+    }
+    if (docsError) {
+      setActiveTab('data')
+      setSaveError(`Not saved. ${docsError}`)
+      return
     }
     const basisError = basisProblem(settings)
     if (basisError) {
@@ -898,6 +908,23 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                   </MappingSection>
                 )
               })}
+
+              <MappingSection
+                title="O&M and warranty"
+                hint="Each group is one kind of equipment. The asset drawer opens its O&M manual and its warranty when the equipment matches. Save Settings stores the list on this project, and om-warranty.json is not read for it after that. Leave this unset and that file stays the catalog for the site it belongs to."
+                hasValue={!!settings.finDocuments?.length || !!docsError}
+                unsetText="Not set for this project. Marsa Al Arab's manuals stay in om-warranty.json until they are copied here and saved. Another FIN project gets no manuals from that file."
+                error={docsError ?? undefined}
+                onLoad={() => { update('finDocuments', undefined); setDocsError(null); setDocsRev(r => r + 1) }}
+              >
+                <FinDocumentsEditor
+                  key={`${currentProject.projectId}-docs-${docsRev}`}
+                  value={settings.finDocuments}
+                  finProject={selectedFinProject}
+                  finConnected={finConnected}
+                  onChange={(families, error) => { update('finDocuments', families); setDocsError(error) }}
+                />
+              </MappingSection>
 
               <MappingSection
                 title="Power Boards"

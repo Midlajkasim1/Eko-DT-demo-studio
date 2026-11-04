@@ -190,6 +190,7 @@ export default function ViewerApp() {
               severityBands: s.finSeverityBands || undefined,
               equipmentClasses: s.finEquipmentClasses || undefined,
               realtimeEndpoints: s.finRealtimeEndpoints || undefined,
+              documents: Array.isArray(s.finDocuments) ? s.finDocuments : undefined,
             },
             weather: {
               lat: s.weatherLat ?? 24.469,

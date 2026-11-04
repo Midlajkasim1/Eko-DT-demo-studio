@@ -211,6 +211,7 @@ export function apiConfigFor(settings: ProjectApiSettings | undefined, fallbackN
     equipment_classes: s.finEquipmentClasses,
     meter_profile: s.finMeterProfile,
     severity_bands: s.finSeverityBands,
+    ...(Array.isArray(s.finDocuments) ? { documents: s.finDocuments } : {}),
     // Only a key the user entered for this project; no shared key is ever written into a project
     weather: {
       lat: s.weatherLat ?? 24.469,
@@ -274,5 +275,6 @@ export function toBackendSettings(settings: ProjectApiSettings | undefined): Pro
   for (const field of MAPPING_FIELDS) {
     if (s[field]) Object.assign(out, { [field]: s[field] })
   }
+  if (Array.isArray(s.finDocuments)) out.finDocuments = s.finDocuments
   return out
 }

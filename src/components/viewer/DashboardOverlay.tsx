@@ -2899,7 +2899,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
               meterProfile: ${apiSettings.finMeterProfile ? JSON.stringify(apiSettings.finMeterProfile) : 'undefined'},
               severityBands: ${apiSettings.finSeverityBands ? JSON.stringify(apiSettings.finSeverityBands) : 'undefined'},
               equipmentClasses: ${apiSettings.finEquipmentClasses ? JSON.stringify(apiSettings.finEquipmentClasses) : 'undefined'},
-              realtimeEndpoints: ${apiSettings.finRealtimeEndpoints ? JSON.stringify(apiSettings.finRealtimeEndpoints) : 'undefined'}
+              realtimeEndpoints: ${apiSettings.finRealtimeEndpoints ? JSON.stringify(apiSettings.finRealtimeEndpoints) : 'undefined'},
+              documents: ${Array.isArray(apiSettings.finDocuments) ? JSON.stringify(apiSettings.finDocuments) : 'undefined'}
             }
           };
         `
@@ -2956,6 +2957,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       fin.directMode = s.finDirectMode || false
       if (s.finLivePoints) fin.livePoints = s.finLivePoints
       if (s.finEndpoints) fin.endpoints = s.finEndpoints
+      fin.documents = Array.isArray(s.finDocuments) ? s.finDocuments : null
     }
     try { (window as any).EKO_HEAT?.relink?.() } catch { /* the next data tick rebuilds the zones */ }
     try { (window as any).EKO?.set?.({}) } catch { /* the dashboard redraws on its next refresh */ }

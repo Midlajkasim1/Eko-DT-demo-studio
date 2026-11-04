@@ -53,6 +53,19 @@ export async function fetchFinProjects(): Promise<FinProject[]> {
   return Array.isArray(body.projects) ? body.projects : []
 }
 
+/** One PDF (or other file) on a FIN project. `ref` is the record id, "@p:project:r:…". */
+export interface FinFile {
+  ref: string
+  name: string
+}
+
+/** The files of ONE FIN project, for the O&M and warranty picker. */
+export async function fetchFinFiles(projectId: string): Promise<{ files: FinFile[]; truncated: boolean }> {
+  const body = await getJson<{ files: FinFile[]; truncated?: boolean }>(
+    `/api/fin/files?project=${encodeURIComponent(projectId)}`, `the files of ${projectId}`)
+  return { files: Array.isArray(body.files) ? body.files : [], truncated: !!body.truncated }
+}
+
 /** The points of ONE FIN project, whichever project the session currently serves. */
 export async function fetchFinResources(projectId: string): Promise<{ resources: FinResource[]; truncated: boolean }> {
   const body = await getJson<{ resources: FinResource[]; truncated?: boolean }>(

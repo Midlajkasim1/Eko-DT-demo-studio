@@ -3,6 +3,7 @@ import type JSZip from 'jszip'
 import { ASSETS_VERSION, buildTextureAsset, collectGarbage, TEXTURES_DIR } from '@/lib/textureAssets'
 import { assetFileName, collectMapGarbage, MAP_ASSETS_DIR } from '@/lib/mapAssets'
 import { hasMap, pruneMapConfig } from '@/lib/mapConfig'
+import { documentCatalogText } from '@/lib/finDocuments'
 import { exportedSiteConfig, finExportMappings } from '@/lib/finSettings'
 import { BACKEND_EXPORT_FILES } from '@/lib/backendExport'
 import type { MapAsset, ProjectMeta, ProjectModel, RecentProjectCard, TextureAsset } from '@/types'
@@ -514,6 +515,9 @@ export async function exportProjectAsZip(handle: FileSystemDirectoryHandle, meta
     zip.file(`backend/${name}`, await r.text())
   }
 
+  const catalog = documentCatalogText(meta.apiSettings?.finDocuments)
+  if (catalog != null) zip.file('backend/om-warranty.json', catalog)
+
   // config.json — start from the repo file and overlay only the connection fields
   // the settings modal owns. Point maps are deliberately left alone: config.json
   // holds equipment_classes / meter_profile / realtime_endpoints and an audited
@@ -595,10 +599,14 @@ export async function exportFinProjectAsZip(handle: FileSystemDirectoryHandle, m
   }
   zip.file('project.json', JSON.stringify(finMeta, null, 2))
 
-  try {
-    const docs = await fetch('/backend/om-warranty.json?t=' + Date.now(), { cache: 'no-store' })
-    if (docs.ok) zip.file('om-warranty.json', await docs.text())
-  } catch { /* manuals stay on the fixture set when the catalog is absent */ }
+  const catalog = documentCatalogText(apiSettings.finDocuments)
+  if (catalog != null) zip.file('om-warranty.json', catalog)
+  else {
+    try {
+      const docs = await fetch('/backend/om-warranty.json?t=' + Date.now(), { cache: 'no-store' })
+      if (docs.ok) zip.file('om-warranty.json', await docs.text())
+    } catch { /* manuals stay on the fixture set when the catalog is absent */ }
+  }
 
   // Also include api-config.json for standalone FIN dashboard (direct API mode)
   const apiConfig = {
@@ -614,6 +622,7 @@ export async function exportFinProjectAsZip(handle: FileSystemDirectoryHandle, m
     meter_profile: mapped.finMeterProfile,
     severity_bands: mapped.finSeverityBands,
     equipment_classes: mapped.finEquipmentClasses,
+    ...(Array.isArray(apiSettings.finDocuments) ? { documents: apiSettings.finDocuments } : {}),
     realtime_endpoints: siteCfg.realtime_endpoints,
     // Only a key the user entered for this project; no shared key is ever written into a project
     weather: {
