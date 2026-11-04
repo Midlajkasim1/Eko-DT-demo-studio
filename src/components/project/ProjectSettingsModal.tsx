@@ -9,7 +9,6 @@ import {
   KeyValueEditor,
   MappingSection,
   MeterProfileEditor,
-  PowerBoardsEditor,
   SeverityEditor,
   type EditorState,
 } from '@/components/project/FinMappingEditors'
@@ -31,6 +30,7 @@ import type { JsonObject } from '@/lib/mappingRows'
 import { validateMappings, type ValidationResponse } from '@/lib/mappingValidation'
 import { FinPointMapping } from '@/components/project/FinPointMapping'
 import { FinDocumentsEditor } from '@/components/project/FinDocumentsEditor'
+import { PowerBoardsEditor } from '@/components/project/FinPowerBoards'
 import { importMappingCsv, mappingCsv, pointListCsv, pointViews } from '@/lib/finMappingCatalog'
 import type { HeatmapSetup, ProjectApiSettings } from '@/types'
 
@@ -445,8 +445,6 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
     if (keys.unverifiedStandard) return `${problem} config.json's standard keys are accepted only once the backend has verified ${sch.standardProfile}'s records on the FIN server it is signed in to: connect to FIN with this project open, then save again.`
     return problem
   }
-  const boardKeys = boardKeyOptions(currentProject.projectId, settings.finProjectName,
-    { live: mappings.finLivePoints.value, history: mappings.finEndpoints.value }, schema)
   const boardsError = boardsCheck(schema, schemaLoaded)
   // isFin only decides FIN-specific side effects below; every settings tab is for every project
   const isFin = !!currentProject.isFinProject
@@ -938,7 +936,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
 
               <MappingSection
                 title="Power Boards"
-                hint="Boards for this project. Add a row, name the board, and pick its live reading."
+                hint="The boards on Energy › Consumption. Name each board and choose its FIN point; charts read the same point's history when FIN keeps it."
                 hasValue={!!settings.finPowerBoards?.length}
                 unsetText="No boards for this project yet. Add them here. The sample boards stay until you do."
                 error={boardsError ?? undefined}
@@ -947,8 +945,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 <PowerBoardsEditor
                   key={`${currentProject.projectId}-boards-${boardsRev}`}
                   value={settings.finPowerBoards}
-                  liveKeys={boardKeys.live}
-                  historyKeys={boardKeys.history}
+                  points={finPoints}
                   onChange={boards => update('finPowerBoards', boards)}
                 />
               </MappingSection>

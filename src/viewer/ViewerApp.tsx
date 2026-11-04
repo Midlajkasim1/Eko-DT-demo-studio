@@ -9,7 +9,7 @@ import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import { useMapStore } from '@/store/useMapStore'
 import { hasMap } from '@/lib/mapConfig'
 import { savedTemplateId } from '@/constants/renderSettings'
-import { dashboardProjectInfo } from '@/lib/finSettings'
+import { dashboardProjectInfo, pointsWithBoards } from '@/lib/finSettings'
 import { MapLayer } from '@/components/map/MapLayer'
 import { SignInOverlay, checkSession } from '@/viewer/SignInOverlay'
 import { EkoLoading } from '@/components/viewer/EkoLoading'
@@ -182,8 +182,8 @@ export default function ViewerApp() {
               project: s.finProjectName || '',
               interval: s.finInterval || 5000,
               directMode: s.finDirectMode || false,
-              livePoints: s.finLivePoints || undefined,
-              endpoints: s.finEndpoints || undefined,
+              livePoints: pointsWithBoards(s).live || undefined,
+              endpoints: pointsWithBoards(s).history || undefined,
               realtimeMs: s.finRealtimeMs || undefined,
               workorderExpr: s.finWorkorderExpr || '',
               meterProfile: s.finMeterProfile || undefined,

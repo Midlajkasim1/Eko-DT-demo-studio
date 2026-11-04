@@ -97,7 +97,7 @@ function emitFrom(rows: Row[]): EditorState {
   return Object.keys(out).length ? { value: out } : {}
 }
 
-function Chips({ v }: { v: PointView }) {
+export function Chips({ v }: { v: PointView }) {
   return (
     <span className="fpm-chips">
       {v.unit && <span className="fpm-chip">{v.unit}</span>}
@@ -117,7 +117,7 @@ interface PickerProps {
 }
 
 /** The point list for one key: its best matches first, then every point, searchable; or a value typed by hand */
-function PointPicker({ block, entry, views, current, onPick, onClose }: PickerProps) {
+export function PointPicker({ block, entry, views, current, onPick, onClose }: PickerProps) {
   const [query, setQuery] = useState('')
   const [typed, setTyped] = useState(current)
   const currentRef = pointRefOf(current)
@@ -354,7 +354,7 @@ export function FinPointMapping({ block, value, onChange, points, results, sugge
       })}
       <section className="fpm-group">
         <h4 className="fpm-gh">Your own keys</h4>
-        <p className="fpm-note">Your own key. List a board under Power Boards.</p>
+        <p className="fpm-note">A reading this list does not have. Boards go under Power Boards, with their own point.</p>
         {ownRows.filter(visible).map(row)}
         <button type="button" className="ds-btn ds-btn-secondary fpm-btn"
           onClick={() => { const id = newRowId(); commit([...rows, { id, key: '', text: '', own: true }]); setOpen(id) }}>

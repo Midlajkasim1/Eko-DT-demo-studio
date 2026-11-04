@@ -2096,6 +2096,8 @@ details > summary.fpm-gh { cursor: pointer; }
 .fpm-manual input { flex: 1; min-width: 220px; font-family: var(--font-mono); }
 .fpm-paste { width: 100%; font-family: var(--font-mono); margin-bottom: 6px; }
 .fpm-csv { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 0 0 6px; }
+.fpb-name { font-family: inherit; font-weight: 600; }
+.fpb-meter { margin-top: 6px; font-size: 12px; }
 @media (max-width: 640px) {
   .fpm-row { grid-template-columns: 1fr; }
   .fpm-side { padding-top: 0; }

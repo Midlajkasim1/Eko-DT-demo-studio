@@ -439,8 +439,9 @@
       if (!live.length) return hold(obj, keys, false);
       if (live.every(function (k) { return asNum(p[k]) == null; })) keys.forEach(function (k) { blank.push([obj, k, obj[k]]); });
     }
-    own(['hourly_energy'], site.metrics, ['loadNowMw', 'loadNowKw']);
-    own(['hourly_energy'], el, ['currentKw']);
+    own(['hourly_energy'], site.metrics, ['loadNowMw']);
+    own(['hourly_energy', 'current_month'], site.metrics, ['loadNowKw']);
+    own(['hourly_energy', 'current_month'], el, ['currentKw']);
     own(['peak_demand'], site.metrics, ['peakTodayKw', 'peakTodayMw']);
     own(['peak_demand'], pw.subview, ['peakKw']);
     own(['carbon'], el, ['carbonKgH']);

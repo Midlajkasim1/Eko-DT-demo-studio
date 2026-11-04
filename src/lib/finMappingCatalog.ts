@@ -43,12 +43,12 @@ const BOARDS: [string, string, string][] = [
 ]
 
 export const MAPPING_CATALOG: CatalogEntry[] = [
-  live('hourly_energy', OVERVIEW, 'Load now', 'Overview · kW or MW',
-    ['hourlyenergyconsumption', 'activepower', 'totalpower', 'hourlyenergy'], ['kW', 'MW', 'kWh']),
   live('comfort_compliance', OVERVIEW, 'Comfort', 'Overview, Spaces · %', ['thermalcomfortcompliance', 'comfortcompliance', 'comfortindex', 'comfort'], ['%']),
   live('iaq_index', OVERVIEW, 'IAQ', 'Overview, Spaces', ['iaqindex', 'iaq', 'indoorairquality']),
   live('temp_deviation', SYSTEMS, 'Temperature deviation', 'Systems', ['tempdeviation', 'temperaturedeviation'], ['°C', 'K', '%']),
-  live('current_month', ENERGY, 'Energy', 'Energy · kWh or MWh', ['currentmonth', 'monthtodate', 'monthlyenergy', 'mtdenergy', 'hourlyenergyconsumption', 'hourlyenergy'], ['kWh', 'MWh']),
+  live('hourly_energy', ENERGY, 'Current consumption', 'Energy › Consumption, Overview · energy this hour, kWh',
+    ['hourlyenergyconsumption', 'hourlyenergy', 'activepower', 'totalpower'], ['kWh', 'kW', 'MW']),
+  live('current_month', ENERGY, 'Energy this month', 'Energy · month to date, kWh or MWh', ['currentmonth', 'monthtodate', 'monthlyenergy', 'mtdenergy'], ['kWh', 'MWh']),
   live('carbon', ENERGY, 'Carbon', 'Energy · kg CO₂/h', ['carbonemissions', 'carbonemission', 'carbon', 'co2emissions'], ['kg', 'kgCO2', 'kgCO₂']),
   live('energy_performance', ENERGY, 'Energy performance', 'Energy · %', ['energyperformance'], ['%']),
   live('energy_deviation', ENERGY, 'Energy deviation', 'Energy · %', ['energydeviation'], ['%']),
@@ -203,6 +203,34 @@ export function findPointByName(text: string, views: PointView[]): PointView | n
   const want = foldName(text)
   if (!want) return null
   return views.find(v => foldName(pointTitle(v)) === want || foldName(v.fin) === want || foldName(`${v.equip} ${v.point}`) === want) ?? null
+}
+
+/* ------------------------------------------------------------------ boards */
+
+/** The live key a board with its own FIN point is read under; its chart history adds `_his` */
+export const boardKey = (name: string) => 'board_' + (name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'unnamed')
+
+const ACRONYMS = /^(hvac|ahu|fahu|fcu|ups|it|ev|mcc|smdb|mdb|lv|mv|ats)$/i
+
+function boardName(part: string): string {
+  const s = part.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_\s]+/g, ' ').trim()
+  if (ACRONYMS.test(s)) return s.toUpperCase()
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()
+}
+
+/** FIN points that read like one board's energy: "HourlyHvacEnergy" (HVAC), "GF_ENERGY_CONSUMPTION" (GF). */
+export function boardSuggestions(views: PointView[]): { name: string; view: PointView }[] {
+  const out: { name: string; view: PointView }[] = []
+  for (const v of views) {
+    if (v.kind && v.kind !== 'Number') continue
+    if (v.unit && !['kWh', 'MWh'].includes(v.unit)) continue
+    const hourly = /^Hourly(.+?)Energy$/i.exec(v.point.replace(/[\s_]+/g, ''))
+    const floor = /^([A-Za-z0-9]{1,3})_ENERGY_CONSUMPTION$/i.exec(v.point)
+    const part = hourly ? hourly[1] : floor ? floor[1] : null
+    if (!part || /^(consumption|total|daily)$/i.test(part)) continue
+    out.push({ name: hourly ? boardName(part) : part.toUpperCase(), view: v })
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
 }
 
 /* ------------------------------------------------------------------ CSV */

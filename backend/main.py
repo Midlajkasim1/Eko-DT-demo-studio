@@ -129,6 +129,30 @@ def project_overrides(settings: Optional[dict]) -> dict:
     return out
 
 
+_BOARD_KEY = re.compile(r"^board_[a-z0-9_]{1,60}$")
+_BOARD_POINT = re.compile(r"^p:\{project\}:r:[\w.-]+$")
+_BOARD_HISTORY = re.compile(
+    r"^/api/\{project\}/eval\?expr=hisRead\(@p:\{project\}:r:[\w.-]+,\d{4}-\d{2}-\d{2}\.\.today\(\)%2C%7B-limit%7D\)$")
+
+
+def board_points(settings: Optional[dict]) -> tuple:
+    """The live points and history queries of the boards that name their own FIN point."""
+    live: dict = {}
+    history: dict = {}
+    boards = settings.get("finPowerBoards") if isinstance(settings, dict) else None
+    for board in boards if isinstance(boards, list) else []:
+        if not isinstance(board, dict):
+            continue
+        key, point = board.get("liveKey"), board.get("point")
+        if not (isinstance(key, str) and _BOARD_KEY.match(key) and isinstance(point, str) and _BOARD_POINT.match(point)):
+            continue
+        live[key] = point
+        hkey, expr = board.get("historyKey"), board.get("history")
+        if hkey == key + "_his" and isinstance(expr, str) and _BOARD_HISTORY.match(expr) and "@" + point + "," in expr:
+            history[hkey] = expr
+    return live, history
+
+
 def merge_project_settings(base: dict, settings: Optional[dict], isolated: bool = False) -> dict:
     """Overlay a project's apiSettings onto the config.json defaults.
 
@@ -148,6 +172,11 @@ def merge_project_settings(base: dict, settings: Optional[dict], isolated: bool 
             merged["polling"] = {**(merged.get("polling") or {}), "live_ms": value}
         else:
             merged[key] = copy.deepcopy(value)
+    live, history = board_points(settings)
+    if live:
+        merged["live_point_ids"] = {**(merged.get("live_point_ids") or {}), **live}
+    if history:
+        merged["power_endpoints"] = {**(merged.get("power_endpoints") or {}), **history}
     return merged
 
 

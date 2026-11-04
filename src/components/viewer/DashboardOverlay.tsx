@@ -32,7 +32,7 @@ import { createHvacLabels } from '@/lib/hvacLabels'
 import type { HvacSchematic } from '@/lib/hvacGeometry'
 import { useFinStore } from '@/store/useFinStore'
 import type { ProjectApiSettings } from '@/types'
-import { dashboardProjectInfo } from '@/lib/finSettings'
+import { dashboardProjectInfo, pointsWithBoards } from '@/lib/finSettings'
 
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import { DashboardModelTree } from '@/components/viewer/DashboardModelTree'
@@ -2909,8 +2909,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
               interval: ${apiSettings.finInterval || 5000},
               directMode: ${apiSettings.finDirectMode || false},
               realtimeMs: ${apiSettings.finRealtimeMs || 30000},
-              livePoints: ${apiSettings.finLivePoints ? JSON.stringify(apiSettings.finLivePoints) : 'undefined'},
-              endpoints: ${apiSettings.finEndpoints ? JSON.stringify(apiSettings.finEndpoints) : 'undefined'},
+              livePoints: ${pointsWithBoards(apiSettings).live ? JSON.stringify(pointsWithBoards(apiSettings).live) : 'undefined'},
+              endpoints: ${pointsWithBoards(apiSettings).history ? JSON.stringify(pointsWithBoards(apiSettings).history) : 'undefined'},
               workorderExpr: ${JSON.stringify(apiSettings.finWorkorderExpr || '')},
               meterProfile: ${apiSettings.finMeterProfile ? JSON.stringify(apiSettings.finMeterProfile) : 'undefined'},
               severityBands: ${apiSettings.finSeverityBands ? JSON.stringify(apiSettings.finSeverityBands) : 'undefined'},
@@ -2971,8 +2971,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       fin.project = s.finProjectName || ''
       fin.interval = s.finInterval || fin.interval
       fin.directMode = s.finDirectMode || false
-      if (s.finLivePoints) fin.livePoints = s.finLivePoints
-      if (s.finEndpoints) fin.endpoints = s.finEndpoints
+      const polled = pointsWithBoards(s)
+      if (polled.live) fin.livePoints = polled.live
+      if (polled.history) fin.endpoints = polled.history
       fin.documents = Array.isArray(s.finDocuments) ? s.finDocuments : null
     }
     try { (window as any).EKO_HEAT?.relink?.() } catch { /* the next data tick rebuilds the zones */ }

@@ -397,6 +397,10 @@ export interface PowerBoard {
   historyKey?: string
   /** The meter that feeds it, as the meter profile names it (e.g. "PMU09") */
   meter?: string
+  /** The board's own FIN point (p:{project}:r:…), polled under liveKey */
+  point?: string
+  /** The hisRead query for that point, read under historyKey */
+  history?: string
 }
 
 export interface ProjectModel extends ProjectModelEntry {
