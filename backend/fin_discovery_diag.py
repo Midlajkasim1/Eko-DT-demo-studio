@@ -21,7 +21,6 @@ import httpx
 
 from fin_client import FinScramClient
 
-EXPECTED_IDS = ("adnocWarsan", "ellisdonDemo", "khaznaDataCenter", "marsaAlArab")
 PREVIEW_CHARS = 1200
 SECRET_HEADER_NAMES = ("authorization", "cookie", "attest-key", "fin-stack-auth", "authentication-info")
 
@@ -150,13 +149,14 @@ async def main() -> int:
         red.learn_response(resp)
         red.learn_jar(http)
         text = resp.text
-        found = [pid for pid in EXPECTED_IDS if pid in text]
+        # Discover all FIN project references dynamically.
+        found = sorted(set(re.findall(r"@p:([A-Za-z0-9_.-]+)", text)))
         results[label] = {"method": method, "url": shown_url, "status": resp.status_code,
                           "ids": found, "text": text}
         print(f"\n[{label}] {method} {shown_url}")
         print(f"  status       : {resp.status_code}")
         print(f"  content type : {resp.headers.get('content-type', '-')}")
-        print(f"  project ids  : " + ", ".join(f"{pid}={'YES' if pid in found else 'no'}" for pid in EXPECTED_IDS))
+        print("  discovered project IDs:", ", ".join(found) if found else "none detected")
         print(f"  response (first {PREVIEW_CHARS} chars):")
         print("    " + red.clean(text[:PREVIEW_CHARS]).replace("\n", "\n    "))
 
