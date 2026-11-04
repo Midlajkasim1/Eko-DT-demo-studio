@@ -70,7 +70,7 @@ window.EKO_V = (function(){
     let list = E.visAlarms().filter(a => (isFinite(+a.x) && isFinite(+a.y)) || a.bimId || guidOf(a.asset));
     if (E.state.module === 'systems' && E.state.sub) {
       const grp = ((E.data.systems && E.data.systems.groups) || []).find(g => g.id === E.state.sub);
-      if (grp && grp.sysKey) list = list.filter(a => grp.sysKey.includes(a.sys));
+      if (grp && grp.sysKey) list = list.filter(a => E.alarmInGroup(a, grp));
     }
     if (E.state.module === 'utilities') {
       const sub = E.state.sub;

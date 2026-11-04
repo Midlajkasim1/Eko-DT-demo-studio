@@ -105,7 +105,7 @@ window.EKO_A = (function(){
     const ar = E.lang === 'ar';
     const groups = E.data.systems.groups.filter(g => !g.hidden && (!E.state.sub || g.id === E.state.sub));
     const inner = groups.map(g => {
-      const n = E.data.alarms.filter(a => g.sysKey.includes(a.sys)).length;
+      const n = E.data.alarms.filter(a => E.alarmInGroup(a, g)).length;
       const open = (E.state.sysExp||{})[g.id] !== false;
       /* Locked groups (Final mock): header only — routes to the teaser. */
       if(g.locked && !E.state.sub)
@@ -146,7 +146,7 @@ window.EKO_A = (function(){
     const ar = E.lang === 'ar';
     const groups = E.data.systems.groups;
     const cur = groups.find(g => g.id === E.state.sub) || null;
-    const alarms = (cur ? E.visAlarms().filter(a => cur.sysKey.includes(a.sys)) : E.visAlarms());
+    const alarms = (cur ? E.visAlarms().filter(a => E.alarmInGroup(a, cur)) : E.visAlarms());
     const grpLbl = g => ar ? g.labelAr : g.labelEn;
     const tabs = `<div class="sysrows">${groups.map(g => g.locked
       ? `<button class="landrow2" data-lock="true" data-act="teaser" data-teaser="systems.${g.id}" data-mod="systems">
@@ -171,7 +171,7 @@ window.EKO_A = (function(){
     const ar = E.lang === 'ar';
     const g = E.data.systems.groups.find(x => x.id === (w && w.binding && w.binding.group));
     if(!g) return '';
-    const alarms = E.data.alarms.filter(a => g.sysKey.includes(a.sys));
+    const alarms = E.data.alarms.filter(a => E.alarmInGroup(a, g));
     const lbl = c => ar ? c.labelAr : c.labelEn;
     const word = c => (ar ? c.wordAr : c.wordEn) || '';
     // Only non-subOnly stat/gauge cards become hero tiles at the top

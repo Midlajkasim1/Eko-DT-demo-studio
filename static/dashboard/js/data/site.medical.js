@@ -101846,7 +101846,8 @@ window.EKO_DATA.medical = {
     "id": "electrical",
     "hue": "#C2955A",
     "sysKey": [
-     "Electrical"
+     "Electrical",
+     "EMS"
     ],
     "labelEn": "Electrical",
     "labelAr": "الكهرباء",
@@ -101906,6 +101907,26 @@ window.EKO_DATA.medical = {
       "wordAr": "0.65 من 1.1 م.و"
      }
     ]
+   },
+   {
+    "id": "life",
+    "hue": "#5FA8D3",
+    "sysKey": [
+     "Life safety"
+    ],
+    "labelEn": "Life & Safety",
+    "labelAr": "السلامة",
+    "cards": []
+   },
+   {
+    "id": "security",
+    "hue": "#9B8AD4",
+    "sysKey": [
+     "Security"
+    ],
+    "labelEn": "Security",
+    "labelAr": "الأمن",
+    "cards": []
    }
   ]
  },

@@ -274,6 +274,16 @@
       return this.data.alarms.filter(a =>
         !hid.has(a.sev) && (this.state.showAcked || !a.ack));
     },
+    /* A systems page keeps the alarms whose tag matches that group. Live FIN
+       alarms use Mechanical, Electrical, EMS, Life safety, and Security. */
+    alarmInGroup(a, g){
+      if(!g || !Array.isArray(g.sysKey)) return false;
+      const sys = String(a && a.sys || '').toLowerCase();
+      const keys = g.sysKey.map(k => String(k).toLowerCase());
+      if(keys.includes(sys)) return true;
+      const extra = { hvac: ['hvac', 'mechanical'], electrical: ['electrical', 'elec', 'ems'], life: ['life safety', 'fire'], security: ['security'], medgas: ['medical gas', 'refrigeration'] };
+      return (extra[g.id] || []).includes(sys);
+    },
     /* The one definition of the site's alarm counts (Alert Centre, Assets Overview, reports). An ACTIVE alert is a record in
        data.alarms, which is FIN's open list: the backend has already dropped cleared and "Return to normal" records and merged
        re-issued ones, and acknowledging an alert does not end it. An ASSET IN ALARM is an asset with at least one active alert,
