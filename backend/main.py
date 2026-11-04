@@ -133,12 +133,15 @@ def merge_project_settings(base: dict, settings: Optional[dict], isolated: bool 
     A project value replaces the default whole (never a key-by-key merge, so one
     site's point IDs cannot leak into another's). With `isolated`, the five FIN mapping
     blocks start empty instead of from config.json: a block the project did not set is
-    not configured, and config.json's own site mappings are never used for it.
+    not configured, and config.json's own site mappings are never used for it. The same
+    goes for config.json's distribution boards (power_boards, which Eko-Chat reads): they
+    are its own site's, and no project brings its own to the backend.
     """
     merged = copy.deepcopy(base)
     if isolated:
         for key in PROJECT_DICT_SETTINGS.values():
             merged[key] = {}
+        merged["power_boards"] = []
         # config.json's work-order query reads its own site's table (workOrderMarsa)
         merged["workorder_expr"] = ""
     for key, value in project_overrides(settings).items():
@@ -2511,13 +2514,16 @@ def _chat_guard(request: Request) -> tuple[str, str]:
     route (the FIN connection, this browser's own session cookie, the X-Eko-Project header against the project the backend
     serves, and the project the session signed in for), re-raised in the {"error", "message"} shape the chat client reads.
     Nothing a request says about who it is or which site it wants is trusted: the user and site come from the session.
-    Chat is limited to chat.allowed_projects, which is config.json's own project_name until more are listed."""
+    Any project that passes those checks may use chat; it reads that project's own caches and mappings (_chat_view). An
+    operator can still narrow chat to some projects with chat.allowed_projects (FIN project names). Absent means no
+    narrowing; present it must be a list that names the project, so a list that is empty or not a list admits no one."""
     try:
         user, site = _notification_scope(request)
     except NotificationApiError as exc:
         code = "fin_not_connected" if exc.code == "unauthenticated" else exc.code
         raise HTTPException(status_code=exc.status, detail={"error": code, "message": exc.message})
-    if site not in ((CONFIG.get("chat") or {}).get("allowed_projects") or [BASE_CONFIG["project_name"]]):
+    allowed = (CONFIG.get("chat") or {}).get("allowed_projects")
+    if allowed is not None and not (isinstance(allowed, list) and site in allowed):
         raise HTTPException(status_code=403, detail={"error": "project_not_supported",
                                                      "message": "Eko-Chat is not available for this project yet."})
     return user, site

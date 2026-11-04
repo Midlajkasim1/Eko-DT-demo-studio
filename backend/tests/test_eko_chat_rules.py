@@ -1,5 +1,5 @@
 """Rule-based Eko-Chat (chat.provider = "rules"): intents answered from the backend's FIN caches and the notification store,
-no language model, one project (Marsa Al Arab unless chat.allowed_projects says otherwise).
+no language model, the signed-in project (any validated one unless chat.allowed_projects narrows it; see test_eko_chat_projects).
 
 Run from backend/:   python -m unittest tests.test_eko_chat_rules
 Fake FIN, a throwaway notification database, and a model adapter that fails the test if anything builds or calls it.
@@ -448,17 +448,17 @@ class UnsupportedTests(RulesBase):
 
 
 class ProjectTests(RulesBase):
-    def test_only_the_configured_project_may_use_chat(self):
+    def test_only_the_projects_the_operator_lists_may_use_chat(self):
         marsa = dict(PROJECT_A, finProjectName="marsaAlArab")
-        cfg = {"enabled": True, "provider": "rules"}
+        cfg = {"enabled": True, "provider": "rules", "allowed_projects": ["marsaAlArab"]}
         self.login(marsa, "proj-M")   # config.json's own project: its FIN mappings are config.json's, so only the equipment read is awaited
         wait_for(lambda: self.tool("find_equipment").get("available"))
-        main.BASE_CONFIG["chat"] = main.CONFIG["chat"] = cfg                  # no allowed_projects: config.json's project_name rules
+        main.BASE_CONFIG["chat"] = main.CONFIG["chat"] = cfg                  # a list that names only config.json's project
         self.assertEqual(main.BASE_CONFIG["project_name"], "marsaAlArab")
         self.assertEqual(self.ask("list all assets").status_code, 200)
         self.http.post("/api/fin/logout")
         main.SESSIONS.clear()
-        self.login(PROJECT_B, "proj-B")                                       # another project, validly signed in
+        self.login(PROJECT_B, "proj-B")                                       # another project, validly signed in, but not listed
         wait_for(lambda: self.tool("find_equipment").get("available"))
         main.BASE_CONFIG["chat"] = main.CONFIG["chat"] = cfg
         r = self.ask("list all assets")
