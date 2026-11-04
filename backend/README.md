@@ -117,12 +117,13 @@ another project a 409 (`session_project_mismatch`); a notification or site that 
   out for a user whose effective preference (or master toggle) is off: from their list and its pages,
   the unread count, mark-all-read, archive-read and by-id reads, so all of them describe the same rows
   and no state or history is written for notifications that user cannot see. A user's own `alarm.critical`
-  preference only narrows what that user sees. No route writes the site setting:
-  `Store.update_project_preferences` is the seam for the later administration phase, and until then an
-  operator sets it in the database. `GET` and `PUT /api/notifications/v1/preferences` answer the user's
-  own preferences plus a read-only `site` part, `{"critical_alarms": true | false | null}` (null: it
-  could not be read, never assumed on), so the settings page can tell the two apart. A request cannot
-  set it (extra fields are a 400).
+  preference only narrows what that user sees. The user's `PUT /api/notifications/v1/preferences` can never write
+  the site setting (extra fields are a 400, and an owner starting `#project:` is refused). The site setting is changed
+  by a **superuser of that project** through `PUT /api/notifications/v1/site-settings` (below), or by an operator with
+  `Store.update_project_preferences`. `GET` and `PUT /api/notifications/v1/preferences` answer the user's own
+  preferences plus a read-only `site` part, `{"critical_alarms": true | false | null, "can_administer": true | false | null}`
+  (null: it could not be read, never assumed on), so the settings page can tell the two apart and offer the site switch
+  only to someone the server will accept it from.
 - **Per Studio project (gate 1).** A Studio project's own `apiSettings.notificationsCriticalAlarmsEnabled` (true / false) is the first
   gate; the site's `alarm.critical` toggle above is the second, and both must allow it. Absent means *not configured*, never enabled:
   `critical_alarm_sites` in `config.json` applies only to config.json's own site (Marsa) and the standalone backend, never to a Studio
@@ -130,9 +131,28 @@ another project a 409 (`session_project_mismatch`); a notification or site that 
   `setup: {critical_alarms: not_configured | disabled_project | disabled_site | enabled, severity_bands, workorders}` so the panel can
   say why a list is empty. `apiSettings.finWorkorderExpr` is the project's own work-order query (read-only forms only); none means the
   work-order sync is not configured (not a failure). Severity bands likewise come only from the project (`finSeverityBands`).
-- **Enabling the site toggle (operator, no HTTP route).** From `backend/`, with `EKO_NOTIFICATION_DB` set if the database is not at the
-  default path: `python -c "import notifications as n; s = n.Store(n.resolve_db_path(None)); s.update_project_preferences('<FIN project name>', types={'alarm.critical': True})"`
-  (False switches it off). It touches only that site's baseline row.
+- **Who may change the site setting (superuser, enforced on the server).** `PUT /api/notifications/v1/site-settings` with exactly
+  `{"critical_alarms": true | false}` is accepted only from a signed-in user whose server-side `eko_role_mapping` row for that
+  site and user is `superuser`. The role comes from that row, which is keyed by the site and the FIN-authenticated user of the
+  session cookie: no header, body field, query parameter or frontend role label is read. The site is the session's, never the
+  request's. It changes only that site's baseline `alarm.critical` row (never a user's own preference or another site), records
+  who did it in `notification_audit_log` (`notifications.site_critical_alarms.set`, with the previous value), deletes nothing, and
+  answers 403 to anyone else. Selecting a project or turning its Dashboard Settings switch on never writes it. There is no HTTP
+  route that grants the role: the operator maps the first superuser with the same care as the toggle, from `backend/`
+  and with the path the start-up line prints:
+  `python -c "import os, sys, notifications as n; p = sys.argv[1]; assert os.path.exists(p), p; n.Store(p).map_role(sys.argv[2], sys.argv[3], 'superuser', 'operator')" "<path from the start-up line>" "<site>" "<FIN user id>"`.
+  Both the site and the user id are exact and case-sensitive (`/api/auth/me` returns them; a user who signs in with different
+  capitalisation is a different user here, and fails closed).
+- **Enabling the site toggle without a superuser (operator, no HTTP route).** A project shows critical-alarm notifications only when three things hold:
+  its Dashboard Settings switch is on, the project has Severity Configuration (`finSeverityBands`; FIN's alarm priority has no fixed
+  direction, so Eko-DT cannot derive bands, and another project's are never used), and this site toggle is on. The panel names whichever
+  is missing. The backend prints `[notifications] database: <path> (from <why>)` at start-up: that is the database it uses, so write to
+  THAT path, never to one worked out on another account or machine (`config.json`'s `notification_db_path` and a service's own
+  `EKO_NOTIFICATION_DB` or profile all change it). The site is the exact, case-sensitive `site` that `/api/auth/me` returns. From `backend/`:
+  `python -c "import os, sys, notifications as n; p = sys.argv[1]; assert os.path.exists(p), p; n.Store(p).update_project_preferences(sys.argv[2], types={'alarm.critical': True})" "<path from the start-up line>" "<site>"`
+  (`False` switches it off). It refuses a path that does not exist instead of creating a new database, and touches only that site's
+  baseline row. To look first, read it with `sqlite3.connect(pathlib.Path(p).resolve().as_uri() + '?mode=ro', uri=True)` and
+  `SELECT user_id, site_id, type, enabled FROM notification_preferences WHERE site_id = '<site>'`. It takes effect on the next poll.
 - Migration 4 changes no row; it writes one `notifications.per_user_state` audit row per site with how
   many notifications and preferences were inherited as the baseline. The database is backed up first
   (see `notification_db_path`).
@@ -142,6 +162,101 @@ state does not change that: events are created from that one connection's projec
 signed in for another project see nothing new for theirs until it is the one served (their requests are
 refused with 409 meanwhile). The unique user is the FIN username the sign-in accepted; names are
 compared exactly as FIN returned them (case is not folded). Sessions are in memory (above).
+
+## Eko-Chat (Ask EKO's backend)
+
+`POST /api/chat` answers a question about the open project from **typed, read-only tools** over the caches the polling loops
+already keep (`get_building_snapshot`, `find_equipment`, `get_equipment_status`, `get_alarms`). Nothing in it can write, acknowledge or
+reach FIN, and a model can only call those four tools; every number in an answer must come from a tool result, and the card shown
+with it is built by code from the tool result. Code: `eko_chat.py`, `eko_chat_router.py`; browser side: `static/dashboard/js/llm/eko-chat.js`.
+
+- **Off by default.** `config.json` has a `chat` block with `"enabled": false`; nothing is answered until it is `true`.
+  `fast_router` answers simple English questions from the tools with no model. For the rest, `provider: "openai_compatible"` talks to any
+  OpenAI-style `/chat/completions` server with native tool calling (Ollama at `http://localhost:11434/v1` by default) with `model`,
+  `timeout_s` and `max_concurrent_llm`. An API key is read only from the environment variable named by `api_key_env` (`EKO_CHAT_API_KEY`);
+  a key written into `config.json` is refused, and no project setting can supply the chat configuration.
+- **Who may ask.** The signed-in user of the open project, enforced on `/api/chat` and `/api/chat/stats` by the same checks as the
+  notification routes: the FIN connection, this browser's own session cookie, an `X-Eko-Project` header equal to the project the backend
+  serves, and a session that signed in for this project. Failures answer 401 (`fin_not_connected`, `session_required`, `session_expired`),
+  400 (`project_required`) or 409 (`project_mismatch`, `session_project_mismatch`, `project_not_validated`) as JSON
+  `{"detail": {"error", "message"}}`. A disabled chat answers 503 first, whoever asks. The browser client sends the header from the project the
+  Studio opened and refuses an answer that comes back for any other project.
+- **Logging.** Tool-selection diagnostics (`CHAT_DEBUG` in `eko_chat.py`) are off: they would print each user's question to the server log.
+- **Load test.** `scripts/eko_chat_load_test.py` needs `--cookie` (the `eko_session` value, or `EKO_SESSION_COOKIE`) and `--project`.
+- **Export.** `eko_chat.py`, `eko_chat_router.py` and `eko_chat_llm.py` are in the backend export list (`src/lib/backendExport.ts`): `main.py` imports them.
+
+### Hybrid mode: a local model for questions the rules do not know (Ollama)
+
+`chat.provider = "ollama"` adds a small **local** model behind the rules. The order of a request is unchanged up to the rules:
+session and project checks, then the deterministic router answers everything it knows with **no model call**. Only a question the rules do not
+recognise goes to Ollama, once, and the model's whole job is to return one JSON intent (schema-constrained, `think` off, at most 160 tokens).
+The backend then checks the intent against an allowlist (the eight existing read-only tools; `INTENTS` in `eko_chat_llm.py`), checks the
+parameters against that tool's own schema, requires any equipment name, class or floor to be written in the question itself, and runs the same
+tool the rules use over the signed-in user's own project. The answer text and the card are built by code from the tool result, so numbers,
+units and times are never the model's. The model never sees FIN data, credentials or other projects, and cannot name a tool, endpoint or
+project. The one second call is an optional plain-English summary for "explain the current building conditions": it is used only when every
+number in it is one of the facts it was given, otherwise the code's own text is shown.
+
+When Ollama is not running, is slow, or the model is not installed, the reply is a short plain message plus the list of supported questions, the rules keep
+answering, and the model is not called again for `llm_cooldown_s` (30 s) so a dead server does not delay every question (a refused
+connection alone takes about 2 s on Windows). Latency and an error category are logged (`[eko-chat-llm]`, and `/api/chat/stats`), never the question.
+
+**Model.** The default is `qwen3.5:4b` (a 4-billion-parameter model; the file is a few GB, so with a 4 GB GPU part of it may run on the CPU).
+Whether it runs on your Ollama depends on the Ollama version, which only `ollama pull` can tell you: if the pull or the first call fails,
+use `qwen3:4b` (smaller, long supported) or `qwen2.5:3b`. Set it with `OLLAMA_MODEL`; nothing else changes.
+
+**Setup (Windows PowerShell)**
+
+```powershell
+# 1. install Ollama (https://ollama.com/download/windows), then check it
+ollama --version
+Invoke-RestMethod http://localhost:11434/api/version     # the service starts with Windows; or run: ollama serve
+# 2. pull the model once (a multi-GB download; run it deliberately, nothing in Eko-DT does)
+ollama pull qwen3.5:4b
+ollama list
+# 3. turn the hybrid mode on for this backend process only (config.json keeps provider "rules")
+$env:LLM_ENABLED = "true"
+$env:OLLAMA_MODEL = "qwen3.5:4b"
+# 4. chat itself must also be on: "chat": {"enabled": true} in config.json (local edit; do not commit it)
+cd backend; python -m uvicorn main:app --port 8000
+```
+
+| Setting | Where | Meaning |
+|---|---|---|
+| `LLM_ENABLED` | env | `true` selects `ollama`; `false` is the kill switch (rules only), whatever `config.json` says |
+| `LLM_PROVIDER` | env | `ollama`, `rules` or `openai_compatible` (the older tool-calling provider) |
+| `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | env | default `http://localhost:11434`, `qwen3.5:4b`; a `/v1` suffix is ignored |
+| `LLM_TIMEOUT_SECONDS`, `LLM_MAX_OUTPUT_TOKENS` | env | defaults 30 s (config.json: `timeout_s`) and 160 (`max_output_tokens`) |
+| `num_ctx`, `keep_alive`, `llm_cooldown_s`, `max_concurrent_llm` | config.json `chat` | context 2048, model kept loaded 10m, cooldown 30 s, 2 model calls at once |
+| `allow_remote_llm` | config.json `chat` | an Ollama on another machine is refused unless this is `true`; the default is this computer only |
+
+Environment values override `config.json`; an invalid value is ignored. No API key is used. To **turn the model off**, unset `LLM_ENABLED`
+(or set it to `false`): the rules answer as before and unknown questions get the list of supported questions.
+
+**Try it** (signed in to FIN in the Studio, chat enabled): "How clean is the air inside at the moment?", "Anything critical going wrong right now?",
+"Do I have anything unread waiting for me?", "Can you explain the current building conditions?" The rule-known "What is the current IAQ index?" must not
+call the model (`/api/chat/stats` shows the runs).
+
+**Tests and measurement**
+
+```powershell
+cd backend
+$env:EKO_NOTIFICATION_DB = "$env:TEMP\eko-test-notifications.db"      # keeps the tests off the real notification history
+python -m unittest tests.test_eko_chat_rules tests.test_eko_chat_metrics
+cd ..
+python scripts/eko_chat_llm_benchmark.py                 # live: cold start, intent latency, end-to-end, accuracy (needs Ollama + the model)
+python scripts/eko_chat_llm_benchmark.py --unavailable   # how the chat behaves with Ollama off
+python scripts/eko_chat_llm_benchmark.py --simulate      # checks the harness only; its times mean nothing
+```
+
+The two test modules cover the rule-based answers (`chat.provider = "rules"`) and the building-metric questions, against a fake FIN (`tests/fake_fin.py`) and a
+throwaway notification database; no model is built or called and there is no network. The hybrid Ollama path (`eko_chat_llm.py`) has no unit tests yet, and
+neither test checks a real model's accuracy or speed, or live FIN. `pytest tests/test_eko_chat_rules.py tests/test_eko_chat_metrics.py` also works from `backend/`.
+
+**Limitations.** A 4B model misreads some phrasings (the benchmark's accuracy line shows how many on your machine); a misread becomes a
+wrong-but-read-only lookup or a "could you be more specific", never a write. The model sees one question at a time (no conversation memory)
+and the English prompt works best for English. Equipment names must be written in the question, so "the fan coil on level 2" cannot be resolved.
+Streaming is not used: the answer arrives whole, after the model call.
 
 ## Running the Server
 

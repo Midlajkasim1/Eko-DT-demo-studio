@@ -3,6 +3,16 @@
   "fin_server_url": "https://localhost",
   "display_name": "Marsa Al Arab",
   "documents_file": "om-warranty.json",
+  "chat": {
+    "enabled": false,
+    "fast_router": true,
+    "max_concurrent_llm": 2,
+    "provider": "rules",
+    "base_url": "http://localhost:11434/v1",
+    "model": "qwen3:4b",
+    "api_key_env": "EKO_CHAT_API_KEY",
+    "timeout_s": 60
+  },
   "polling": {
     "live_ms": 5000,
     "realtime_ms": 30000
@@ -199,6 +209,14 @@
     "total_water": "p:{project}:r:31820139-a3ee6982",
     "total_gas": "p:{project}:r:31820148-f95561a2"
   },
+  "power_boards": [
+    { "name": "MCC 1",        "live": "mcc1",      "history": "Hourly_EC_MCC1_his" },
+    { "name": "MCC 2",        "live": "mcc2",      "history": "Hourly_EC_MCC2_his" },
+    { "name": "Kitchen SMDB", "live": "smdb_kit",  "history": "Hourly_EC_SMDB_KIT_his" },
+    { "name": "LVFP",         "live": "lvfp",      "history": "Hourly_EC_LVFP_his" },
+    { "name": "ATS",          "live": "ats",       "history": "Hourly_EC_ATS_his" },
+    { "name": "Sump pump",    "live": "sump_pump", "history": "Hourly_EC_SP_his" }
+  ],
   "_removed_2026_08_04": "These keys pointed at IDs that do not exist in the marsaAlArab project (leftovers from the ekoMedical demo) and always returned null: Water_Consumption_his/water_consumption (310346fb-95c42637), VAV_Consumption_his/vav (31034e49-efdd0bc0), Carbon_Emission_his (3105de9e-0091a3a6), Consumption_Level1-3_his, previous_month (3105c5a1-a272e1a7), and the per-service live points ahu, fcu, boiler, chiller, cooling_tower, lighting, power_sockets, pumps.",
   "_comment": "To use a different FIN project, change project_name and update the point reference IDs above."
 }

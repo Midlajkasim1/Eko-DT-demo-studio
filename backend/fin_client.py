@@ -515,6 +515,7 @@ class FinScramClient:
         self.is_authenticated = False
         self.last_alarm_rows: list[dict] = []
         self.last_point_rows: list[dict] = []
+        self.last_alarm_read_ok: Optional[bool] = None   # None until the first alarm read of this project
 
     async def authenticate(self, username: str, password: str) -> bool:
         """Perform SCRAM-SHA-256 authentication."""

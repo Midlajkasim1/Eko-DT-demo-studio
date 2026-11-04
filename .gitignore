@@ -30,6 +30,7 @@ venv
 
 
 backend/__pycache__/
+backend/tests/__pycache__/
 CLAUDE.md
 *.md
 !README.md
