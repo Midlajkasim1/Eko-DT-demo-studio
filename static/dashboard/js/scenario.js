@@ -133,7 +133,7 @@ window.EKO_SCN = (function(){
   /* ------------------------------ S8: muster panel ------------------------------ */
   function musterPanel(E2){
     use(E2);
-    const s = S(); if(!s) return '';
+    const s = S(); if(!s || !Array.isArray(s.steps)) return '';
     const v = on(E) ? view(E) : null;
     const MV = (v || view(E)).muster;   /* the expected counts from the evacuation plan, playing or not */
     const rows = (s.muster || []).map((m0, i) => { const r = v && v.musterOn ? v.muster[i] : null, m = MV[i] || m0;

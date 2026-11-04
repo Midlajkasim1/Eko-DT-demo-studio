@@ -97,7 +97,8 @@ window.EKO_PWA = (function(){
     try{
       let text = '';
       const directCfg = window.DashboardData && window.DashboardData.config;
-      const sample = window.DASHBOARD_OVERLAY && !!(window.INJECTED_PROJECT_CONFIG || {}).sampleData;   /* E15: sample data has no live feed to watch */
+      const inj = window.INJECTED_PROJECT_CONFIG || {};
+      const sample = window.DASHBOARD_OVERLAY && !!inj.sampleData && inj.demo === true;   /* demo figures have no live feed to watch */
       if (sample) {
         text = JSON.stringify({ connected: true });
       } else if (window.DASHBOARD_OVERLAY && directCfg && directCfg.directMode) {

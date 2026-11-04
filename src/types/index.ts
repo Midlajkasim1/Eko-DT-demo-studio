@@ -302,10 +302,10 @@ export interface ProjectApiSettings {
   schemaVersion?: number
   /** IANA timezone of the site ("Asia/Dubai"): the day boundary for today's readings */
   siteTimezone?: string
-  /** Show the prototype's demo figures (Marsa Al Arab fixture) in the dashboard. Off: only FIN
-   *  readings and this project's own settings are shown. */
+  /** Show the sample data set's demo figures in the dashboard. Off: FIN readings and this project's
+   *  own settings; with the medical set, its figures stay wherever the project maps no FIN data. */
   dashboardDemo?: boolean
-  /** The sample data set the demo figures come from; absent = Marsa Al Arab. Only used with dashboardDemo. */
+  /** The sample data set: the dashboard's layout and its sample figures; absent = Marsa Al Arab. */
   dashboardSampleData?: 'medical'
   /** The dashboard's module set. 'extended' adds ESG, Maintenance, and Security and life safety; absent = standard. */
   dashboardModules?: 'extended'

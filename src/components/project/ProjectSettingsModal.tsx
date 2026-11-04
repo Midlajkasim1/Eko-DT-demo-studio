@@ -709,16 +709,16 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                     onChange={e => update('dashboardDemo', e.target.checked || undefined)} />
                   Show the prototype's demo figures
                 </label>
-                <p className="ds-hint">Off: the dashboard shows only this project's FIN readings and settings, and modules with no FIN source (anomalies, forecast, benchmark) are hidden.</p>
+                <p className="ds-hint">Off: the dashboard shows this project's FIN readings and settings. With Medical centre sample data, a reading this project maps in FIN shows FIN's value (-- when FIN has none), and everything else stays as sample data. With Marsa Al Arab the rest is left empty, and modules with no FIN source (anomalies, forecast, benchmark) are hidden.</p>
               </div>
               <div className="ds-field">
                 <label>Sample data</label>
-                <select value={settings.dashboardSampleData || ''} disabled={settings.dashboardDemo !== true}
+                <select value={settings.dashboardSampleData || ''}
                   onChange={e => update('dashboardSampleData', e.target.value || undefined)}>
                   <option value="">Marsa Al Arab</option>
                   <option value="medical">Medical centre</option>
                 </select>
-                <p className="ds-hint">The sample data set the figures come from while demo figures are on. Takes effect the next time the dashboard opens.</p>
+                <p className="ds-hint">The dashboard's tabs and panels, and the sample figures. Takes effect the next time the dashboard opens.</p>
               </div>
 
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Modules</h3>
@@ -728,7 +728,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                   <option value="">Standard</option>
                   <option value="extended">Extended</option>
                 </select>
-                <p className="ds-hint">Extended adds ESG, Maintenance, and Security and life safety. Works with sample data or live data. Takes effect the next time the dashboard opens.</p>
+                <p className="ds-hint">Extended adds ESG, Maintenance, and Security and life safety, with the Other systems, Data health, Occupancy, Evacuation and Nurse call views. Works with sample data or live data. Takes effect the next time the dashboard opens.</p>
               </div>
 
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Weather API</h3>

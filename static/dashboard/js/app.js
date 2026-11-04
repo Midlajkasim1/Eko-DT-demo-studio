@@ -45,6 +45,7 @@
       site.viewer = D.marsa.viewer;
       useMockPlan(site, mockImages);   // fire, access and the other mock plans keep this drawing
       delete site.overviewPage;   // its own Overview is not ported yet
+      if(cfg.demo !== true) site.demo = Object.assign({}, site.demo, { modules: [] });   // demo figures off: no Demo data chip
       { const nm = (cfg.site || {}).displayName || (cfg.site || {}).name; if(nm){ site.nameEn = nm; site.nameAr = nm; } }   // the Studio project's name, before the first render (data-map.js applies the same name later)
       if(row){ row.nameEn = site.nameEn; row.nameAr = site.nameAr; }   // the top bar names the site from this row
       D.marsa = site;
@@ -52,6 +53,7 @@
     const states = extended
       ? { esg: 'active', maintenance: 'active', security: 'active', 'systems.life': 'hidden', 'systems.security': 'hidden' }
       : { esg: 'available', maintenance: 'available', security: 'available' };
+    ['systems.other', 'systems.data', 'spaces.occ', 'security.evac', 'security.nurse'].forEach(v => { states[v] = extended ? 'active' : 'hidden'; });
     if(D.marsa){ D.marsa.entitlements = D.marsa.entitlements || {}; D.marsa.entitlements.modules = Object.assign({}, D.marsa.entitlements.modules, states); }
     /* every site hands over between its shifts (wall.shifts); a site without its own settings gets the prototype's, with no stand-in handovers */
     if(D.marsa && !D.marsa.handover) D.marsa.handover = { server: { api: '/api/handover', pollSec: 30, retention: { days: null } }, prepareBeforeMin: 90, emailRelay: null, onCall: 'the duty engineer' };

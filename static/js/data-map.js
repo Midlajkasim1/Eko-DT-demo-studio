@@ -23,6 +23,8 @@
      Without an injected project (the standalone prototype) everything stays as it was. */
   var injected = window.INJECTED_PROJECT_CONFIG || null;
   var realMode = !!(injected && injected.site) && injected.demo !== true;
+  // a sample data set with demo figures off: FIN where it reports, the sample everywhere else
+  var sampleFill = realMode && !!injected.sampleData;
   var fixtureSite = (function () {
     var site = window.EKO_DATA && window.EKO_DATA.marsa, info = siteInfo();
     return !info || (!!info.finProject && !!site && info.finProject === site.finProject);
@@ -39,7 +41,7 @@
       var row = (window.EKO_DATA.portfolio || []).find(function (p) { return p.key === site.key; });
       if (row) { row.nameEn = name; row.nameAr = name; }
     }
-    if (realMode) clearFixtureFigures(site);
+    if (realMode && !sampleFill) clearFixtureFigures(site);
     if (realMode) applyReportingBasis(site, injected.basis || {});
     if (realMode) clearFixtureServices(site);
   })();
@@ -52,10 +54,15 @@
   function clearFixtureServices(site) {
     site.user = Object.assign({}, site.user, { name: '', nameAr: '' });
     site.integrations = [{ name: 'FIN Framework' + (siteInfo().finProject ? ' · ' + siteInfo().finProject : ''), proto: '', st: 'Connecting', hb: '', pts: '' }];
-    site.features = Object.assign({}, site.features, { cmms: 'none', llm: 'none', control: 'off' });
     var D = window.EKO_DATA || {};
-    if (Array.isArray(D.portfolio)) D.portfolio = D.portfolio.filter(function (p) { return p.key === site.key; });
+    // the top bar reads the 'marsa' row, which a sample data set's site takes over
+    if (Array.isArray(D.portfolio)) D.portfolio = D.portfolio.filter(function (p) { return p.key === site.key || p.key === 'marsa'; });
     if (D.estate && Array.isArray(D.estate.sites)) D.estate.sites = [];
+    if (sampleFill) {
+      site.features = Object.assign({}, site.features, { control: 'off' });
+      return;
+    }
+    site.features = Object.assign({}, site.features, { cmms: 'none', llm: 'none', control: 'off' });
     // adapters are chosen when the app starts, which may already have happened
     if (window.EKO && window.EKO_CMMS) window.EKO_CMMS.init(window.EKO);
     if (window.EKO_LLM && window.EKO_LLM.use) window.EKO_LLM.use('none');
@@ -103,15 +110,22 @@
     var rate = b.energyTariff == null ? null : b.energyTariff;
     var factor = b.co2Factor == null ? null : b.co2Factor;
     basis.currency = b.currency || 'AED';
-    basis.aedPerKwh = rate;
-    basis.tariffId = rate == null ? null : (b.tariffName || 'Project tariff');
-    basis.tariffVersion = '';
-    basis.tariffStatus = rate == null ? 'missing' : 'configured';
-    basis.co2KgPerKwh = factor;
-    basis.co2FactorId = factor == null ? null : (b.co2FactorName || 'Project factor');
-    basis.co2FactorStatus = factor == null ? 'missing' : 'configured';
-    basis.gasTariffStatus = b.gasTariff == null ? 'missing' : 'configured';
-    if (site.gas) site.gas.tariffAedM3 = b.gasTariff == null ? null : b.gasTariff;
+    // with sampleFill, a rate the project did not set keeps the sample's
+    if (rate != null || !sampleFill) {
+      basis.aedPerKwh = rate;
+      basis.tariffId = rate == null ? null : (b.tariffName || 'Project tariff');
+      basis.tariffVersion = '';
+      basis.tariffStatus = rate == null ? 'missing' : 'configured';
+    }
+    if (factor != null || !sampleFill) {
+      basis.co2KgPerKwh = factor;
+      basis.co2FactorId = factor == null ? null : (b.co2FactorName || 'Project factor');
+      basis.co2FactorStatus = factor == null ? 'missing' : 'configured';
+    }
+    if (b.gasTariff != null || !sampleFill) {
+      basis.gasTariffStatus = b.gasTariff == null ? 'missing' : 'configured';
+      if (site.gas) site.gas.tariffAedM3 = b.gasTariff == null ? null : b.gasTariff;
+    }
     var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     Object.defineProperty(basis, 'asOf', { enumerable: true, configurable: true, get: function () {
       var n = siteNow(); return String(n.h).padStart(2, '0') + ':' + String(n.min).padStart(2, '0'); } });
@@ -392,12 +406,77 @@
   }
   var lastBoardKwh = {};
 
+  function summaryRow(site, key) {
+    return (site.summary || []).find(function (r) { return r && r.key === key; });
+  }
+
+  /* The backend sends only the keys this project maps, so a key present is a FIN reading, null or not */
+  function mapsKey(obj, key) {
+    return !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+  }
+  function historyHas(p, key) {
+    return mapsKey(p.power_history, key);
+  }
+
+  /* sampleFill: a reading the project does not map keeps its sample value; a mapped one shows FIN's, or "--" when empty.
+     Returns the step that puts this back after applyPower has written. */
+  function holdSample(site, p) {
+    var pw = site.power || {}, el = site.energyLanding;
+    var boardsLive = mappedBoards(p).length > 0;
+    var todayLive = boardsLive || historyHas(p, 'Hourly_Energy_Consumption_his') || historyHas(p, 'Total_Power_Consumption_his');
+    var waterLive = historyHas(p, 'Total_Water_Consumption_his');
+    var held = [], blank = [];
+    function hold(obj, keys, live) {
+      if (!obj || live) return;
+      keys.forEach(function (k) { held.push([obj, k, Object.prototype.hasOwnProperty.call(obj, k), obj[k]]); });
+    }
+    // fields applyPower writes only when FIN has a value
+    function own(src, obj, keys) {
+      if (!obj) return;
+      var live = src.filter(function (k) { return mapsKey(p, k); });
+      if (!live.length) return hold(obj, keys, false);
+      if (live.every(function (k) { return asNum(p[k]) == null; })) keys.forEach(function (k) { blank.push([obj, k, obj[k]]); });
+    }
+    own(['hourly_energy', 'total_power'], site.metrics, ['loadNowMw']);
+    own(['hourly_energy', 'total_power'], el, ['currentKw']);
+    own(['peak_demand'], site.metrics, ['peakTodayKw', 'peakTodayMw']);
+    own(['peak_demand'], pw.subview, ['peakKw']);
+    own(['carbon'], el, ['carbonKgH']);
+    own(['iaq_index'], site.metrics, ['iaq']);
+    own(['iaq_index'], site.spaces, ['ieq']);
+    own(['comfort_compliance'], site.metrics, ['comfortIndex']);
+    own(['comfort_compliance'], site.spaces, ['comfortPct']);
+    own(['total_water'], site.metrics, ['waterTodayM3']);
+    own(['total_gas'], site.metrics, ['gasTodayM3']);
+    own(['current_month'], el, ['mtdKwh']);
+    own(['energy_performance'], el, ['performancePct']);
+    own(['after_hours_deviation', 'energy_performance'], el, ['overnightDeviationPct']);
+    own(['kpi_after_hours_ratio'], el, ['overnightWordEn', 'overnightWordAr']);
+    hold(el, ['overnightTone'], mapsKey(p, 'kpi_after_hours_ratio'));
+    hold(site.metrics, ['energyTodayKwh', 'energyTodayMwh'], todayLive);
+    hold(summaryRow(site, 'energy'), ['spark', 'sparkCompare', 'deltaEn', 'deltaAr'], todayLive);
+    hold(pw.bva && pw.bva.ranges, ['today'], todayLive);
+    hold(pw, ['boards', 'zones', 'zonesAr', 'zoneHues', 'zoneHourly', 'zoneLast24', 'zoneWeekly', 'zoneMonthly', 'zoneWTD',
+      'zoneMTD', 'zoneYesterday', 'zonePrevWeek', 'zonePrevMonth', 'pmuFlats', 'weekRange', 'trendX'], boardsLive);
+    hold(site, ['timeline24'], boardsLive);
+    hold(pw, ['peakLast24', 'peakWeekly', 'peakMonthly', 'peakSeries', 'peakAvgKw'], historyHas(p, 'Peak_Demand_his'));
+    hold(site.water, ['todayM3', 'avgDrawM3Day', 'sparkToday', 'hourly', 'todayH', 'weekly', 'monthly'], waterLive);
+    hold(summaryRow(site, 'water'), ['spark', 'deltaEn', 'deltaAr'], waterLive);
+    hold(summaryRow(site, 'gas'), ['spark', 'deltaEn', 'deltaAr'], historyHas(p, 'Total_Gas_Consumption_his'));
+    return function restore() {
+      held.forEach(function (h) { if (h[2]) h[0][h[1]] = h[3]; else delete h[0][h[1]]; });
+      // still the sample's value: FIN wrote nothing for it
+      blank.forEach(function (b) { if (b[0][b[1]] === b[2]) b[0][b[1]] = null; });
+    };
+  }
+
   function applyPower(p) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !p || !site.metrics) return;
     var m = site.metrics;
     var el = site.energyLanding;
     var changed = false;
+    var restoreSample = sampleFill ? holdSample(site, p) : null;
     function set(obj, key, val) {
       if (!obj || val == null) return;
       if (obj[key] === val) return;
@@ -638,9 +717,9 @@
       var enSpark = extractDaily("Hourly_Energy_Consumption_his");
       if (!enSpark.length) enSpark = extractDaily("Total_Power_Consumption_his");
       var wtSpark = extractDaily("Total_Water_Consumption_his");
-      if (site.summary) { applySparkAndDelta(site.summary[1], wtSpark); changed = true; }
+      if (site.summary) { applySparkAndDelta(summaryRow(site, "water"), wtSpark); changed = true; }
       var gsSpark = extractDaily("Total_Gas_Consumption_his");
-      if (site.summary) { applySparkAndDelta(site.summary[2], gsSpark); changed = true; }
+      if (site.summary) { applySparkAndDelta(summaryRow(site, "gas"), gsSpark); changed = true; }
 
       if (el && enSpark.length > 0) {
         set(el, "perfSpark", enSpark);
@@ -786,8 +865,8 @@
       }
       // real mode's basis.asOf is already the live site clock (a getter, applyReportingBasis)
       if (site.basis && !realMode) site.basis.asOf = String(nowP.h).padStart(2, "0") + ":00";
-      if (site.summary && site.summary[0]) {
-        var energyRow = site.summary[0];
+      var energyRow = summaryRow(site, "energy");
+      if (energyRow) {
         energyRow.spark = todayHours;
         energyRow.sparkCompare = yestHours;
         if (todayKwh != null && yestKwh != null && yestKwh > 0) {
@@ -1351,6 +1430,7 @@
       }
       if (el && el.currentKw != null) sv.loadNowKw = el.currentKw;
     }
+    if (restoreSample) restoreSample();
     countUtilityAndEmsMeters(site, site.assets);
     if (changed) paint();
   }
@@ -1396,6 +1476,7 @@
   function applyMeters(meters) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !meters || !site.power) return;
+    if (sampleFill && !Object.keys(meters).length) return;
     /* /pmu-live lists the meters the project's own meter profile matched (its prefix and point
        aliases), so every one is shown. Marsa Al Arab's are keyed by PMU number, which its board
        names and history follow; another site's meter keeps its own name. */
@@ -1566,6 +1647,10 @@
     if (Object.prototype.hasOwnProperty.call(payload, 'workOrderError')) {
       site.workOrderError = payload.workOrderError || '';
       site.workOrderState = payload.workOrderState || '';
+    }
+    if (sampleFill && !list.length) {
+      applyHeat(list);
+      return;
     }
 
     // Build fresh asset list from FIN live data
@@ -1752,6 +1837,9 @@
 
     site.assets = newAssets;
     site.registerTotal = newAssets.length;
+    finAssets = true;
+    // FIN's equipment is the register now, not the sample model's item list
+    if (sampleFill) delete site.register;
 
     if (site.landing && site.landing.reg) {
       site.landing.reg.headEn = newAssets.length + " assets";
@@ -1821,6 +1909,7 @@
   }
 
   var woState = { byId: {} };
+  var finAssets = false;
 
   function normEquipId(value) {
     if (value == null || value === '') return '';
@@ -1851,6 +1940,8 @@
   function stampWorkOrders() {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !Array.isArray(site.assets)) return;
+    // the sample's own assets keep their sample work orders
+    if (sampleFill && !finAssets) return;
     site.assets.forEach(function (asset) {
       var equipId = normEquipId(asset.equipId);
       asset.equipId = equipId;
@@ -2302,6 +2393,7 @@
     if (!site || !site.heat || !Array.isArray(list)) return;
     var zones = [];
     var linkedSpaces = readSpaceLinks();
+    if (sampleFill && !linkedSpaces.length && !list.some(function (eq) { return eq && sensorKey(eq.name); })) return;
     if (!linkedSpaces.length) {
       for (var i = 1; i <= 4; i++) zones.push(blankZone('IAQ' + String(i).padStart(2, '0')));
       for (var j = 1; j <= 7; j++) zones.push(blankZone('IS' + String(j).padStart(2, '0')));

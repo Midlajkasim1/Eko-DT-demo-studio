@@ -1635,10 +1635,15 @@ window.EKO_C = (function(){
       </div></aside>`;
   }
 
+  /* FIN equipment (data-map.js keeps its points), or the equipment a FIN alarm names */
+  function finAsset(E, id){
+    const r = (E.data.assets || []).find(a => a.id === id);
+    return r ? Array.isArray(r.points) : (E.data.alarms || []).some(a => a.asset === id && String(a.id).indexOf('fin-') === 0);
+  }
   function assetPanel(E){
     const id = E.state.assetSel;
     if(!id) return '';
-    if(E.sim) return engineAssetPanel(E);   /* E15: a site run by the simulation engine */
+    if(E.sim && !finAsset(E, id)) return engineAssetPanel(E);   /* E15: a site run by the simulation engine */
     const r = E.data.assets.find(a => a.id === id) || (window.EKO_MT && window.EKO_MT.meterAsAsset(E, id))   /* D96: a meter row opens here too */
       || alarmAsAsset(E, id);   /* an alarm's equipment the register does not list yet */
     if(!r) return '';
