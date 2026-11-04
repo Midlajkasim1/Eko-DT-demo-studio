@@ -424,7 +424,7 @@
   function holdSample(site, p) {
     var pw = site.power || {}, el = site.energyLanding;
     var boardsLive = mappedBoards(p).length > 0;
-    var hourlyChart = !!(injected && injected.energyFromHourly && historyHas(p, 'Hourly_Energy_Consumption_his'));
+    var hourlyChart = !!(historyHas(p, 'Hourly_Energy_Consumption_his') && (!injected || injected.energyFromHourly !== false));
     var todayLive = boardsLive || historyHas(p, 'Hourly_Energy_Consumption_his');
     var waterLive = historyHas(p, 'Total_Water_Consumption_his');
     var held = [], blank = [];
@@ -914,7 +914,7 @@
         changed = true;
       }
 
-      if (injected && injected.energyFromHourly && historyHas(p, 'Hourly_Energy_Consumption_his')) {
+      if (historyHas(p, 'Hourly_Energy_Consumption_his') && (!injected || injected.energyFromHourly !== false)) {
         var kwhScale = energyMwh ? 1000 : 1;
         function sumMonth(y, mo) {
           var s = 0, n = 0;
@@ -934,7 +934,7 @@
           var facRow = summaryRow(site, 'facility');
           if (facRow) { facRow.d = 1; facRow.u = 'kW'; facRow.metric = 'loadNowKw'; facRow.capEn = null; facRow.capAr = null; facRow.notConfigured = false; }
         }
-        if (!mapsKey(p, 'current_month')) {
+        if (!mapsKey(p, 'current_month') || !injected || injected.energyMonthOwn !== true) {
           var monthSum = sumMonth(nowP.y, nowP.m);
           if (monthSum != null) {
             set(el, 'mtdKwh', trunc1(monthSum));
@@ -1127,7 +1127,7 @@
       }
 
       var boardList = mappedBoards(p);
-      var fromHourly = !!(injected && injected.energyFromHourly && hourlyFlat && hourlyFlat.length && !boardList.length);
+      var fromHourly = !!(hourlyFlat && hourlyFlat.length && !boardList.length && (!injected || injected.energyFromHourly !== false) && historyHas(p, 'Hourly_Energy_Consumption_his'));
       if (fromHourly) {
         var buildingFlat = hourlyFlat.map(function (pt) {
           return { y: pt.y, m: pt.m, d: pt.d, h: pt.h, val: pt.val * (energyMwh ? 1000 : 1) };

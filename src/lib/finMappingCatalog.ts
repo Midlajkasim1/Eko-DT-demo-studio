@@ -48,7 +48,7 @@ export const MAPPING_CATALOG: CatalogEntry[] = [
   live('comfort_compliance', OVERVIEW, 'Comfort', 'Overview, Spaces · %', ['thermalcomfortcompliance', 'comfortcompliance', 'comfortindex', 'comfort'], ['%']),
   live('iaq_index', OVERVIEW, 'IAQ', 'Overview, Spaces', ['iaqindex', 'iaq', 'indoorairquality']),
   live('temp_deviation', SYSTEMS, 'Temperature deviation', 'Systems', ['tempdeviation', 'temperaturedeviation'], ['°C', 'K', '%']),
-  live('current_month', ENERGY, 'Energy this month', 'Energy · kWh or MWh', ['currentmonth', 'monthtodate', 'monthlyenergy', 'mtdenergy'], ['kWh', 'MWh']),
+  live('current_month', ENERGY, 'Energy', 'Energy · kWh or MWh', ['currentmonth', 'monthtodate', 'monthlyenergy', 'mtdenergy', 'hourlyenergyconsumption', 'hourlyenergy'], ['kWh', 'MWh']),
   live('carbon', ENERGY, 'Carbon', 'Energy · kg CO₂/h', ['carbonemissions', 'carbonemission', 'carbon', 'co2emissions'], ['kg', 'kgCO2', 'kgCO₂']),
   live('energy_performance', ENERGY, 'Energy performance', 'Energy · %', ['energyperformance'], ['%']),
   live('energy_deviation', ENERGY, 'Energy deviation', 'Energy · %', ['energydeviation'], ['%']),

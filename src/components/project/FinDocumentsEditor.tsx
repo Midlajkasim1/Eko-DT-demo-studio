@@ -6,6 +6,7 @@ import {
   draftsFromFamilies,
   familiesFromDrafts,
   importDocumentsCsv,
+  suggestDocuments,
   type DocumentDraft,
 } from '@/lib/finDocuments'
 import { newRowId } from '@/lib/mappingRows'
@@ -68,6 +69,38 @@ export function FinDocumentsEditor({ value, finProject, finConnected, onChange }
     if (side === 'om') edit(row.key, { omRef: file.ref, omName: row.omName.trim() ? row.omName : file.name })
     else edit(row.key, { wRef: file.ref, wName: row.wName.trim() ? row.wName : file.name })
     setPick(null)
+  }
+
+  const suggest = async () => {
+    setNotice(null)
+    if (!finProject) {
+      setNotice('Choose a FIN project first.')
+      return
+    }
+    setLoadingFiles(true)
+    try {
+      const result = files && files.project === finProject && !files.error ? files : await fetchFinFiles(finProject).then(loaded => {
+        const next = { project: finProject, items: loaded.files, truncated: loaded.truncated }
+        setFiles(next)
+        return next
+      })
+      const suggested = suggestDocuments(result.items).map(withKey)
+      if (!suggested.length) {
+        setNotice('No O&M or warranty files named like O&M Manual-AHU or Warranty-AHU.')
+        return
+      }
+      const kept = rows.filter(row => row.name.trim() && !suggested.some(item => item.name.toLowerCase() === row.name.trim().toLowerCase()))
+      const next = [...kept, ...suggested]
+      commit(next)
+      const problem = draftProblem(next, finProject)
+      setNotice(problem
+        ? `Suggested ${suggested.length} groups. ${problem}`
+        : `Suggested ${suggested.length} groups from the FIN file names, including the match words. Save Settings to keep them.`)
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Could not load FIN files.')
+    } finally {
+      setLoadingFiles(false)
+    }
   }
 
   const copySite = async () => {
@@ -187,6 +220,7 @@ export function FinDocumentsEditor({ value, finProject, finConnected, onChange }
       <div className="fpm-csv">
         <button type="button" className="ds-btn ds-btn-secondary fpm-btn" onClick={downloadCsv}>Download CSV</button>
         <button type="button" className="ds-btn ds-btn-secondary fpm-btn" onClick={() => csvInput.current?.click()}>Import CSV</button>
+        <button type="button" className="ds-btn ds-btn-secondary fpm-btn" disabled={!finConnected || !finProject} onClick={() => void suggest()}>Suggest from FIN files</button>
         <button type="button" className="ds-btn ds-btn-secondary fpm-btn" onClick={() => void copySite()}>Copy om-warranty.json</button>
         <input ref={csvInput} type="file" accept=".csv,text/csv" hidden
           onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void importCsv(file) }} />

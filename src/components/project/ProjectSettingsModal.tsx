@@ -799,7 +799,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                   />
                   Use the hourly history for consumption
                 </label>
-                <p className="ds-hint">Current load, the hourly chart, and this month and last month come from Energy by hour. A point mapped on its own still wins.</p>
+                <p className="ds-hint">One Energy point with history fills hourly, today, week, and month. A separate month point is used only for the month.</p>
               </div>
 
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Mapping validation</h3>

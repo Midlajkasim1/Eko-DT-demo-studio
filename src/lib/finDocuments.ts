@@ -144,6 +144,51 @@ export function familiesFromDrafts(rows: DocumentDraft[]): FinDocumentFamily[] |
   return out.length ? out : undefined
 }
 
+const KIND_WORDS: Record<string, string[]> = {
+  ahu: ['ahu', 'air handling'],
+  fahu: ['fahu', 'fresh air'],
+  fcu: ['fcu', 'fan coil'],
+  vav: ['vav'],
+  fan: ['fan'],
+  chiller: ['chiller'],
+  boosterpump: ['booster', 'booster pump'],
+}
+
+/** Groups suggested from FIN file names such as "O&M Manual-AHU" and "Warranty-AHU". */
+export function suggestDocuments(files: { ref: string; name: string }[]): DocumentDraft[] {
+  const groups = new Map<string, { label: string; om?: { ref: string; name: string }; w?: { ref: string; name: string } }>()
+  for (const file of files) {
+    const match = /^(O\s*&\s*M(?:\s+Manual)?|Warranty)\s*[-–—]\s*(.+)$/i.exec(file.name.trim())
+    if (!match || !file.ref) continue
+    const label = match[2].trim()
+    const key = label.toLowerCase().replace(/[^a-z0-9]+/g, '')
+    if (!key) continue
+    const row = groups.get(key) || { label }
+    if (/warranty/i.test(match[1])) row.w = file
+    else row.om = file
+    groups.set(key, row)
+  }
+  return [...groups.values()].map(group => {
+    const code = group.label.toUpperCase().replace(/[^A-Z0-9]+/g, '')
+    const key = code.toLowerCase()
+    const words = KIND_WORDS[key] || [group.label.toLowerCase()]
+    return {
+      id: '',
+      name: group.label,
+      tags: words[0] || '',
+      codes: code,
+      types: words.join(', '),
+      names: code,
+      omName: group.om?.name || '',
+      omNameAr: '',
+      omRef: group.om?.ref || '',
+      wName: group.w?.name || '',
+      wNameAr: '',
+      wRef: group.w?.ref || '',
+    }
+  })
+}
+
 export function draftsFromFamilies(families: FinDocumentFamily[] | undefined): DocumentDraft[] {
   return (families ?? []).map(fam => ({
     id: fam.id || '',

@@ -36,7 +36,7 @@
     const h = e.hour(now, false), hd = e.hour(now, true), d0 = e.day(0);
     let peak = { kw: 0, at: e.today0 }; for(let ms = e.today0; ms <= now; ms += HOUR){ const x = e.hour(ms, false); if(x.total > peak.kw) peak = { kw: x.total, at: ms }; }   /* E7: the peak hour's average, at the start of its hour */
     let rest = 0; const end = e.dayStart(1); for(let ms = now; ms < end; ms += HOUR) rest += e.hour(ms, false).total * Math.min(1, (end - ms) / HOUR) / 1000;
-    d.metrics = Object.assign({}, d.metrics, { facilityLoadMw: +(h.total / 1000).toFixed(3), loadNowMw: +(h.total / 1000).toFixed(3), energyTodayKwh: Math.round(d0.total * 1000), energyTodayMwh: +d0.total.toFixed(2),
+    d.metrics = Object.assign({}, d.metrics, { facilityLoadMw: +(h.total / 1000).toFixed(3), loadNowMw: +(h.total / 1000).toFixed(3), loadNowKw: Math.round(h.total), energyTodayKwh: Math.round(d0.total * 1000), energyTodayMwh: +d0.total.toFixed(2),
       peakTodayMw: +(peak.kw / 1000).toFixed(3), peakTodayAt: iso(peak.at), todayForecastEodMwh: +(d0.total + rest).toFixed(1), baselineKw: Math.round(hd.total),
       loadAboveBaselinePct: +((h.total / hd.total - 1) * 100).toFixed(1) });
     const l24 = []; for(let k = 23; k >= 0; k--) l24.push(+(e.hour(now - k * HOUR, false).total / 1000).toFixed(3)); d.load24hMw = l24;

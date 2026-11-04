@@ -1,5 +1,5 @@
 import type { PowerBoard, ProjectApiSettings } from '@/types'
-import { MAPPING_CATALOG } from '@/lib/finMappingCatalog'
+import { MAPPING_CATALOG, historyExpression, pointRefOf } from '@/lib/finMappingCatalog'
 import type { JsonObject } from '@/lib/mappingRows'
 
 /** The apiSettings fields edited as JSON in Dashboard Settings → Data Mapping */
@@ -121,9 +121,13 @@ export function boardKeyOptions(
   const unverifiedStandard = !standard && !!finProjectName && finProjectName === schema.standardProfile
   const catalogLive = MAPPING_CATALOG.filter(e => e.block === 'live').map(e => e.key)
   const catalogHistory = MAPPING_CATALOG.filter(e => e.block === 'history').map(e => e.key)
-  const join = (catalog: string[], saved?: JsonObject) => [...new Set([...catalog, ...Object.keys(saved ?? {})])]
-  if (standard) return { live: schema.finLivePoints ?? [], history: schema.finEndpoints ?? [], standard, unverifiedStandard }
-  return { live: join(catalogLive, own.live), history: join(catalogHistory, own.history), standard, unverifiedStandard }
+  const join = (...lists: (string[] | undefined)[]) => [...new Set(lists.flatMap(list => list ?? []))]
+  return {
+    live: join(catalogLive, schema.finLivePoints, Object.keys(own.live ?? {})),
+    history: join(catalogHistory, schema.finEndpoints, Object.keys(own.history ?? {})),
+    standard,
+    unverifiedStandard,
+  }
 }
 
 /** The first problem with the boards, or null when they can be saved */
@@ -184,6 +188,9 @@ export function dashboardProjectInfo(meta: { projectId: string; name: string; ap
     /* the project's own boards; null = the built-in board keys, where the project maps them */
     powerBoards: Array.isArray(s.finPowerBoards) && s.finPowerBoards.length ? s.finPowerBoards : null,
     energyFromHourly: s.energyFromHourly === true,
+    energyMonthOwn: pointRefOf(s.finLivePoints?.current_month || '') != null
+      && pointRefOf(s.finEndpoints?.Hourly_Energy_Consumption_his || '') != null
+      && pointRefOf(s.finLivePoints?.current_month || '') !== pointRefOf(s.finEndpoints?.Hourly_Energy_Consumption_his || ''),
     site: {
       name: meta.name,
       displayName: s.finDisplayName || '',
@@ -279,6 +286,11 @@ export function toBackendSettings(settings: ProjectApiSettings | undefined): Pro
   if (s.finWorkorderExpr?.trim()) out.finWorkorderExpr = s.finWorkorderExpr
   for (const field of MAPPING_FIELDS) {
     if (s[field]) Object.assign(out, { [field]: s[field] })
+  }
+  const energyRef = pointRefOf(out.finLivePoints?.current_month || '')
+  const historyRef = pointRefOf(out.finEndpoints?.Hourly_Energy_Consumption_his || '')
+  if (energyRef && !historyRef) {
+    out.finEndpoints = { ...(out.finEndpoints || {}), Hourly_Energy_Consumption_his: historyExpression(energyRef) }
   }
   if (Array.isArray(s.finDocuments)) out.finDocuments = s.finDocuments
   return out
