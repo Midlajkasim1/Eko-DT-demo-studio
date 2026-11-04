@@ -364,6 +364,124 @@
     return decodeZinc(nav);
   }
 
+  // Same allow-list as backend/config.json point_control. The backend checks it again on write.
+  var POINT_CONTROL = {
+    enabled: true,
+    writeLevel: 8,
+    equipment: {
+      fcu: ['setpoint', 'status', 'choice'],
+      vav: ['setpoint', 'status', 'choice'],
+      ahu: ['setpoint', 'status', 'output', 'choice'],
+      mahu: ['setpoint', 'status', 'output', 'choice'],
+      fahu: ['setpoint', 'status', 'output', 'choice']
+    },
+    status: ['startstop', 'runcmd', 'onoff', 'fancmd', 'fancommand', 'safancmd', 'rafancmd', 'supplyfancmd', 'exhaustfancmd', 'sfvfdcmd', 'efvfdcmd', 'hrwcmd', 'sensiblecmd', 'enablecmd', 'fanenablecmd', 'status', 'effectiveoccupancy'],
+    output: ['coolingvalvecmd', 'coolingcoil', 'oadamper', 'madamper', 'eadamper', 'sfvfdspdcmd', 'efvfdspdcmd', 'hrwvfdspdcmd', 'sensiblevfdspdcmd', 'sfvfd', 'rfvfd', 'safanvfd', 'rafanvfd', 'supplyfanspeedcmd', 'exhaustfanspeedcmd'],
+    choice: ['fanspeedmode', 'fanspeed'],
+    ranges: {
+      '°C': { min: 16, max: 30, step: 0.5 },
+      '%': { min: 0, max: 100, step: 1 },
+      '%RH': { min: 30, max: 70, step: 1 },
+      ppm: { min: 400, max: 1500, step: 50 },
+      Pa: { min: 0, max: 1000, step: 5 },
+      kPa: { min: 0, max: 1000, step: 1 },
+      Hz: { min: 0, max: 60, step: 0.5 }
+    }
+  };
+  var CLASS_RE = /^(MAHU|FAHU|AHU|FCU|VAV)(?=[^A-Z]|$)/;
+  var LIFE_RE = /fire|smoke|life|emergency/i;
+  var MEAS_RE = /^(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(°C|°F|%RH|ppm|Pa|kPa|Hz|%)$/;
+
+  function foldName(name) {
+    return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+  function numOf(value) {
+    if (typeof value === 'boolean' || value == null) return null;
+    if (typeof value === 'number') return isFinite(value) ? value : null;
+    var m = String(value).match(/-?\d+(?:\.\d+)?/);
+    return m ? parseFloat(m[0]) : null;
+  }
+  function enumWords(point) {
+    var words = typeof point.enum === 'string' ? point.enum.split(',').map(function (w) { return w.trim(); }) : [];
+    return words.length >= 2 && words.every(Boolean) ? words : [];
+  }
+  function pointKindOf(point) {
+    if (typeof point.pointKind === 'string' && point.pointKind) return point.pointKind;
+    if (gluedUnit(point.curVal) || gluedUnit(point.currentValue)) return 'Number';
+    return typeof point.kind === 'string' ? point.kind : '';
+  }
+  function gluedUnit(value) {
+    if (value && typeof value === 'object' && value.unit) return String(value.unit);
+    var m = String(value || '').replace(/ /g, '').match(MEAS_RE);
+    return m ? m[2] : '';
+  }
+  function unitOf(point, role) {
+    var unit = String(point.unit || '').trim();
+    if (unit) return unit;
+    var found = gluedUnit(point.curVal) || gluedUnit(point.currentValue);
+    if (found) return found;
+    var folded = foldName(point.navName);
+    if (role === 'output') return /damper|coil|valve/.test(folded) ? '%' : '';
+    if (folded.indexOf('temp') >= 0) return '°C';
+    if (folded.indexOf('co2') >= 0) return 'ppm';
+    if (folded.indexOf('hum') >= 0) return '%RH';
+    if (folded.indexOf('pressure') >= 0) return 'Pa';
+    return '';
+  }
+  function equipmentClass(name, tags) {
+    var allowed = POINT_CONTROL.equipment;
+    var list = tags || [];
+    var order = ['mahu', 'fahu', 'vav', 'fcu', 'ahu'];
+    for (var i = 0; i < order.length; i++) {
+      if (allowed[order[i]] && list.indexOf(order[i]) >= 0) return order[i];
+    }
+    var match = String(name || '').toUpperCase().match(CLASS_RE);
+    var cls = match ? match[1].toLowerCase() : '';
+    return allowed[cls] ? cls : '';
+  }
+  function pointRole(point, roles) {
+    var name = String(point.navName || '');
+    if (!point.writable || LIFE_RE.test(name)) return '';
+    var folded = foldName(name);
+    var kind = pointKindOf(point);
+    if (roles.indexOf('status') >= 0 && kind === 'Bool' && POINT_CONTROL.status.indexOf(folded) >= 0) return 'status';
+    if (roles.indexOf('choice') >= 0 && kind === 'Str' && POINT_CONTROL.choice.indexOf(folded) >= 0 && enumWords(point).length) return 'choice';
+    if (roles.indexOf('setpoint') >= 0 && kind === 'Number' && (point.sp || folded.slice(-2) === 'sp')) return 'setpoint';
+    if (roles.indexOf('output') >= 0 && kind === 'Number' && POINT_CONTROL.output.indexOf(folded) >= 0) return 'output';
+    return '';
+  }
+  function controlFor(point, eqClass) {
+    if (!eqClass || !POINT_CONTROL.enabled) return null;
+    var roles = POINT_CONTROL.equipment[eqClass] || [];
+    var role = pointRole(point, roles);
+    if (!role) return null;
+    var level = POINT_CONTROL.writeLevel;
+    var manual = numOf(point.writeLevel) === level;
+    if (role === 'status') {
+      var words = enumWords(point);
+      if (words.length !== 2) words = ['Off', 'On'];
+      return { role: 'status', options: [{ value: false, label: words[0] }, { value: true, label: words[1] }], level: level, manual: manual };
+    }
+    if (role === 'choice') {
+      return { role: 'choice', options: enumWords(point).map(function (w) { return { value: w, label: w }; }), level: level, manual: manual };
+    }
+    var unit = unitOf(point, role);
+    var preset = POINT_CONTROL.ranges[unit] || {};
+    var ownLow = numOf(point.minVal), ownHigh = numOf(point.maxVal);
+    var siteLow = numOf(preset.min), siteHigh = numOf(preset.max);
+    var own = ownLow != null && ownHigh != null && ownLow < ownHigh;
+    var low, high;
+    if (siteLow != null && siteHigh != null) {
+      low = siteLow; high = siteHigh;
+      if (own && Math.max(ownLow, siteLow) < Math.min(ownHigh, siteHigh)) {
+        low = Math.max(ownLow, siteLow); high = Math.min(ownHigh, siteHigh);
+      }
+    } else if (own) {
+      low = ownLow; high = ownHigh;
+    } else return null;
+    return { role: 'setpoint', unit: unit, min: low, max: high, step: numOf(preset.step) || 1, level: level, manual: manual };
+  }
+
   function buildRealtime(pointsText, equipText, alarmsText) {
     var points = parseZincCsv(pointsText);
     var equipment = parseZincCsv(equipText);
@@ -393,7 +511,7 @@
         var isRule = navLower.indexOf('rule') === 0;
         if (!isRule) {
           if (navLower.indexOf('metadata') >= 0 || navLower.indexOf('[metadata_block]') >= 0) return;
-          if (navLower === 'start/stop' || navLower === 'start_stop' || navLower === 'startstop') return;
+          if ((navLower === 'start/stop' || navLower === 'start_stop' || navLower === 'startstop') && p.writable !== true) return;
         }
         var val = p.curVal;
         var isHis = p.his === true;
@@ -428,12 +546,21 @@
           // currentValue stays On/Off for the 3D schematics
           bool: state,
           text: boolText(p, state),
-          alarmPoint: p.alarmPoint === true
+          alarmPoint: p.alarmPoint === true,
+          writable: p.writable === true,
+          pointKind: typeof p.kind === 'string' ? p.kind : null,
+          sp: p.sp === true,
+          enum: typeof p.enum === 'string' ? p.enum : null,
+          minVal: p.minVal,
+          maxVal: p.maxVal,
+          writeLevel: p.writeLevel
         });
       });
       var floor = safeGet(equip.floorRef, 'dis') || 'Unknown Floor';
       var bucket = String(navName).toLowerCase().indexOf('cctv') >= 0 ? 'cctv' : 'hvac';
       var tags = Object.keys(equip).filter(function (k) { return equip[k] === true && k !== 'equip' && k !== 'inAlarm'; });
+      var eqClass = equipmentClass(navName, tags);
+      formatted.forEach(function (pt) { pt.control = controlFor(pt, eqClass); });
       var sysRaw = equip.system;
       if (sysRaw && typeof sysRaw === 'object') sysRaw = sysRaw.dis || sysRaw.val;
       var row = {

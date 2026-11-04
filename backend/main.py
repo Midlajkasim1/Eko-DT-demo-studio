@@ -2065,6 +2065,12 @@ def _write_landed(record: dict, control: dict, literal: Optional[str], action: s
         return not held
     if control["role"] == "status":
         return held and bool_state(record.get("curVal")) == (literal == "T")
+    if control["role"] == "choice":
+        wanted = str(literal or "").strip()
+        if len(wanted) >= 2 and wanted[0] == wanted[-1] == '"':
+            wanted = wanted[1:-1]
+        current = record.get("curVal")
+        return held and isinstance(current, str) and current.strip().lower() == wanted.lower()
     current, wanted = number_of(record.get("curVal")), number_of(literal)
     return held and current is not None and wanted is not None and abs(current - wanted) < 1e-6
 

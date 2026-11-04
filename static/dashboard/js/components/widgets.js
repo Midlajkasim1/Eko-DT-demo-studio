@@ -1131,7 +1131,7 @@ window.EKO_C = (function(){
   function liveRow(E, name, shown, point) {
     const ctl = point && point.control;
     if (!ctl || !point.id) return `<div class="aprow"><dt>${esc(name)}</dt><dd>${esc(shown)}</dd></div>`;
-    const tip = E.t(ctl.role === 'status' ? 'pcEditStatusTip' : 'pcEditSetpointTip');
+    const tip = E.t(ctl.role === 'setpoint' ? 'pcEditSetpointTip' : 'pcEditStatusTip');
     return `<div class="aprow apctlrow"><dt>${esc(name)}</dt><dd><button type="button" class="apctlval tipU" data-act="pointEditOpen" data-pt="${esc(point.id)}" data-tip="${esc(tip)}" aria-label="${esc(tip + ': ' + name)}">`
       + `${ctl.manual ? `<span class="apctlman">${esc(E.t('pcManual'))}</span>` : ''}<span>${esc(shown)}</span>${icon('pencil', 13)}</button></dd></div>`;
   }
