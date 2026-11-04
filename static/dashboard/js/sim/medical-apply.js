@@ -288,10 +288,12 @@
           else { c.v = H.pct.toFixed(1); c.tone = H.pct >= 95 ? 'ok' : H.pct >= 85 ? 'warn' : 'crit';
             c.capEn = H.bad ? H.bad + ' of ' + H.n + ' assets with an alarm' : 'All ' + H.n + ' assets without an alarm'; c.capAr = H.bad ? H.bad + ' من ' + H.n + ' أصول عليها إنذار' : 'كل الأصول الـ' + H.n + ' بلا إنذار'; } }
         else if(/AIR HANDLING/.test(L2)){
-          const real = (d.assets || []).filter(a => /^AHU-\d+$/.test(a.id));
+          const ahuNum = s => { const m = String(s || '').toUpperCase().match(/AHU[-_ ]?0*(\d+)/); return m ? m[1] : ''; };
+          const real = (d.assets || []).filter(a => ahuNum(a.id));
           const list = real.length ? real : ahus;
-          const liveAhu = (d.alarms || []).filter(a => String(a.id || '').indexOf('fin-') === 0 && /^AHU-\d+/.test(String(a.asset || '')));
-          const badN = liveAhu.length ? new Set(liveAhu.map(a => a.asset)).size : ahuBad;
+          const liveKeys = new Set();
+          (d.alarms || []).forEach(a => { const k = ahuNum(a.locEn) || ahuNum(a.asset) || ahuNum(a.plainEn); if(k) liveKeys.add(k); });
+          const badN = liveKeys.size || ahuBad;
           c.v = list.length + ' / ' + list.length; c.capEn = 'Total: ' + list.length + ', all running'; c.capAr = 'الإجمالي: ' + list.length + '، كلها تعمل';
           c.chipEn = badN ? badN + ' with an alarm' : ''; c.chipAr = badN ? badN + ' عليها إنذار' : ''; c.tone = badN ? 'warn' : 'ok'; c.wash = badN ? 'warn' : ''; }
         else if(/HUMIDITY BAND/.test(L2)){ c.val = inRh.length; c.max = rh.length; c.u = '/ ' + rh.length; const off = rh.length - inRh.length;

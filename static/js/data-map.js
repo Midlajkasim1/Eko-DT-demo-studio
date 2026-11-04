@@ -424,7 +424,7 @@
   function holdSample(site, p) {
     var pw = site.power || {}, el = site.energyLanding;
     var boardsLive = mappedBoards(p).length > 0;
-    var hourlyChart = !!(historyHas(p, 'Hourly_Energy_Consumption_his') && (!injected || injected.energyFromHourly !== false));
+    var hourlyChart = !!((historyHas(p, 'Hourly_Energy_Consumption_his') || mapsKey(p, 'current_month')) && (!injected || injected.energyFromHourly !== false));
     var todayLive = boardsLive || historyHas(p, 'Hourly_Energy_Consumption_his');
     var waterLive = historyHas(p, 'Total_Water_Consumption_his');
     var held = [], blank = [];
@@ -485,14 +485,17 @@
       obj[key] = val;
       changed = true;
     }
-    if (!mapsKey(p, 'hourly_energy') && mapsKey(p, 'current_month')) {
-      var energyNow = asNum(p.current_month);
-      if (energyNow != null) {
-        if (pointUnit(p, 'current_month') === 'mwh') energyNow = energyNow * 1000;
-        set(el, 'currentKw', trunc1(energyNow));
-        set(el, 'loadUnit', 'kW');
-        set(m, 'loadNowKw', trunc1(energyNow));
-        if (site.power) site.power.energyFromFin = true;
+    if (mapsKey(p, 'current_month')) {
+      if (site.power) { site.power.energyFromFin = true; site.power.prevMonthKwh = null; }
+      if (el) el.mtdKwh = null;
+      if (!mapsKey(p, 'hourly_energy')) {
+        var energyNow = asNum(p.current_month);
+        if (energyNow != null) {
+          if (pointUnit(p, 'current_month') === 'mwh') energyNow = energyNow * 1000;
+          set(el, 'currentKw', trunc1(energyNow));
+          set(el, 'loadUnit', 'kW');
+          set(m, 'loadNowKw', trunc1(energyNow));
+        }
       }
     }
     var load = mapsKey(p, 'hourly_energy') ? asNum(p.hourly_energy) : null;
@@ -552,13 +555,7 @@
         set(site.landing.gas, "headAr", trunc1(gas) + " م³ اليوم");
       }
     }
-    var mtd = asNum(p.current_month);
-    if (mtd != null) {
-      var monthMwh = pointUnit(p, 'current_month') === 'mwh';
-      set(el, 'mtdKwh', trunc1(monthMwh ? mtd * 1000 : mtd));
-      set(el, 'mtdMwh', trunc1(monthMwh ? mtd : mtd / 1000));
-      set(el, 'mtdUnit', monthMwh ? 'MWh' : 'kWh');
-    }
+    if (mapsKey(p, 'current_month') && site.power) site.power.energyFromFin = true;
     var perf = asNum(p.energy_performance);
     if (perf != null && perf >= 0 && perf <= 500) {
       set(el, "performancePct", trunc1(perf));
