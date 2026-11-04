@@ -789,7 +789,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
               </div>
 
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Equipment charts</h3>
-              <p className="ds-hint">Words in the FIN point name. Commas mean any of them. Blank keeps return air for AHU and zone temp for FCU.</p>
+              <p className="ds-hint">Leave these blank. AHU, FAHU, and MAHU use supply air, then return air. FCU and VAV use zone temp, then space temp. Fill a box only when that project uses another name.</p>
               <div className="ds-field-row">
                 <div className="ds-field">
                   <label>AHU temperature</label>

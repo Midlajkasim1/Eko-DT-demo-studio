@@ -1688,33 +1688,34 @@
     var type = String(eq.type || "").toUpperCase();
     var kind = "gen";
     if (id.indexOf("FAHU") === 0 || type.indexOf("FAHU") !== -1) kind = "fahu";
+    else if (id.indexOf("MAHU") === 0 || type.indexOf("MAHU") !== -1) kind = "mahu";
     else if (id.indexOf("AHU") === 0 || type.indexOf("AHU") !== -1) kind = "ahu";
+    else if (id.indexOf("VAV") === 0 || type.indexOf("VAV") !== -1) kind = "vav";
     else if (id.indexOf("FCU") === 0 || type.indexOf("FCU") !== -1) kind = "fcu";
     var names = equipPointWords();
     var specs = [];
-    if (kind === "fcu") {
-      var fcuTemp = names.fcuTemp.length ? names.fcuTemp : ["zonetemp"];
-      specs = [
-        makePair(points, "apCmpZone", function (k) { return matchesWords(k, fcuTemp) && !isSpName(k); }, spTest(names.fcuSp, fcuTemp))
-      ];
+    var zoneTemps = names.fcuTemp.length ? [names.fcuTemp] : [["zonetemp"], ["spacetemp"], ["roomtemp"]];
+    var zoneSpecs = zoneTemps.map(function (fcuTemp) {
+      return makePair(points, "apCmpZone", function (k) { return matchesWords(k, fcuTemp) && !isSpName(k); }, spTest(names.fcuSp, fcuTemp));
+    });
+    if (kind === "fcu" || kind === "vav") {
+      specs = zoneSpecs;
     } else if (kind === "ahu" && names.ahuTemp.length) {
       specs = [
         makePair(points, "apCmpSA", function (k) { return matchesWords(k, names.ahuTemp) && !isSpName(k); }, spTest(names.ahuSp, names.ahuTemp))
       ];
     } else if (kind === "ahu") {
       specs = [
-        makePair(points, "apCmpRA", function (k) { return k.indexOf("ratemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("ratemp") !== -1 && isSpName(k); }),
-        makePair(points, "apCmpSA", function (k) { return k.indexOf("satemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("satemp") !== -1 && isSpName(k); }),
+        makePair(points, "apCmpSA", function (k) { return (k.indexOf("satemp") !== -1 || k.indexOf("supplyairtemp") !== -1) && !isSpName(k); }, function (k) { return (k.indexOf("satemp") !== -1 || k.indexOf("supplyairtemp") !== -1) && isSpName(k); }),
+        makePair(points, "apCmpRA", function (k) { return (k.indexOf("ratemp") !== -1 || k.indexOf("returnairtemp") !== -1) && !isSpName(k); }, function (k) { return (k.indexOf("ratemp") !== -1 || k.indexOf("returnairtemp") !== -1) && isSpName(k); }),
         makePair(points, "apCmpRAHum", function (k) { return k.indexOf("rahum") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("rahum") !== -1 && isSpName(k); }),
         makePair(points, "apCmpRACO2", function (k) { return (k.indexOf("raco2") !== -1 || k === "raco2" || (k.indexOf("co2") !== -1 && k.indexOf("ra") !== -1)) && !isSpName(k); }, function (k) { return k.indexOf("co2") !== -1 && isSpName(k); })
       ];
-    } else if (kind === "fahu") {
-      specs = [
-        makePair(points, "apCmpFA", function (k) { return k.indexOf("fatemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("fatemp") !== -1 && isSpName(k); }),
-        makePair(points, "apCmpRA", function (k) { return k.indexOf("ratemp") !== -1 && k.indexOf("sensible") === -1 && !isSpName(k); }, function (k) { return k.indexOf("ratemp") !== -1 && k.indexOf("sensible") === -1 && isSpName(k); }),
-        makePair(points, "apCmpSA", function (k) { return k.indexOf("satemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("satemp") !== -1 && isSpName(k); }),
-        makePair(points, "apCmpOffCoil", function (k) { return (k.indexOf("offcoil") !== -1 || (k.indexOf("off") !== -1 && k.indexOf("temp") !== -1 && k.indexOf("hum") === -1 && k.indexOf("sensible") === -1)) && !isSpName(k); }, function (k) { return (k.indexOf("offcoil") !== -1 || k.indexOf("offtemp") !== -1) && isSpName(k); })
-      ];
+    } else if (kind === "fahu" || kind === "mahu") {
+      var airTemps = names.ahuTemp.length ? [names.ahuTemp] : [["satemp", "supplyairtemp"], ["freshairtemp"], ["ratemp", "returnairtemp"]];
+      specs = airTemps.map(function (words) {
+        return makePair(points, "apCmpSA", function (k) { return matchesWords(k, words) && !isSpName(k); }, spTest(names.ahuSp, words));
+      });
     } else {
       specs = [
         makePair(points, "apCmpTemp", function (k) { return k.indexOf("temp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("temp") !== -1 && isSpName(k); })
