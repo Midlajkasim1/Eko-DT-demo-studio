@@ -200,6 +200,31 @@ with it is built by code from the tool result. Code: `eko_chat.py`, `eko_chat_ro
   `SAFE_REASONS` in `eko_chat.py` (anything else is an internal error); `missing` holds Data Mapping NAMES only (`{mapping, key}`, at most 6, never a
   point ID, expression or exception text), so the dashboard can say "not mapped: Live Points: avg_zone_temp". Every reason, tool and mapping name has
   an English and an Arabic text in `static/dashboard/js/i18n/en.js` and `ar.js`.
+- **Alarms and equipment.** The equipment list counts an alarm by the FIN id of the record it is on; `get_alarms` matches an equipment name the same
+  way (the alarm rows carry that id internally, never shown) and by name as before, so the two always agree, and the alarm is shown under the equipment's
+  own name. When the equipment list shows alarms for an item that the alarm read cannot match, the answer says so. A project with no Severity Bands is told
+  that every alarm is graded info (none is critical), so "no critical alarms" is never false comfort. A severity the model adds that the question does not
+  say is dropped, and the one explicit equipment id the user wrote is used when the model left it out. Equipment `type` comes only from the project's
+  Equipment Classes (`type_priority`); with none mapped it is `other` for every item, the answer says so, and the item's own FIN tags are listed (nothing
+  is classified from a name).
+- **Is the model being used?** Every request writes one `CHAT_RESULT` line to the backend's console (`eko_chat_trace.py`), and a model call writes
+  `LLM_CALL_STARTED` / `LLM_CALL_COMPLETED` (provider, model, milliseconds, whether a tool was chosen) around it:
+
+  ```
+  [eko-chat] LLM_CALL_SKIPPED   provider=ollama model=qwen3.5:4b reason=rules_matched
+  [eko-chat] CHAT_RESULT        mode=RULES_ONLY handler=rules rule=equipment.list.read tool=find_equipment llm_called=false ...
+  [eko-chat] LLM_CALL_STARTED   stage=interpret provider=ollama model=qwen3.5:4b
+  [eko-chat] LLM_CALL_COMPLETED stage=interpret provider=ollama model=qwen3.5:4b ms=2175 tool_selected=yes tool=get_environment outcome=ok
+  [eko-chat] CHAT_RESULT        mode=LLM_USED handler=llm_intent tool=get_environment llm_called=true llm_calls=1 llm_ms=2175 ...
+  ```
+
+  `mode` is `RULES_ONLY` (deterministic code answered, no model call: `llm_skipped` says `provider_rules`, `rules_matched` or
+  `unsafe_or_empty_question`), `LLM_USED` (a model was called and its output produced the answer) or `LLM_FALLBACK` (the model path was entered but
+  did not produce the answer; `fallback_reason` says why: `llm_unavailable`, `llm_timeout`, `llm_model_missing`, `llm_cooldown`, `llm_not_configured`,
+  `llm_invalid_output`, `model_unsupported`, `model_clarification`, `answer_not_grounded`). `provider` and `model` are the ones in effect after the
+  environment is applied (`LLM_ENABLED`, `OLLAMA_MODEL`, ... over `chat` in config.json). Nothing else is written: not the question or the answer, a key,
+  the server address, a cookie, a FIN point ID or a tool argument. `chat.diagnostics: false` silences the lines. `GET /api/chat/stats` (signed in) shows
+  the running totals as `modes` and `llm_calls`.
 - **Logging.** Tool-selection diagnostics (`CHAT_DEBUG` in `eko_chat.py`) are off: they would print each user's question to the server log.
 - **Load test.** `scripts/eko_chat_load_test.py` needs `--cookie` (the `eko_session` value, or `EKO_SESSION_COOKIE`) and `--project`.
 - **Export.** `eko_chat.py`, `eko_chat_router.py` and `eko_chat_llm.py` are in the backend export list (`src/lib/backendExport.ts`): `main.py` imports them.
@@ -261,7 +286,7 @@ call the model (`/api/chat/stats` shows the runs).
 ```powershell
 cd backend
 $env:EKO_NOTIFICATION_DB = "$env:TEMP\eko-test-notifications.db"      # keeps the tests off the real notification history
-python -m unittest tests.test_eko_chat_rules tests.test_eko_chat_metrics tests.test_eko_chat_projects tests.test_eko_chat_inventory tests.test_eko_chat_capabilities tests.test_eko_chat_messages tests.test_fin_projects
+python -m unittest tests.test_eko_chat_rules tests.test_eko_chat_metrics tests.test_eko_chat_projects tests.test_eko_chat_inventory tests.test_eko_chat_capabilities tests.test_eko_chat_messages tests.test_eko_chat_trace tests.test_eko_chat_alarms tests.test_fin_projects
 cd ..
 python scripts/eko_chat_llm_benchmark.py                 # live: cold start, intent latency, end-to-end, accuracy (needs Ollama + the model)
 python scripts/eko_chat_llm_benchmark.py --unavailable   # how the chat behaves with Ollama off

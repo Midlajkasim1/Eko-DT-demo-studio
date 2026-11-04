@@ -34,6 +34,7 @@ from typing import Any, Callable, Optional, Protocol
 
 import httpx
 import eko_chat_capabilities as caps
+import eko_chat_trace as chat_trace
 from fin_client import AM_PM_LOOKUP, MONTHS_ORDER
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -137,7 +138,12 @@ def _fold(text: Any) -> str:
 
 
 # The narrowing filters a model may pass to a tool, which must be words the user wrote (the hybrid mode asks the same of its intents)
-ASKED_FILTERS = {"find_equipment": ("type", "floor", "name"), "get_hvac_status": ("type",)}
+ASKED_FILTERS = {"find_equipment": ("type", "floor", "name"), "get_hvac_status": ("type",), "get_alarms": ("severity",)}
+
+
+def severity_written(severity: Any, message: str) -> bool:
+    """Whether the question itself says this severity (critical, warning, info) as a word, singular or plural."""
+    return isinstance(severity, str) and bool(re.search(rf"\b{re.escape(severity.strip().lower())}s?\b", str(message).lower()))
 
 
 def unasked_filters(tool: Any, args: Any, message: str) -> list[str]:
@@ -151,7 +157,10 @@ def unasked_filters(tool: Any, args: Any, message: str) -> list[str]:
         if value in (None, ""):
             continue
         folded = _fold(value) if isinstance(value, str) else ""
-        if not folded or folded not in asked:
+        if key == "severity":            # a whole word ("critical", "warnings"), not a fragment of another ("info" in "information")
+            if not (isinstance(value, str) and severity_written(value, message)):
+                out.append(key)
+        elif not folded or folded not in asked:
             out.append(key)
     return out
 
@@ -188,9 +197,9 @@ def _bim_id(eq: dict) -> Optional[str]:
     return value if isinstance(value, str) and GUID_RE.match(value) else None
 
 
-def _alarm_view(a: dict) -> dict:
+def _alarm_view(a: dict, equipment_name: Optional[str] = None) -> dict:
     out = {
-        "source": a.get("source") or "",
+        "source": equipment_name or a.get("source") or "",       # the equipment's own name when the alarm is on a known record, as the equipment list says it
         "message": _clip(a.get("message")),
         "severity": a.get("severity"),
         "priority": a.get("priority"),
@@ -224,6 +233,7 @@ def _summary(eq: dict) -> dict:
         "system": eq.get("system") or None,
         "in_alarm": bool(eq.get("inAlarm")),
         "open_alarm_count": len(eq.get("alarms") or []),
+        "tags": [t for t in (eq.get("tags") or []) if isinstance(t, str) and re.match(r"^[A-Za-z][A-Za-z0-9_]{0,31}$", t)][:8],   # FIN's own markers
         "bim_id": _bim_id(eq),
     }
 
@@ -315,11 +325,15 @@ def find_equipment(args: dict, view: DataView) -> dict:
             continue
         matches.append(eq)
     matches.sort(key=lambda e: str(e.get("name") or ""))
-    return {
+    out = {
         "available": True, "project": _project(view), "as_of": as_of,
         "total": len(matches), "returned": min(len(matches), limit), "truncated": len(matches) > limit,
         "items": [_summary(e) for e in matches[:limit]],
     }
+    if view.mapped and not view.mapped.get("equipmentTypes"):
+        # no Equipment Classes > type_priority is mapped: `type` is "other" for every item, which is not a classification
+        out["types_mapped"] = False
+    return out
 
 
 def get_equipment_status(args: dict, view: DataView) -> dict:
@@ -397,9 +411,15 @@ def get_alarms(args: dict, view: DataView) -> dict:
         source = view.alarms.get("alarms") or []
         scope = "open alarms from the backend's latest poll"
     rows = [a for a in source if isinstance(a, dict)]
+    equipment = _equipment_list(view)
+    names = {e["finId"]: e.get("name") for e in equipment if isinstance(e, dict) and e.get("finId")}     # FIN record id -> the equipment's own name
+    on_equipment = []
     if args.get("equipment"):
         key = _fold(args["equipment"])
-        rows = [a for a in rows if key and (key == _fold(a.get("source")) or key in _fold(a.get("source")))]
+        # the equipment list counts an alarm by the id of the record it is on; match the same way, and by name as before
+        on_equipment = [e for e in equipment if isinstance(e, dict) and key and (_fold(e.get("name")) == key or _loose(_fold(e.get("name"))) == _loose(key))]
+        ids = {e["finId"] for e in on_equipment if e.get("finId")}
+        rows = [a for a in rows if key and (key == _fold(a.get("source")) or key in _fold(a.get("source")) or (a.get("source_id") and a["source_id"] in ids))]
     if args.get("severity"):
         rows = [a for a in rows if a.get("severity") == args["severity"]]
     if args.get("state"):
@@ -409,12 +429,18 @@ def get_alarms(args: dict, view: DataView) -> dict:
     for a in rows:
         if a.get("severity") in counts:
             counts[a["severity"]] += 1
-    return {
+    out = {
         "available": True, "project": _project(view), "as_of": as_of,
         "scope": scope, "history": history,
         "total": len(rows), "counts": counts, "returned": min(len(rows), limit), "truncated": len(rows) > limit,
-        "alarms": [dict(_alarm_view(a), **({"open": a["open"]} if "open" in a else {})) for a in rows[:limit]],
+        "alarms": [dict(_alarm_view(a, names.get(a.get("source_id"))), **({"open": a["open"]} if "open" in a else {})) for a in rows[:limit]],
     }
+    if view.mapped and not view.mapped.get("finSeverityBands"):
+        out["grading_note"] = "No severity bands are mapped for this project, so every alarm is graded info and none is graded critical or warning."
+    recorded = sum(len(e.get("alarms") or []) for e in on_equipment)
+    if args.get("equipment") and not history and recorded and not args.get("severity") and not args.get("state") and len(rows) == 0:
+        out["equipment_record_open_alarms"] = recorded       # the equipment list shows alarms for it that this read could not match: said, not hidden
+    return out
 
 
 def get_notifications(args: dict, view: DataView) -> dict:
@@ -924,12 +950,12 @@ def build_card(tool: str, args: Optional[dict], result: dict) -> Optional[dict]:
             rows=rows, total=result.get("total", 0))
     elif tool == "find_equipment":
         filters = _filters(args, ["name", "type", "floor", "in_alarm"])
-        rows = [[i.get("name"), i.get("floor"), i.get("type"), i.get("in_alarm"), i.get("open_alarm_count")]
+        rows = [[i.get("name"), i.get("floor"), i.get("type"), i.get("in_alarm"), i.get("open_alarm_count"), ", ".join(i.get("tags") or [])]
                 for i in (result.get("items") or [])[:MAX_CARD_ROWS]]
         card.update(
             headline=_text("equipment", "Matching equipment: {total}", total=result.get("total", 0)),
             interpreted_as=_text("equipment", "Equipment list{f}", f=_filters_text(filters)),
-            columns=["name", "floor", "type", "in_alarm", "open_alarms"], rows=rows, total=result.get("total", 0))
+            columns=["name", "floor", "type", "in_alarm", "open_alarms", "tags"], rows=rows, total=result.get("total", 0))
     elif tool == "get_equipment_status":
         filters = _filters(args, ["equipment"])
         if result.get("found"):
@@ -1333,6 +1359,7 @@ class LLMRun:
         self.calls = self.prompt_tokens = self.completion_tokens = 0
         self.tokens_known = False
         self.record: Optional[dict] = None
+        self.trace: Optional[chat_trace.ChatTrace] = None     # this request's diagnostics (eko_chat_trace); the endpoint sets it
         LLM_STATS["llm_requests"] += 1
 
     def _ms(self, t: Optional[float]) -> Optional[float]:
@@ -1381,6 +1408,8 @@ class LLMRun:
         _debug_kv(llm=outcome, reason=self.reason, stream=self.stream, queue_ms=self.record["queue_wait_ms"],
                   inference_ms=self.record["inference_ms"], total_ms=self.record["total_ms"], calls=self.calls,
                   error=error, tokens_per_s=tps)
+        if self.trace is not None:
+            self.trace.run_finished(outcome, error)
         return self.record
 
 
@@ -1391,7 +1420,7 @@ def _outcome(code: str) -> str:
 def chat_stats() -> dict:
     """Route and LLM counters, the gate, and the recent llm_fallback timing records."""
     from eko_chat_router import route_stats
-    return {"routes": route_stats(), "llm": dict(LLM_STATS),
+    return {"routes": route_stats(), "llm": dict(LLM_STATS), **chat_trace.stats(),
             "gate": {"limit": LLM_GATE.limit, "configured": LLM_GATE.wanted, "active": LLM_GATE.active, "queued": LLM_GATE.waiting},
             "runs": list(LLM_RUNS)}
 
@@ -1435,6 +1464,7 @@ async def conversation(adapter: LLMAdapter, message: str, view_fn: Callable[[], 
     tools run, then one ("result", {...}) with the grounded answer. Raises ChatFailure (see converse).
     Every model call waits for an LLM_GATE slot; run (if given) records the wait and the inference."""
     messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": message}]
+    ctrace = (run.trace if run is not None else None) or chat_trace.ChatTrace.null()     # (`trace` below is the list of tool calls)
     trace: list = []
     tool_texts: list[str] = []
     last_ok: Optional[tuple] = None          # (tool, args, result) of the newest successful call: the card
@@ -1444,14 +1474,23 @@ async def conversation(adapter: LLMAdapter, message: str, view_fn: Callable[[], 
         if rounds >= MAX_TOOL_ROUNDS:
             raise ChatFailure("max_tool_rounds_exceeded", f"The model did not finish within {MAX_TOOL_ROUNDS} rounds.", 502, trace)
         rounds += 1
+        call_ms = 0.0
         try:
             async with (run.model_call() if run is not None else LLM_GATE.slot()):
-                reply = await adapter.complete(messages, tool_definitions())
+                ctrace.call_started("tool_loop")
+                t_call = time.perf_counter()
+                try:
+                    reply = await adapter.complete(messages, tool_definitions())
+                except LLMError as exc:
+                    ctrace.call_failed("tool_loop", (time.perf_counter() - t_call) * 1000, exc.code)
+                    raise
+                call_ms = (time.perf_counter() - t_call) * 1000
             if run is not None:
                 run.usage(reply.get("usage"))
         except LLMError as exc:
             raise ChatFailure(exc.code, exc.message, exc.status, trace)
         calls = reply.get("tool_calls") or []
+        ctrace.call_completed("tool_loop", call_ms, tools=[_tool_label(c.get("name")) for c in calls if isinstance(c, dict)])
         content = THINK_BLOCK.sub("", reply.get("content") or "").strip()
         if not calls:
             _debug("model tool", f"none (final answer, round {rounds})")
@@ -1499,6 +1538,7 @@ async def conversation(adapter: LLMAdapter, message: str, view_fn: Callable[[], 
             _debug("tool result", f"{label} " + ("available" if result.get("available")
                                                    else f"unavailable ({_safe_reason(result.get('reason'))})")
                    + (f" found={result['found']}" if "found" in result else ""))
+            ctrace.tool_result(label, bool(result.get("available")), None if result.get("available") else _safe_reason(result.get("reason")))
             text = json.dumps(result, default=str)
             if result.get("available"):
                 tool_texts.append(text)
@@ -1622,6 +1662,8 @@ def try_direct(message: str, view_fn: Callable[[], DataView], info: Optional[dic
                 decision = {"route": "llm_fallback", "reason": "direct_ungrounded"}
             else:
                 record(decision)
+                if info is not None:
+                    info["rule"] = decision.get("rule")
                 _debug_kv(route="direct", intent=decision["intent"], rule=decision.get("rule"))
                 entry = {"name": out["intent"], "arguments": out["parameters"], "available": bool(result.get("available"))}
                 if not result.get("available"):
@@ -1701,6 +1743,16 @@ async def stream_direct(resp: dict, project: dict):
                        "project": project, "timestamp": datetime.now().astimezone().isoformat(timespec="seconds")})
 
 
+def _trace_direct(trace: chat_trace.ChatTrace, direct: dict, info: dict, rules_only: bool) -> None:
+    """The summary line for an answer the endpoint already holds (rules, a clarification, a topic reply, or the hybrid model's intent)."""
+    route, calls = direct.get("route"), direct.get("tool_calls") or []
+    tool = calls[0].get("name") if calls and isinstance(calls[0], dict) else None
+    handler = {"direct": "rules", "llm_intent": "llm_intent", "clarification": "clarification"}.get(route) or ("topic" if calls else "help")
+    why = info.get("reason")
+    skipped = "provider_rules" if rules_only else ("unsafe_or_empty_question" if why in ("unsafe_content", "empty") else "rules_matched")
+    trace.finish(handler, rule=info.get("rule") if route == "direct" else None, tool=tool, skipped=skipped)
+
+
 def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
                  guard_fn: Optional[Callable[[Request], None]] = None) -> APIRouter:
     """POST /api/chat. view_fn and config_fn are read on every request (the project can change).
@@ -1726,8 +1778,9 @@ def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
         _debug("question", req.message)
         fallback: dict = {}
         # the deployment's environment (LLM_ENABLED, OLLAMA_MODEL, ...) is applied on top of config.json's chat block
-        from eko_chat_llm import PROVIDER as HYBRID, effective, hybrid   # imported here: that module imports this one
+        from eko_chat_llm import DEFAULT_MODEL, PROVIDER as HYBRID, effective, hybrid   # imported here: that module imports this one
         cfg = effective(cfg)
+        trace = chat_trace.ChatTrace.for_config(cfg, DEFAULT_MODEL, t0)     # which provider and model this request would use; no text, key or address
         rules_only = cfg.get("provider") == RULES_PROVIDER
         direct = None
         rules_on = rules_only or cfg.get("fast_router", True) is not False       # chat.fast_router=false hands everything to the model, as before
@@ -1743,10 +1796,11 @@ def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
             direct = topic_reply(req.message, vf) or unsupported(fallback.get("reason"))
         if direct is None and cfg.get("provider") == HYBRID:
             # the rules did not know it: one model call reads the intent, the existing tool answers (see eko_chat_llm)
-            direct = await hybrid(cfg, req.message, vf, fallback.get("reason"), bool(req.stream), t0)
+            direct = await hybrid(cfg, req.message, vf, fallback.get("reason"), bool(req.stream), t0, trace)
             if direct.get("route") == "unsupported":    # the model did not answer it: ask back or say which capability it is, when it names one
                 direct = topic_reply(req.message, vf) or direct
         if direct is not None:
+            _trace_direct(trace, direct, fallback, rules_only)
             if req.stream:
                 return StreamingResponse(stream_direct(direct, _project(view)), media_type="text/event-stream",
                                          headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -1755,11 +1809,16 @@ def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
         try:
             adapter = get_adapter(cfg)
         except ValueError as exc:
+            trace.mark_fallback("llm_not_configured")
+            trace.finish("error", outcome="llm_not_configured")
             raise _error(503, "llm_not_configured", str(exc))
         if adapter is None:
+            trace.mark_fallback("llm_not_configured")
+            trace.finish("error", outcome="llm_not_configured")
             raise _error(503, "llm_not_configured", "No language model provider is configured for Eko-Chat.")
         LLM_GATE.configure(_limit_from(cfg))
         run = LLMRun(fallback.get("reason"), bool(req.stream), t0)
+        run.trace = trace         # the summary line is printed when the model path finishes (LLMRun.finish)
         if req.stream:
             return StreamingResponse(stream_chat(adapter, req.message, vf, _project(view), run),
                                      media_type="text/event-stream",

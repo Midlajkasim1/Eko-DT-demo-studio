@@ -4,6 +4,8 @@ export const BACKEND_EXPORT_FILES = [
   'eko_chat.py',
   'eko_chat_router.py',
   'eko_chat_llm.py',
+  'eko_chat_capabilities.py',
+  'eko_chat_trace.py',
   'workorders.py',
   'point_control.py',
   'notifications.py',

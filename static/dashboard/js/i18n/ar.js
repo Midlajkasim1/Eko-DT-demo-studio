@@ -2455,6 +2455,7 @@ window.EKO_I18N.ar = {
   "ai.card.c.not_supported": "غير مدعوم",
   "ai.card.c.capability": "الإمكانية",
   "ai.card.c.needs": "المطلوب",
+  "ai.card.c.tags": "وسوم FIN",
   "ai.card.c.data": "البيانات",
   "ai.card.f.equipment": "المعدة",
   "ai.card.f.severity": "الخطورة",

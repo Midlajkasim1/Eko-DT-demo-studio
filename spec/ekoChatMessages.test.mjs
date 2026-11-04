@@ -108,7 +108,7 @@ test('the capability card has its headline, columns and cells in both languages'
   for (const lang of ['en', 'ar']) {
     const T = TABLES[lang]
     for (const k of ['capabilities', 'capability', 'capabilitiesUnavailable']) assert.ok(T[`ai.card.h.${k}`] && T[`ai.card.i.${k}`], `${lang} ${k}`)
-    for (const c of ['area', 'available', 'unmapped', 'not_supported', 'capability', 'needs', 'data']) assert.ok(T[`ai.card.c.${c}`], `${lang} column ${c}`)
+    for (const c of ['area', 'available', 'unmapped', 'not_supported', 'capability', 'needs', 'data', 'tags']) assert.ok(T[`ai.card.c.${c}`], `${lang} column ${c}`)
     for (const v of ['available', 'unmapped', 'not_supported', 'live', 'historical', 'stored']) assert.ok(T[`ai.card.cap.${v}`], `${lang} cell ${v}`)
   }
   assert.match(js('ai/ask.js'), /col === 'status' \|\| col === 'data'\) return tOr\('ai\.card\.cap\./)

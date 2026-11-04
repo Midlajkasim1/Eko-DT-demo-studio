@@ -563,13 +563,18 @@ def direct_text(out: dict, rule: str = "") -> str:
         sev = f" {params['severity']}" if params.get("severity") else ""
         where = f" on {params['equipment']}" if params.get("equipment") else ""
         total = r.get("total", 0)
+        note = f" {r['grading_note']}" if r.get("grading_note") else ""
         if not total:
-            return f"There are no open{sev} alarms{where}."
+            recorded = r.get("equipment_record_open_alarms")
+            if recorded:
+                return (f"The equipment list shows {recorded} open alarms for {params.get('equipment')}, but the latest FIN alarm read holds no alarm record "
+                        "that could be matched to it, so their descriptions and severities cannot be shown." + note)
+            return f"There are no open{sev} alarms{where}." + note
         c = r.get("counts") or {}
         text = f"Open{sev} alarms{where}: {total}"
         text += "." if sev else f" ({c.get('critical', 0)} critical, {c.get('warning', 0)} warning, {c.get('info', 0)} info)."
         shown = [f"{a.get('source')} ({a.get('severity')}): {a.get('message')}" for a in (r.get("alarms") or [])[:3]]
-        return text + (" " + "; ".join(shown) + "." if shown else "")
+        return text + (" " + "; ".join(shown) + "." if shown else "") + note
     if intent == "find_equipment":
         total, names = r.get("total", 0), [i.get("name") for i in r.get("items") or []]
         if params.get("in_alarm"):
@@ -578,7 +583,9 @@ def direct_text(out: dict, rule: str = "") -> str:
         if kind and not total:
             return f"No equipment of type {kind} was found in this project's data."
         lead = f"Equipment of type {kind}: {total}." if kind else f"Equipment items: {total}."
-        return lead + (f" Including {_names(names)}." if names else "") + _shown(r)
+        untyped = (" No equipment types are mapped for this project (Dashboard Settings > Data Mapping > Equipment Classes), so the type shows other for "
+                   "every item; each item's own FIN tags are listed instead." if r.get("types_mapped") is False and total else "")
+        return lead + (f" Including {_names(names)}." if names else "") + _shown(r) + untyped
     if intent == "get_capabilities":
         return _capabilities_text(r)
     if intent == "get_equipment_status":

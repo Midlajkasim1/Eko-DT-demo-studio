@@ -27,6 +27,7 @@ import httpx
 
 import eko_chat
 import eko_chat_capabilities as caps
+import eko_chat_trace as chat_trace
 from eko_chat import (ENV_METRICS, HELP_TEXT, LLM_GATE, MAX_LIMIT, NOT_VERIFIED, PERIODS, SEVERITIES, THINK_BLOCK, TOOLS, DataView,
                       LLMError, LLMRun, _fold, _limit_from, _project, _ungrounded, _validate)
 
@@ -180,7 +181,7 @@ INTENT_SYSTEM = (
     "get_hvac_status (type: an equipment class such as ahu or fcu, if one is named); "
     "list_equipment (type, floor, in_alarm, limit); "
     "get_equipment_status (equipment: the exact name written in the question); "
-    "get_alarms (severity: critical, warning or info; equipment; history true for the newest alarm records including cleared ones; limit); "
+    "get_alarms (severity: critical, warning or info, only if the question says it; equipment; history true for the newest alarm records including cleared ones; limit); "
     "get_notifications (view: all, unread or read; severity; limit); "
     "get_acknowledgements (questions about acknowledged alarms or notifications); "
     "explain_conditions (an overview of how the building is doing now); "
@@ -223,6 +224,16 @@ def to_decision(parsed: Any, question: str) -> tuple[str, Optional[dict]]:
         given["type"] = given["type"].strip().lower()
     if "equipment" in given:
         given["equipment"] = given["equipment"].strip()
+    if tool == "get_alarms":
+        # a severity the user did not write is dropped: with no band for it nothing matches, and "no critical alarms" would be false comfort
+        if "severity" in given and not eko_chat.severity_written(given["severity"], question):
+            del given["severity"]
+        # an item the question names but the model left out: the one explicit id the user wrote, as written (the rules read it the same way)
+        if "equipment" not in given:
+            from eko_chat_router import EQUIPMENT_ID    # imported here: the router imports eko_chat
+            ids = list(dict.fromkeys(m.group(1) for m in EQUIPMENT_ID.finditer(question) if re.search(r"\d", m.group(1))))
+            if len(ids) == 1:
+                given["equipment"] = ids[0]
     if _validate(given, TOOLS[tool]["parameters"]):
         return "clarification", None             # understood, but a required or valid parameter is missing
     return "ok", {"route": "direct", "intent": tool, "parameters": given, "confidence": "llm",
@@ -272,19 +283,24 @@ def _reply(text: str, route: str, tool_calls: Optional[list] = None, card: Optio
 
 
 async def hybrid(cfg: dict, message: str, view_fn: Callable[[], DataView], reason: Optional[str], stream: bool = False,
-                 t0: Optional[float] = None) -> dict:
-    """The response for a question the rules did not answer. Never raises."""
+                 t0: Optional[float] = None, trace: Optional[chat_trace.ChatTrace] = None) -> dict:
+    """The response for a question the rules did not answer. Never raises. `trace` (eko_chat_trace) only records what happens."""
     from eko_chat_router import direct_text, execute   # imported here: the router imports eko_chat
+    trace = trace or chat_trace.ChatTrace.null()
+    trace.deferred = True        # the endpoint prints the summary: it may still replace this reply with a topic reply
     if reason in NO_MODEL_FOR:
         return eko_chat.unsupported(reason)
     run = LLMRun(reason, stream, t0)
+    run.trace = trace
     try:
         client = OllamaClient(cfg)
     except ValueError:
+        trace.mark_fallback("llm_not_configured")
         run.finish("failure", "llm_not_configured")
         _log(stage="configure", outcome="llm_not_configured")
         return _reply(LLM_DOWN + HELP_TEXT, "unsupported")
     if time.monotonic() < BREAKER["until"]:   # a refused connection takes ~2 s on Windows: do not make every question wait for it
+        trace.mark_fallback("llm_cooldown")
         run.finish("failure", "llm_cooldown")
         _log(stage="interpret", outcome="llm_cooldown")
         return _reply(LLM_DOWN + HELP_TEXT, "unsupported")
@@ -292,10 +308,18 @@ async def hybrid(cfg: dict, message: str, view_fn: Callable[[], DataView], reaso
     try:
         started = time.perf_counter()
         async with run.model_call():
-            reply = await client.generate(INTENT_SYSTEM, json.dumps({"question": message[:MAX_QUESTION_CHARS]}), INTENT_SCHEMA)
+            trace.call_started("interpret")
+            t_call = time.perf_counter()
+            try:
+                reply = await client.generate(INTENT_SYSTEM, json.dumps({"question": message[:MAX_QUESTION_CHARS]}), INTENT_SCHEMA)
+            except LLMError as exc:
+                trace.call_failed("interpret", (time.perf_counter() - t_call) * 1000, exc.code)
+                raise
+            call_ms = (time.perf_counter() - t_call) * 1000
         run.usage(reply["usage"])
         interpret_ms = round((time.perf_counter() - started) * 1000)
     except LLMError as exc:
+        trace.mark_fallback(exc.code)
         if exc.code in OUTAGE:
             BREAKER["until"] = time.monotonic() + (_number(cfg.get("llm_cooldown_s"), 0, 3600) if cfg.get("llm_cooldown_s") is not None else DEFAULT_COOLDOWN_S)
         run.finish("timeout" if exc.code == "llm_timeout" else "failure", exc.code)
@@ -306,6 +330,9 @@ async def hybrid(cfg: dict, message: str, view_fn: Callable[[], DataView], reaso
     except ValueError:
         status, decision = "invalid", None
     _log(stage="interpret", outcome=status, ms=interpret_ms)
+    trace.call_completed("interpret", call_ms, tools=[decision["intent"]] if status == "ok" else None, outcome=status)
+    if status != "ok":
+        trace.mark_fallback("llm_invalid_output" if status == "invalid" else f"model_{status}")     # the model did not pick a tool
     if status == "invalid":
         run.finish("failure", "llm_invalid_output")
         return _reply(NOT_UNDERSTOOD + HELP_TEXT, "unsupported", model=client.model)
@@ -314,11 +341,14 @@ async def hybrid(cfg: dict, message: str, view_fn: Callable[[], DataView], reaso
         return _reply((CLARIFY if status == "clarification" else NOT_UNDERSTOOD) + HELP_TEXT, "unsupported", model=client.model)
     out = execute(decision, view_fn())
     if out.get("route") != "direct":
+        trace.mark_fallback("llm_invalid_output")
         run.finish("failure", "llm_invalid_output")
         return _reply(NOT_UNDERSTOOD + HELP_TEXT, "unsupported", model=client.model)
     result = out["result"]
     text = direct_text(out, decision["rule"])
+    trace.tool_result(out["intent"], bool(result.get("available")), None if result.get("available") else eko_chat._safe_reason(result.get("reason")))
     if _ungrounded(text, [json.dumps(result, default=str, ensure_ascii=False), message]):
+        trace.mark_fallback("answer_not_grounded")
         run.finish("failure", "answer_not_grounded")
         return _reply(NOT_VERIFIED, "unsupported", model=client.model)
     entry = {"name": out["intent"], "arguments": out["parameters"], "available": bool(result.get("available"))}
@@ -327,11 +357,19 @@ async def hybrid(cfg: dict, message: str, view_fn: Callable[[], DataView], reaso
         if result.get("missing"):
             entry["missing"] = result["missing"]
     source = "code"
+    trace.mark_used(tool=out["intent"], rule=decision["rule"])      # the model chose this tool and the code ran it
     if decision["rule"] == "llm.explain_conditions" and result.get("available"):
         facts = json.dumps(_facts(result), default=str, ensure_ascii=False)
         try:
             async with run.model_call():
-                told = await client.generate(NARRATE_SYSTEM, facts)
+                trace.call_started("narrate")
+                t_call = time.perf_counter()
+                try:
+                    told = await client.generate(NARRATE_SYSTEM, facts)
+                except LLMError:
+                    trace.call_failed("narrate", (time.perf_counter() - t_call) * 1000, "llm_error")
+                    raise
+                trace.call_completed("narrate", (time.perf_counter() - t_call) * 1000)
             run.usage(told["usage"])
             summary = THINK_BLOCK.sub("", told["content"]).strip()
             # a summary is used only if every number in it is one of the facts (or the question's); else the code's text stands

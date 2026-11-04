@@ -2230,6 +2230,7 @@ window.EKO_I18N.en = {
   "ai.card.c.not_supported": "Not supported",
   "ai.card.c.capability": "Capability",
   "ai.card.c.needs": "Needs",
+  "ai.card.c.tags": "FIN tags",
   "ai.card.c.data": "Data",
   "ai.card.f.equipment": "equipment",
   "ai.card.f.severity": "severity",

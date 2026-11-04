@@ -561,6 +561,8 @@ def _flatten_alarms(rows: list, bands: dict) -> dict:
             # FIN's own record id, as sent (None when FIN sends none: never made up)
             "id": safe_get(row.get("id"), "val") or None,
             "source": safe_get(source, "dis") or safe_get(source, "val") or "",
+            # FIN's id of the record the alarm is on, the key the equipment list counts alarms by (never shown by Eko-Chat)
+            "source_id": _alarm_source(row) or None,
             "message": message,
             "detail": detail,
             "priority": priority,
@@ -2494,6 +2496,7 @@ def _chat_mapped() -> dict:
     number = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)   # noqa: E731
     return {"finLivePoints": keys("live_point_ids"), "finEndpoints": keys("power_endpoints"),
             "finEquipmentClasses": bool(keys("equipment_classes")), "finMeterProfile": bool(keys("meter_profile")),
+            "equipmentTypes": bool((CONFIG.get("equipment_classes") or {}).get("type_priority")),
             "finSeverityBands": number(bands.get("critical")) or number(bands.get("warning"))}
 
 
@@ -2507,7 +2510,7 @@ def _chat_alarm_records() -> list:
             continue
         source = row.get("sourceRef")
         priority = row.get("priority") if isinstance(row.get("priority"), (int, float)) else None
-        out.append({"source": safe_get(source, "dis") or safe_get(source, "val") or "",
+        out.append({"source": safe_get(source, "dis") or safe_get(source, "val") or "", "source_id": _alarm_source(row) or None,
                     "message": clip_decimals(str(row.get("message") or "")), "priority": priority,
                     "severity": severity_for(priority, bands), "occurred": row.get("occurred") or row.get("created"),
                     "state": row.get("state"), "open": alarm_is_open(row)})

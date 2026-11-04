@@ -233,13 +233,15 @@ class ModelChosenFilterTests(ProjectChatBase):
         self.assertEqual(eko_chat.unasked_filters("find_equipment", {"type": 5}, "list 5"), ["type"])
         self.assertEqual(eko_chat.unasked_filters("find_equipment", {"type": ["ahu"]}, "ahu"), ["type"])
 
-    def test_the_helper_asks_only_about_the_filters_of_these_two_tools(self):
+    def test_the_helper_asks_only_about_the_narrowing_filters_of_these_tools(self):
         ask = eko_chat.unasked_filters
         self.assertEqual(ask("find_equipment", {"type": "AHU"}, "list AHUs"), [])
         self.assertEqual(ask("find_equipment", {"type": "electrical"}, "read the equipment list"), ["type"])
         self.assertEqual(ask("find_equipment", {"type": ""}, "read the equipment list"), [])
         self.assertEqual(ask("find_equipment", {"in_alarm": True, "limit": 5}, "x"), [])
-        self.assertEqual(ask("get_alarms", {"severity": "critical"}, "x"), [])
+        self.assertEqual(ask("get_alarms", {"severity": "critical"}, "x"), ["severity"])       # (a severity the question does not say: see test_eko_chat_alarms)
+        self.assertEqual(ask("get_alarms", {"severity": "critical"}, "show critical alarms"), [])
+        self.assertEqual(ask("get_alarms", {"equipment": "AHU_01", "limit": 5}, "x"), [])       # the item and the limit are not narrowing filters of this kind
         self.assertEqual(ask(None, {"type": "x"}, "y"), [])
         self.assertEqual(ask("find_equipment", None, "y"), [])
 
