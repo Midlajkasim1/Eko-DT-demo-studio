@@ -1440,7 +1440,9 @@ async def get_fin_projects(request: Request):
     endpoint and expression come from config.json `project_discovery`.
     """
     _require_user(request)
-    cfg = CONFIG.get("project_discovery") or {}
+    cfg = CONFIG.get("project_discovery")
+    if not isinstance(cfg, dict):
+        cfg = {}
     endpoint = str(cfg.get("endpoint") or "").strip()
     expr = str(cfg.get("expr") or "").strip()
     if not endpoint or not expr or str(cfg.get("method") or "GET").upper() != "GET":
