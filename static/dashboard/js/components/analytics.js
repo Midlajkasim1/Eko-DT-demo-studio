@@ -132,9 +132,9 @@ window.EKO_A = (function(){
       <span class="alrsev" data-tip="${esc(C().sevTipFor(E, a))}">${C().sevGlyph(a.sev, !!a.ack, 13)}</span>
       <div class="alrbody"><span class="alrid" ${a.ack?'data-ack="1"':''}>${esc(a.asset)}</span>
         <span class="alrwhat">${esc(l.main)}</span>${l.sub ? `<span class="alrtech">${esc(l.sub)}</span>` : ''}
-        ${a.ack?`<span class="alrack">${esc(E.ackText(a))}</span>`:''}</div>
+        ${a.ack?`<span class="alrack">${esc(E.t('ackShort',{time:a.ack.time,who:a.ack.who}))}</span>`:''}</div>
       <span class="alract hst">
-        ${a.ack?'':`<button class="alghost" data-act="ackAlarm" data-alarm="${a.id}"${E.ackBusy.has(a.id) ? ' disabled aria-busy="true"' : ''}${E.ackTip(a) ? ` data-tip="${esc(E.ackTip(a))}"` : ''}>${esc(E.t('acknowledge'))}</button>`}
+        ${a.ack?'':`<button class="alghost" data-act="ackAlarm" data-alarm="${a.id}">${esc(E.t('acknowledge'))}</button>`}
         <button class="alprim" data-act="openAsset" data-asset="${esc(a.asset)}">${esc(E.t('details'))}</button></span>
       <span class="alrage">${esc(E.fmtAge(a.ageH))}</span>
       <span class="alractw" data-tip="${esc(C().actTip(E, a.sev))}">${esc(C().sevAction(E,a.sev))}</span></div>`); }).join('');

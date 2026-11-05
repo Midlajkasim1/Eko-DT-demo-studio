@@ -440,10 +440,10 @@ window.EKO_C = (function(){
           ${grouped?'':`<span class="alrid" ${a.ack?'data-ack="1"':''}>${esc(a.asset)}</span>`}
           <span class="alrwhat">${esc(l.main)}</span>
           ${l.sub?`<span class="alrtech">${esc(l.sub)}</span>`:''}
-          ${a.ack?`<span class="alrack">${esc(E.ackText(a))}</span>`:''}
+          ${a.ack?`<span class="alrack">${esc(E.t('ackShort',{time:a.ack.time,who:a.ack.who}))}</span>`:''}
         </div>
         <span class="alract hst">
-          ${a.ack?'':`<button class="alghost" data-act="ackAlarm" data-alarm="${a.id}"${E.ackBusy.has(a.id) ? ' disabled aria-busy="true"' : ''}${E.ackTip(a) ? ` data-tip="${esc(E.ackTip(a))}"` : ''}>${esc(E.t('acknowledge'))}</button>`}
+          ${a.ack?'':`<button class="alghost" data-act="ackAlarm" data-alarm="${a.id}">${esc(E.t('acknowledge'))}</button>`}
           <button class="alprim" data-act="openAsset" data-asset="${esc(a.asset)}">${esc(E.t('details'))}</button>
         </span>
         <span class="alrage">${esc(a.age)}</span>
@@ -1401,7 +1401,7 @@ window.EKO_C = (function(){
           <span class="alrefage tMonoS msA">${esc(a.age)}</span>${histBtn(a)}</div>
         <div class="alreft">${esc(E.alarmLines(a).main)}</div>${E.alarmLines(a).sub ? `<div class="alreftech">${esc(E.alarmLines(a).sub)}</div>` : ''}
         ${a.recEn ? `<div class="alrec"><span class="alrecl">${esc(t('apRecommended'))}</span><div class="alrect">${esc(E.lang === 'ar' ? (a.recAr || a.recEn) : a.recEn)}</div>${a.basisEn ? `<div class="alrecb"><span class="alrecl">${esc(t('apRecBasis'))}</span> ${esc(E.lang === 'ar' ? (a.basisAr || a.basisEn) : a.basisEn)}</div>` : ''}</div>` : ''}
-        ${a.ack ? `<div class="alrefack">${esc(E.ackText(a))}</div>` : ''}
+        ${a.ack ? `<div class="alrefack">${esc(t('ackShort',{time:a.ack.time,who:a.ack.who}))}</div>` : ''}
         ${histPanel(a)}
       </div>`).join('') : `<p class="alempty">${esc(t('apNoAlarms'))}</p>`);
     } else if(tab === 'analytics'){

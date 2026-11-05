@@ -218,7 +218,6 @@
       // FIN's record id, else what the alarm is: never its place in the list, which moves when FIN
       // adds or drops a record and made the same alarm look new (and lose its acknowledgement)
       id: 'fin-' + slugId(a.id || [src, msg, a.occurred].join(' ')),
-      finId: a.id || null,   // FIN's own record id, as sent; null when FIN sent none (such an alarm cannot be recorded server-side)
       fam: 'sys',
       asset: matchedAsset ? matchedAsset.id : asset,
       bimId: matchedAsset ? matchedAsset.bimId : null,
@@ -309,7 +308,6 @@
     site.alarms = payload.alarms.map(mapAlarm);
     site.alarms.forEach(function (a) { if (acked[a.id]) a.ack = acked[a.id]; });
     linkAlarms(site);
-    if (window.EKO_NOTIF && window.EKO_NOTIF.applyAcks) window.EKO_NOTIF.applyAcks(true);   // Eko-DT's stored acknowledgements, matched by FIN id
     if (window.EKO_HOST_ENGINE && typeof window.EKO_HOST_ENGINE.resolveAllAssetPositions === 'function') {
       window.EKO_HOST_ENGINE.resolveAllAssetPositions();
     }

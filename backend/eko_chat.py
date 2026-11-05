@@ -470,8 +470,6 @@ def get_notifications(args: dict, view: DataView) -> dict:
     limit = args.get("limit", DEFAULT_LIMIT)
     try:
         page = view.notifications(*view.scope, view=args.get("view", "all"), severity=args.get("severity"), limit=limit)
-    except PermissionError:   # signed in, but not a superuser of this project: the bell refuses them too
-        return _unavailable("notifications_unavailable", "Notifications are available to superusers of this project.", view)
     except Exception:   # the store's own message is not for the browser
         return _unavailable("notifications_failed", "Notifications could not be read.", view)
     items = [{"severity": n.get("severity"), "type": n.get("type"), "asset": n.get("asset_id"),

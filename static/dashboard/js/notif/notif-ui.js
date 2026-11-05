@@ -46,11 +46,6 @@ window.EKO_NF = (function(){
     Object.keys(p).forEach(k => { const v = p[k]; if(v && typeof v === 'object' && 'en' in v) p[k] = v[E.lang] ?? v.en; });
     if(typeof p.site === 'string' && window.EKO_EST){ const s = window.EKO_EST.site(E, p.site); if(s) p.site = ar ? (s.nameAr || s.nameEn) : s.nameEn; }
     if(typeof p.alarm === 'string'){ const a = E.alarm(p.alarm); if(a) p.alarm = ar ? (a.techAr || a.techEn) : a.techEn; }
-    /* instants the server stored (UTC) read as the viewer's own clock, in either language */
-    [['at', 'time'], ['acknowledged_at', 'ackTime']].forEach(([from, to]) => {
-      const ms = typeof p[from] === 'string' ? Date.parse(p[from]) : NaN;
-      if(!isNaN(ms)) p[to] = E.clockLabel(ms);
-    });
     /* string params that are PHRASES (module names, expiry wording, names,
        connector labels) go through the paramAr table in Arabic; codes and
        numbers pass through untouched because the table has no entry (D56) */
@@ -58,16 +53,6 @@ window.EKO_NF = (function(){
       Object.keys(p).forEach(k => { if(typeof p[k] === 'string') p[k] = E.ph(p[k]); });
     }
     return p;
-  }
-
-  /* An alarm row from the server: the FIN alarm id it is about, and, on the alarm's own row, who acknowledged it and when
-     (the server's record, never inferred here). Other rows have neither. */
-  function alarmMeta(E, n){
-    if(!n.remote || !/^alarm\./.test(n.type)) return '';
-    const p = params2(E, n), id = n.source && n.source.id;
-    const ack = n.type === 'alarm.critical' && p.acknowledged_by
-      ? `<div class="nftext nfack">${esc(E.t('nfAckedBy', { user: p.acknowledged_by, time: p.ackTime || '' }))}</div>` : '';
-    return ack + (id ? `<div class="nfkids"><span class="nfkid tMonoS">${esc(id)}</span></div>` : '');
   }
 
   /* threading: rows sharing a groupKey render as ONE item (latest state),
@@ -158,7 +143,7 @@ window.EKO_NF = (function(){
         <div class="nftitle">${unread?'<span class="nfdot"></span>':''}${esc(E.t(n.titleKey))}
           ${cnt?`<span class="cbadge">${cnt}</span>`:''}${n.level==='attention'?`<span class="statchip nfattchip" data-sev="high" data-tip="${esc(E.t('nfAttentionTip'))}">${esc(E.t('nfAttention'))}</span>`:''}</div>
         <div class="nftext">${esc(E.t(n.bodyKey, params2(E, n)))}</div>
-        ${alarmMeta(E, n)}${expBtn}${kids}${hist}
+        ${expBtn}${kids}${hist}
         ${acts?`<div class="nfacts hst">${acts}</div>`:''}
       </div>
       <span class="nftime">${esc(rel(E, n.createdAt))}</span>
@@ -186,11 +171,11 @@ window.EKO_NF = (function(){
     if(!N2 || !N2.REMOTE || !N2.remoteState) return '';
     const state = N2.remoteState();
     if(state === 'ok' || state === 'checking') return '';
-    const key = state === 'signin' ? 'nfSignIn' : state === 'forbidden' ? 'nfNotAllowed'
+    const key = state === 'signin' ? 'nfSignIn'
       : state === 'mismatch' ? (N2.remoteCode() === 'session_project_mismatch' ? 'nfSessionOtherProject' : 'nfServerOtherProject')
       : 'nfError';
     return `<div class="nfempty nfauth" data-state="${esc(state)}" role="status"><span class="nfemoji">!</span>${esc(E.t(key))}
-      ${state === 'error' || state === 'forbidden' ? `<button class="btnG btnSm" data-act="nfRetryRemote">${esc(E.t('retryBtn'))}</button>` : ''}</div>`;
+      ${state === 'error' ? `<button class="btnG btnSm" data-act="nfRetryRemote">${esc(E.t('retryBtn'))}</button>` : ''}</div>`;
   }
 
   /* Why a project's list is empty when it is not simply quiet: critical-alarm notifications not set up for the
@@ -401,5 +386,5 @@ window.EKO_NF = (function(){
       setTimeout(() => { st(E).loading = false; E.set({}); }, 400); E.set({}); }
   };
 
-  return { bell, overlays, page, ACTS, st, follow, row, params2 };
+  return { bell, overlays, page, ACTS, st, follow };
 })();

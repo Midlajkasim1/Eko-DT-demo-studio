@@ -230,12 +230,8 @@ SEVERITIES = ("critical", "warning", "info")
 CHANNEL = "inapp"                            # the only channel the contract defines
 MASTER = "*"                                 # notification_preferences row for the master toggle
 # Types a user can switch off so they are not shown at all: left out of their list, count and bulk actions.
-# The alarm types are created once for the whole site (when its critical-alarm notifications are on), so each user decides
-# for themselves whether to see them; the other types are the user's own anyway.
-CRITICAL_ALARM = "alarm.critical"
-ALARM_ACK, ALARM_CLEARED, ALARM_RERAISED = "alarm.ack_recorded", "alarm.cleared", "alarm.reraised"
-USER_HIDEABLE = (CRITICAL_ALARM, ALARM_ACK, ALARM_CLEARED, ALARM_RERAISED)
-RERAISE_WINDOW = timedelta(hours=24)           # an alarm that returns within this long of clearing is "reraised"
+# (alarm.critical is the one type the site creates for everyone; the others are the user's own anyway.)
+USER_HIDEABLE = ("alarm.critical",)
 # Read, dismissed and preference state is per signed-in user and site. The site's shared recipient
 # ('#project:<site>', the state before per-user sign-in) is the baseline every user starts from: a
 # user's own recipient row, created the first time that user acts on a notification, overrides it for
@@ -310,15 +306,6 @@ def _check_notification_id(notification_id) -> None:
 def _params_json(params: Optional[dict]) -> str:
     # UTF-8, not \u escapes: search runs a LIKE over this text, and Arabic must match as typed
     return json.dumps(params or {}, ensure_ascii=False)
-
-
-def _stored_params(text: Optional[str]) -> dict:
-    """The params of a stored row. A row we cannot read is a storage fault, not a bad request."""
-    try:
-        params = json.loads(text or "{}")
-    except ValueError as exc:
-        raise StoreError(STORE_FAILED) from exc
-    return params if isinstance(params, dict) else {}
 
 
 def _item(row) -> dict:
@@ -419,7 +406,7 @@ class Store:
         key = "|".join([site_id, asset_id or "", type_, state])
         self._maybe_purge(now)
         row = self.db.execute(
-            "SELECT id, params_json FROM notification_events WHERE dedup_key = ? AND status = 'active'", (key,)
+            "SELECT id FROM notification_events WHERE dedup_key = ? AND status = 'active'", (key,)
         ).fetchone()
         if not active:
             if row:
@@ -429,133 +416,27 @@ class Store:
                 )
             return None
         if row:
-            # what a later write added to the row (who acknowledged it) stays; the poll's own fields are refreshed
-            merged = {**_stored_params(row["params_json"]), **(params or {})}
             self.db.execute(
                 "UPDATE notification_events SET last_at = ?, params_json = ? WHERE id = ?",
-                (stamp, _params_json(merged), row["id"]),
+                (stamp, _params_json(params), row["id"]),
             )
             return row["id"]
-        with self._write():   # the event, its audience and its project recipient together, or neither
-            return self._insert_event(site_id, type_, severity, source_kind, source_ref, asset_id, state, key, params, stamp,
-                                      "active")
-
-    def _insert_event(self, site_id: str, type_: str, severity: str, source_kind: str, source_ref: str,
-                      asset_id: Optional[str], state: str, key: str, params: Optional[dict], stamp: str, status: str) -> str:
-        """One event with its audience and project recipient. Call inside a write transaction. A 'resolved' event is
-        one-off: it never takes the active dedup slot, so it cannot block or be blocked by a condition."""
         event_id = "ntf_" + uuid.uuid4().hex
-        self.db.execute(
-            "INSERT INTO notification_events (id, site_id, type, severity, source_kind, source_ref, asset_id,"
-            " created_at, last_at, state, status, resolved_at, dedup_key, params_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (event_id, site_id, type_, severity, source_kind, source_ref, asset_id, stamp, stamp, state, status,
-             stamp if status == "resolved" else None, key, _params_json(params)),
-        )
-        # everyone on the project, as every event so far; role routing (a later phase) narrows it
-        self.db.execute("INSERT INTO notification_audience (event_id, kind, value) VALUES (?, 'project', ?)",
-                        (event_id, site_id))
-        self.db.execute(
-            "INSERT INTO notification_recipients (id, event_id, user_id, role, channel, delivery_status)"
-            " VALUES (?, ?, ?, NULL, ?, 'delivered')", ("rcp_" + event_id, event_id, project_recipient(site_id), CHANNEL),
-        )
+        with self._write():   # the event, its audience and its project recipient together, or neither
+            self.db.execute(
+                "INSERT INTO notification_events (id, site_id, type, severity, source_kind, source_ref, asset_id,"
+                " created_at, last_at, state, status, dedup_key, params_json) VALUES (?,?,?,?,?,?,?,?,?,?,'active',?,?)",
+                (event_id, site_id, type_, severity, source_kind, source_ref, asset_id, stamp, stamp, state, key,
+                 _params_json(params)),
+            )
+            # everyone on the project, as every event so far; role routing (a later phase) narrows it
+            self.db.execute("INSERT INTO notification_audience (event_id, kind, value) VALUES (?, 'project', ?)",
+                            (event_id, site_id))
+            self.db.execute(
+                "INSERT INTO notification_recipients (id, event_id, user_id, role, channel, delivery_status)"
+                " VALUES (?, ?, ?, NULL, ?, 'delivered')", ("rcp_" + event_id, event_id, project_recipient(site_id), CHANNEL),
+            )
         return event_id
-
-    def event(self, site_id: Optional[str], type_: str, *, severity: str, source_kind: str, source_ref: str,
-              key: str, asset_id: Optional[str] = None, params: Optional[dict] = None,
-              now: Optional[datetime] = None) -> Optional[str]:
-        """A one-off event that happened (an alarm cleared, came back): stored once per key, already complete (status
-        'resolved'), so a poll or a reconnect that reports it again finds it and adds nothing. Returns the event's id (the
-        existing one when it was stored before), or None when there is no site."""
-        if not site_id or not SITE_RE.match(site_id) or not isinstance(key, str) or not key:
-            return None
-        now = now or datetime.now(timezone.utc)
-        self._maybe_purge(now)
-        dedup = "|".join([site_id, asset_id or "", type_, key])
-        with self._write():
-            row = self.db.execute("SELECT id FROM notification_events WHERE dedup_key = ?", (dedup,)).fetchone()
-            if row:
-                return row["id"]
-            return self._insert_event(site_id, type_, severity, source_kind, source_ref, asset_id, key, dedup, params,
-                                      utc_iso(now), "resolved")
-
-    def active_rows(self, site_id: str, type_: str) -> list[dict]:
-        """This site's still-active conditions of one type, with what a clearing event needs."""
-        _check_ids("system", site_id)
-        rows = self._read("SELECT id, asset_id, state, created_at, params_json FROM notification_events"
-                          " WHERE site_id = ? AND type = ? AND status = 'active'", [site_id, type_])
-        return [{"id": r["id"], "asset_id": r["asset_id"], "state": r["state"], "created_at": r["created_at"],
-                 "params": _stored_params(r["params_json"])} for r in rows]
-
-    def resolved_since(self, site_id: str, type_: str, asset_id: Optional[str], since: datetime) -> list[dict]:
-        """This site's conditions of one type on one asset that cleared at or after `since`, newest first: how a
-        recurrence is told from a first occurrence."""
-        _check_ids("system", site_id)
-        rows = self._read("SELECT id, state, resolved_at, params_json FROM notification_events"
-                          " WHERE site_id = ? AND type = ? AND status = 'resolved' AND asset_id IS ? AND resolved_at >= ?"
-                          " ORDER BY resolved_at DESC, rowid DESC", [site_id, type_, asset_id, utc_iso(since)])
-        return [{"id": r["id"], "state": r["state"], "resolved_at": r["resolved_at"],
-                 "params": _stored_params(r["params_json"])} for r in rows]
-
-    def acknowledgements_of(self, site_id: str, alarms: list) -> list[dict]:
-        """This site's stored acknowledgements for the given (alarm id, occurrence id) pairs, and no others."""
-        _check_ids("system", site_id)
-        ids = sorted({a for a, _ in alarms})
-        if not ids:
-            return []
-        wanted = set(alarms)
-        rows = self._read("SELECT alarm_id, occurrence_id, user_id, acknowledged_at, fin_sync_status FROM alarm_acknowledgements"
-                          f" WHERE site_id = ? AND alarm_id IN ({','.join('?' * len(ids))}) ORDER BY acknowledged_at",
-                          [site_id, *ids])
-        return [{"alarm_id": r["alarm_id"], "user_id": r["user_id"], "acknowledged_at": r["acknowledged_at"],
-                 "fin_sync_status": r["fin_sync_status"]} for r in rows if (r["alarm_id"], r["occurrence_id"]) in wanted]
-
-    def record_acknowledgement(self, site_id: str, alarm_id: str, occurrence_id: str, user_id: str, role: Optional[str], *,
-                               asset_id: Optional[str], params: dict, notify: bool, origin: str = "dashboard",
-                               now: Optional[datetime] = None) -> dict:
-        """Eko-DT's own record that a signed-in user acknowledged one open FIN alarm occurrence: the acknowledgement row, an audit
-        row and, when `notify`, a notification linked to the alarm's critical notification (which also learns who acknowledged
-        it). Nothing is sent to FIN (fin_sync_status 'not_sent'): FIN's own alarm state is unchanged. One acknowledgement per
-        occurrence: a repeat changes nothing and reports recorded False. All of it, or none."""
-        _check_ids(user_id, site_id)
-        for name, value in (("alarm_id", alarm_id), ("occurrence_id", occurrence_id)):
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"{name} is required")
-        stamp = utc_iso(now or datetime.now(timezone.utc))
-        key = f"{alarm_id}|{occurrence_id}"
-        dedup = "|".join([site_id, asset_id or "", ALARM_ACK, key])
-        with self._write():
-            known = self.db.execute("SELECT user_id, acknowledged_at FROM alarm_acknowledgements"
-                                    " WHERE site_id = ? AND alarm_id = ? AND occurrence_id = ?",
-                                    (site_id, alarm_id, occurrence_id)).fetchone()
-            if known:
-                event = self.db.execute("SELECT id FROM notification_events WHERE dedup_key = ?", (dedup,)).fetchone()
-                return {"recorded": False, "user_id": known["user_id"], "acknowledged_at": known["acknowledged_at"],
-                        "notification_id": event["id"] if event else None}
-            self.db.execute(
-                "INSERT INTO alarm_acknowledgements (id, site_id, alarm_id, occurrence_id, user_id, role, acknowledged_at,"
-                " origin, fin_sync_status) VALUES (?,?,?,?,?,?,?,?, 'not_sent')",
-                ("ack_" + uuid.uuid4().hex, site_id, alarm_id, occurrence_id, user_id, role, stamp, origin))
-            self.db.execute(
-                "INSERT INTO notification_audit_log (id, site_id, actor_id, action, target_type, target_id, asset_id, origin,"
-                " occurred_at, details_json) VALUES (?, ?, ?, 'alarm.acknowledged', 'alarm', ?, ?, ?, ?, ?)",
-                ("aud_" + uuid.uuid4().hex, site_id, user_id, alarm_id, asset_id, origin, stamp,
-                 json.dumps({"occurrence_id": occurrence_id, "fin_sync_status": "not_sent"})))
-            notification_id = None
-            if notify:
-                original = self.db.execute(
-                    "SELECT id, params_json FROM notification_events WHERE site_id = ? AND type = ? AND state = ?"
-                    " ORDER BY created_at DESC, rowid DESC LIMIT 1", (site_id, CRITICAL_ALARM, alarm_id)).fetchone()
-                shown = {**params, "alarm_id": alarm_id, "user": user_id, "project": site_id, "at": stamp}
-                if original:
-                    shown["critical_notification_id"] = original["id"]
-                notification_id = self._insert_event(site_id, ALARM_ACK, "info", "alarm", alarm_id, asset_id, key, dedup, shown,
-                                                     stamp, "resolved")
-                if original:   # the alarm's own notification now says who acknowledged it
-                    linked = {**_stored_params(original["params_json"]), "acknowledged_by": user_id,
-                              "acknowledged_at": stamp, "ack_notification_id": notification_id}
-                    self.db.execute("UPDATE notification_events SET params_json = ? WHERE id = ?",
-                                    (_params_json(linked), original["id"]))
-        return {"recorded": True, "user_id": user_id, "acknowledged_at": stamp, "notification_id": notification_id}
 
     def active_states(self, site_id: str, type_: str) -> list[tuple]:
         """(asset_id, state) of this site's still-active conditions of one type: what a poll that no

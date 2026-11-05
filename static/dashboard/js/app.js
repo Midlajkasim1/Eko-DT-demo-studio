@@ -198,25 +198,6 @@
       Object.defineProperty(k, 'time', { get(){ return E2.clockLabel(atMs); }, enumerable: true, configurable: true });
       return k;
     },
-    /* On a live project an acknowledgement is the server's record (notif-store recordAck): the alarm reads acknowledged only after
-       the server confirmed it, and a refusal says why and changes nothing. It is Eko-DT's record: the alarm in FIN is not acknowledged.
-       Resolves with how many were recorded. */
-    ackBusy: new Set(),
-    ackServer(alarms){
-      const N = window.EKO_NOTIF, E2 = this, toast = key => { if(window.EKO_FB) window.EKO_FB.toast({ tone:'warn', text: E2.t(key), ms: 6000 }); };
-      const todo = alarms.filter(a => a && !a.ack && !E2.ackBusy.has(a.id)), sendable = todo.filter(a => a.finId);
-      if(todo.length > sendable.length) toast('ackErrNoId');   /* FIN sent no id for it, so there is nothing to record against */
-      sendable.forEach(a => E2.ackBusy.add(a.id));
-      if(sendable.length) E2.set({});
-      return Promise.all(sendable.map(a => N.recordAck(a.finId).then(res => { E2.ackBusy.delete(a.id); return res; }))).then(results => {
-        const bad = results.find(r => !r.ok);
-        if(bad) toast(N.ackErrorKey(bad));
-        E2.set({});
-        return results.filter(r => r.ok).length;
-      });
-    },
-    ackText(a){ return this.t(a.ack && a.ack.source === 'eko' ? 'ackEkoShort' : 'ackShort', { time: a.ack.time, who: a.ack.who }); },
-    ackTip(a){ return a.finId ? this.t(window.EKO_NOTIF && window.EKO_NOTIF.REMOTE ? 'ackEkoTip' : 'ackLocalTip') : ''; },
     /* CLDR plural category of a count in the current language (module helper). */
     pluralCat(n){ return pluralCat(this.lang, n); },
     alarm(id){ return this.data.alarms.find(a => a.id === id) },
@@ -1544,8 +1525,7 @@
     /* the point labels on the selected equipment's 3D graphic (hvacLabels.ts reads EKO.state.eqLabelsOn): labels only, never the model */
     eqLabelsToggle(){ const on = E.state.eqLabelsOn === false; ss.set('eko-eql', on ? '1' : '0'); E.set({ eqLabelsOn: on }); },
     ackAlarm(el, ev){ ev.stopPropagation(); if(window.EKO_PWA) window.EKO_PWA.haptic('ack');
-      const a = E.alarm(el.dataset.alarm); if(!a) return;
-      if(window.EKO_NOTIF && window.EKO_NOTIF.REMOTE){ E.ackServer([a]); return; }   /* a live project: the alarm reads acknowledged only once the server says so */
+      const a = E.alarm(el.dataset.alarm);
       const d = new Date();
       a.ack = { time: String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'), who: E.initials() || '—' };
       render(); },

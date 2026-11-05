@@ -71,17 +71,10 @@ class ChatTestBase(unittest.TestCase):
         main.apply_project_settings(None)
         main.BASE_CONFIG["chat"], main.CONFIG["chat"] = self._real_chat
 
-    # Notifications (the bell, and Eko-Chat's notifications tool) are for superusers of the project; the role is the operator's
-    # server-side mapping, so the tests that read them map "u" as one. A test of the refusal sets this False.
-    AUTO_SUPERUSER = True
-
     def login(self, settings, project_id):
         """Sign in as "u" for this Studio project, then open a dashboard for it so the FIN reads start."""
         r = self.http.post("/api/fin/login", json={"username": "u", "password": "pw", "settings": settings, "project_id": project_id})
         self.assertEqual(r.status_code, 200, r.text)
-        if self.AUTO_SUPERUSER:
-            import notifications
-            notifications.store().map_role(main.client.project_name, "u", "superuser", "operator")
         self.http.headers["X-Eko-Project"] = project_id   # the open project, as the dashboard's own calls send it
         self.assertEqual(self.http.post("/api/fin/watch", json={}).status_code, 200)
 

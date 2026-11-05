@@ -1640,67 +1640,28 @@ def _notification_setup(site: str) -> dict:
             "alarms_read": getattr(client, "last_alarm_read_ok", None)}
 
 
-def _elapsed_label(since: str, now: datetime) -> str:
-    """How long ago a stored UTC instant was, as the bell words a duration: 18m, 26h, 3d."""
-    try:
-        seconds = (now - datetime.fromisoformat(since.replace("Z", "+00:00"))).total_seconds()
-    except (ValueError, AttributeError):
-        return ""
-    seconds = max(0, int(seconds))
-    return f"{max(1, seconds // 60)}m" if seconds < 3600 else f"{seconds // 3600}h" if seconds < 86400 else f"{seconds // 86400}d"
-
-
-def _note_critical_alarms(site: str, alarms: list, read_ok: bool, now: Optional[datetime] = None) -> None:
+def _note_critical_alarms(site: str, alarms: list, read_ok: bool) -> None:
     """Contract trigger "critical alarm": only when the site allows it (config.json
     critical_alarm_sites lists its FIN project) AND the project's alarm.critical toggle is on (the
     site's baseline setting, not any user's preference); both are off by default. One row per open critical FIN alarm, keyed by FIN's own id (an alarm with
     no id is not notified), resolved once FIN stops reporting it. A failed or error read changes
-    nothing: an answer FIN did not give is not "all clear".
-
-    The same gates cover the rest of the alarm's life, which is told only about alarms that were notified: when one
-    clears, an alarm.cleared event; when one comes back within a day on the same equipment with the same message, an
-    alarm.reraised event (FIN issues a returning alarm a new id). Each is stored once per raise, from the stored state,
-    so repeated polls, a restart or a reconnect add nothing."""
+    nothing: an answer FIN did not give is not "all clear"."""
     if not read_ok or not site:
         return
     try:
         store = notifications.store()
-        now = now or datetime.now(timezone.utc)
-        enabled = _critical_alarms_enabled(store, site)
         open_now = {a["id"]: a for a in alarms if a.get("severity") == "critical" and a.get("id")}
         fields = dict(severity="critical", source_kind="alarm")
-        before = store.active_rows(site, CRITICAL_ALARM)
-        for row in before:   # cleared since the last poll
-            if row["state"] in open_now:
-                continue
-            if enabled:   # told first and once per raise: a failure before the resolve below is retried by the next poll
-                shown = row["params"]
-                store.event(site, notifications.ALARM_CLEARED, severity="info", source_kind="alarm", source_ref=row["state"],
-                            asset_id=row["asset_id"], key=row["id"], now=now,
-                            params={"alarm": shown.get("message") or row["state"], "alarm_id": row["state"],
-                                    "asset": shown.get("asset") or row["asset_id"] or "", "project": site,
-                                    "dur": _elapsed_label(row["created_at"], now), "raised_at": row["created_at"]})
-            store.condition(site, CRITICAL_ALARM, False, asset_id=row["asset_id"], state=row["state"],
-                            source_ref=row["state"], now=now, **fields)
-        if not enabled:
+        for asset, state in store.active_states(site, CRITICAL_ALARM):   # cleared since the last poll
+            if state not in open_now:
+                store.condition(site, CRITICAL_ALARM, False, asset_id=asset, state=state, source_ref=state, **fields)
+        if not _critical_alarms_enabled(store, site):
             return
-        known = {(r["asset_id"], r["state"]) for r in before}
         for fin_id, a in open_now.items():
-            asset = a.get("source") or None
-            message = a.get("message") or ""
-            earlier = []
-            if (asset, fin_id) not in known:   # a new raise: was the same condition cleared a short while ago?
-                earlier = [r for r in store.resolved_since(site, CRITICAL_ALARM, asset, now - notifications.RERAISE_WINDOW)
-                           if (r["params"].get("message") or "") == message]
-            event_id = store.condition(site, CRITICAL_ALARM, True, asset_id=asset, state=fin_id, source_ref=fin_id, now=now,
-                                       params={"asset": asset or "", "message": message,
-                                               "occurred": a.get("occurred") or "", "priority": a.get("priority")},
-                                       **fields)
-            if earlier and event_id:
-                store.event(site, notifications.ALARM_RERAISED, severity="warning", source_kind="alarm", source_ref=fin_id,
-                            asset_id=asset, key=event_id, now=now,
-                            params={"alarm": message or fin_id, "alarm_id": fin_id, "asset": asset or "", "project": site,
-                                    "previous_alarm_id": earlier[0]["state"], "cleared_at": earlier[0]["resolved_at"]})
+            store.condition(site, CRITICAL_ALARM, True, asset_id=a.get("source") or None, state=fin_id,
+                            source_ref=fin_id, params={"asset": a.get("source") or "", "message": a.get("message") or "",
+                                                       "occurred": a.get("occurred") or "", "priority": a.get("priority")},
+                            **fields)
     except (notifications.StoreError, sqlite3.Error, ValueError) as exc:
         print(f"[notifications] critical alarms not recorded: {exc.__cause__ or exc}")
 
@@ -1790,27 +1751,6 @@ def _notification_scope(request: Request) -> tuple[str, str]:
     return user["user_id"], site
 
 
-NOT_A_READER = "Notifications are available to superusers of this project."
-
-
-def _require_superuser(who: str, site: str, message: str) -> None:
-    """The server's own role for this user on this site (eko_role_mapping, set by the operator) must be the administrator's.
-    A frontend role label, a header or a body field is never consulted."""
-    if _notif_call(lambda s: s.role_of(site, who)) != notifications.ADMIN_ROLE:
-        raise NotificationApiError(403, "forbidden", message)
-
-
-def _notification_reader(request: Request) -> tuple[str, str]:
-    """(user id, site) for a request that READS or acts on this project's notifications: the same session and project checks as
-    _notification_scope, and then the user must be a superuser of the project. Every notification route goes through this (the
-    list, one notification, opened / dismissed state, preferences, stored acknowledgements); the bell polls those routes, so
-    polling is covered by the same check. _notification_scope alone is for Eko-Chat's own guard, which any signed-in user of
-    the project passes and whose notifications tool then applies this role check itself (_chat_notifications)."""
-    who, site = _notification_scope(request)
-    _require_superuser(who, site, NOT_A_READER)
-    return who, site
-
-
 def _notif_call(op):
     """Run op(store): bad input is a 400, a storage fault a 500 with the fixed message only."""
     try:
@@ -1832,7 +1772,7 @@ async def notifications_list(request: Request, response: Response, view: str = "
                              type_: Optional[str] = Query(None, alias="type"), severity: Optional[str] = None,
                              asset_id: Optional[str] = None, q: Optional[str] = None,
                              limit: str = str(notifications.PAGE_DEFAULT), cursor: Optional[str] = None):
-    who, site = _notification_reader(request)
+    who, site = _notification_scope(request)
     _stamp(response)
     page = _notif_call(lambda s: s.list_notifications(
         who, site, view=view, type_=type_, severity=severity, asset_id=asset_id, q=q,
@@ -1845,52 +1785,53 @@ async def notifications_list(request: Request, response: Response, view: str = "
 
 @app.get(NOTIF_BASE + "/notifications/{notification_id}")
 async def notifications_get(notification_id: str, request: Request, response: Response):
-    who, site = _notification_reader(request)
+    who, site = _notification_scope(request)
     _stamp(response)
     return _found(_notif_call(lambda s: s.get_notification(who, site, notification_id)))
 
 
 @app.post(NOTIF_BASE + "/notifications/{notification_id}/opened")
 async def notifications_opened(notification_id: str, request: Request, response: Response):
-    who, site = _notification_reader(request)
+    who, site = _notification_scope(request)
     _stamp(response)
     return _found(_notif_call(lambda s: s.mark_opened(who, site, notification_id)))
 
 
 @app.post(NOTIF_BASE + "/notifications/{notification_id}/dismiss")
 async def notifications_dismiss(notification_id: str, request: Request, response: Response):
-    who, site = _notification_reader(request)
+    who, site = _notification_scope(request)
     _stamp(response)
     return _found(_notif_call(lambda s: s.dismiss(who, site, notification_id)))
 
 
 @app.delete(NOTIF_BASE + "/notifications/{notification_id}/dismiss")
 async def notifications_undismiss(notification_id: str, request: Request, response: Response):
-    who, site = _notification_reader(request)
+    who, site = _notification_scope(request)
     _stamp(response)
     return _found(_notif_call(lambda s: s.undismiss(who, site, notification_id)))
 
 
 @app.post(NOTIF_BASE + "/notifications/opened-all")
 async def notifications_opened_all(request: Request, response: Response):
-    who, site = _notification_reader(request)
+    who, site = _notification_scope(request)
     _stamp(response)
     return {"updated": _notif_call(lambda s: s.mark_all_opened(who, site))}
 
 
 @app.post(NOTIF_BASE + "/notifications/dismiss-opened")
 async def notifications_dismiss_opened(request: Request, response: Response):
-    who, site = _notification_reader(request)
+    who, site = _notification_scope(request)
     _stamp(response)
     return {"updated": _notif_call(lambda s: s.dismiss_opened(who, site))}
 
 
-def _notification_admin(request: Request, what: str = "change its notification settings") -> tuple[str, str]:
+def _notification_admin(request: Request) -> tuple[str, str]:
     """(user id, site) for a request that changes a SITE setting. The same session and project checks as every notification
     route, then the server's own role for this user on this site must be the administrator's. A frontend role label, a
     header or a body field is never consulted."""
     who, site = _notification_scope(request)
-    _require_superuser(who, site, f"Only a superuser of this project can {what}.")
+    if _notif_call(lambda s: s.role_of(site, who)) != notifications.ADMIN_ROLE:
+        raise NotificationApiError(403, "forbidden", "Only a superuser of this project can change its notification settings.")
     return who, site
 
 
@@ -1913,14 +1854,14 @@ def _preferences_answer(who: str, site: str) -> dict:
 
 @app.get(NOTIF_BASE + "/preferences")
 async def notifications_preferences(request: Request, response: Response):
-    who, site = _notification_reader(request)
+    who, site = _notification_scope(request)
     _stamp(response)
     return _preferences_answer(who, site)
 
 
 @app.put(NOTIF_BASE + "/preferences")
 async def notifications_preferences_update(request: Request, response: Response):
-    who, site = _notification_reader(request)
+    who, site = _notification_scope(request)
     _stamp(response)
     try:
         body = await request.json()
@@ -1946,62 +1887,6 @@ async def notifications_site_settings(request: Request, response: Response):
         raise NotificationApiError(400, "invalid_input", "The body must be exactly {\"critical_alarms\": true | false}.")
     _notif_call(lambda s: s.set_site_critical(site, body["critical_alarms"], who))
     return {"site": _preferences_answer(who, site)["site"], "setup": _notification_setup(site)}
-
-
-ACK_LIST_CAP = 500
-
-
-def _ack_occurrence(open_alarm: dict) -> str:
-    """The occurrence an acknowledgement belongs to: when FIN raised it, else its own id. A returning alarm is another one."""
-    return str(open_alarm.get("occurred") or open_alarm.get("id"))
-
-
-@app.get(NOTIF_BASE + "/alarm-acknowledgements")
-async def notifications_alarm_acknowledgements_list(request: Request, response: Response):
-    """Eko-DT's stored acknowledgements for the alarms FIN reports open right now on this project, so a reloaded dashboard shows
-    them. Read only and superuser only, like every notification route. These are Eko-DT's records, not FIN's: each says
-    recorded_in "eko-dt" and fin_acknowledged false, because Eko-DT never acknowledges in FIN and does not read FIN's own
-    acknowledgement state here. Nothing is returned for an alarm FIN no longer reports, or for another project."""
-    who, site = _notification_reader(request)
-    _stamp(response)
-    open_now = [(a["id"], _ack_occurrence(a)) for a in (cached_alarm_data or {}).get("alarms", []) if a.get("id")][:ACK_LIST_CAP]
-    rows = _notif_call(lambda s: s.acknowledgements_of(site, open_now))
-    return {"items": [{**r, "recorded_in": "eko-dt", "fin_acknowledged": False} for r in rows]}
-
-
-@app.post(NOTIF_BASE + "/alarm-acknowledgements")
-async def notifications_alarm_acknowledge(request: Request, response: Response):
-    """A superuser of this project records that they acknowledged one of its open FIN alarms. This is Eko-DT's own record
-    (who, when, which alarm): nothing is written to FIN and FIN's alarm is unchanged, which the answer says
-    (fin_acknowledged false). The user, the project and the role come from the server's session; the alarm's equipment,
-    message and occurrence come from FIN's open list that this backend already holds, never from the request, and an alarm
-    FIN is not reporting open cannot be acknowledged. Only a critical alarm of a site whose critical-alarm notifications
-    are on also produces a notification; every acknowledgement is recorded and audited."""
-    who, site = _notification_admin(request, "acknowledge its alarms")
-    _stamp(response)
-    try:
-        body = await request.json()
-    except ValueError:
-        raise NotificationApiError(400, "invalid_input", "The body must be JSON.")
-    alarm_id = body.get("alarm_id") if isinstance(body, dict) and set(body) == {"alarm_id"} else None
-    if not isinstance(alarm_id, str) or not alarm_id.strip() or len(alarm_id) > 512:
-        raise NotificationApiError(400, "invalid_input", "The body must be exactly {\"alarm_id\": \"<FIN alarm id>\"}.")
-    open_alarm = next((a for a in (cached_alarm_data or {}).get("alarms", []) if a.get("id") == alarm_id), None)
-    if open_alarm is None:
-        raise NotificationApiError(404, "not_found", "FIN is not reporting that alarm as open on this project.")
-    asset = open_alarm.get("source") or None
-
-    def record(store):
-        notify = open_alarm.get("severity") == "critical" and _critical_alarms_enabled(store, site)
-        return store.record_acknowledgement(
-            site, alarm_id, _ack_occurrence(open_alarm), who, notifications.ADMIN_ROLE,
-            asset_id=asset, notify=notify,
-            params={"alarm": open_alarm.get("message") or alarm_id, "asset": asset or ""})
-    done = _notif_call(record)
-    return {"acknowledgement": {"alarm_id": alarm_id, "user_id": done["user_id"], "acknowledged_at": done["acknowledged_at"],
-                                "recorded": done["recorded"]},
-            "notification_id": done["notification_id"], "notified": done["notification_id"] is not None,
-            "fin_acknowledged": False}
 
 
 @app.get("/api/fin/workorders")
@@ -2659,11 +2544,8 @@ def _chat_alarm_records() -> list:
 
 
 def _chat_notifications(user: str, site: str, **filters) -> dict:
-    """The signed-in user's notifications on their project for the chat tool; read-only, same store as the bell, and the same
-    rule: only a superuser of the project reads them (a PermissionError, which the tool reports as unavailable)."""
+    """The signed-in user's notifications on their project for the chat tool; read-only, same store as the bell."""
     s = notifications.store()
-    if s.role_of(site, user) != notifications.ADMIN_ROLE:
-        raise PermissionError(NOT_A_READER)
     page = s.list_notifications(user, site, **{k: v for k, v in filters.items() if v is not None})
     return {"items": page["items"], "more": page["next_cursor"] is not None, "unread": s.unread_count(user, site)}
 
