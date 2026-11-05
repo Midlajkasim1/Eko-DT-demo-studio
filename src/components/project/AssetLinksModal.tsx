@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type React
 import { createPortal } from 'react-dom'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useProjectStore } from '@/store/useProjectStore'
+import { hospitalHvacEnabled } from '@/lib/hospitalHvac'
 import { useFinStore } from '@/store/useFinStore'
 import { useModelStore } from '@/store/useModelStore'
 import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
@@ -79,11 +80,11 @@ function toLinkEquipment(equipment: FinEquipment[]): LinkEquipment[] {
   return [...seen.values()]
 }
 
-function newLink(eq: LinkEquipment, guid: string, el?: ModelElement): AssetLink {
+function newLink(eq: LinkEquipment, guid: string, nameWords: boolean, el?: ModelElement): AssetLink {
   return {
     equip: eq.name,
     guid,
-    type: eq.cctv ? 'CCTV' : defaultType(eq),
+    type: eq.cctv ? 'CCTV' : defaultType(eq, nameWords),
     ...(eq.cctv ? { kind: 'cctv' as const } : {}),
     ...(eq.finId ? { finId: eq.finId } : {}),
     ...(el ? { element: el.name || el.objectType } : {}),
@@ -106,6 +107,7 @@ export function AssetLinksModal({ visible, onClose, engineRef }: AssetLinksModal
       initial={currentProject.assetLinks ?? []}
       initialSource={currentProject.apiSettings?.dashboardCameraSource === 'model' ? 'model' : 'fin'}
       projectName={currentProject.name}
+      nameWords={hospitalHvacEnabled(currentProject)}
       onClose={onClose}
       engineRef={engineRef}
     />
@@ -118,11 +120,13 @@ interface AssetLinksDialogProps {
   initial: AssetLink[]
   initialSource: CameraSource
   projectName: string
+  /** Hospital HVAC graphics on: a unit FIN gives no type is typed by the whole word in its name (AHU, FCU) */
+  nameWords: boolean
   onClose: () => void
   engineRef: React.MutableRefObject<FragmentsEngine | null>
 }
 
-function AssetLinksDialog({ initial, initialSource, projectName, onClose, engineRef }: AssetLinksDialogProps) {
+function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onClose, engineRef }: AssetLinksDialogProps) {
   const equipment = useFinStore(s => s.equipment)
   const finConnected = useFinStore(s => s.isConnected)
 
@@ -196,7 +200,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
     const engine = engineRef.current
     const bimIds = finL.flatMap(eq => (isGuid(eq.bimId) ? [eq.bimId] : []))
     const presentSet = engine && bimIds.length ? await guidsInModels(engine, bimIds).catch(() => null) : null
-    const sugg = suggestAll(finL, prepareElements(found), presentSet)
+    const sugg = suggestAll(finL, prepareElements(found), presentSet, nameWords)
     const current = linksRef.current
     const machines = current.filter(l => l.kind !== 'space')
     const named = new Set(machines.map(l => foldName(l.equip)))
@@ -205,7 +209,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
     // Only FIN's own bimId links by itself; name likeness stays a suggestion
     const matches = bestMatches(open, sugg, new Set(machines.map(l => l.guid)), 1)
     const byG = new Map(found.map(e => [e.guid, e]))
-    const added = matches.map(({ eq, s }) => newLink(eq, s.guid, byG.get(s.guid)))
+    const added = matches.map(({ eq, s }) => newLink(eq, s.guid, nameWords, byG.get(s.guid)))
 
     const cameras = new Set(finL.filter(eq => eq.cctv).map(eq => foldName(eq.name)))
     const isCam = (l: AssetLink) => l.kind === 'cctv' || cameras.has(foldName(l.equip))
@@ -229,7 +233,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
     setAutoRooms(prev => new Set([...prev, ...roomKeys]))
     setNotice(null)
     setError(null)
-  }, [engineRef])
+  }, [engineRef, nameWords])
 
   const fillRoom = async (key: string, guid: string) => {
     const engine = engineRef.current
@@ -451,7 +455,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
   const byGuid = useMemo(() => new Map((elements ?? []).map(e => [e.guid, e])), [elements])
 
   const finList = useMemo(() => toLinkEquipment(equipment), [equipment])
-  const suggestions = useMemo(() => suggestAll(finList, prepared, present), [finList, prepared, present])
+  const suggestions = useMemo(() => suggestAll(finList, prepared, present, nameWords), [finList, prepared, present, nameWords])
 
   const allRows = useMemo<Row[]>(() => {
     const finKeys = new Set(finList.map(eq => foldName(eq.name)))
@@ -580,7 +584,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
     const next: AssetLink = {
       equip: name,
       guid,
-      type: row.link?.type || (cctv ? 'CCTV' : defaultType(row.eq ?? { name })),
+      type: row.link?.type || (cctv ? 'CCTV' : defaultType(row.eq ?? { name }, nameWords)),
       ...(cctv ? { kind: 'cctv' as const } : {}),
       ...(finId ? { finId } : {}),
       ...(el ? { element: el.name || el.objectType } : {}),
@@ -707,7 +711,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
   const autoMatches = bestMatches(unlinked, suggestions, new Set(equipLinks.map(l => l.guid)), AUTO_MIN)
 
   const linkAll = () => {
-    const added = autoMatches.map(({ eq, s }) => newLink(eq, s.guid, byGuid.get(s.guid)))
+    const added = autoMatches.map(({ eq, s }) => newLink(eq, s.guid, nameWords, byGuid.get(s.guid)))
     const next = [...links, ...added]
     setUndo({ before: links, after: next, auto: autoMatches.map(m => foldName(m.eq.name)) })
     setLinks(next)
@@ -717,7 +721,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
   }
 
   const doImport = () => {
-    const parsed = parseLinks(importText ?? '')
+    const parsed = parseLinks(importText ?? '', nameWords)
     if (!parsed.links) {
       setError(parsed.error ?? 'Nothing to import.')
       return
@@ -894,7 +898,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
   }
 
   const renderPicker = (row: Row) => {
-    const type = isCctvRow(row) ? 'CCTV' : row.link?.type || (row.eq ? defaultType(row.eq) : '')
+    const type = isCctvRow(row) ? 'CCTV' : row.link?.type || (row.eq ? defaultType(row.eq, nameWords) : '')
     const words = typeWords(type)
     const onlyType = words.length > 0 && !pickerAll
     const here = levelRank(rowLevel(row))
@@ -973,7 +977,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, onClose, engine
           <td>
             {row.link
               ? <input className="al-type" list="al-types" value={row.link.type} onChange={e => setType(row, e.target.value)} />
-              : <span className="al-sub">{isCctvRow(row) ? 'CCTV' : row.eq ? defaultType(row.eq) : ''}</span>}
+              : <span className="al-sub">{isCctvRow(row) ? 'CCTV' : row.eq ? defaultType(row.eq, nameWords) : ''}</span>}
           </td>
           <td>
             {row.link ? (

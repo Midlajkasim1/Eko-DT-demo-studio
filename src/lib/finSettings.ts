@@ -1,6 +1,7 @@
 import type { PowerBoard, ProjectApiSettings } from '@/types'
 import { MAPPING_CATALOG, boardKey, historyExpression, isStandardHistory, normalizeRef, pointRefOf } from '@/lib/finMappingCatalog'
 import type { JsonObject } from '@/lib/mappingRows'
+import { hospitalHvacEnabled } from '@/lib/hospitalHvac'
 
 /** The apiSettings fields edited as JSON in Dashboard Settings → Data Mapping */
 export type MappingField =
@@ -215,6 +216,8 @@ export function dashboardProjectInfo(meta: { projectId: string; name: string; ap
     sampleData: s.dashboardSampleData === 'medical' ? 'medical' : null,
     /* the module set: 'extended' or 'standard' */
     modules: s.dashboardModules === 'extended' ? 'extended' : 'standard',
+    /* Hospital HVAC graphics: the project whose FIN project is Eko Hospital's (hospitalHvac.ts); the dashboard's equipment mapping reads this too */
+    hospitalHvac: hospitalHvacEnabled(meta),
     /* the project's own boards; null = the built-in board keys, where the project maps them */
     powerBoards: Array.isArray(s.finPowerBoards) && s.finPowerBoards.length ? s.finPowerBoards : null,
     energyFromHourly: s.energyFromHourly === true,

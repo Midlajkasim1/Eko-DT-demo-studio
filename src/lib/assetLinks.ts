@@ -133,13 +133,19 @@ export interface Suggestion {
 }
 
 /** The type a new link starts with: a known name prefix (FCU-…), else FIN's own type */
-export function defaultType(eq: LinkEquipment): string {
+export function defaultType(eq: LinkEquipment, nameWords = false): string {
   const prefix = eq.name.toUpperCase().match(/^[A-Z]+[0-9]*/)?.[0] ?? ''
   if (TYPE_WORDS[prefix]) return prefix
   const letters = prefix.replace(/[0-9]+$/, '')
   if (TYPE_WORDS[letters]) return letters
   const fin = (eq.type || '').toUpperCase()
-  return fin && fin !== 'OTHER' ? fin : letters
+  if (fin && fin !== 'OTHER') return fin
+  // Only a project with Hospital HVAC graphics on (nameWords); every other project keeps the first letters, as before.
+  if (!nameWords) return letters
+  // "HOSPITAL_AHU_01": the type is a whole word inside the name, not its first letters. Only when FIN gave no type of its own.
+  // A meter named after what it feeds (PMU03_MAHU_…) is still a meter.
+  const words = tokens(eq.name)
+  return (/^PMU\d*$/.test(words[0] ?? '') ? undefined : words.find(t => TYPE_WORDS[t])) ?? letters
 }
 
 const tokens = (s: string) => s.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean)
@@ -190,7 +196,7 @@ function scoreOne(eq: LinkEquipment, eqFold: string, eqTokens: string[], eqLastN
 }
 
 /** The likeliest model elements for one FIN equipment, best first */
-export function suggest(eq: LinkEquipment, elements: PreparedElement[], limit = 3, min = 0.5): Suggestion[] {
+export function suggest(eq: LinkEquipment, elements: PreparedElement[], limit = 3, min = 0.5, nameWords = false): Suggestion[] {
   if (isGuid(eq.bimId) && elements.some(p => p.el.guid === eq.bimId)) {
     return [{ guid: eq.bimId, score: 1, reason: 'FIN bimId tag' }]
   }
@@ -198,7 +204,7 @@ export function suggest(eq: LinkEquipment, elements: PreparedElement[], limit = 
   const eqTokens = tokens(eq.name)
   if (!eqFold || !eqTokens.length) return []
   const nums = numbers(eqTokens)
-  const words = TYPE_WORDS[defaultType(eq)] ?? []
+  const words = TYPE_WORDS[defaultType(eq, nameWords)] ?? []
   const out: Suggestion[] = []
   for (const p of elements) {
     const s = scoreOne(eq, eqFold, eqTokens, nums[nums.length - 1], words, p)
@@ -208,13 +214,13 @@ export function suggest(eq: LinkEquipment, elements: PreparedElement[], limit = 
 }
 
 /** Per FIN equipment: its own bimId, then name likeness */
-export function suggestAll(finList: LinkEquipment[], prepared: PreparedElement[], present: Set<string> | null): Map<string, Suggestion[]> {
+export function suggestAll(finList: LinkEquipment[], prepared: PreparedElement[], present: Set<string> | null, nameWords = false): Map<string, Suggestion[]> {
   const out = new Map<string, Suggestion[]>()
   const known = new Set(prepared.map(p => p.el.guid))
   for (const eq of finList) {
     const key = foldName(eq.name)
     if (isGuid(eq.bimId) && !known.has(eq.bimId) && present?.has(eq.bimId)) out.set(key, [{ guid: eq.bimId, score: 1, reason: 'FIN bimId tag' }])
-    else out.set(key, prepared.length ? suggest(eq, prepared) : [])
+    else out.set(key, prepared.length ? suggest(eq, prepared, 3, 0.5, nameWords) : [])
   }
   return out
 }
@@ -269,7 +275,7 @@ function csvCells(line: string): string[] {
 
 const CSV_COLUMNS = ['equip', 'guid', 'type', 'finId', 'element', 'kind', 'room', 'level', 'clip'] as const
 
-function linkFrom(rec: Record<string, unknown>): AssetLink | string {
+function linkFrom(rec: Record<string, unknown>, nameWords: boolean): AssetLink | string {
   const kindText = String(rec.kind ?? '').trim().toLowerCase()
   const kind = kindText === 'space' ? 'space' as const : kindText === 'cctv' ? 'cctv' as const : undefined
   const equip = String(rec.equip ?? rec.name ?? rec.id ?? '').trim()
@@ -279,7 +285,7 @@ function linkFrom(rec: Record<string, unknown>): AssetLink | string {
   const link: AssetLink = {
     equip,
     guid,
-    type: kind === 'space' ? 'SPACE' : (String(rec.type ?? '').trim() || (kind === 'cctv' ? 'CCTV' : defaultType({ name: equip }))),
+    type: kind === 'space' ? 'SPACE' : (String(rec.type ?? '').trim() || (kind === 'cctv' ? 'CCTV' : defaultType({ name: equip }, nameWords))),
     ...(kind ? { kind } : {}),
   }
   if (rec.finId) link.finId = String(rec.finId).trim()
@@ -291,7 +297,7 @@ function linkFrom(rec: Record<string, unknown>): AssetLink | string {
   return link
 }
 
-export const CLIPS = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7']
+export const CLIPS =['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7']
 
 /** A video file name in static/dashboard/assets/video without .mp4, or 'none' */
 export const isClipName = (s: string) => /^[\w .()-]{1,80}$/.test(s) && s.trim() === s
@@ -314,7 +320,7 @@ export function defaultClip(name: string): string {
 }
 
 /** A JSON list of links, the old { name: { bimId, type } } table, or CSV with an equip,guid header. kind=space marks a heatmap room, kind=cctv a camera. */
-export function parseLinks(text: string): { links?: AssetLink[]; error?: string } {
+export function parseLinks(text: string, nameWords = false): { links?: AssetLink[]; error?: string } {
   const trimmed = text.trim()
   if (!trimmed) return { error: 'Nothing to import.' }
   const out: AssetLink[] = []
@@ -327,7 +333,7 @@ export function parseLinks(text: string): { links?: AssetLink[]; error?: string 
     }
     if (Array.isArray(parsed)) {
       for (const rec of parsed) {
-        const link = typeof rec === 'object' && rec ? linkFrom(rec as Record<string, unknown>) : 'every entry must be an object'
+        const link = typeof rec === 'object' && rec ? linkFrom(rec as Record<string, unknown>, nameWords) : 'every entry must be an object'
         if (typeof link === 'string') return { error: `Not imported: ${link}.` }
         out.push(link)
       }
@@ -335,7 +341,7 @@ export function parseLinks(text: string): { links?: AssetLink[]; error?: string 
       // Old table: entries with no element only carried a type, so they are not links
       for (const [equip, rec] of Object.entries(parsed as Record<string, { bimId?: unknown; type?: unknown }>)) {
         if (!rec || !isGuid(rec.bimId)) continue
-        const link = linkFrom({ equip, guid: rec.bimId, type: rec.type })
+        const link = linkFrom({ equip, guid: rec.bimId, type: rec.type }, nameWords)
         if (typeof link !== 'string') out.push(link)
       }
     }
@@ -347,7 +353,7 @@ export function parseLinks(text: string): { links?: AssetLink[]; error?: string 
     for (const [i, line] of lines.slice(1).entries()) {
       const cells = csvCells(line)
       const rec = Object.fromEntries(CSV_COLUMNS.filter(c => col[c] >= 0).map(c => [c, cells[col[c]] ?? '']))
-      const link = linkFrom(rec)
+      const link = linkFrom(rec, nameWords)
       if (typeof link === 'string') return { error: `Not imported: line ${i + 2}: ${link}.` }
       out.push(link)
     }

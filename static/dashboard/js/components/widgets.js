@@ -1159,6 +1159,20 @@ window.EKO_C = (function(){
       return liveRow(E, label, pointShown(m.value), m.point);
     }).join('');
   }
+  /* The Eko Hospital's FAHU overview. Only for a project whose Hospital graphics are on (its FIN project is ekoHospital, injected by the
+     Studio), and only rows whose FIN point names are VERIFIED. EKO_FAHU_OVERVIEW stays empty until the real FAHU_01 point list confirms
+     them, so nothing is added and the generic rows stand, as for every other project. Entries: [label, folded point name, ...]. */
+  const EKO_FAHU_OVERVIEW = [];
+  function fahuOverviewRows(E, asset) {
+    const cfg = window.INJECTED_PROJECT_CONFIG;
+    if (!(cfg && cfg.hospitalHvac === true) || !EKO_FAHU_OVERVIEW.length || airKind(asset) !== 'FAHU') return '';
+    const points = (asset && asset.points) || [];
+    if (!points.length) return '';
+    return EKO_FAHU_OVERVIEW.map(([label, ...names]) => {
+      const m = pointMatch(points, ...names);
+      return liveRow(E, label, pointShown(m.value), m.point);
+    }).join('');
+  }
   /* Same names as readEcoPoints, in the order of its FIN page. COMMAN_ALARM is FIN's spelling. */
   function ecoPointRows(asset) {
     if (airKind(asset) !== 'ECO') return '';
@@ -1678,6 +1692,7 @@ window.EKO_C = (function(){
     const analogRows = analogPointRows(E, r);
     /* MAHU and ECO list every FIN point they draw, a missing one as "—"; the rest use the generic analog rows */
     const typeRows = mauPointRows(E, r) || ecoPointRows(r);
+    const fahuRows = fahuOverviewRows(E, r);   /* '' for every project but the Eko Hospital, and until its names are verified */
     const cmp = r.compare || null;
     const reason = r.st === 'stale' ? 'dgNoTrend.stale' : (r.trendKind === 'state' ? 'dgNoTrend.state' : 'dgNoTrend.none');
     const graphBlock = (() => {
@@ -1791,8 +1806,9 @@ window.EKO_C = (function(){
     } else if(tab === 'activity'){
       body = workOrderBody(E, r);
     } else if(tab === 'analytics'){
+      const live = typeRows || (fahuRows ? fahuRows + (analogRows || '') : analogRows);
       body = `<section class="pcard"><h3 class="pcardt">${esc(t('apFullT'))}</h3>${graphBlock}</section>`
-        + sec(t('apLiveParams')) + ((typeRows || analogRows) ? rows(typeRows || analogRows) : empty('apNoLive'));
+        + sec(t('apLiveParams')) + (live ? rows(live) : empty('apNoLive'));
     } else if(tab === 'om'){
       body = rows(row(t('apMake'), esc(r.make || t('emptyDash'))) + row(t('apSerial'), esc(r.serial || t('emptyDash'))) + row(t('apSvc'), esc(r.svc || t('emptyDash')))
           + row(t('apCafmRec'), r.cafm ? `<button class="aplink" aria-disabled="true" data-tip="${esc(t('apCafmOpen'))}">${esc(r.cafm)}</button>` : esc(t('emptyDash'))))
