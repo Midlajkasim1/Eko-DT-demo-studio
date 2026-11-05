@@ -153,6 +153,8 @@ const colours = s => {
 const AHU_SENSORS = ['raHum', 'raCo2', 'raTemp', 'saHum', 'saPressure', 'saTemp']
 const AHU_BASE = ['faDamperPos', 'preFilter', 'bagFilter', 'coolingValveCmd', 'sfFanStatus']
 const FCU_BASE = ['zoneTemp', 'valvePos', 'valveCmd', 'fanSpeed', 'fanRun']
+// The Hospital's FCU labels the valve COOLING_VALVE (its own point) where the others label the command
+const FCU_HOSPITAL = ['zoneTemp', 'valvePos', 'valve', 'fanSpeed', 'fanRun']
 
 test('Hospital AHU (feature on): the five parts plus six optional sensor labels, no-data grey for what FIN does not send', () => {
   const s = createAhuSchematic(box(), new THREE.Matrix4(), undefined, { hospitalHvac: true })
@@ -169,7 +171,7 @@ test('Hospital AHU (feature on): the five parts plus six optional sensor labels,
 test('Hospital FCU (feature on): filter and humidity probe are built, optional, and shown only while FIN sends the point', () => {
   const s = createFcuSchematic(box(), new THREE.Matrix4(), undefined, { hospitalHvac: true })
   const a = Object.fromEntries(s.anchors.map(x => [x.key, x]))
-  assert.deepEqual(s.anchors.map(x => x.key), [...FCU_BASE, 'filter', 'zoneHum'])
+  assert.deepEqual(s.anchors.map(x => x.key), [...FCU_HOSPITAL, 'filter', 'zoneHum'])
   assert.equal(a.filter.optional, true)
   assert.equal(a.zoneHum.optional, true)
   const filterPart = s.group.getObjectByName('ekoFcuFilter')

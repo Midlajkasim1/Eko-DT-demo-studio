@@ -99,6 +99,8 @@ const labels = () => page.evaluate(() => [...document.querySelectorAll('.eko-hva
 const AHU_BASE = ['faDamperPos', 'preFilter', 'bagFilter', 'coolingValveCmd', 'sfFanStatus']
 const AHU_SENSORS = ['raHum', 'raCo2', 'raTemp', 'saHum', 'saPressure', 'saTemp']
 const FCU_BASE = ['zoneTemp', 'valvePos', 'valveCmd', 'fanSpeed', 'fanRun']
+// The Hospital's FCU labels the valve COOLING_VALVE (its own point) where the others label the command
+const FCU_HOSPITAL = ['zoneTemp', 'valvePos', 'valve', 'fanSpeed', 'fanRun']
 
 test('the fixture has an element to link to', { skip }, () => {
   assert.ok(guid, 'a GlobalId was read from the model, so the selections below are real')
@@ -115,7 +117,7 @@ test('Eko Hospital: the AHU shows its five parts and six sensors as labels', { s
 test('Eko Hospital: the FCU shows its five parts and the filter and humidity labels', { skip }, async () => {
   await open(EKO(fcuLinks))
   assert.equal(await select('FCU-GF-01'), true)
-  assert.deepEqual(await labels(), [...FCU_BASE, 'filter', 'zoneHum'])
+  assert.deepEqual(await labels(), [...FCU_HOSPITAL, 'filter', 'zoneHum'])
   await clear()
 })
 
