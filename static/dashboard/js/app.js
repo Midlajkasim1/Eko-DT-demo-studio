@@ -55,6 +55,8 @@
       : { esg: 'available', maintenance: 'available', security: 'available' };
     ['systems.other', 'systems.data', 'spaces.occ', 'security.evac', 'security.nurse'].forEach(v => { states[v] = extended ? 'active' : 'hidden'; });
     if(window.INJECTED_PROJECT_CONFIG) states['energy.anom'] = 'active';   /* every Studio project: its meters, the sample's, or none yet */
+    /* Ask EKO asks the backend's Eko-Chat for every Studio and exported project, whatever sample data it shows */
+    if(window.INJECTED_PROJECT_CONFIG && D.marsa) D.marsa.features = Object.assign({}, D.marsa.features, { ask: 'eko-chat' });
     if(D.marsa){ D.marsa.entitlements = D.marsa.entitlements || {}; D.marsa.entitlements.modules = Object.assign({}, D.marsa.entitlements.modules, states); }
     /* every site hands over between its shifts (wall.shifts); a site without its own settings gets the prototype's, with no stand-in handovers */
     if(D.marsa && !D.marsa.handover) D.marsa.handover = { server: { api: '/api/handover', pollSec: 30, retention: { days: null } }, prepareBeforeMin: 90, emailRelay: null, onCall: 'the duty engineer' };
