@@ -15898,6 +15898,118 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   margin:0
 }
 
+.dashboard-native-container .aitext .aimdh {
+  margin:8px 0 4px;
+  font-size:inherit;
+  font-weight:600
+}
+
+.dashboard-native-container .aitext .aimdl {
+  margin:0 0 6px;
+  padding-inline-start:20px
+}
+
+.dashboard-native-container .aitext .aimdl li {
+  margin:0 0 2px
+}
+
+.dashboard-native-container .aitext code {
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:.92em;
+  padding:0 3px;
+  border-radius:3px;
+  background:var(--s2)
+}
+
+.dashboard-native-container .aitext .aimdcode {
+  margin:0 0 6px;
+  padding:6px 8px;
+  overflow:auto;
+  border-radius:6px;
+  background:var(--s2);
+  direction:ltr;
+  text-align:left
+}
+
+.dashboard-native-container .aitext .aimdcode code {
+  padding:0;
+  background:none;
+  white-space:pre
+}
+
+.dashboard-native-container .aitext .aimdtbl {
+  display:block;
+  width:100%;
+  margin:0 0 6px;
+  overflow-x:auto;
+  border-collapse:collapse;
+  font-size:var(--txCapSz)
+}
+
+.dashboard-native-container .aitext .aimdtbl th,.dashboard-native-container .aitext .aimdtbl td {
+  padding:3px 10px 3px 0;
+  border-block-end:1px solid var(--bd1);
+  text-align:start;
+  vertical-align:top
+}
+
+.dashboard-native-container .aitext .aimdtbl th {
+  font-weight:600;
+  color:var(--t2)
+}
+
+.dashboard-native-container .aiparts {
+  display:flex;
+  flex-direction:column;
+  gap:10px
+}
+
+.dashboard-native-container .aipart {
+  padding-block-end:10px;
+  border-block-end:1px solid var(--bd1)
+}
+
+.dashboard-native-container .aipart:last-child {
+  padding-block-end:0;
+  border-block-end:0
+}
+
+.dashboard-native-container .aiparth {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:baseline;
+  gap:6px;
+  margin:0 0 4px;
+  font-size:inherit;
+  font-weight:600
+}
+
+.dashboard-native-container .aipartn {
+  color:var(--t2);
+  font-weight:600
+}
+
+.dashboard-native-container .aipartn::after {
+  content:"."
+}
+
+.dashboard-native-container .aipartst {
+  padding:0 6px;
+  border:1px solid var(--bd1);
+  border-radius:999px;
+  font-size:var(--txCapSz);
+  font-weight:500;
+  color:var(--warnTx)
+}
+
+.dashboard-native-container .aipartst[data-status="failed"] {
+  color:var(--critTx)
+}
+
+.dashboard-native-container .aipartbody p:last-child {
+  margin:0
+}
+
 .dashboard-native-container .aicaret {
   display:inline-block;
   width:2px;

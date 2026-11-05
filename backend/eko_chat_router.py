@@ -74,7 +74,8 @@ NOT_KIND_WORDS = {"the", "all", "a", "an", "my", "our", "this", "that", "these",
                   "alarm", "alarming", "unhealthy", "available", "installed", "current", "existing", "total", "overall",
                   "complete", "full", "entire", "whole", "list", "register", "inventory", "latest", "recent", "new",
                   "energy", "power", "water", "gas", "electricity", "temperature", "humidity", "load", "demand", "consumption", "usage",
-                  "carbon", "cost", "emission", "building", "site", "project", "floor", "room", "space", "ppm"}
+                  "carbon", "cost", "emission", "building", "site", "project", "floor", "room", "space", "ppm",
+                  "iaq", "comfort", "air", "quality", "weather", "temp", "alert", "alarm", "notification", "reading", "metric", "status"}
 HERE = r"(?: (?:in|of|for|from) (?:this|the|our|your)(?: (?:currently selected|selected|current|open|active))? (?:project|building|site))?"
 ASK = r"(?:(?:give me|tell me|show me|what is|what's) )?"
 PROJ = r"(?: (?:for|in|about))?(?: (?:this|the|my|our))?(?: (?:project|building|site))?"
@@ -114,6 +115,10 @@ RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat +
      SHOW + r"(?:all )?(?:the )?equipment (?:that is |that are |which is |which are )?(?:currently )?in alarm" + NOW),
     ("equipment.in_alarm.has", "find_equipment",
      r"(?:what|which) " + ASSETS + r" (?:has|have) (?:any )?" + OPEN + ALARMS + NOW),
+    ("equipment.in_alarm.count", "find_equipment",
+     r"how many (?:equipment|assets?|(?P<kind>[a-z]{2,8}?)s?) (?:are|is) (?:currently )?in alarm" + NOW),
+    ("equipment.in_alarm.count.has", "find_equipment",
+     r"how many (?:equipment|assets?|(?P<kind>[a-z]{2,8}?)s?) (?:have|has) (?:any )?" + OPEN + ALARMS + NOW),
     ("equipment.list", "find_equipment",
      r"(?:show(?: me)? |list |display |get |give me )(?:all )?(?:the )?(?:(?:available|installed) )?" + ASSETS + HERE),
     ("equipment.available", "find_equipment",
@@ -130,6 +135,8 @@ RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat +
      r"(?:what|which) notifications (?:have been|are|were|have not been|are not|were not) (?:un)?acknowledged"),
     ("notifications.unread", "get_notifications",
      r"(?:" + SHOW + r"(?:the )?|(?:do i have |are there )(?:any )?|how many )" + N + r"(?:unread|new) (?P<noun>notifications?)"),
+    ("notifications.unread.count", "get_notifications",
+     r"(?:" + SHOW + r"(?:the |my )?unread (?:notifications? )?count|how many (?P<noun>notifications?) (?:are|do i have) (?:still )?(?:unread|new))"),
     ("notifications.list", "get_notifications",
      SHOW + r"(?:the |all |my )*(?:(?:recent|latest|newest|current) )*" + N + r"(?:(?:recent|latest|newest) )*(?P<noun>notifications?)"),
     # status / information of one explicit equipment item
@@ -245,6 +252,10 @@ UNSUPPORTED_TOPICS: list[tuple[str, re.Pattern]] = [(cid, re.compile(pat)) for c
     ("energy.compare", r"\b(?:compare|compared|comparison|versus|vs)\b.*\b(?:energy|power|consumption|usage)\b|"
                        r"\b(?:energy|power|consumption|usage)\b.*\b(?:compare|compared|comparison|versus|vs)\b"),
     ("energy.trend", r"\b(?:energy|power|consumption|usage)\b.*\b(?:trend|trends|weekly|monthly|last week|last month|this week|over time|history)\b"),
+    # the current readings of points are aggregated; their stored history is not read (FIN's hourly series are mapped for energy only)
+    ("analytics.point_history", r"\b(?:temperatures?|temp|humidity|co2|co₂|carbon dioxide)\b.*\b(?:last week|last month|this week|yesterday|trends?|history|historical|over time|"
+                                r"last \d+ (?:hours|days|weeks)|past \w+ (?:hours|days|weeks))\b|"
+                                r"\b(?:trends?|history|historical)\b.*\b(?:temperatures?|temp|humidity|co2|co₂|carbon dioxide)\b"),
     ("alarms.history_summary", r"\b(?:alarm|alert)s? history\b|\b(?:alarm|alert)s?\b.*\b(?:history|historical|trend|per day|by day|each day|last week|last month|this week)\b"),
     ("utilities.water_gas", r"\b(?:water|gas)\b.*\b(?:consumption|usage|use|meter|reading)\b"),
     ("maintenance.workorders", r"\b(?:work ?orders?|maintenance (?:jobs?|tasks?|requests?|schedule)|cmms)\b"),
@@ -259,6 +270,8 @@ CLARIFICATIONS: list[tuple[re.Pattern, str]] = [(re.compile(pat), ask) for pat, 
     (r"^(?:(?:what is|what's|show|get|check|tell me|read)(?: me)? )?(?:the )?(?:current |present |live )?(?:temperature|temp)(?: reading| level)?" + NOW + "$",
      "Which temperature do you mean? I can read this project's average indoor (zone) temperature: ask \"what is the indoor temperature\". "
      "Outdoor and supply-air temperatures are not read."),
+    (r"^compare (?:the )?(?:(?:current|live|latest) )?(?:(?:status|state|readings) )?(?:of )?(?:the )?(?:two|2|both|several|some|all) (?:[a-z]{2,8}?)s?$",
+     "Name the two units to compare, exactly as they are written in the equipment list, for example \"compare AHU-01 and AHU-02\"."),
 ]]
 
 
@@ -353,6 +366,118 @@ def _metric(text: str) -> Optional[dict]:
     return None
 
 
+# ─── Phase 2: comparison, point search, analytics and alarm records ──────────
+# Whole-question templates like the rules above. Tried after them, so a question the existing rules answer ("average humidity") keeps its answer.
+# Nothing here reads FIN: it only chooses one of the Phase 2 tools and its parameters, which are checked against that tool's own schema.
+METRIC_WORD = {"temperature": "temperature", "temperatures": "temperature", "temp": "temperature", "humidity": "humidity", "co2": "co2", "co₂": "co2",
+               "carbon dioxide": "co2", "power": "power"}
+MET = r"(?P<m>temperatures?|temp|humidity|co2|co₂|carbon dioxide|power)"
+READ = r"(?: (?:readings?|levels?|values?))?"
+ANY_UNIT = r"(?:equipment|assets?|units?|systems?)"
+KIND = r"(?P<kind>[a-z]{2,8}?)s"
+ORD = {"highest": "highest", "maximum": "highest", "max": "highest", "lowest": "lowest", "minimum": "lowest", "min": "lowest"}
+OPS = {"highest": "max", "maximum": "max", "max": "max", "lowest": "min", "minimum": "min", "min": "min", "average": "average", "mean": "average",
+       "avg": "average", "total": "sum", "sum": "sum"}
+TOP_N = {"two": 2, "three": 3, "four": 4, "five": 5, "ten": 10}
+CMP = r"(?:compare|comparison of|contrast)(?: the)?(?: (?:current|live|latest))?(?: (?:status|state|readings|points|values))?(?: of)?"
+COMPARE_RULES: list[tuple[str, re.Pattern]] = [(rid, re.compile("^" + pat + "$")) for rid, pat in [
+    ("compare.equipment", CMP + r" <eq1> (?:and|with|to|vs\.?|versus|against) <eq2>(?: (?:status|state|readings|points|values))?" + NOW),
+    ("compare.vs", r"<eq1> (?:vs\.?|versus|compared (?:to|with|against)) <eq2>" + NOW),
+    ("compare.difference", r"(?:what(?:'s| is) )?(?:the )?(?:difference|differences) between <eq1> and <eq2>" + NOW),
+    ("compare.how", r"how (?:does|do|is) <eq1> compare(?:d)? (?:to|with|against) <eq2>" + NOW),
+    ("compare.show", r"(?:show|give me|get)(?: me)? (?:a )?comparison (?:of|between) <eq1> and <eq2>" + NOW),
+]]
+HISTORY_PERIOD = {"today": "today", "yesterday": "yesterday", "this month": "this_month", "the last 7 days": "last_7_days", "the last seven days": "last_7_days",
+                  "the latest 7 days": "last_7_days", "the past 7 days": "last_7_days", "the past seven days": "last_7_days", "the last week": "last_7_days",
+                  "the last 30 days": "last_30_days", "the last thirty days": "last_30_days", "the latest 30 days": "last_30_days", "the past 30 days": "last_30_days",
+                  "the past thirty days": "last_30_days"}
+_PERIODS = "|".join(re.escape(k) for k in sorted(HISTORY_PERIOD, key=len, reverse=True))
+RAISED = r"(?:raised|triggered|recorded|logged|generated|reported|occurred)"
+HISTORY_RULES: list[tuple[str, re.Pattern]] = [(rid, re.compile("^" + pat + "$")) for rid, pat in [
+    ("alarmhist.summary", SHOW + r"(?:the )?alarm (?:history|summary|statistics|stats|breakdown)(?: by severity)?(?: (?:for|in|during|over|from) (?P<p>" + _PERIODS + "))?" + NOW),
+    ("alarmhist.count", r"how many alarms (?:were |have been |had been )?" + RAISED + r"(?: (?:in|during|over|on))?(?: (?P<p>" + _PERIODS + "))?" + NOW),
+    ("alarmhist.raised", SHOW + r"(?:the )?alarms " + RAISED + r" (?P<p>" + _PERIODS + ")"),
+]]
+ANALYTIC_RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat + "$")) for rid, intent, pat in [
+    # which unit has the highest / lowest reading
+    ("analytics.which", "calculate_metric",
+     r"(?:which|what) (?:(?P<kind>[a-z]{2,8}?)s?|" + ANY_UNIT + r") (?P<verb>has|have|is|are|shows?|reads?|records?) the (?P<ord>highest|lowest|maximum|minimum|max|min) " + MET + READ + NOW),
+    # the top N by a metric
+    ("analytics.top", "calculate_metric",
+     r"(?:show |list |give me |get |what are )?(?:me )?(?:the )?top (?P<n>\d{1,2}|two|three|four|five|ten) " + KIND + r" (?:by|for|with the highest) " + MET + READ + NOW),
+    ("analytics.rank", "calculate_metric", r"rank (?:the )?(?:all )?" + KIND + r" by " + MET + READ + NOW),
+    # an operation over a metric, building-wide or over one class
+    ("analytics.agg", "calculate_metric",
+     LEAD + r"(?P<op>highest|lowest|maximum|minimum|max|min|average|mean|avg|total|sum) " + MET + READ
+     + r"(?: (?:of|across|in|for|on|among) (?:all )?(?:the )?(?:" + KIND + r"|" + ANY_UNIT + r"))?" + NOW),
+    # which equipment has points for a metric
+    ("points.search", "search_points",
+     r"(?:find|list|show|which|what|get)(?: me)?(?: all)?(?: the)? (?:" + KIND + r"|" + ANY_UNIT + r")(?: that| which)? (?:has|have|with|having|reporting|report) "
+     r"(?:any )?" + MET + r" (?:readings?|measurements?|points?|sensors?|values?)" + NOW),
+    ("points.search.count", "search_points",
+     r"how many (?:" + KIND + r"|" + ANY_UNIT + r"(?: items)?) (?:has|have|with|report|reporting) (?:any )?" + MET + r" (?:readings?|measurements?|points?|sensors?|values?)" + NOW),
+]]
+
+
+def _kind_of(gd: dict) -> str:
+    kind = (gd.get("kind") or "").lower()
+    return "" if {kind, kind + "s"} & (NOT_A_TYPE | NOT_KIND_WORDS) else kind
+
+
+def _analytic(text: str) -> Optional[dict]:
+    """The decision for a Phase 2 point-analytics or point-search question, or None."""
+    for rid, intent, pattern in ANALYTIC_RULES:
+        m = pattern.match(text)
+        if not m:
+            continue
+        gd = m.groupdict()
+        params: dict = {"metric": METRIC_WORD[gd["m"]]}
+        if rid == "analytics.agg":
+            params["op"] = OPS[gd["op"]]
+        elif intent == "calculate_metric":
+            params["op"] = "top"
+            params["order"] = ORD[gd["ord"]] if gd.get("ord") else "highest"
+            if rid == "analytics.which" and gd["verb"] in ("has", "is", "shows", "show", "reads", "read", "records", "record"):
+                params["limit"] = 1
+            elif gd.get("n"):
+                params["limit"] = TOP_N.get(gd["n"]) or int(gd["n"])
+        kind = _kind_of(gd)
+        if kind:
+            params["type"] = kind
+        if params.get("op") == "sum" and not kind:
+            continue          # a building-wide sum would add meters that meter other meters: asked for one class only
+        if _validate(params, TOOLS[intent]["parameters"]):
+            return _fallback("invalid_parameters")
+        return {"route": "direct", "intent": intent, "parameters": params, "confidence": "high", "rule": rid}
+    return None
+
+
+def _history(text: str) -> Optional[dict]:
+    """The decision for a question about the alarm records of FIN's latest read (not the open alarms), or None."""
+    for rid, pattern in HISTORY_RULES:
+        m = pattern.match(text)
+        if not m:
+            continue
+        params = {"period": HISTORY_PERIOD[m.group("p")]} if m.group("p") else {}
+        if _validate(params, TOOLS["get_alarm_history"]["parameters"]):
+            return _fallback("invalid_parameters")
+        return {"route": "direct", "intent": "get_alarm_history", "parameters": params, "confidence": "high", "rule": rid}
+    return None
+
+
+def _compare(question: str, ids: list) -> Optional[dict]:
+    """The decision for a comparison of the two named equipment items in the question, or None."""
+    order = {name: f"<eq{i}>" for i, name in enumerate(ids, 1)}
+    text = _normalize(EQUIPMENT_ID.sub(lambda m: order.get(m.group(1), m.group(1)), question))
+    for rid, pattern in COMPARE_RULES:
+        if pattern.match(text):
+            params = {"equipment_a": ids[0], "equipment_b": ids[1]}
+            if _validate(params, TOOLS["compare_equipment"]["parameters"]):
+                return _fallback("invalid_parameters")
+            return {"route": "direct", "intent": "compare_equipment", "parameters": params, "confidence": "high", "rule": rid}
+    return None
+
+
 def _fallback(reason: str) -> dict:
     return {"route": "llm_fallback", "reason": reason}
 
@@ -377,7 +502,9 @@ def route(question: Any) -> dict:
     if UNSAFE.search(question):
         return _fallback("unsafe_content")
     ids = list(dict.fromkeys(m.group(1) for m in EQUIPMENT_ID.finditer(question) if re.search(r"\d", m.group(1))))
-    if len(ids) > 1:
+    if len(ids) == 2:        # two named items: a comparison is the one question that takes two
+        return _compare(question, ids) or _fallback("multiple_equipment")
+    if len(ids) > 2:
         return _fallback("multiple_equipment")
     equipment = ids[0] if ids else None
     text = question if equipment is None else question.replace(equipment, "<eq>")
@@ -390,7 +517,7 @@ def route(question: Any) -> dict:
         gd = m.groupdict()
         kind = (gd.get("kind") or "").lower()
         both = {kind, kind + "s"}     # the pattern takes a trailing "s" as a plural: "gas" is read as "ga" + s, "status" as "statu" + s
-        if both & NOT_A_TYPE or (rid.startswith("equipment.kind.") and both & NOT_KIND_WORDS):
+        if both & NOT_A_TYPE or (rid.startswith(("equipment.kind.", "equipment.type.")) and both & NOT_KIND_WORDS):
             continue
         params: dict = {}
         if "<eq>" in pattern.pattern:
@@ -410,7 +537,7 @@ def route(question: Any) -> dict:
             params["in_alarm"] = True
         if rid.startswith("capabilities.unavailable"):
             params["show"] = "unavailable"
-        if rid == "notifications.unread":
+        if rid in ("notifications.unread", "notifications.unread.count"):
             params["view"] = "unread"
         if _validate(params, TOOLS[intent]["parameters"]):
             return _fallback("invalid_parameters")
@@ -418,7 +545,155 @@ def route(question: Any) -> dict:
     metric = _metric(text)
     if metric:
         return metric
+    for found in (_history(text), _analytic(text)):
+        if found:
+            return found
     return _fallback("complex_question" if complex_q else "unsupported_or_ambiguous")
+
+
+# ─── Several questions in one message ────────────────────────────────────────
+# split_parts / plan_parts turn "How many assets are there and how many AHUs are in alarm?" into its questions, each one routed by the SAME route() as a
+# single question. Nothing here runs a tool or reads FIN: it is text only. A message is split only when every piece is either routed by a rule or is
+# plainly a question or request of its own that no rule knows (so the caller can say so); anything else is not a compound message and is left whole.
+MAX_PARTS = 4
+# a sentence ends at . ? ! followed by a space (not 3.5, not "e.g."), or at a line break
+_SENTENCE_END = re.compile(r"(?<=[?!.\u061f])(?<!e\.g\.)(?<!i\.e\.)(?<!etc\.)(?<!vs\.)\s+(?=\S)|\s*\n+\s*")
+# inside a sentence: a comma (not in 1,000), and / then / also / plus / as well as / & / + between whole words
+_CONNECTOR = re.compile(r"\s*(?<!\d)[,\u060c](?!\d)\s*(?:(?:and|then|also|plus)\s+)?|\s+(?:and\s+then|and\s+also|as\s+well\s+as|and|then|also|plus)\s+|\s*[&+]\s*", re.I)
+_LEADING = re.compile(r"^(?:(?:and\s+then|and\s+also|as\s+well\s+as|after\s+that|and|then|also|plus|next|finally)\b[\s,]*)+", re.I)
+_ARABIC = re.compile(r"[\u0600-\u06ff]")
+_NUMBERING = re.compile(r"^\s*\d{1,2}[.)]\s+")
+# the verb a list shares: "Show notifications, humidity and CO2" is show notifications, show humidity, show CO2
+_LEAD = re.compile(r"^(show me|show|list|display|get me|get|give me|read|view|see|tell me|what is|what's|what are|check)\b", re.I)
+# a piece no rule knows is kept (and reported) only when it is a question or a request of its own
+_SELF_STANDING = re.compile(r"^(?:what|which|who|where|when|why|how|is|are|do|does|did|can|could|will|would|should|have|has|show|list|display|get|give|read|view|see|"
+                            r"tell|check|find|compare|explain|open|go|change|switch|turn|set|start|stop|count|acknowledge|ack|silence|mute|enable|disable|delete|"
+                            r"remove|edit|update|reset)\b", re.I)
+# values that only narrow another phrase ("critical and warning alarms", "unread, today"): a split that leaves one of these on its own is not a split
+_MODIFIERS = {"critical", "warning", "warnings", "info", "high", "medium", "low", "open", "closed", "active", "all", "unread", "read", "new", "latest", "recent",
+              "today", "yesterday", "current", "currently", "live", "only", "both", "each", "every", "any", "the", "a", "an", "of", "in", "on", "for", "to", "please",
+              "now", "right", "total", "overall", "average", "by", "floor", "type", "severity", "state", "status"}
+
+
+def _clean_piece(text: str) -> str:
+    t = _NUMBERING.sub("", text.strip())
+    t = _LEADING.sub("", t)
+    return re.sub(r"\s+", " ", t.strip(" \t,;:.!?\u060c\u061f")).strip()
+
+
+def _routes(text: str) -> Optional[dict]:
+    """The direct decision route() gives this text, or None."""
+    d = route(text)
+    return d if d["route"] == "direct" else None
+
+
+# "compare X and Y", "difference between X and Y": the "and" between the two names belongs to the question, so it is held back from the splitter
+_ID = r"[A-Za-z]{1,8}[0-9]*(?:[-_][A-Za-z0-9]+)+"
+_COMPARE_PAIR = re.compile(r"\b(?:compare|comparison|difference|differences|between|contrast)\b[^,;]*?(?<![\w-])" + _ID + r"\s+and\s+" + _ID + r"(?![\w-])", re.I)
+_HOLD = "\x00"
+# "list their alarms" / "show its alarms": the equipment the part just before it named (compare X and Y -> their; status of X -> its)
+_ANAPHORIC_ALARMS = re.compile(r"^(?:show|list|display|get|give me|what are)(?: me)? (?P<who>their|its|both) (?:(?:open|current|active) )?(?:alarms|alerts)$")
+# a metric written on its own after an operation ("the highest temperature and humidity"): the operation is shared
+_BARE_METRIC = re.compile(r"^(?:the )?(?:temperatures?|temp|humidity|co2|co₂|carbon dioxide|power)$")
+_METRIC_WORD = re.compile(r"temperatures?|temp|humidity|co2|co₂|carbon dioxide|power", re.I)
+
+
+def _protect(text: str) -> str:
+    return _COMPARE_PAIR.sub(lambda m: re.sub(r"\s+and\s+", _HOLD, m.group(0)), text)
+
+
+def _restore(text: str) -> str:
+    return text.replace(_HOLD, " and ")
+
+
+def _alarms_of_previous(text: str, previous: Optional[dict]) -> tuple[Optional[dict], Optional[str]]:
+    """(decision, interpreted_as) for "list their alarms" / "list its alarms" after a part that named the equipment, else (None, None).
+    Their is the two items of a comparison; its is the one item of a status or alarm question. Nothing is guessed: no such part before it, no answer."""
+    m = _ANAPHORIC_ALARMS.match(_normalize(text))
+    d = previous.get("decision") if isinstance(previous, dict) else None
+    if not m or not d:
+        return None, None
+    params = d.get("parameters") or {}
+    if d.get("intent") == "compare_equipment" and m.group("who") in ("their", "both"):
+        new = {"equipment_a": params["equipment_a"], "equipment_b": params["equipment_b"], "focus": "alarms"}
+        rule, intent, said = "compare.alarms", "compare_equipment", f"list alarms on {params['equipment_a']} and {params['equipment_b']}"
+    elif m.group("who") == "its" and d.get("intent") in ("get_equipment_status", "get_alarms") and params.get("equipment"):
+        new = {"equipment": params["equipment"]}
+        rule, intent, said = "alarms.equipment.ref", "get_alarms", f"list alarms on {params['equipment']}"
+    else:
+        return None, None
+    if _validate(new, TOOLS[intent]["parameters"]):
+        return None, None
+    return {"route": "direct", "intent": intent, "parameters": new, "confidence": "high", "rule": rule}, said
+
+
+def split_parts(message: Any) -> list[str]:
+    """The pieces of a message: its sentences, and inside each sentence the parts a comma or and / then / also / plus / & separates. The
+    pieces are unchecked text; plan_parts decides whether the split is real."""
+    if not isinstance(message, str):
+        return []
+    out = []
+    for sentence in _SENTENCE_END.split(message.strip()):
+        out += [c for c in (_clean_piece(_restore(x)) for x in _CONNECTOR.split(_protect(sentence or ""))) if c and not re.fullmatch(r"\d{1,2}", c)]
+    return out
+
+
+def plan_parts(message: Any) -> Optional[dict]:
+    """The questions of a compound message, each with its own routing decision, or None when the message is not compound.
+
+      {"parts": [{"text": <the user's words>, "decision": <route() decision> | None, "interpreted_as": <text routed, when a shared verb was added> | None}],
+       "overflow": [<the questions beyond MAX_PARTS>]}
+
+    A decision of None is a question or request of its own that no rule knows: the caller reports it, it is never dropped. A single question, and a
+    message whose pieces do not each stand as a question or a rule match (a modifier like "warnings" left alone), is not compound: None."""
+    if not isinstance(message, str) or not message.strip() or len(message) > MAX_MESSAGE_CHARS or UNSAFE.search(message):
+        return None
+    pieces: list[dict] = []
+
+    def push(text: str, decision: Optional[dict], said: Optional[str] = None) -> None:
+        if decision is None:                           # "list their alarms" means the equipment of the part before it, and only that
+            decision, said = _alarms_of_previous(text, pieces[-1] if pieces else None)
+        pieces.append({"text": text, "decision": decision, "interpreted_as": said if decision else None})
+
+    for sentence in _SENTENCE_END.split(message.strip()):
+        whole = _clean_piece(sentence or "")
+        if not whole or re.fullmatch(r"\d{1,2}", whole):
+            continue
+        decision = _routes(whole)
+        if decision:                                   # a sentence a rule answers as it is stays whole ("and" and commas inside it included)
+            push(whole, decision)
+            continue
+        subs = [c for c in (_clean_piece(_restore(x)) for x in _CONNECTOR.split(_protect(whole))) if c]
+        lead = _LEAD.match(subs[0]) if subs else None
+        op_text = None                                 # the last part that was an operation over a metric ("the highest temperature")
+        for i, sub in enumerate(subs):
+            if op_text and _BARE_METRIC.match(sub.lower()):
+                shared = _METRIC_WORD.sub(re.sub(r"^the ", "", sub, flags=re.I), op_text, count=1)
+                d = _routes(shared)
+                if d and d["intent"] == "calculate_metric":
+                    push(sub, d, shared)
+                    continue
+            d = _routes(sub)
+            if d:
+                op_text = sub if d.get("rule") == "analytics.agg" else None
+                push(sub, d)
+                continue
+            op_text = None
+            shared = f"{lead.group(1)} {sub}" if lead and i > 0 else None
+            d = _routes(shared) if shared else None
+            push(sub, d, shared)
+    if len(pieces) < 2 or not any(p["decision"] for p in pieces):
+        return None
+    for p in pieces:
+        words = re.findall(r"[a-z]+", p["text"].lower())
+        if p["decision"] is None:
+            known = unsupported_topic(p["text"]) or clarification_for(p["text"])
+            own = _SELF_STANDING.match(p["text"]) or _ARABIC.search(p["text"])
+            if not known and (len(p["text"].split()) < 3 or not own):
+                return None                            # a fragment, not a question of its own: this was not a list of questions
+        elif p["interpreted_as"] and words and set(words) <= _MODIFIERS:
+            return None
+    return {"parts": pieces[:MAX_PARTS], "overflow": [p["text"] for p in pieces[MAX_PARTS:]]}
 
 
 def execute(decision: dict, view: DataView) -> dict:
@@ -480,9 +755,22 @@ _DATA_KIND = {"live": "a current FIN read", "historical": "FIN's hourly history"
 _READ_STATE = {"stale": "is stale (older than the allowed age)", "not_read": "has not been read from FIN yet"}
 
 
+def _partial_text(rows: list) -> str:
+    """" Partly available: A, B (the limit); C (its limit)." The same limit is said once, with every capability it applies to."""
+    from eko_chat_capabilities import PARTIAL
+    by_limit: dict = {}
+    for x in rows:
+        if x.get("status") == PARTIAL:
+            for m in x.get("limitations") or [""]:
+                by_limit.setdefault(m, []).append(x["label"])
+    if not by_limit:
+        return ""
+    return " Partly available: " + "; ".join(f"{', '.join(labels)} ({m})" if m else ", ".join(labels) for m, labels in by_limit.items()) + "."
+
+
 def _capabilities_text(r: dict) -> str:
     """What the assistant can do for this project, in words, copied from the get_capabilities result."""
-    from eko_chat_capabilities import AVAILABLE, NOT_SUPPORTED, UNMAPPED, where
+    from eko_chat_capabilities import AVAILABLE, NOT_SUPPORTED, PARTIAL, UNMAPPED, where
     project = (r.get("project") or {}).get("name") or "this project"
     a = r.get("about")
     if a:
@@ -494,6 +782,10 @@ def _capabilities_text(r: dict) -> str:
         if status == UNMAPPED:
             need = "; ".join(where(m) for m in a.get("missing") or [])
             return f"{label} is not available for {project}: nothing is mapped for it. Map {need}."
+        if status == PARTIAL:
+            return (f"{label} is partly available for {project}, from {_DATA_KIND.get(a.get('data'), 'the project data')}."
+                    + "".join(" " + m for m in a.get("limitations") or []) + (f" {a['note']}" if a.get("note") else "")
+                    + (f" For example: \"{a['examples'][0]}\"." if a.get("examples") else ""))
         text = f"{label} is available for {project}, from {_DATA_KIND.get(a.get('data'), 'the project data')}."
         if a.get("examples"):
             text += f" For example: \"{a['examples'][0]}\"."
@@ -506,6 +798,7 @@ def _capabilities_text(r: dict) -> str:
         return _unavailable_text(r, project, rows, counts)
     by_area = [f"{x['label']} ({x.get('available', 0)})" for x in r.get("areas") or [] if x.get("available")]
     text = (f"For {project} I can answer {counts.get(AVAILABLE, 0)} kinds of question, read-only from its FIN data: " + ", ".join(by_area) + ".")
+    text += _partial_text(rows)
     unmapped = [x for x in rows if x.get("status") == UNMAPPED]
     if unmapped:
         text += " Not available because nothing is mapped for this project: " + "; ".join(
@@ -528,11 +821,13 @@ def _unavailable_text(r: dict, project: str, rows: list, counts: dict) -> str:
     unmapped = [x for x in rows if x.get("status") == UNMAPPED]
     planned = [x for x in rows if x.get("status") != UNMAPPED and x.get("reason") == "planned"]
     never = [x for x in rows if x.get("status") != UNMAPPED and x.get("reason") == "read_only"]
+    partial = _partial_text(rows)
     if unmapped:
         text = (f"In {project}, {counts.get('unmapped', 0)} things the assistant can answer are not available because nothing is mapped for them: "
                 + "; ".join(f"{x['label']} (map {'; '.join(where(m) for m in x.get('missing') or [])})" for x in unmapped) + ".")
     else:
         text = f"In {project}, nothing the assistant can answer is missing a mapping."
+    text += partial
     if planned:
         text += " Not supported yet: " + ", ".join(x["label"] for x in planned) + "."
     if never:
@@ -542,6 +837,129 @@ def _unavailable_text(r: dict, project: str, rows: list, counts: dict) -> str:
     odd = [f"{k} {_READ_STATE[v['state']]}" for k, v in (r.get("reads") or {}).items() if v.get("state") in _READ_STATE]
     if odd:
         text += " Data state: " + "; ".join(odd) + "."
+    return text
+
+
+def _n(count: int, one: str, many: Optional[str] = None) -> str:
+    return f"{count} {one if count == 1 else (many or one + 's')}"
+
+
+def _reasons(counts: dict) -> str:
+    return ", ".join(f"{n} {k.replace('_', ' ')}" for k, n in counts.items())
+
+
+_OPS_LEAD = {"average": "Average", "min": "Lowest", "max": "Highest", "sum": "Total"}
+# no digits in these: the grounding check accepts only numbers the tool result holds
+_PERIOD_TEXT = {"today": " for today", "yesterday": " for yesterday", "last_7_days": " for the last seven days", "last_30_days": " for the last thirty days",
+                "this_month": " for this month"}
+
+
+def _metric_text(r: dict) -> str:
+    label, kind = r.get("label"), (r.get("scope") or {}).get("type")
+    scope = f" for {kind}" if kind else ""
+    basis = f"from {_n(r['samples'], 'reading')} on {_n(r['equipment_count'], 'equipment item')} (latest FIN read {r.get('as_of')})"
+    if r.get("op") == "top":
+        ranked = "; ".join(f"{i['rank']}. {i['equipment']} {_g(i['value'])}{(' ' + i['unit']) if i.get('unit') else ''} ({i['point']})" for i in r.get("items") or [])
+        text = f"{'Highest' if r.get('order') == 'highest' else 'Lowest'} {label}{scope} by equipment, each by its own reading: {ranked}, {basis}."
+    elif r.get("op") == "count":
+        text = f"Usable {label} readings{scope}: {r['value']}, {basis}."
+    else:
+        at = f" at {r['at']['equipment']} ({r['at']['point']})" if r.get("at") else ""
+        text = f"{_OPS_LEAD[r['op']]} {label}{scope}: {_g(r['value'])}{(' ' + r['unit']) if r.get('unit') else ''}{at}, {basis}."
+    text += " Readings are a point in time; no history is available."
+    if r.get("op") == "top" and r.get("truncated"):
+        text += f" Showing {len(r['items'])} of {r['ranked_equipment']} equipment items."
+    if r.get("note"):
+        text += " " + r["note"]
+    other = r.get("other_units") or {}
+    left = {k: v for k, v in (r.get("excluded") or {}).items() if not (k == "unit_mismatch" and other)}
+    if left:
+        text += f" Left out: {_reasons(left)}."
+    if other:
+        text += " In another unit, not combined: " + ", ".join(f"{n} in {u}" for u, n in other.items()) + "."
+    if r.get("stale_points"):
+        text += f" Stale: {', '.join(r['stale_points'])}."
+    if r.get("assumed_unit"):
+        text += f" {r['assumed_unit']} points carry no unit; {r.get('unit') or 'the metric unit'} is taken from the metric."
+    return text
+
+
+def _compare_text(r: dict, params: dict) -> str:
+    if not r.get("found"):
+        if r.get("reason") == "same_equipment":
+            return f"{params.get('equipment_a')} and {params.get('equipment_b')} are the same equipment item, so there is nothing to compare."
+        said = []
+        for u in r.get("unfound") or []:
+            said.append((f"More than one equipment item matches {u['equipment']}." if u.get("reason") == "ambiguous" else f"No equipment named {u['equipment']} was found.")
+                        + (f" Close matches: {_names(u['candidates'])}." if u.get("candidates") else ""))
+        return " ".join(said) + " Nothing was compared."
+    a, b = (e.get("name") for e in r["equipment"])
+    al = r.get("alarms") or {}
+    if r.get("focus") == "alarms":
+        def side(name: str, s: dict) -> str:
+            msgs = "; ".join(str(x.get("message")) for x in (s.get("items") or [])[:3])
+            return f"{name}: {_n(s['open'], 'open alarm')}" + (f" ({msgs})" if msgs else "")
+        return side(a, al["a"]) + "; " + side(b, al["b"]) + "."
+    c = r.get("comparison") or {}
+    text = f"{a} compared with {b}: {_n(c.get('compared', 0), 'common numeric point')}."
+    rank = sorted(c.get("items") or [], key=lambda i: -abs(i["percent_difference"] if i.get("percent_difference") is not None else i["difference"]))[:3]
+    shown = []
+    for i in rank:
+        unit = f" {i['unit']}" if i.get("unit") else ""
+        gap = f", {_g(i['percent_difference'])}%" if i.get("percent_difference") is not None else "; no percentage, the second value is zero"
+        shown.append(f"{i['point']} {_g(i['a'])} vs {_g(i['b'])}{unit} (difference {_g(i['difference'])}{gap})")
+    if shown:
+        text += " Largest differences first, first item minus second: " + "; ".join(shown) + "."
+    if c.get("truncated"):
+        text += f" Showing {c['returned']} of {c['compared']}."
+    if c.get("not_comparable_total"):
+        text += (f" {_n(c['not_comparable_total'], 'common point')} could not be compared ("
+                 + ", ".join(sorted({x['reason'].replace('_', ' ') for x in c.get('not_comparable') or []})) + ").")
+    for key, name in (("only_in_a", a), ("only_in_b", b)):
+        if c.get(key):
+            text += f" Only on {name}: {_names(c[key])}."
+    return text + f" Open alarms: {a} {al['a']['open']}, {b} {al['b']['open']}."
+
+
+def _history_text(r: dict) -> str:
+    cov = r.get("coverage")
+    if cov is None:
+        return r["coverage_note"]
+    text = (f"Alarm records in FIN's latest read{_PERIOD_TEXT.get(r.get('period'), '')}: {r['total']} ({r['open']} open, {r['cleared']} cleared).")
+    if r.get("by_severity"):
+        s = r["by_severity"]
+        text += f" By severity: {s['critical']} critical, {s['warning']} warning, {s['info']} info."
+    elif r.get("severity_note"):
+        text += " " + r["severity_note"]
+    if cov.get("from"):
+        text += f" The read covers {cov['from']} to {cov['to']}."
+    if r.get("coverage_note"):
+        text += " " + r["coverage_note"]
+    if cov.get("may_be_truncated"):
+        text += f" The read holds {cov['records_in_read']} records, the most that are kept, so older ones may be missing."
+    if cov.get("undated"):
+        text += f" {_n(cov['undated'], 'record')} carry no date."
+    return text + " This is not an archive."
+
+
+def _phase2_text(intent: str, r: dict, params: dict) -> str:
+    """The answer sentence of the Phase 2 tools; every number in it is a field of the tool result."""
+    if intent == "calculate_metric":
+        return _metric_text(r)
+    if intent == "get_alarm_history":
+        return _history_text(r)
+    if intent == "compare_equipment":
+        return _compare_text(r, params)
+    kind = (r.get("scope") or {}).get("type")
+    total = r.get("total", 0)
+    if not total:
+        live = r.get("mapping") or {}
+        tail = f" The live point {live['live_point']} is not mapped for this project either." if live.get("live_point") and live.get("mapped") is False else ""
+        return f"No equipment point name matches {r.get('label')}{f' on {kind} equipment' if kind else ''}. Equipment checked: {r.get('equipment_scanned', 0)}." + tail
+    text = (f"{total} equipment items have" if total != 1 else "1 equipment item has") + f" {r.get('label')} points{f' of type {kind}' if kind else ''}, " \
+           f"{r.get('with_readings', 0)} with a usable reading. Including {_names([i.get('name') for i in r.get('items') or []])}.{_shown(r)}"
+    if r.get("points_without_reading"):
+        text += f" {r['points_without_reading']} of {r['points_matched']} matching points have no usable reading ({_reasons(r.get('excluded') or {})})."
     return text
 
 
@@ -578,7 +996,9 @@ def direct_text(out: dict, rule: str = "") -> str:
     if intent == "find_equipment":
         total, names = r.get("total", 0), [i.get("name") for i in r.get("items") or []]
         if params.get("in_alarm"):
-            return f"Equipment currently in alarm ({total}): {_names(names)}.{_shown(r)}" if total else "No equipment is currently in alarm."
+            of_type = f" of type {params['type']}" if params.get("type") else ""
+            return (f"Equipment{of_type} currently in alarm ({total}): {_names(names)}.{_shown(r)}" if total
+                    else f"No equipment{of_type} is currently in alarm.")
         kind = params.get("type")
         if kind and not total:
             return f"No equipment of type {kind} was found in this project's data."
@@ -586,6 +1006,8 @@ def direct_text(out: dict, rule: str = "") -> str:
         untyped = (" No equipment types are mapped for this project (Dashboard Settings > Data Mapping > Equipment Classes), so the type shows other for "
                    "every item; each item's own FIN tags are listed instead." if r.get("types_mapped") is False and total else "")
         return lead + (f" Including {_names(names)}." if names else "") + _shown(r) + untyped
+    if intent in ("search_points", "calculate_metric", "compare_equipment", "get_alarm_history"):
+        return _phase2_text(intent, r, params)
     if intent == "get_capabilities":
         return _capabilities_text(r)
     if intent == "get_equipment_status":

@@ -5,7 +5,9 @@ turns it into the picture for ONE project from the Data Mapping names that proje
 projects carry the same data:
 
   available      a read-only tool answers it, and the mapping it needs (if any) is present
-  unmapped       a tool answers it, but the project has not mapped what it needs; `missing` names the Data Mapping entries
+  partial        a tool answers it, with a stated limit that changes what the answer covers (the alarm records are those of FIN's latest read, not an
+                 archive; some of the metrics have no point in this project's equipment); `limitations` says which
+  unmapped       a tool answers it, but the project has not mapped what it needs (or its equipment has no point for it); `missing` names what
   not_supported  nothing answers it: `reason` is "planned" (not built yet) or "read_only" (Eko-Chat will never do it)
 
 `data` says what kind of data the answer is: live (a current FIN read), historical (FIN's hourly series), stored (Eko-DT's own notification
@@ -17,13 +19,14 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-AVAILABLE, UNMAPPED, NOT_SUPPORTED = "available", "unmapped", "not_supported"
+AVAILABLE, PARTIAL, UNMAPPED, NOT_SUPPORTED = "available", "partial", "unmapped", "not_supported"
 LIVE, HISTORICAL, STORED = "live", "historical", "stored"
 
 # Data Mapping block (the apiSettings field) -> what Dashboard Settings > Data Mapping calls it
 MAPPING_LABEL = {
     "finLivePoints": "Live Points", "finEndpoints": "Endpoints", "finEquipmentClasses": "Equipment Classes",
     "finMeterProfile": "Meter Profile", "finSeverityBands": "Severity Bands", "power_boards": "Distribution boards",
+    "equipmentPoints": "Equipment points in FIN",
 }
 ENERGY_SERIES = ("Hourly_Energy_Consumption_his", "Total_Power_Consumption_his")   # eko_chat.ENERGY_SERIES (a test keeps the two equal)
 
@@ -31,6 +34,7 @@ AREAS = {
     "equipment": "Equipment", "alarms": "Alarms", "notifications": "Notifications", "environment": "Indoor environment",
     "energy": "Energy", "hvac": "HVAC", "building": "Building", "assistant": "Assistant", "utilities": "Water and gas",
     "meters": "Power meters", "maintenance": "Maintenance", "documents": "Documents", "studio": "Studio controls", "control": "Control",
+    "analytics": "Point analytics",
 }
 
 # needs: a list of groups; every group must hold, and a group holds when ANY of its alternatives does. Alternatives:
@@ -39,6 +43,9 @@ AREAS = {
 #   ("boards",)         the project has distribution boards (backend power_boards)
 #   ("board_series",)   at least one board's hourly series is mapped in finEndpoints
 #   ("equipment_points",) nothing to map: read from the equipment points themselves
+# partial: the capability always answers with this limit (a message); status `partial` instead of `available`.
+# coverage_metrics: True when the answer needs the project's equipment to have points for the metrics (evaluate()'s `coverage`): a metric with no point
+#   makes it partial, no metric with a point makes it unmapped.
 # reads: the cache the answer comes from ("equipment", "alarms", "power", "history", "store"), for the stale / not-yet-read report.
 # limits: (mapping block, message) pairs: the capability works without that block, but its answer is limited, and says so.
 # studio: where the same information lives in the dashboard (module, sub), for the UI actions of a later phase; informational.
@@ -55,6 +62,15 @@ CAPABILITIES: list[dict] = [
        examples=["status of AHU-01"], studio=_C(module="assets", sub="reg")),
     _C(id="equipment.in_alarm", area="equipment", label="Equipment in alarm", tool="find_equipment", data=LIVE, reads="equipment",
        examples=["which equipment is in alarm"], studio=_C(module="assets", sub="reg")),
+    _C(id="equipment.compare", area="equipment", label="Compare two equipment items", tool="compare_equipment", data=LIVE, reads="equipment",
+       examples=["compare AHU-01 and AHU-02"], studio=_C(module="assets", sub="reg"),
+       note="Their open alarms and the difference and percentage difference of the numeric points they share."),
+    _C(id="points.search", area="analytics", label="Find equipment by the points it has", tool="search_points", data=LIVE, reads="equipment",
+       examples=["find equipment with humidity readings", "list AHUs with CO2 measurements"], coverage_metrics=True,
+       note="Searches the point names of this project's equipment for temperature, humidity, CO2 and power."),
+    _C(id="analytics.metric", area="analytics", label="Calculations over equipment points", tool="calculate_metric", data=LIVE, reads="equipment",
+       examples=["which AHU has the highest temperature", "top 3 AHUs by CO2"], coverage_metrics=True,
+       note="Average, minimum, maximum, count and ranking of the current readings, calculated in Python with the sample count; power can also be summed."),
     _C(id="alarms.open", area="alarms", label="Open alarms, by severity or equipment", tool="get_alarms", data=LIVE, reads="alarms",
        examples=["are there any active alarms", "show critical alarms"], studio=_C(module="overview"),
        limits=[("finSeverityBands", "No severity bands are mapped, so every alarm is graded info.")]),
@@ -94,6 +110,11 @@ CAPABILITIES: list[dict] = [
     _C(id="hvac.online", area="hvac", label="HVAC systems online", tool="get_hvac_status", data=LIVE, reads="equipment",
        examples=["which AHUs are online"], studio=_C(module="systems", sub="hvac"),
        limits=[("finEquipmentClasses", "No equipment classes are mapped, so every equipment item counts as a system.")]),
+    _C(id="alarms.history_summary", area="alarms", label="Alarm history by day and severity", tool="get_alarm_history", data=LIVE, reads="alarms",
+       examples=["alarm history", "how many alarms were raised today"], studio=_C(module="overview"),
+       partial="Only the alarm records in FIN's latest alarm read (open and cleared, the newest 200) are counted; it is not an archive, so a period that "
+               "read does not reach cannot be summarised.",
+       limits=[("finSeverityBands", "No severity bands are mapped, so alarms are not graded and there is no severity breakdown.")]),
     _C(id="building.snapshot", area="building", label="Building overview", tool="get_building_snapshot", data=LIVE, reads="power",
        examples=["show the building status"], studio=_C(module="overview")),
     _C(id="assistant.capabilities", area="assistant", label="What the assistant can answer for this project", tool="get_capabilities",
@@ -102,8 +123,9 @@ CAPABILITIES: list[dict] = [
     _C(id="energy.compare", area="energy", label="Compare energy between periods", status=NOT_SUPPORTED, reason="planned",
        examples=["compare today's energy with yesterday"]),
     _C(id="energy.trend", area="energy", label="Energy trends over weeks or months", status=NOT_SUPPORTED, reason="planned"),
-    _C(id="alarms.history_summary", area="alarms", label="Alarm history by day and severity", status=NOT_SUPPORTED, reason="planned",
-       note="The latest alarm records are available."),
+    _C(id="analytics.point_history", area="analytics", label="Averages, minimums and maximums of points over a past period", status=NOT_SUPPORTED,
+       reason="planned", examples=["average temperature last week"],
+       note="Only the current readings of points are calculated: stored point history is not read, and nothing is estimated for a past period."),
     _C(id="utilities.water_gas", area="utilities", label="Water and gas consumption", status=NOT_SUPPORTED, reason="planned"),
     _C(id="meters.power", area="meters", label="Power meter readings", status=NOT_SUPPORTED, reason="planned"),
     _C(id="maintenance.workorders", area="maintenance", label="Work orders", status=NOT_SUPPORTED, reason="planned"),
@@ -160,9 +182,27 @@ def _missing(alt: tuple) -> dict:
     return {"mapping": "power_boards", "key": "history series in finEndpoints"}   # board_series
 
 
-def evaluate(mapped: Optional[dict], boards: Optional[list] = None) -> list[dict]:
+def _coverage_limits(c: dict, coverage: Optional[dict]) -> tuple[list, list]:
+    """(missing, limitations) of a capability that needs equipment points for the metrics, from the points the project's equipment has.
+    `coverage` is {"equipment": n, "metrics": {metric: {"label", "points", "with_readings"}}}, or None when the equipment was not read (nothing is claimed)."""
+    metrics = coverage.get("metrics") if isinstance(coverage, dict) else None
+    if not c.get("coverage_metrics") or not isinstance(metrics, dict) or not metrics:
+        return [], []
+    none = [(k, v) for k, v in metrics.items() if not v.get("points")]
+    if len(none) == len(metrics):
+        return [{"mapping": "equipmentPoints", "key": k} for k, _ in none], []
+    limits = []
+    if none:
+        limits.append(f"No equipment point in this project is named like {', '.join(str(v.get('label') or k) for k, v in none)}, so those cannot be calculated.")
+    limits += [f"{v.get('label') or k} has points, but none has a usable reading in the latest read." for k, v in metrics.items()
+               if v.get("points") and not v.get("with_readings")]
+    return [], limits
+
+
+def evaluate(mapped: Optional[dict], boards: Optional[list] = None, coverage: Optional[dict] = None) -> list[dict]:
     """Every capability as it stands for one project. `mapped` holds the names the project maps (finLivePoints / finEndpoints: key lists;
-    finEquipmentClasses / finMeterProfile / finSeverityBands: whether set); `boards` its distribution boards [{"name", "history"}]."""
+    finEquipmentClasses / finMeterProfile / finSeverityBands: whether set); `boards` its distribution boards [{"name", "history"}]; `coverage` what its
+    equipment points hold for each metric (see _coverage_limits)."""
     mapped = mapped if isinstance(mapped, dict) else {}
     out = []
     for c in CAPABILITIES:
@@ -177,22 +217,30 @@ def evaluate(mapped: Optional[dict], boards: Optional[list] = None) -> list[dict
         for group in c.get("needs") or []:
             if not any(_holds(a, mapped, boards or []) for a in group):
                 row["missing"] += [_missing(a) for a in group]
+        gaps, limits = _coverage_limits(c, coverage)
+        row["missing"] += gaps
         row["status"] = UNMAPPED if row["missing"] else AVAILABLE
         if row["status"] == AVAILABLE:
+            if c.get("partial"):
+                row["status"] = PARTIAL
+                row["limitations"].append(c["partial"])
             for block, message in c.get("limits") or []:
                 if not mapped.get(block):
                     row["limitations"].append(message)
+            row["limitations"] += limits
+            if any(m.startswith("No equipment point") for m in limits):
+                row["status"] = PARTIAL
         out.append(row)
     return out
 
 
 def summary(rows: list[dict]) -> dict:
     """Counts by status, and by area: the numbers the answer and the card quote."""
-    counts = {AVAILABLE: 0, UNMAPPED: 0, NOT_SUPPORTED: 0}
+    counts = {AVAILABLE: 0, PARTIAL: 0, UNMAPPED: 0, NOT_SUPPORTED: 0}
     areas: dict = {}
     for r in rows:
         counts[r["status"]] += 1
-        a = areas.setdefault(r["area"], {"area": r["area"], "label": AREAS.get(r["area"], r["area"]), AVAILABLE: 0, UNMAPPED: 0, NOT_SUPPORTED: 0})
+        a = areas.setdefault(r["area"], {"area": r["area"], "label": AREAS.get(r["area"], r["area"]), AVAILABLE: 0, PARTIAL: 0, UNMAPPED: 0, NOT_SUPPORTED: 0})
         a[r["status"]] += 1
     return {"counts": counts, "areas": list(areas.values())}
 
@@ -201,6 +249,8 @@ def where(missing: dict) -> str:
     """'Dashboard Settings > Data Mapping > Live Points: iaq_index' for one missing entry."""
     block = MAPPING_LABEL.get(missing.get("mapping"), missing.get("mapping"))
     key = missing.get("key")
+    if missing.get("mapping") == "equipmentPoints":
+        return f"the equipment points in FIN: no point name contains {key}" if key else "the equipment points in FIN"
     if missing.get("mapping") == "power_boards":
         if key:
             return "the distribution boards' hourly series under Dashboard Settings > Data Mapping > Endpoints"

@@ -33,8 +33,10 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Optional, Protocol
 
 import httpx
+import eko_chat_analytics as an
 import eko_chat_capabilities as caps
 import eko_chat_trace as chat_trace
+import eko_chat_context as chat_ctx
 from fin_client import AM_PM_LOOKUP, MONTHS_ORDER
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -48,6 +50,11 @@ MAX_TOOL_ROUNDS = 4
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 50
 MAX_POINTS = 25
+POINTS_PER_ITEM = 3            # points shown for one equipment item of a point search
+DEFAULT_TOP = 5                # size of a ranking when none is asked
+MAX_COMPARE_POINTS = 25        # compared points returned for two equipment items
+ALARM_RECORDS_CAP = 200        # the most alarm records main.py hands to the chat (main._chat_alarm_records)
+MAX_DAYS = 14                  # days listed in an alarm-record summary
 MAX_RULES = 15
 MAX_TEXT = 200
 GUID_RE = re.compile(r"^[0-9A-Za-z_$]{22}$")
@@ -138,7 +145,9 @@ def _fold(text: Any) -> str:
 
 
 # The narrowing filters a model may pass to a tool, which must be words the user wrote (the hybrid mode asks the same of its intents)
-ASKED_FILTERS = {"find_equipment": ("type", "floor", "name"), "get_hvac_status": ("type",), "get_alarms": ("severity",)}
+ASKED_FILTERS = {"find_equipment": ("type", "floor", "name"), "get_hvac_status": ("type",), "get_alarms": ("severity",),
+                 "search_points": ("type",), "calculate_metric": ("type",), "compare_equipment": ("equipment_a", "equipment_b"),
+                 "get_alarm_history": ("severity", "equipment")}
 
 
 def severity_written(severity: Any, message: str) -> bool:
@@ -146,13 +155,15 @@ def severity_written(severity: Any, message: str) -> bool:
     return isinstance(severity, str) and bool(re.search(rf"\b{re.escape(severity.strip().lower())}s?\b", str(message).lower()))
 
 
-def unasked_filters(tool: Any, args: Any, message: str) -> list[str]:
-    """The filters in args that the question does not contain ("type": "electrical" for "read the equipment list"); [] when all are written."""
+def unasked_filters(tool: Any, args: Any, message: str, filters: Optional[dict] = None, seen: Any = ()) -> list[str]:
+    """The filters in args that the question does not contain ("type": "electrical" for "read the equipment list"); [] when all are written.
+    `filters` replaces ASKED_FILTERS, and `seen` is the text of the tool results already read in this request: a name the user did not write but an earlier
+    result holds (the planner's follow-up call) is a name from the data, not an invention. A severity must always be the user's own word."""
     if not isinstance(tool, str) or not isinstance(args, dict):
         return []
-    asked = _fold(message)
+    asked = _fold(str(message) + " " + " ".join(str(s) for s in seen))
     out = []
-    for key in ASKED_FILTERS.get(tool, ()):
+    for key in (ASKED_FILTERS if filters is None else filters).get(tool, ()):
         value = args.get(key)
         if value in (None, ""):
             continue
@@ -336,6 +347,20 @@ def find_equipment(args: dict, view: DataView) -> dict:
     return out
 
 
+def _lookup_equipment(name: Any, equipment: list) -> tuple[Optional[dict], Optional[dict]]:
+    """(equipment, None) for the one item with exactly this name (case, spaces, dashes and underscores ignored), else (None, {"reason", "candidates"}).
+    Close matches are offered, never chosen: "AHU-1" is not silently AHU-10 or AHU-01."""
+    wanted = _fold(name)
+    exact = [e for e in equipment if _fold(e.get("name")) == wanted]
+    if len(exact) == 1:
+        return exact[0], None
+    loose = _loose(wanted)
+    partial = sorted({str(e.get("name")) for e in equipment if wanted and (wanted in _fold(e.get("name"))
+                                                                          or loose in _loose(_fold(e.get("name"))))})
+    same = sorted(f"{e.get('name')} ({e.get('floor')})" if e.get("floor") else str(e.get("name")) for e in exact)
+    return None, {"reason": "ambiguous" if len(exact) > 1 else "not_found", "candidates": (same if exact else partial)[:10]}
+
+
 def get_equipment_status(args: dict, view: DataView) -> dict:
     problem = _session_problem(view)
     if problem:
@@ -344,18 +369,9 @@ def get_equipment_status(args: dict, view: DataView) -> dict:
     if not ok:
         return _cache_problem(why, as_of, view)
     wanted = _fold(args["equipment"])
-    equipment = _equipment_list(view)
-    exact = [e for e in equipment if _fold(e.get("name")) == wanted]
-    if len(exact) != 1:
-        # close matches are offered, never chosen: "AHU-1" is not silently AHU-10 or AHU-01
-        loose = _loose(wanted)
-        partial = sorted({str(e.get("name")) for e in equipment if wanted and (wanted in _fold(e.get("name"))
-                                                                              or loose in _loose(_fold(e.get("name"))))})
-        same = sorted(f"{e.get('name')} ({e.get('floor')})" if e.get("floor") else str(e.get("name")) for e in exact)
-        return {"available": True, "project": _project(view), "as_of": as_of, "found": False,
-                "reason": "ambiguous" if len(exact) > 1 else "not_found",
-                "candidates": (same if exact else partial)[:10]}
-    eq = exact[0]
+    eq, miss = _lookup_equipment(args["equipment"], _equipment_list(view))
+    if miss:
+        return {"available": True, "project": _project(view), "as_of": as_of, "found": False, **miss}
     points = [p for p in eq.get("points") or [] if isinstance(p, dict)]
     reporting = [p for p in points if p.get("reporting")]
     shown = []
@@ -520,30 +536,23 @@ def _live_reading(key: str, label: str, unit: str, bounds: Optional[tuple], view
 
 
 def _point_average(metric: str, view: DataView) -> tuple[Optional[dict], Optional[dict]]:
-    needle, label, unit, (lo, hi) = ENV_POINTS[metric]
-    values, units, rejected = [], set(), 0
-    for eq in _equipment_list(view):
-        for pt in eq.get("points") or []:
-            if not isinstance(pt, dict) or not pt.get("reporting") or needle not in str(pt.get("navName") or "").lower():
-                continue
-            try:
-                num = float(re.sub(r"[^0-9.\-]", "", str(pt.get("currentValue", ""))))
-            except ValueError:
-                rejected += 1
-                continue
-            if lo <= num <= hi:
-                values.append(num)
-                if pt.get("unit"):
-                    units.add(str(pt["unit"]))
-            else:
-                rejected += 1
+    """The average of the equipment points that report this metric, calculated by eko_chat_analytics over the project's point index: setpoints,
+    unreported, stale, faulty, implausible and other-unit points are left out and counted, and the sample count and the read time come with it."""
+    needle, label, unit, _bounds = ENV_POINTS[metric]
+    rows = _point_index(view).by_metric[metric]
+    readings = [r.reading for r in rows if r.reading]
+    excluded, _, _, _ = _tally(rows)
+    rejected = sum(n for k, n in excluded.items() if k not in ("not_reporting", "setpoint"))      # a point that reports, and was not usable
     name = f"Average {label} of equipment points"
-    if not values:
+    if not readings:
         why = f"no reporting equipment point named *{needle}* has a plausible value" if rejected else f"no equipment point named *{needle}* is reporting"
         return None, {"name": name, "reason": "no_sensors", "message": f"{label}: {why}"}
-    return {"name": name, "value": round(sum(values) / len(values), 1), "unit": units.pop() if len(units) == 1 else unit,
-            "points": len(values), "min": round(min(values), 1), "max": round(max(values), 1), "ignored_points": rejected,
-            "source": f"{len(values)} equipment points whose name contains '{needle}'", "as_of": view.equipment.get("timestamp")}, None
+    mean, low, high = (an.aggregate(readings, op) for op in ("average", "min", "max"))
+    stamp = view.equipment.get("timestamp")
+    return {"name": name, "value": round(mean["value"], 1), "unit": mean["unit"] or unit, "points": len(readings), "min": round(low["value"], 1),
+            "max": round(high["value"], 1), "ignored_points": rejected, "samples": len(readings), "excluded": excluded,
+            "time_range": {"from": stamp, "to": stamp, "basis": "the latest FIN read, a point in time; not a history"},
+            "source": f"{len(readings)} equipment points whose name contains '{needle}'", "as_of": stamp}, None
 
 
 def get_environment(args: dict, view: DataView) -> dict:
@@ -711,16 +720,32 @@ def _read_states(view: DataView) -> dict:
     return out
 
 
+def _point_coverage(view: DataView) -> Optional[dict]:
+    """What this project's equipment points hold for each metric: {"equipment": n, "metrics": {metric: {"label", "points", "with_readings"}}} (counts only,
+    never a point name). None when the equipment cache is not fresh: nothing is then claimed about which points exist."""
+    ok, _, _ = _freshness(view.equipment, view)
+    if not ok:
+        return None
+    index = _point_index(view)
+    return {"equipment": len(index.equipment),
+            "metrics": {m: {"label": an.METRICS[m]["label"], "points": len(rows), "with_readings": sum(1 for r in rows if r.reading)}
+                        for m, rows in index.by_metric.items()}}
+
+
 def get_capabilities(args: dict, view: DataView) -> dict:
-    """What Eko-Chat can answer for THIS project: from its Data Mapping names (never a point ID), not from a fixed list."""
+    """What Eko-Chat can answer for THIS project: from its Data Mapping names and the points of its own equipment (never a point ID or name), not from a
+    fixed list."""
     problem = _session_problem(view)
     if problem:
         return problem
-    rows = caps.evaluate(view.mapped, view.power_boards)
+    coverage = _point_coverage(view)
+    rows = caps.evaluate(view.mapped, view.power_boards, coverage)
     reads = _read_states(view)
     for r in rows:
         r["read"] = reads[r["reads"]]["state"] if r.get("reads") else None
     out = {"available": True, "project": _project(view), "reads": reads, **caps.summary(rows)}
+    if coverage is not None:
+        out["point_coverage"] = coverage
     about = args.get("about")
     if about:
         out["about"] = next(r for r in rows if r["id"] == about)
@@ -763,6 +788,322 @@ def get_hvac_status(args: dict, view: DataView) -> dict:
             "open_alarms": (alarms or {}).get("total") if kind is None else None,
             "definition": "Online: at least one point is reporting and no point reports a fault. Run/stop state is not read.",
             "note": "Systems are the plant equipment the project counts (AHU, FCU, pumps)."}
+
+
+# ─── Point search, analytics, comparison and alarm records (Phase 2) ────────
+# What FIN gives this module, and what it does not:
+#   * equipment points: each has a name, a displayed current value, a unit, a reporting flag and a status; the whole cache has ONE read time.
+#     So a calculation here is over the latest read (a point in time), never over a period, and says so (time_range).
+#   * alarm records: only the newest ALARM_RECORDS_CAP records of FIN's latest alarm read (open and cleared), not an archive.
+# The arithmetic is eko_chat_analytics's; the points are read from its per-project index, so a question does not rescan the cache.
+
+LIVE_KEY = {"co2": "ra_co2", "temperature": "avg_zone_temp"}       # the Data Mapping live point that answers the same metric as a single reading
+HISTORY_PERIODS = ["today", "yesterday", "last_7_days", "last_30_days", "this_month", "all"]
+
+
+def _point_index(view: DataView) -> an.PointIndex:
+    return an.index_for((view.project_id, view.project_name), view.equipment, _equipment_list(view))
+
+
+def _equipment_ready(view: DataView) -> tuple[Optional[dict], Optional[str]]:
+    """(problem, as_of): the answer to give when the equipment cache cannot be read, else (None, the time of the read)."""
+    problem = _session_problem(view)
+    if problem:
+        return problem, None
+    ok, as_of, why = _freshness(view.equipment, view)
+    return (None, as_of) if ok else (_cache_problem(why, as_of, view), None)
+
+
+def _scope_rows(index: an.PointIndex, metric: str, kind: Optional[str]) -> tuple[list, int]:
+    """(point rows of this metric on the equipment of this type, how many equipment items that is). No type: all equipment."""
+    if not kind:
+        return index.by_metric[metric], len(index.equipment)
+    wanted = {i for i, e in enumerate(index.equipment) if isinstance(e, dict) and _kind_match(e, kind)}
+    return [r for r in index.by_metric[metric] if r.eq in wanted], len(wanted)
+
+
+def _tally(rows: list) -> tuple[dict, dict, int, list]:
+    """(excluded by reason, other units seen, points whose unit was assumed, names of stale points) over the rows of one metric."""
+    excluded: dict = {}
+    other_units: dict = {}
+    assumed = 0
+    stale = []
+    for r in rows:
+        if r.why == "assumed_unit":
+            assumed += 1
+        elif r.why:
+            excluded[r.why] = excluded.get(r.why, 0) + 1
+            if r.why == an.UNIT_MISMATCH and r.detail:
+                other_units[r.detail] = other_units.get(r.detail, 0) + 1
+            if r.why == "stale":
+                stale.append(f"{r.equipment} · {r.point}")
+    return excluded, other_units, assumed, stale[:5]
+
+
+def _live_mapping(metric: str, view: DataView) -> dict:
+    key = LIVE_KEY.get(metric)
+    mapped = None if (key is None or not view.mapped) else key in caps.mapped_names(view.mapped, "finLivePoints")
+    return {"live_point": key, "mapped": mapped}
+
+
+def search_points(args: dict, view: DataView) -> dict:
+    """Which equipment has points for a metric (humidity, CO2, temperature, power), and which of those points have a usable reading."""
+    problem, as_of = _equipment_ready(view)
+    if problem:
+        return problem
+    metric, kind, limit = args["metric"], str(args.get("type", "")).strip().lower() or None, args.get("limit", DEFAULT_LIMIT)
+    index = _point_index(view)
+    rows, scanned = _scope_rows(index, metric, kind)
+    groups: dict = {}
+    for r in rows:
+        groups.setdefault(r.eq, []).append(r)
+    ordered = sorted(groups.values(), key=lambda g: (g[0].equipment, g[0].eq))
+    items = []
+    for g in ordered[:limit]:
+        eq = index.equipment[g[0].eq]
+        shown = []
+        for r in g[:POINTS_PER_ITEM]:
+            p = {"point": r.point, "value": round(r.reading.value, 4) if r.reading else None, "unit": r.reading.unit if r.reading else "",
+                 "reading": r.reading is not None}
+            if r.why == "assumed_unit":
+                p["unit_assumed"] = True
+            elif r.why:
+                p["note"] = r.why
+            shown.append(p)
+        item = {"name": eq.get("name"), "floor": eq.get("floor"), "type": eq.get("type"), "points": shown}
+        if len(g) > POINTS_PER_ITEM:
+            item["points_more"] = len(g) - POINTS_PER_ITEM
+        items.append(item)
+    excluded, _, _, _ = _tally(rows)
+    return {"available": True, "project": _project(view), "as_of": as_of, "metric": metric, "label": an.METRICS[metric]["label"],
+            "scope": {"type": kind}, "equipment_scanned": scanned, "total": len(ordered),
+            "with_readings": sum(1 for g in ordered if any(r.reading for r in g)),
+            "points_matched": len(rows), "points_with_reading": sum(1 for r in rows if r.reading),
+            "points_without_reading": sum(1 for r in rows if not r.reading), "excluded": excluded, "returned": len(items), "truncated": len(ordered) > len(items), "items": items, "mapping": _live_mapping(metric, view),
+            "method": "points whose name contains the metric; a setpoint, a point that is not reporting, stale or faulty, or in another unit has no reading"}
+
+
+def _no_readings(metric: str, kind: Optional[str], rows: list, scanned: int, view: DataView) -> dict:
+    label = an.METRICS[metric]["label"]
+    excluded, other_units, _, stale = _tally(rows)
+    if not rows:
+        where = f" on {kind} equipment" if kind else ""
+        message = (f"No equipment point name matches {label}{where}. Equipment checked: {scanned}. "
+                   "Either this project has no such point, or FIN does not publish it under a name that says so.")
+    else:
+        why = ", ".join(f"{n} {k.replace('_', ' ')}" for k, n in excluded.items())
+        message = f"{len(rows)} points match {label} but none has a usable reading ({why})."
+    out = _unavailable("no_sensors", message, view, missing=None)
+    out.update(metric=metric, points_matched=len(rows), excluded=excluded, equipment_scanned=scanned, mapping=_live_mapping(metric, view))
+    if other_units:
+        out["other_units"] = other_units
+    return out
+
+
+def calculate_metric(args: dict, view: DataView) -> dict:
+    """sum, average, min, max, count or a top-N ranking of one metric across the equipment points of the latest FIN read, calculated in Python."""
+    problem, as_of = _equipment_ready(view)
+    if problem:
+        return problem
+    metric, op, kind = args["metric"], args["op"], str(args.get("type", "")).strip().lower() or None
+    spec = an.METRICS[metric]
+    if op == "sum" and not spec["additive"]:
+        return _unavailable("not_additive", f"{spec['label']} readings cannot be added up: the sum of several {spec['label'].lower()} values means nothing. "
+                                            "Ask for the average, minimum, maximum or count instead.", view)
+    rows, scanned = _scope_rows(_point_index(view), metric, kind)
+    readings = [r.reading for r in rows if r.reading]
+    if not readings:
+        return _no_readings(metric, kind, rows, scanned, view)
+    excluded, other_units, assumed, stale = _tally(rows)
+    out: dict = {"available": True, "project": _project(view), "as_of": as_of, "metric": metric, "label": spec["label"], "op": op, "scope": {"type": kind},
+                 "samples": len(readings), "equipment_count": len({x.equipment for x in readings}), "points_matched": len(rows), "excluded": excluded,
+                 "time_range": {"from": as_of, "to": as_of, "basis": "the latest FIN read, a point in time; not a history"},
+                 "method": "calculated here from the current point values; setpoints, unreported, stale, faulty, implausible and other-unit points are left out"}
+    if assumed:
+        out["assumed_unit"] = assumed
+    if other_units:
+        out["other_units"] = other_units
+    if stale:
+        out["stale_points"] = stale
+    if op == "top":
+        highest = args.get("order", "highest") == "highest"
+        best: dict = {}
+        for x in readings:
+            cur = best.get(x.equipment)
+            if cur is None or (x.value > cur.value if highest else x.value < cur.value) or (x.value == cur.value and x.point < cur.point):
+                best[x.equipment] = x
+        ranked = an.top_n(best.values(), args.get("limit", DEFAULT_TOP), highest)
+        out.update(order=ranked["order"], unit=ranked["unit"], items=ranked["items"], ranked_equipment=len(best), truncated=len(best) > len(ranked["items"]))
+        return out
+    got = an.aggregate(readings, op)
+    if not got["ok"]:
+        return _unavailable("unit_conflict", f"{spec['label']} readings carry different units and are not combined.", view)
+    out.update(value=got["value"], unit=got["unit"])
+    if op == "sum":
+        out["note"] = "This adds the matching points; equipment that meters other equipment is counted twice, so it is not a metered total."
+    if "at" in got:
+        out["at"] = got["at"]
+    return out
+
+
+def _side(point: dict) -> tuple[Optional[an.Reading], Optional[str]]:
+    """(reading, None) of one point for a comparison, or (None, why). A setpoint is a value like any other here."""
+    if not point.get("reporting"):
+        return None, "not_reporting"
+    problem = an.status_problem(point.get("status"))
+    if problem:
+        return None, problem
+    parsed = None if point.get("kind") in ("Bool", "Str", "Null") else an.parse_number(point.get("currentValue"), point.get("unit"))
+    if parsed is None:
+        return None, "non_numeric"
+    return an.Reading(parsed[0], parsed[1], "", str(point.get("navName") or "")), None
+
+
+def _compare_points(a: dict, b: dict) -> dict:
+    pa = {_fold(p.get("navName")): p for p in reversed(a.get("points") or []) if isinstance(p, dict) and p.get("navName")}
+    pb = {_fold(p.get("navName")): p for p in reversed(b.get("points") or []) if isinstance(p, dict) and p.get("navName")}
+    items, skipped = [], []
+    for key in sorted(set(pa) & set(pb), key=lambda k: (str(pa[k].get("navName")).lower(), k)):
+        name = str(pa[key].get("navName"))
+        ra, why_a = _side(pa[key])
+        rb, why_b = _side(pb[key])
+        if ra is None or rb is None:
+            skipped.append({"point": name, "reason": why_a or why_b})
+        elif ra.unit != rb.unit:
+            skipped.append({"point": name, "reason": an.UNIT_MISMATCH})
+        else:
+            diff, pct = an.difference(ra, rb), an.percent_difference(ra, rb)
+            row = {"point": name, "a": ra.value, "b": rb.value, "unit": ra.unit, "difference": diff["difference"],
+                   "percent_difference": pct.get("percent")}
+            if not pct["ok"]:
+                row["percent_note"] = pct["reason"]
+            items.append(row)
+    only = lambda x, y: sorted(str(x[k].get("navName")) for k in set(x) - set(y))      # noqa: E731
+    return {"compared": len(items), "returned": min(len(items), MAX_COMPARE_POINTS), "truncated": len(items) > MAX_COMPARE_POINTS,
+            "items": items[:MAX_COMPARE_POINTS], "not_comparable_total": len(skipped), "not_comparable": skipped[:10], "only_in_a": only(pa, pb)[:10], "only_in_b": only(pb, pa)[:10]}
+
+
+def compare_equipment(args: dict, view: DataView) -> dict:
+    """Two equipment items side by side: open alarms, and their common numeric points with the difference and the percentage difference."""
+    problem, as_of = _equipment_ready(view)
+    if problem:
+        return problem
+    base = {"available": True, "project": _project(view), "as_of": as_of, "focus": args.get("focus", "status")}
+    if _fold(args["equipment_a"]) == _fold(args["equipment_b"]):
+        return {**base, "found": False, "reason": "same_equipment", "unfound": []}
+    equipment = _equipment_list(view)
+    found, unfound = {}, []
+    for side in ("a", "b"):
+        eq, miss = _lookup_equipment(args[f"equipment_{side}"], equipment)
+        if miss:
+            unfound.append({"side": side, "equipment": args[f"equipment_{side}"], **miss})
+        else:
+            found[side] = eq
+    if unfound:
+        return {**base, "found": False, "reason": unfound[0]["reason"], "unfound": unfound}
+    a, b = found["a"], found["b"]
+    out = {**base, "found": True, "equipment": [_summary(a), _summary(b)],
+           "alarms": {s: {"open": len(e.get("alarms") or []),
+                          "items": [{"message": _clip(x.get("alarm")), "priority": x.get("priority")} for x in (e.get("alarms") or [])[:5] if isinstance(x, dict)]}
+                      for s, e in found.items()},
+           "basis": "difference is the first equipment minus the second"}
+    if out["focus"] != "alarms":
+        out["points"] = {"reporting": {s: sum(1 for p in e.get("points") or [] if isinstance(p, dict) and p.get("reporting")) for s, e in found.items()},
+                         "total": {s: len(e.get("points") or []) for s, e in found.items()}}
+        out["comparison"] = _compare_points(a, b)
+    return out
+
+
+_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+
+
+def _day(record: dict) -> Optional[str]:
+    """The calendar day of an alarm record as FIN wrote it (YYYY-MM-DD), or None when it carries none."""
+    m = _DATE.match(str(record.get("occurred") or ""))
+    return m.group(1) if m else None
+
+
+def _history_range(period: str, today) -> Optional[tuple]:
+    if period == "today":
+        return today, today
+    if period == "yesterday":
+        return today - timedelta(days=1), today - timedelta(days=1)
+    if period == "last_7_days":
+        return today - timedelta(days=6), today
+    if period == "last_30_days":
+        return today - timedelta(days=29), today
+    if period == "this_month":
+        return today.replace(day=1), today
+    return None
+
+
+def get_alarm_history(args: dict, view: DataView) -> dict:
+    """Counts over the alarm records of FIN's latest alarm read (open and cleared), by day, source and, when severity bands are mapped, severity.
+
+    This is not an archive and open alarms are never counted in its place: only records are, and the days they cover are stated."""
+    problem = _session_problem(view)
+    if problem:
+        return problem
+    ok, as_of, why = _freshness(view.alarms, view)
+    if not ok:
+        return _cache_problem(why, as_of, view)
+    if view.alarm_records is None:
+        return _unavailable("alarm_history_unavailable", "Alarm records are not available for this session.", view)
+    mapped = bool(view.mapped and view.mapped.get("finSeverityBands"))
+    if args.get("severity") and not mapped:
+        return _unavailable("metric_unavailable", "No severity bands are mapped for this project, so alarms are not graded and a severity cannot be counted; map "
+                            + caps.where({"mapping": "finSeverityBands", "key": None}) + ".", view, missing=[{"mapping": "finSeverityBands", "key": None}])
+    try:
+        records = [a for a in view.alarm_records() if isinstance(a, dict)]
+    except Exception:
+        return _unavailable("alarm_history_unavailable", "Alarm records could not be read.", view)
+    everything = [(_day(a), a) for a in records]
+    dated = [(d, a) for d, a in everything if d]
+    coverage = None
+    if records:
+        days = sorted(d for d, _ in dated)
+        coverage = {"from": days[0] if days else None, "to": days[-1] if days else None, "records_in_read": len(records), "records_cap": ALARM_RECORDS_CAP,
+                    "may_be_truncated": len(records) >= ALARM_RECORDS_CAP, "undated": len(records) - len(dated)}
+    period = args.get("period", "all")
+    today = _site_now(view).date()
+    window = _history_range(period, today)
+    rng = {"from": window[0].isoformat(), "to": window[1].isoformat()} if window else None
+    rows = [(d, a) for d, a in dated if rng["from"] <= d <= rng["to"]] if rng else everything     # a period keeps only records with a date in it
+    if args.get("equipment"):
+        key = _fold(args["equipment"])
+        ids = {e["finId"] for e in _equipment_list(view) if key and _fold(e.get("name")) == key and e.get("finId")}
+        rows = [(d, a) for d, a in rows if key == _fold(a.get("source")) or (key and key in _fold(a.get("source"))) or (a.get("source_id") and a["source_id"] in ids)]
+    if args.get("severity"):
+        rows = [(d, a) for d, a in rows if a.get("severity") == args["severity"]]
+    by_day: dict = {}
+    by_source: dict = {}
+    for d, a in rows:
+        if d:
+            by_day[d] = by_day.get(d, 0) + 1
+        src = str(a.get("source") or "")
+        if src:
+            by_source[src] = by_source.get(src, 0) + 1
+    limit = args.get("limit", DEFAULT_TOP)
+    day_rows = [{"date": d, "total": n} for d, n in sorted(by_day.items(), reverse=True)]
+    sources = sorted(by_source.items(), key=lambda kv: (-kv[1], kv[0]))
+    outside = bool(rng and (coverage is None or coverage["from"] is None or rng["from"] < coverage["from"]))
+    out = {"available": True, "project": _project(view), "as_of": as_of, "history": True,
+           "scope": "alarm records in FIN's latest alarm read, open and cleared; not an archive, and not the open alarms",
+           "period": period, "range_requested": rng, "coverage": coverage, "outside_coverage": outside,
+           "total": len(rows), "open": sum(1 for _, a in rows if a.get("open") is True), "cleared": sum(1 for _, a in rows if a.get("open") is not True),
+           "severity_mapped": mapped, "by_severity": None,
+           "by_day": day_rows[:MAX_DAYS], "by_day_more": max(0, len(day_rows) - MAX_DAYS),
+           "top_sources": [{"source": s, "total": n} for s, n in sources[:limit]]}
+    if mapped:
+        out["by_severity"] = {s: sum(1 for _, a in rows if a.get("severity") == s) for s in SEVERITIES}
+    else:
+        out["severity_note"] = "No severity bands are mapped for this project, so alarms are not graded and no severity breakdown is given."
+    if coverage is None:
+        out["coverage_note"] = "FIN's latest alarm read holds no alarm records, so no count over any period can be given."
+    elif outside:
+        out["coverage_note"] = (f"FIN's latest alarm read starts on {coverage['from']}, so days before it in this period are not in it and nothing is claimed about them."
+                                if coverage["from"] else "The alarm records of FIN's latest read carry no date, so the period cannot be checked against them.")
+    return out
 
 
 # ─── Registry and schemas ────────────────────────────────────────────────────
@@ -820,8 +1161,8 @@ TOOLS: dict[str, dict] = {
     },
     "get_capabilities": {
         "fn": get_capabilities,
-        "description": "What Eko-Chat can answer for the open project: each capability's status (available, unmapped with the Data Mapping entries it "
-                       "needs, or not supported), its data kind (live, historical or stored) and whether the data behind it is fresh, stale or not read "
+        "description": "What Eko-Chat can answer for the open project: each capability's status (available, partial with its limits, unmapped with the "
+                       "Data Mapping entries or equipment points it needs, or not supported), its data kind (live, historical or stored) and whether the data behind it is fresh, stale or not read "
                        "yet. Pass about to ask about one capability.",
         "parameters": {"type": "object", "additionalProperties": False, "properties": {
             "about": {"type": "string", "enum": list(caps.IDS), "description": "One capability id, to ask whether it is available."},
@@ -831,6 +1172,44 @@ TOOLS: dict[str, dict] = {
         "fn": get_hvac_status,
         "description": "Which HVAC systems are online (optionally one type, e.g. ahu), with counts and the definition of online.",
         "parameters": {"type": "object", "additionalProperties": False, "properties": {"type": dict(_NAME)}},
+    },
+    "search_points": {
+        "fn": search_points,
+        "description": "Which equipment has points for a metric (temperature, humidity, co2 or power), and whether those points have a usable reading. "
+                       "Searches the cached point names of the open project only.",
+        "parameters": {"type": "object", "additionalProperties": False, "required": ["metric"], "properties": {
+            "metric": {"type": "string", "enum": list(an.METRICS)},
+            "type": dict(_NAME, description="Only when the user wrote an equipment type (e.g. ahu, fcu); otherwise leave it out."),
+            "limit": _LIMIT}},
+    },
+    "calculate_metric": {
+        "fn": calculate_metric,
+        "description": "Sum (power only), average, min, max, count or top-N ranking of one metric across the current equipment points, calculated in Python "
+                       "with the sample count, units and the readings left out. Current readings only; no history.",
+        "parameters": {"type": "object", "additionalProperties": False, "required": ["metric", "op"], "properties": {
+            "metric": {"type": "string", "enum": list(an.METRICS)},
+            "op": {"type": "string", "enum": ["sum", "average", "min", "max", "count", "top"]},
+            "type": dict(_NAME, description="Only when the user wrote an equipment type (e.g. ahu, fcu); otherwise leave it out."),
+            "order": {"type": "string", "enum": ["highest", "lowest"], "description": "For top: which end of the ranking."},
+            "limit": dict(_LIMIT, description="For top: how many.")}},
+    },
+    "compare_equipment": {
+        "fn": compare_equipment,
+        "description": "Two equipment items, each named exactly, side by side: open alarms and the difference and percentage difference of their common numeric points.",
+        "parameters": {"type": "object", "additionalProperties": False, "required": ["equipment_a", "equipment_b"], "properties": {
+            "equipment_a": dict(_NAME, description="Exact name of the first equipment item."),
+            "equipment_b": dict(_NAME, description="Exact name of the second equipment item."),
+            "focus": {"type": "string", "enum": ["status", "alarms"], "description": "alarms: only their open alarms."}}},
+    },
+    "get_alarm_history": {
+        "fn": get_alarm_history,
+        "description": "Counts of the alarm records (open and cleared) in FIN's latest alarm read, by day, source and, when severity bands are mapped, severity. "
+                       "Not an archive; says which days the read covers.",
+        "parameters": {"type": "object", "additionalProperties": False, "properties": {
+            "period": {"type": "string", "enum": HISTORY_PERIODS},
+            "severity": {"type": "string", "enum": SEVERITIES},
+            "equipment": dict(_NAME, description="Equipment name the alarm source refers to."),
+            "limit": _LIMIT}},
     },
     "get_notifications": {
         "fn": get_notifications,
@@ -1018,14 +1397,65 @@ def build_card(tool: str, args: Optional[dict], result: dict) -> Optional[dict]:
                            unread=result.get("unread", 0)),
             interpreted_as=_text("notifications", "Your notifications on this project{f}", f=_filters_text(filters)),
             columns=["severity", "type", "asset", "created", "read"], rows=rows, total=result.get("total", 0))
+    elif tool == "search_points":
+        filters = _filters(args, ["metric", "type"])
+        rows = [[i.get("name"), i.get("floor"), i.get("type"), p.get("point"), p.get("value") if p.get("reading") else p.get("note") or "", p.get("unit")]
+                for i in result.get("items") or [] for p in i.get("points") or []]
+        card.update(
+            headline=_text("pointSearch", "{label} points: {total} equipment items, {with_readings} with a reading", label=result.get("label"),
+                           total=result.get("total", 0), with_readings=result.get("with_readings", 0)),
+            interpreted_as=_text("pointSearch", "Equipment points that match the metric, from the latest FIN read{f}", f=_filters_text(filters)),
+            columns=["name", "floor", "type", "point", "value", "unit"], rows=rows[:MAX_CARD_ROWS], total=len(rows))
+    elif tool == "calculate_metric":
+        filters = _filters(args, ["metric", "op", "type", "order"])
+        if result.get("op") == "top":
+            items = result.get("items") or []
+            rows = [[i.get("rank"), i.get("equipment"), i.get("point"), i.get("value"), i.get("unit")] for i in items]
+            first = items[0] if items else {}
+            card.update(
+                headline=_text("metricTop", "{label}, {order} first: {name} ({value} {unit})", label=result.get("label"), order=result.get("order"),
+                               name=first.get("equipment"), value=first.get("value"), unit=first.get("unit") or ""),
+                columns=["rank", "name", "point", "value", "unit"], rows=rows[:MAX_CARD_ROWS], total=len(rows))
+        else:
+            rows = [[result.get("label"), result.get("value"), result.get("unit") or "", result.get("samples")]]
+            card.update(
+                headline=_text("metricCalc", "{label} {op}: {value} {unit}", label=result.get("label"), op=result.get("op"), value=result.get("value"),
+                               unit=result.get("unit") or ""),
+                columns=["metric", "value", "unit", "samples"], rows=rows, total=1)
+        card["interpreted_as"] = _text("metricCalc", "Calculated here from the current point readings of the latest FIN read{f}", f=_filters_text(filters))
+    elif tool == "compare_equipment":
+        filters = _filters(args, ["focus"])
+        if not result.get("found"):
+            rows = [[c] for u in result.get("unfound") or [] for c in u.get("candidates") or []]
+            card.update(headline=_text("compareNone", "The two equipment items could not be compared"), columns=["candidate"], rows=rows[:MAX_CARD_ROWS], total=len(rows))
+        else:
+            a, b = (e.get("name") for e in result.get("equipment") or [{}, {}])
+            if result.get("focus") == "alarms":
+                rows = [[n, result["alarms"][s]["open"]] for n, s in ((a, "a"), (b, "b"))]
+                card.update(headline=_text("compareAlarms", "{a}: {na} open alarms; {b}: {nb} open alarms", a=a, b=b, na=rows[0][1], nb=rows[1][1]),
+                            columns=["name", "open_alarms"], rows=rows, total=2)
+            else:
+                comparison = result.get("comparison") or {}
+                rows = [[i.get("point"), i.get("a"), i.get("b"), i.get("unit"), i.get("difference"), i.get("percent_difference")] for i in comparison.get("items") or []]
+                card.update(headline=_text("compare", "{a} compared with {b}: {compared} common numeric points", a=a, b=b, compared=comparison.get("compared", 0)),
+                            columns=["point", "first", "second", "unit", "difference", "percent"], rows=rows[:MAX_CARD_ROWS], total=len(rows))
+        card["interpreted_as"] = _text("compare", "Two equipment items side by side, from the latest FIN read{f}", f=_filters_text(filters))
+    elif tool == "get_alarm_history":
+        filters = _filters(args, ["period", "severity", "equipment"])
+        rows = [[d.get("date"), d.get("total")] for d in result.get("by_day") or []]
+        card.update(
+            headline=_text("alarmHistory", "Alarm records in FIN's latest read: {total} ({open} open, {cleared} cleared)", total=result.get("total", 0),
+                           open=result.get("open", 0), cleared=result.get("cleared", 0)),
+            interpreted_as=_text("alarmHistory", "Alarm records of FIN's latest read, open and cleared; not an archive{f}", f=_filters_text(filters)),
+            columns=["date", "total"], rows=rows[:MAX_CARD_ROWS], total=len(rows))
     elif tool == "get_capabilities":
         filters = _filters(args, ["about"])
         if result.get("show") == "unavailable":
             counts = result.get("counts") or {}
             rows = [[x.get("label"), x.get("status"), x.get("data") or "", "; ".join(caps.where(m) for m in x.get("missing") or [])]
                     for x in result.get("capabilities") or []]
-            headline = _text("capabilitiesUnavailable", "Not available in {project}: {unmapped} not mapped, {not_supported} not supported",
-                             project=project or "", unmapped=counts.get("unmapped", 0), not_supported=counts.get("not_supported", 0))
+            headline = _text("capabilitiesUnavailable", "Not fully available in {project}: {partial} partly available, {unmapped} not mapped, {not_supported} not supported",
+                             project=project or "", partial=counts.get("partial", 0), unmapped=counts.get("unmapped", 0), not_supported=counts.get("not_supported", 0))
             interpreted = _text("capabilitiesUnavailable", "What this project cannot answer: not mapped, or not supported{f}", f="")
         elif result.get("about"):
             a = result["about"]
@@ -1035,13 +1465,13 @@ def build_card(tool: str, args: Optional[dict], result: dict) -> Optional[dict]:
             interpreted = _text("capability", "One capability of this project{f}", f=_filters_text(filters))
         else:
             counts = result.get("counts") or {}
-            rows = [[x.get("label"), x.get("available", 0), x.get("unmapped", 0), x.get("not_supported", 0)] for x in result.get("areas") or []]
-            headline = _text("capabilities", "Capabilities for {project}: {available} available, {unmapped} not mapped, {not_supported} not supported",
-                             project=project or "", available=counts.get("available", 0), unmapped=counts.get("unmapped", 0),
+            rows = [[x.get("label"), x.get("available", 0), x.get("partial", 0), x.get("unmapped", 0), x.get("not_supported", 0)] for x in result.get("areas") or []]
+            headline = _text("capabilities", "Capabilities for {project}: {available} available, {partial} partly available, {unmapped} not mapped, {not_supported} not supported",
+                             project=project or "", available=counts.get("available", 0), partial=counts.get("partial", 0), unmapped=counts.get("unmapped", 0),
                              not_supported=counts.get("not_supported", 0))
             interpreted = _text("capabilities", "What Eko-Chat can answer from this project's mappings{f}", f="")
         card.update(headline=headline, interpreted_as=interpreted,
-                    columns=["capability", "status", "data", "needs"] if (result.get("about") or result.get("show")) else ["area", "available", "unmapped", "not_supported"],
+                    columns=["capability", "status", "data", "needs"] if (result.get("about") or result.get("show")) else ["area", "available", "partial", "unmapped", "not_supported"],
                     rows=rows[:MAX_CARD_ROWS], total=len(rows))
     else:  # get_building_snapshot
         filters = []
@@ -1199,8 +1629,12 @@ def get_adapter(cfg: dict) -> Optional[LLMAdapter]:
     return factory(cfg) if factory else None
 
 
+# Arabic-Indic and Persian digits (and the Arabic decimal and thousands marks) are numbers too: an answer in Arabic must not slip past the check
+_ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫٬", "01234567890123456789.,")
+
+
 def _numbers(text: str) -> list[str]:
-    text = _DATETIME.sub(" ", text or "")
+    text = _DATETIME.sub(" ", (text or "").translate(_ARABIC_DIGITS))
     return _NUM.findall(re.sub(r"(?<=\d),(?=\d{3}\b)", "", text))
 
 
@@ -1248,7 +1682,9 @@ SAFE_REASONS = {"unknown_tool", "invalid_arguments", "malformed_tool_call", "too
                 # the other reasons a tool or the fast route reports (each has a text in the dashboard's en.js and ar.js): "not available for this
                 # project" is told as that, with the Data Mapping names it needs, and never as an internal error
                 "metric_unavailable", "period_not_supported", "online_state_unavailable", "no_sensors", "ambiguous",
-                "notifications_unavailable", "notifications_failed", "alarm_history_unavailable", "direct_rejected", "direct_ungrounded"}
+                "notifications_unavailable", "notifications_failed", "alarm_history_unavailable", "direct_rejected", "direct_ungrounded",
+                # Phase 2: point analytics and equipment comparison
+                "not_additive", "unit_conflict", "same_equipment", "not_found"}
 
 
 def _safe_reason(reason: Any) -> str:
@@ -1360,6 +1796,7 @@ class LLMRun:
         self.tokens_known = False
         self.record: Optional[dict] = None
         self.trace: Optional[chat_trace.ChatTrace] = None     # this request's diagnostics (eko_chat_trace); the endpoint sets it
+        self.deadline: Optional[chat_ctx.Deadline] = None     # this request's one time budget (eko_chat_context); the endpoint sets it
         LLM_STATS["llm_requests"] += 1
 
     def _ms(self, t: Optional[float]) -> Optional[float]:
@@ -1414,7 +1851,7 @@ class LLMRun:
 
 
 def _outcome(code: str) -> str:
-    return "timeout" if code == "llm_timeout" else "failure"
+    return "timeout" if code in ("llm_timeout", "request_timeout") else "failure"
 
 
 def chat_stats() -> dict:
@@ -1425,14 +1862,43 @@ def chat_stats() -> dict:
             "runs": list(LLM_RUNS)}
 
 
+@dataclass
+class PlanOptions:
+    """How the planner (eko_chat_planner) uses conversation(): the same bounded tool-calling loop with its own rules. None: the loop as before.
+
+      system_prompt  the model's instructions for this question
+      max_rounds     model calls allowed (a grounding correction does not count); at the limit, what was read is reported, never more
+      shape          a tool result -> the text the model sees AND the text its answer is checked against
+      check          (answer, result texts, question) -> what in the answer the data does not support ([] = grounded); runs even when no tool was used
+      retry_text     the one correction request for those problems
+      filters        tool -> the arguments that must be the user's words or a name an earlier result holds
+      finalize       (answer, failed results, question) -> the answer with a code-written line for what could not be read
+      max_calls      tool calls run per model step; the rest are answered, not run
+    """
+    system_prompt: str
+    max_rounds: int
+    shape: Callable[[dict], str]
+    check: Callable[[str, list, str], list]
+    retry_text: Callable[[list], str]
+    filters: dict
+    finalize: Callable[[str, list, str], str]
+    max_calls: int = 6
+
+
+# a tool that failed for a reason of the model's own request, not of the building's data: never reported as "not available"
+MODEL_SIDE_REASONS = {"invalid_arguments", "unknown_tool", "malformed_tool_call", "tool_error"}
+MODEL_STOPPED_PREFIX = "This answer is incomplete: the language model stopped answering. What had been read from FIN by then: "
+LIMIT_PREFIX = "This answer is incomplete: the planning limit of {n} rounds was reached. What had been read from FIN by then: "
+
+
 async def converse(adapter: LLMAdapter, message: str, view_fn: Callable[[], DataView],
-                   run: Optional[LLMRun] = None) -> dict:
+                   run: Optional[LLMRun] = None, options: Optional[PlanOptions] = None) -> dict:
     """One question, a bounded native tool-calling loop (MAX_TOOL_ROUNDS model calls), one grounded answer.
 
     No memory across requests. Raises ChatFailure for model errors, an empty answer or too many rounds.
     When tools were used, every number in the answer must come from a tool result or the question: the
     model gets one chance to correct an answer that is not, then a safe fallback replaces it."""
-    async for kind, data in conversation(adapter, message, view_fn, run):
+    async for kind, data in conversation(adapter, message, view_fn, run, options):
         if kind == "result":
             return data
     raise ChatFailure("llm_empty_response", "The language model returned an empty answer.", 502, [])
@@ -1459,23 +1925,48 @@ def _debug_kv(**kv) -> None:
 
 
 async def conversation(adapter: LLMAdapter, message: str, view_fn: Callable[[], DataView],
-                       run: Optional[LLMRun] = None):
+                       run: Optional[LLMRun] = None, options: Optional[PlanOptions] = None):
     """The conversation as events, shared by the JSON and the streaming endpoint: ("tool", {...}) while
     tools run, then one ("result", {...}) with the grounded answer. Raises ChatFailure (see converse).
     Every model call waits for an LLM_GATE slot; run (if given) records the wait and the inference."""
-    messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": message}]
+    messages: list[dict] = [{"role": "system", "content": options.system_prompt if options else SYSTEM_PROMPT}, {"role": "user", "content": message}]
+    max_rounds = options.max_rounds if options else MAX_TOOL_ROUNDS
+    failed: list[dict] = []                  # results of reads that failed for a reason of the data (not mapped, stale, ...): the planner reports them
     ctrace = (run.trace if run is not None else None) or chat_trace.ChatTrace.null()     # (`trace` below is the list of tool calls)
     trace: list = []
     tool_texts: list[str] = []
     last_ok: Optional[tuple] = None          # (tool, args, result) of the newest successful call: the card
+    done_tools: list[tuple] = []             # every successful (tool, args, result): what a timeout may still report
+    deadline = run.deadline if run is not None else None
     retried = False
     rounds = 0
+
+    def out_of_time(prefix: Optional[str] = None) -> dict:
+        """The request's deadline passed (or, with a prefix, the planning limit). What the tools had already read is reported in the code's own words
+        (nothing the model had not finished is invented); with nothing read, a plain timeout."""
+        from eko_chat_router import direct_text      # imported here: the router imports this module
+        parts = []
+        for tool, args, result in done_tools[-3:]:
+            try:
+                parts.append(direct_text({"intent": tool, "parameters": args, "result": result}, ""))
+            except Exception:
+                continue
+        if not parts:
+            raise ChatFailure("request_timeout", chat_ctx.timeout_text(deadline), 504, trace)
+        return {"answer": (prefix or chat_ctx.partial_prefix(deadline)) + " ".join(parts), "tool_calls": trace, "grounded": True, "partial": True,
+                "card": build_card(*done_tools[-1])}
+
     while True:
-        if rounds >= MAX_TOOL_ROUNDS:
-            raise ChatFailure("max_tool_rounds_exceeded", f"The model did not finish within {MAX_TOOL_ROUNDS} rounds.", 502, trace)
+        if deadline is not None and deadline.expired():
+            yield "result", out_of_time()
+            return
+        if rounds >= max_rounds:
+            if options is not None and done_tools:        # the planner reports what it read rather than nothing
+                yield "result", {**out_of_time(LIMIT_PREFIX.format(n=max_rounds)), "limit": True}
+                return
+            raise ChatFailure("max_tool_rounds_exceeded", f"The model did not finish within {max_rounds} rounds.", 502, trace)
         rounds += 1
-        call_ms = 0.0
-        try:
+        async def model_round():
             async with (run.model_call() if run is not None else LLM_GATE.slot()):
                 ctrace.call_started("tool_loop")
                 t_call = time.perf_counter()
@@ -1484,10 +1975,22 @@ async def conversation(adapter: LLMAdapter, message: str, view_fn: Callable[[], 
                 except LLMError as exc:
                     ctrace.call_failed("tool_loop", (time.perf_counter() - t_call) * 1000, exc.code)
                     raise
-                call_ms = (time.perf_counter() - t_call) * 1000
+                return reply, (time.perf_counter() - t_call) * 1000
+
+        t_round = time.perf_counter()
+        try:
+            # bounded by what is LEFT of the request's deadline (the wait for a slot included); cancelled when it runs out
+            reply, call_ms = await chat_ctx.within(deadline, model_round())
             if run is not None:
                 run.usage(reply.get("usage"))
+        except chat_ctx.DeadlineExceeded:
+            ctrace.call_failed("tool_loop", (time.perf_counter() - t_round) * 1000, "request_timeout")
+            yield "result", out_of_time()
+            return
         except LLMError as exc:
+            if options is not None and done_tools:         # the model stopped after the tools had read something: that is reported, not thrown away
+                yield "result", {**out_of_time(MODEL_STOPPED_PREFIX), "model_error": exc.code}
+                return
             raise ChatFailure(exc.code, exc.message, exc.status, trace)
         calls = reply.get("tool_calls") or []
         ctrace.call_completed("tool_loop", call_ms, tools=[_tool_label(c.get("name")) for c in calls if isinstance(c, dict)])
@@ -1496,27 +1999,38 @@ async def conversation(adapter: LLMAdapter, message: str, view_fn: Callable[[], 
             _debug("model tool", f"none (final answer, round {rounds})")
             if not content:
                 raise ChatFailure("llm_empty_response", "The language model returned an empty answer.", 502, trace)
-            bad = _ungrounded(content, tool_texts + [message]) if tool_texts else []
+            if options is not None:
+                bad = options.check(content, tool_texts, message)
+            else:
+                bad = _ungrounded(content, tool_texts + [message]) if tool_texts else []
             if bad and not retried:
                 retried = True
                 rounds -= 1              # the one correction request does not use up a tool round
                 messages.append({"role": "assistant", "content": content})
-                messages.append({"role": "user", "content": GROUNDING_RETRY.format(numbers=", ".join(bad))})
+                messages.append({"role": "user", "content": options.retry_text(bad) if options else GROUNDING_RETRY.format(numbers=", ".join(bad))})
                 continue
+            if options is not None:
+                try:
+                    view_fn()            # the last step too: an answer for a project that is no longer the open one is never shown
+                except chat_ctx.ProjectChanged as exc:
+                    raise ChatFailure(exc.code, exc.message, exc.status, trace)
             card = build_card(*last_ok) if last_ok else None
             _debug("card source", last_ok[0] if last_ok else "none")
             if bad:
                 yield "result", {"answer": UNGROUNDED_FALLBACK, "tool_calls": trace, "grounded": False,
                                  "ungrounded_numbers": bad, "card": card}
                 return
-            yield "result", {"answer": content, "tool_calls": trace, "grounded": True, "card": card}
+            yield "result", {"answer": options.finalize(content, failed, message) if options else content, "tool_calls": trace, "grounded": True, "card": card}
             return
         messages.append({"role": "assistant", "content": content or None, "tool_calls": [
             {"id": c.get("id"), "type": "function",
              "function": {"name": str(c.get("name") or ""),
                           "arguments": c.get("arguments") if isinstance(c.get("arguments"), str) else json.dumps(c.get("arguments") or {})}}
             for c in calls]})
-        for c in calls:
+        for position, c in enumerate(calls):
+            if deadline is not None and deadline.expired():      # the rest of this round's tools are not run
+                yield "result", out_of_time()
+                return
             name = c.get("name")
             label = _tool_label(name)
             args, problem = _parse_arguments(c.get("arguments"))
@@ -1528,21 +2042,31 @@ async def conversation(adapter: LLMAdapter, message: str, view_fn: Callable[[], 
                 result = {"available": False, "reason": "malformed_tool_call", "message": "The tool call has no tool name."}
             elif problem:
                 result = {"available": False, "reason": "invalid_arguments", "details": [problem]}
-            elif unasked_filters(name, args, message):
+            elif options is not None and position >= options.max_calls:
+                result = {"available": False, "reason": "invalid_arguments", "details": [f"at most {options.max_calls} tool calls per step; ask for the rest in the next step"]}
+            elif unasked_filters(name, args, message, options.filters if options else None, tool_texts if options else ()):
                 # a filter the user did not write is the model's invention ("read the equipment list" became type "electrical" and
                 # matched nothing): refuse it, and the model asks again without it
                 result = {"available": False, "reason": "invalid_arguments",
-                          "details": [f"{k} is not in the question; leave it out unless the user names it" for k in unasked_filters(name, args, message)]}
+                          "details": [f"{k} is not in the question; leave it out unless the user names it"
+                                      for k in unasked_filters(name, args, message, options.filters if options else None, tool_texts if options else ())]}
             else:
-                result = run_tool(name, args, view_fn())       # a fresh view for every call
+                try:
+                    view = view_fn()       # pinned to the request's project and re-checked before EVERY call (eko_chat_context)
+                except chat_ctx.ProjectChanged as exc:
+                    raise ChatFailure(exc.code, exc.message, exc.status, trace)    # the rest of the conversation is abandoned
+                result = run_tool(name, args, view)
             _debug("tool result", f"{label} " + ("available" if result.get("available")
                                                    else f"unavailable ({_safe_reason(result.get('reason'))})")
                    + (f" found={result['found']}" if "found" in result else ""))
             ctrace.tool_result(label, bool(result.get("available")), None if result.get("available") else _safe_reason(result.get("reason")))
-            text = json.dumps(result, default=str)
+            text = options.shape(result) if options else json.dumps(result, default=str)
+            if options is not None and not result.get("available") and result.get("reason") not in MODEL_SIDE_REASONS:
+                failed.append(result)
             if result.get("available"):
                 tool_texts.append(text)
                 last_ok = (name, args, result)
+                done_tools.append(last_ok)
                 yield "tool", {"tool": label, "status": "completed"}
             else:
                 event = {"tool": label, "status": "failed", "reason": _safe_reason(result.get("reason"))}
@@ -1627,10 +2151,14 @@ async def stream_chat(adapter: LLMAdapter, message: str, view_fn: Callable[[], D
             return
         for tok in _TOKEN.findall(result["answer"]):
             yield sse("token", {"text": tok})
-        outcome = ("success", None)
-        yield sse("done", {"answer": result["answer"], "grounded": True, "tool_calls": _browser_trace(result["tool_calls"]),
-                           "card": result.get("card"), "model": getattr(adapter, "model", None) or adapter.name,
-                           "project": project, "timestamp": datetime.now().astimezone().isoformat(timespec="seconds")})
+        partial = bool(result.get("partial"))        # the deadline passed: what had been read, and nothing more
+        outcome = ("timeout", "request_timeout") if partial else ("success", None)
+        done = {"answer": result["answer"], "grounded": True, "tool_calls": _browser_trace(result["tool_calls"]),
+                "card": result.get("card"), "model": getattr(adapter, "model", None) or adapter.name,
+                "project": project, "timestamp": datetime.now().astimezone().isoformat(timespec="seconds")}
+        if partial:
+            done["partial"] = True
+        yield sse("done", done)
     finally:
         if run is not None:
             run.finish(*(outcome or ("cancelled", None)))
@@ -1677,6 +2205,172 @@ def try_direct(message: str, view_fn: Callable[[], DataView], info: Optional[dic
     if info is not None:
         info["reason"] = decision.get("reason")
     return None
+
+
+# ─── Several questions in one message (Phase 1) ──────────────────────────────
+# eko_chat_router.plan_parts() splits a compound message into at most MAX_PARTS questions, each routed by the same route() as a single question.
+# try_multi() runs each part through the SAME execute() / direct_text() / grounding check as try_direct(), on a view from the pinned view_fn (so
+# the session and project guard runs again before every part, and a project change abandons the whole request), and gives EVERY part a result:
+#   answered     the tool read the data and the sentence was checked against it
+#   unavailable  the data cannot be read for this project right now (not mapped, not read yet, stale, not connected): the reason is said
+#   unsupported  no rule answers it (a capability that does not exist, a write, or a question only the Phase 3 planner will understand)
+#   failed       the tool failed, the answer could not be checked, or the request deadline ended before this part ran
+# No part is dropped, no value is made up, and no part reaches a tool the router would not run for a single question.
+
+PART_STATUSES = ("answered", "unavailable", "unsupported", "failed")
+PART_STATUS_LABELS = {"unavailable": "Unavailable", "unsupported": "Not supported", "failed": "Failed"}
+_UNAVAILABLE_PART_REASONS = {"metric_unavailable", "no_data_yet", "stale", "online_state_unavailable", "period_not_supported", "notifications_unavailable",
+                             "alarm_history_unavailable", "fin_not_connected", "no_active_project", "no_sensors", "notifications_failed",
+                             "not_additive", "unit_conflict"}
+_FACT_KEYS = ("total", "returned", "truncated", "unread", "read", "unread_total", "more", "online_count", "in_alarm", "open_alarms", "metric", "value", "unit",
+              "op", "samples", "equipment_count", "with_readings", "points_matched", "compared", "open", "cleared", "period", "outside_coverage")
+_PART_SOURCES = {"get_notifications": "Eko-DT notification store", "get_capabilities": "Eko-Chat capability registry"}
+NEEDS_PLANNER_TEXT = ("This is not one of the questions the fixed rules can answer, so it was not answered. Ask it on its own, in a separate message.")
+LIMIT_REASON = "limit_exceeded"        # a reason of the part, not of a tool
+LIMIT_TEXT = "Not answered: a message can hold at most 4 questions. Ask this one in a new message."
+TIMEOUT_PART_TEXT = "Not answered: the time limit for this request was reached before this question was reached. Ask it again on its own."
+PART_ERROR_TEXT = "This question could not be answered right now."
+
+
+def _scalar(v: Any) -> bool:
+    return v is None or isinstance(v, (str, int, float, bool))
+
+
+def _part_facts(intent: str, params: dict, r: dict) -> dict:
+    """The few validated values the part's answer rests on, copied from the tool result (never computed here)."""
+    facts = {k: r[k] for k in _FACT_KEYS if k in r and _scalar(r[k])}
+    if params:
+        facts["filter"] = {k: v for k, v in params.items() if _scalar(v)}
+    if intent == "get_alarms" and isinstance(r.get("counts"), dict):
+        facts["counts"] = {k: v for k, v in r["counts"].items() if isinstance(v, int)}
+    if intent == "get_environment":
+        facts["readings"] = [{k: x.get(k) for k in ("name", "value", "unit", "samples") if _scalar(x.get(k))} for x in r.get("readings") or [] if isinstance(x, dict)]
+        if r.get("unavailable"):
+            facts["unavailable"] = [str(m.get("name")) for m in r["unavailable"] if isinstance(m, dict) and m.get("name")]
+    if intent == "get_alarm_history" and isinstance(r.get("by_severity"), dict):
+        facts["by_severity"] = {k: v for k, v in r["by_severity"].items() if isinstance(v, int)}
+    if intent == "compare_equipment" and isinstance(r.get("comparison"), dict):
+        facts["compared"] = r["comparison"].get("compared")
+    about = r.get("about")
+    if intent == "get_capabilities" and isinstance(about, dict):
+        facts["capability"] = {k: about.get(k) for k in ("label", "status") if _scalar(about.get(k))}
+    return facts
+
+
+def _part_status(intent: str, result: dict) -> tuple[str, Optional[str]]:
+    """(status, reason) of an executed part, from the tool result alone."""
+    if result.get("available"):
+        if intent == "compare_equipment" and result.get("found") is False:      # two named items that were not both found were not compared
+            return "unavailable", _safe_reason(result.get("reason"))
+        about = result.get("about") if intent == "get_capabilities" else None
+        if isinstance(about, dict) and about.get("status") == "not_supported":
+            return "unsupported", about.get("reason") or "not_supported"
+        if isinstance(about, dict) and about.get("status") == "unmapped":
+            return "unavailable", "unmapped"
+        return "answered", None
+    reason = result.get("reason")
+    return ("unavailable" if reason in _UNAVAILABLE_PART_REASONS else "failed"), _safe_reason(reason)
+
+
+def _md_inline(text: str) -> str:
+    return re.sub(r"[*`_\[\]#>|]", "", re.sub(r"\s+", " ", str(text))).strip()
+
+
+def compose_parts(parts: list) -> str:
+    """The Markdown for clients that do not draw parts: one headed section per question, in the order asked."""
+    blocks = []
+    for i, p in enumerate(parts, 1):
+        label = PART_STATUS_LABELS.get(p["status"])
+        body = p["answer"] if label is None else f"*{label}.* {p['answer']}"
+        blocks.append(f"**{i}. {_md_inline(p['question'])}**\n\n{body}")
+    return "\n\n".join(blocks)
+
+
+def try_multi(message: str, view_fn: Callable[[], DataView], info: Optional[dict] = None, deadline: Optional[chat_ctx.Deadline] = None,
+              allow_unresolved: bool = True) -> Optional[dict]:
+    """The response for a message of several questions, or None when it is not one (or must go to the model as a whole).
+
+    Parts are answered in the order asked. A part no rule routes is reported (`unsupported`), never run, never dropped. With
+    allow_unresolved=False (a tool-calling model, which handles compound questions itself) the message is taken only when EVERY part routes."""
+    from eko_chat_router import MAX_PARTS, clarification_for, direct_text, execute, plan_parts, record, unsupported_topic   # imported here: the router imports this module
+    plan = plan_parts(message)
+    if plan is None:
+        return None
+    parts, overflow = plan["parts"], plan["overflow"]
+    if (overflow or any(p["decision"] is None for p in parts)) and not allow_unresolved:
+        return None
+    results: list[dict] = []
+    calls: list[dict] = []
+
+    def add(part: dict, status: str, answer: str, reason: Optional[str] = None, **extra) -> None:
+        item = {"question": part["text"], "status": status, "answer": answer}
+        if part.get("interpreted_as"):
+            item["interpreted_as"] = part["interpreted_as"]
+        if reason:
+            item["reason"] = reason
+        item.update({k: v for k, v in extra.items() if v is not None})
+        results.append(item)
+
+    for part in parts:
+        if deadline is not None and deadline.expired():          # no tool starts after the request's deadline; what was answered stays
+            add(part, "failed", TIMEOUT_PART_TEXT, "request_timeout")
+            continue
+        decision = part["decision"]
+        try:
+            if decision is not None:
+                out = execute(decision, view_fn())               # the pinned view: the guard runs again, a project change raises ProjectChanged
+                if out.get("route") != "direct":
+                    add(part, "failed", PART_ERROR_TEXT, "direct_rejected")
+                    continue
+                result = out["result"]
+                text = direct_text(out, decision.get("rule", ""))
+                if _ungrounded(text, [json.dumps(result, default=str, ensure_ascii=False), part["text"]]):     # the same grounding rule as a single answer
+                    add(part, "failed", NOT_VERIFIED, "direct_ungrounded")
+                    continue
+                record(decision)
+                status, reason = _part_status(out["intent"], result)
+                entry = {"name": out["intent"], "arguments": out["parameters"], "available": bool(result.get("available"))}
+                if not result.get("available"):
+                    entry["reason"] = result.get("reason")
+                    if result.get("missing"):
+                        entry["missing"] = result["missing"]
+                calls.append(entry)
+                readings = result.get("readings") if isinstance(result.get("readings"), list) and result.get("readings") else None
+                add(part, status, text, reason, tool=out["intent"], rule=decision.get("rule"), facts=_part_facts(out["intent"], out["parameters"], result),
+                    as_of=result.get("as_of"), source=(readings[0].get("source") if readings and isinstance(readings[0], dict) else None) or _PART_SOURCES.get(out["intent"], "FIN"),
+                    card=out["card"], missing=_clean_missing(result["missing"]) if result.get("missing") else None)
+                continue
+            ask = clarification_for(part["text"])
+            if ask:
+                add(part, "unsupported", ask, "clarification")
+                continue
+            topic = unsupported_topic(part["text"])
+            if topic:
+                out = execute({"route": "direct", "intent": "get_capabilities", "parameters": {"about": topic}}, view_fn())
+                if out.get("route") == "direct":
+                    result = out["result"]
+                    calls.append({"name": "get_capabilities", "arguments": out["parameters"], "available": bool(result.get("available"))})
+                    status, reason = _part_status("get_capabilities", result)
+                    add(part, "unsupported" if status == "answered" else status, direct_text(out, "capabilities.about"), reason or "not_supported",
+                        tool="get_capabilities", facts=_part_facts("get_capabilities", out["parameters"], result), source=_PART_SOURCES["get_capabilities"],
+                        missing=_clean_missing(result["missing"]) if result.get("missing") else None)
+                    continue
+            add(part, "unsupported", NEEDS_PLANNER_TEXT, "needs_planner")
+        except chat_ctx.ProjectChanged:
+            raise                                                # the whole request is abandoned: nothing of it is shown
+        except Exception:                                        # one part failing never takes the others down; the error text is not for the browser
+            _debug_kv(route="multi_part_error", question_index=len(results))
+            add(part, "failed", PART_ERROR_TEXT, "internal_error")
+    for q in overflow:                                           # nothing is dropped silently: each question beyond the limit is listed and said
+        results.append({"question": q, "status": "unsupported", "answer": LIMIT_TEXT, "reason": LIMIT_REASON})
+    answered = sum(1 for r in results if r["status"] == "answered")
+    if info is not None:
+        info["rule"] = f"multi.{len(results)}"
+    _debug_kv(route="multi", parts=len(results), answered=answered)
+    return {"answer": compose_parts(results), "answer_source": "code", "route": "multi", "grounded": True, "tool_calls": calls, "card": None, "model": None,
+            "parts": results,
+            "multi": {"count": len(results), "answered": answered, "status": "complete" if answered == len(results) else "partial",
+                      "needs_planner": any(r.get("reason") == "needs_planner" for r in results)}}
 
 
 RULES_PROVIDER = "rules"   # chat.provider: answer from the rules and the backend's data only; no language model is ever called
@@ -1734,12 +2428,13 @@ async def stream_direct(resp: dict, project: dict):
     """A direct answer as the usual events, finished at once: start, the tool, done. No token events:
     the answer is complete and arrives whole in done, as the frontend already reads it."""
     route = resp.get("route", "direct")
-    yield sse("start", {"model": None, "project": project, "route": route})
+    yield sse("start", {"model": resp.get("model"), "project": project, "route": route})
     for t in _browser_trace(resp["tool_calls"]):
         yield sse("tool", {"tool": t["tool"], "status": "running"})
         yield sse("tool", t)
-    yield sse("done", {"answer": resp["answer"], "answer_source": "code", "route": route, "grounded": True,
-                       "tool_calls": _browser_trace(resp["tool_calls"]), "card": resp["card"], "model": None,
+    yield sse("done", {"answer": resp["answer"], "answer_source": resp.get("answer_source") or "code", "route": route, "grounded": True,
+                       "tool_calls": _browser_trace(resp["tool_calls"]), "card": resp["card"], "model": resp.get("model"),
+                       **{k: resp[k] for k in ("parts", "multi") if k in resp},
                        "project": project, "timestamp": datetime.now().astimezone().isoformat(timespec="seconds")})
 
 
@@ -1747,10 +2442,11 @@ def _trace_direct(trace: chat_trace.ChatTrace, direct: dict, info: dict, rules_o
     """The summary line for an answer the endpoint already holds (rules, a clarification, a topic reply, or the hybrid model's intent)."""
     route, calls = direct.get("route"), direct.get("tool_calls") or []
     tool = calls[0].get("name") if calls and isinstance(calls[0], dict) else None
-    handler = {"direct": "rules", "llm_intent": "llm_intent", "clarification": "clarification"}.get(route) or ("topic" if calls else "help")
+    handler = {"direct": "rules", "multi": "multi", "llm_intent": "llm_intent", "llm_planner": "planner", "clarification": "clarification",
+               "timeout": "timeout"}.get(route) or ("topic" if calls else "help")
     why = info.get("reason")
     skipped = "provider_rules" if rules_only else ("unsafe_or_empty_question" if why in ("unsafe_content", "empty") else "rules_matched")
-    trace.finish(handler, rule=info.get("rule") if route == "direct" else None, tool=tool, skipped=skipped)
+    trace.finish(handler, rule=info.get("rule") if route in ("direct", "multi") else None, tool=tool, skipped=skipped)
 
 
 def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
@@ -1770,42 +2466,77 @@ def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
         if cfg.get("enabled") is not True:
             raise _error(503, "chat_disabled", "Eko-Chat is disabled in config.json.")
         scope = guard_fn(request) if guard_fn is not None else None
-        # the signed-in user's scope rides on every view this request builds, for the tools that read per-user data
-        vf = view_fn if scope is None else (lambda: replace(view_fn(), scope=scope))
-        view = vf()
-        if not view.authenticated:
+        # Pin the project: captured here, right after the guard (nothing awaits in between, so no project switch can land between the two), and
+        # never rebuilt from the backend's globals again. Every view the request builds from now on is for THIS project, re-checked before it is
+        # handed out; a project change or an ended session abandons the rest of the request (see eko_chat_context).
+        first = view_fn()
+        if not first.authenticated:
             raise _error(401, "fin_not_connected", "Sign in to FIN first.")
+        ctx = chat_ctx.ProjectContext(project_id=first.project_id, project_name=first.project_name,
+                                      user=scope[0] if scope else None, site=scope[1] if scope else None)
+
+        def recheck() -> None:
+            """The same session and project guard as at the start, and it must still name the same user and project."""
+            if guard_fn is None:
+                return
+            try:
+                again = guard_fn(request)
+            except HTTPException as exc:
+                raise chat_ctx.ProjectChanged.from_http(exc)
+            if tuple(again) != (ctx.user, ctx.site):
+                raise chat_ctx.ProjectChanged()
+
+        vf = chat_ctx.pinned_view_fn(view_fn, ctx, recheck)
+        view = vf()
         _debug("question", req.message)
         fallback: dict = {}
         # the deployment's environment (LLM_ENABLED, OLLAMA_MODEL, ...) is applied on top of config.json's chat block
         from eko_chat_llm import DEFAULT_MODEL, PROVIDER as HYBRID, effective, hybrid   # imported here: that module imports this one
+        import eko_chat_planner as chat_planner                                          # (so does the planner)
         cfg = effective(cfg)
+        planning = chat_planner.settings(cfg) is not None       # the ollama provider plans with tools (Phase 3) unless chat.planner is false
         trace = chat_trace.ChatTrace.for_config(cfg, DEFAULT_MODEL, t0)     # which provider and model this request would use; no text, key or address
+        deadline = chat_ctx.Deadline.from_config(cfg, t0)                   # ONE budget for the whole request: model calls and tool steps together
         rules_only = cfg.get("provider") == RULES_PROVIDER
-        direct = None
-        rules_on = rules_only or cfg.get("fast_router", True) is not False       # chat.fast_router=false hands everything to the model, as before
-        if rules_on:
-            # a wording that fits more than one reading is asked back first, before any rule or model could pick one
-            direct = clarification_reply(req.message) or try_direct(req.message, vf, fallback)
-        else:
-            fallback["reason"] = "fast_router_off"
-            _debug_kv(route="llm_fallback", reason="fast_router_off")
-        if direct is None and rules_on:
-            direct = topic_reply(req.message, vf, PRE_MODEL_TOPICS)      # outdoor / supply-air: decided by code, before a model could answer with the indoor value
-        if direct is None and rules_only:
-            direct = topic_reply(req.message, vf) or unsupported(fallback.get("reason"))
-        if direct is None and cfg.get("provider") == HYBRID:
-            # the rules did not know it: one model call reads the intent, the existing tool answers (see eko_chat_llm)
-            direct = await hybrid(cfg, req.message, vf, fallback.get("reason"), bool(req.stream), t0, trace)
-            if direct.get("route") == "unsupported":    # the model did not answer it: ask back or say which capability it is, when it names one
-                direct = topic_reply(req.message, vf) or direct
-        if direct is not None:
-            _trace_direct(trace, direct, fallback, rules_only)
-            if req.stream:
-                return StreamingResponse(stream_direct(direct, _project(view)), media_type="text/event-stream",
-                                         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-            return {**direct, "project": _project(view),
-                    "timestamp": datetime.now().astimezone().isoformat(timespec="seconds")}
+        try:
+            direct = None
+            rules_on = rules_only or cfg.get("fast_router", True) is not False       # chat.fast_router=false hands everything to the model, as before
+            if rules_on:
+                # a wording that fits more than one reading is asked back first, before any rule or model could pick one
+                direct = clarification_reply(req.message) or try_direct(req.message, vf, fallback)
+            else:
+                fallback["reason"] = "fast_router_off"
+                _debug_kv(route="llm_fallback", reason="fast_router_off")
+            if direct is None and rules_on:
+                # several questions in one message: each part is routed by the same rules; with a tool-calling model only a message whose parts ALL
+                # route is taken here (the model handles the rest itself), with the rules or the hybrid model the unrouted parts are reported
+                direct = try_multi(req.message, vf, fallback, deadline, allow_unresolved=rules_only or (cfg.get("provider") == HYBRID and not planning))
+            if direct is None and rules_on:
+                direct = topic_reply(req.message, vf, PRE_MODEL_TOPICS)      # outdoor / supply-air: decided by code, before a model could answer with the indoor value
+            if direct is None and rules_only:
+                direct = topic_reply(req.message, vf) or unsupported(fallback.get("reason"))
+            if direct is None and planning:
+                direct = chat_planner.preempt(req.message, vf)           # a change, a theme, a trend...: answered by code, the model is never asked
+            if direct is None and cfg.get("provider") == HYBRID:
+                if planning:
+                    # the rules did not know it: the model plans read-only tool calls, reads their results and explains them (see eko_chat_planner)
+                    direct = await chat_planner.planner_reply(cfg, req.message, vf, fallback.get("reason"), bool(req.stream), t0, trace, deadline)
+                else:
+                    # the rules did not know it: one model call reads the intent, the existing tool answers (see eko_chat_llm)
+                    direct = await hybrid(cfg, req.message, vf, fallback.get("reason"), bool(req.stream), t0, trace, deadline)
+                if direct.get("route") == "unsupported":    # the model did not answer it: ask back or say which capability it is, when it names one
+                    direct = topic_reply(req.message, vf) or direct
+            if direct is not None:
+                _trace_direct(trace, direct, fallback, rules_only)
+                if req.stream:
+                    return StreamingResponse(stream_direct(direct, _project(view)), media_type="text/event-stream",
+                                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+                return {**direct, "project": _project(view),
+                        "timestamp": datetime.now().astimezone().isoformat(timespec="seconds")}
+        except chat_ctx.ProjectChanged as exc:      # the project or session changed under this request: stop, show nothing
+            trace.mark_fallback(exc.code)
+            trace.finish("error", outcome=exc.code)
+            raise _error(exc.status, exc.code, exc.message)
         try:
             adapter = get_adapter(cfg)
         except ValueError as exc:
@@ -1819,6 +2550,7 @@ def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
         LLM_GATE.configure(_limit_from(cfg))
         run = LLMRun(fallback.get("reason"), bool(req.stream), t0)
         run.trace = trace         # the summary line is printed when the model path finishes (LLMRun.finish)
+        run.deadline = deadline
         if req.stream:
             return StreamingResponse(stream_chat(adapter, req.message, vf, _project(view), run),
                                      media_type="text/event-stream",
@@ -1834,7 +2566,10 @@ def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
         except Exception:
             run.finish("failure", "internal_error")
             raise
-        run.finish("success", None if result.get("grounded") else "answer_not_grounded")
+        if result.get("partial"):
+            run.finish("timeout", "request_timeout")
+        else:
+            run.finish("success", None if result.get("grounded") else "answer_not_grounded")
         return {**result, "model": getattr(adapter, "model", None) or adapter.name, "project": _project(view),
                 "timestamp": datetime.now().astimezone().isoformat(timespec="seconds")}
 

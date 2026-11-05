@@ -257,11 +257,13 @@ def _pdf_filename(name: str) -> str:
     return cleaned
 
 
-def load_documents() -> dict:
+def load_documents(project: Optional[str] = None) -> dict:
     """Re-read the catalog each call so an edit shows up on the next poll.
 
-    A manual is a record of ONE FIN project, so only the active project's are listed: another
-    project's equipment is never matched to this site's manuals."""
+    A manual is a record of ONE FIN project, so only that project's are listed: another project's
+    equipment is never matched to this site's manuals. `project` is the validated FIN project of
+    the request (see _documents_project); without one, the backend's active project."""
+    wanted = PROJECT_NAME if project is None else project
     try:
         with open(_documents_path(), "r", encoding="utf-8") as handle:
             raw = json.load(handle)
@@ -285,7 +287,7 @@ def load_documents() -> dict:
                 continue
             ref = str(doc["ref"])
             had_doc = True
-            if _ref_project(ref) != PROJECT_NAME:
+            if _ref_project(ref) != wanted:
                 continue
             item[kind] = {
                 "name": str(doc.get("name") or ""),
@@ -2220,11 +2222,24 @@ async def logout(request: Request, response: Response):
         return {"status": "disconnected"}
 
 
+def _documents_project(request: Request) -> str:
+    """The FIN project whose manuals this request may list: the one the backend serves, that FIN validated, and that THIS browser's session
+    signed in for. Same session and project checks as the notification and chat routes; nothing the request states is read."""
+    user = _require_user(request)
+    site = client.project_name or ""
+    if not site or PROJECT_CHECK.get("validated") is not True:
+        raise HTTPException(status_code=409, detail="The open project is not validated on FIN.")
+    if user.get("site") != site:
+        raise HTTPException(status_code=409, detail="You signed in for another project. Sign in again for this one.")
+    return site
+
+
 @app.get("/api/fin/documents")
-async def get_documents(response: Response):
-    """O&M and warranty manuals. Each link stays on this server."""
+async def get_documents(request: Request, response: Response):
+    """O&M and warranty manuals of the signed-in user's own project. Each link stays on this server."""
+    project = _documents_project(request)
     _stamp(response)
-    return load_documents()
+    return load_documents(project)
 
 
 @app.get("/api/fin/file")
@@ -2515,7 +2530,7 @@ def _chat_alarm_records() -> list:
                     "severity": severity_for(priority, bands), "occurred": row.get("occurred") or row.get("created"),
                     "state": row.get("state"), "open": alarm_is_open(row)})
     out.sort(key=lambda a: str(a.get("occurred") or ""), reverse=True)
-    return out[:200]
+    return out[:eko_chat.ALARM_RECORDS_CAP]
 
 
 def _chat_notifications(user: str, site: str, **filters) -> dict:

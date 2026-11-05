@@ -28,6 +28,7 @@ import httpx
 import eko_chat
 import eko_chat_capabilities as caps
 import eko_chat_trace as chat_trace
+import eko_chat_context as chat_ctx
 from eko_chat import (ENV_METRICS, HELP_TEXT, LLM_GATE, MAX_LIMIT, NOT_VERIFIED, PERIODS, SEVERITIES, THINK_BLOCK, TOOLS, DataView,
                       LLMError, LLMRun, _fold, _limit_from, _project, _ungrounded, _validate)
 
@@ -75,6 +76,14 @@ def effective(cfg: Any, environ: Optional[dict] = None) -> dict:
             out["base_url"] = env["OLLAMA_BASE_URL"].strip()
         if env.get("OLLAMA_MODEL"):
             out["model"] = env["OLLAMA_MODEL"].strip()
+    planner = (env.get("LLM_PLANNER") or "").strip().lower()      # the Phase 3 planner (eko_chat_planner): on by default for ollama
+    if planner in ("0", "false", "no", "off"):
+        out["planner"] = False
+    elif planner in ("1", "true", "yes", "on"):
+        out["planner"] = dict(out["planner"], enabled=True) if isinstance(out.get("planner"), dict) else True
+    rounds = _number(env.get("LLM_PLANNER_MAX_ROUNDS"), 1, 8, whole=True)
+    if rounds and out.get("planner") is not False:
+        out["planner"] = dict(out["planner"] if isinstance(out.get("planner"), dict) else {}, max_rounds=rounds)
     timeout = _number(env.get("LLM_TIMEOUT_SECONDS"), 1, 300)
     if timeout:
         out["timeout_s"] = timeout
@@ -283,8 +292,10 @@ def _reply(text: str, route: str, tool_calls: Optional[list] = None, card: Optio
 
 
 async def hybrid(cfg: dict, message: str, view_fn: Callable[[], DataView], reason: Optional[str], stream: bool = False,
-                 t0: Optional[float] = None, trace: Optional[chat_trace.ChatTrace] = None) -> dict:
-    """The response for a question the rules did not answer. Never raises. `trace` (eko_chat_trace) only records what happens."""
+                 t0: Optional[float] = None, trace: Optional[chat_trace.ChatTrace] = None,
+                 deadline: Optional[chat_ctx.Deadline] = None) -> dict:
+    """The response for a question the rules did not answer. Raises only chat_ctx.ProjectChanged (the project changed under the request).
+    `trace` (eko_chat_trace) only records what happens; `deadline` is the request's one time budget, which every model call here is bounded by."""
     from eko_chat_router import direct_text, execute   # imported here: the router imports eko_chat
     trace = trace or chat_trace.ChatTrace.null()
     trace.deferred = True        # the endpoint prints the summary: it may still replace this reply with a topic reply
@@ -292,6 +303,7 @@ async def hybrid(cfg: dict, message: str, view_fn: Callable[[], DataView], reaso
         return eko_chat.unsupported(reason)
     run = LLMRun(reason, stream, t0)
     run.trace = trace
+    run.deadline = deadline
     try:
         client = OllamaClient(cfg)
     except ValueError:
@@ -305,19 +317,28 @@ async def hybrid(cfg: dict, message: str, view_fn: Callable[[], DataView], reaso
         _log(stage="interpret", outcome="llm_cooldown")
         return _reply(LLM_DOWN + HELP_TEXT, "unsupported")
     LLM_GATE.configure(_limit_from(cfg))
-    try:
-        started = time.perf_counter()
+    async def interpret():
         async with run.model_call():
             trace.call_started("interpret")
             t_call = time.perf_counter()
             try:
-                reply = await client.generate(INTENT_SYSTEM, json.dumps({"question": message[:MAX_QUESTION_CHARS]}), INTENT_SCHEMA)
+                got = await client.generate(INTENT_SYSTEM, json.dumps({"question": message[:MAX_QUESTION_CHARS]}), INTENT_SCHEMA)
             except LLMError as exc:
                 trace.call_failed("interpret", (time.perf_counter() - t_call) * 1000, exc.code)
                 raise
-            call_ms = (time.perf_counter() - t_call) * 1000
+            return got, (time.perf_counter() - t_call) * 1000
+
+    started = time.perf_counter()
+    try:
+        reply, call_ms = await chat_ctx.within(deadline, interpret())        # bounded by what is left of the request's deadline; cancelled after it
         run.usage(reply["usage"])
         interpret_ms = round((time.perf_counter() - started) * 1000)
+    except chat_ctx.DeadlineExceeded:
+        trace.call_failed("interpret", (time.perf_counter() - started) * 1000, "request_timeout")
+        trace.mark_fallback("request_timeout")
+        run.finish("timeout", "request_timeout")        # (not an outage of the model server: the cool-down is not started)
+        _log(stage="interpret", outcome="request_timeout", ms=round((time.perf_counter() - started) * 1000))
+        return _reply(chat_ctx.timeout_text(deadline), "timeout")
     except LLMError as exc:
         trace.mark_fallback(exc.code)
         if exc.code in OUTAGE:
@@ -339,7 +360,12 @@ async def hybrid(cfg: dict, message: str, view_fn: Callable[[], DataView], reaso
     if status != "ok":
         run.finish("success")
         return _reply((CLARIFY if status == "clarification" else NOT_UNDERSTOOD) + HELP_TEXT, "unsupported", model=client.model)
-    out = execute(decision, view_fn())
+    try:
+        out = execute(decision, view_fn())       # pinned: the request's own project, re-checked now
+    except chat_ctx.ProjectChanged as exc:
+        trace.mark_fallback(exc.code)
+        run.finish("failure", exc.code)
+        raise
     if out.get("route") != "direct":
         trace.mark_fallback("llm_invalid_output")
         run.finish("failure", "llm_invalid_output")
@@ -360,22 +386,28 @@ async def hybrid(cfg: dict, message: str, view_fn: Callable[[], DataView], reaso
     trace.mark_used(tool=out["intent"], rule=decision["rule"])      # the model chose this tool and the code ran it
     if decision["rule"] == "llm.explain_conditions" and result.get("available"):
         facts = json.dumps(_facts(result), default=str, ensure_ascii=False)
-        try:
+        async def narrate():
             async with run.model_call():
                 trace.call_started("narrate")
                 t_call = time.perf_counter()
                 try:
-                    told = await client.generate(NARRATE_SYSTEM, facts)
+                    got = await client.generate(NARRATE_SYSTEM, facts)
                 except LLMError:
                     trace.call_failed("narrate", (time.perf_counter() - t_call) * 1000, "llm_error")
                     raise
                 trace.call_completed("narrate", (time.perf_counter() - t_call) * 1000)
+                return got
+
+        try:
+            told = await chat_ctx.within(deadline, narrate())
             run.usage(told["usage"])
             summary = THINK_BLOCK.sub("", told["content"]).strip()
             # a summary is used only if every number in it is one of the facts (or the question's); else the code's text stands
             if summary and len(summary) <= 600 and not _ungrounded(summary, [facts, message]):
                 text, source = summary, "llm"
             _log(stage="narrate", outcome="used" if source == "llm" else "rejected")
+        except chat_ctx.DeadlineExceeded:
+            _log(stage="narrate", outcome="request_timeout")        # the verified answer is already in hand: the code's own text stands
         except LLMError as exc:
             _log(stage="narrate", outcome=exc.code)
     run.finish("success")

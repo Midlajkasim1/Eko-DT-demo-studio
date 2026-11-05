@@ -85,7 +85,8 @@ class EvaluateTests(unittest.TestCase):
         rows = caps.evaluate(MARSA_MAPPED, SHIPPED["power_boards"])
         self.assertEqual({r["id"] for r in rows if r["status"] == caps.UNMAPPED}, set())
         self.assertEqual(by_id(rows)["energy.boards"]["status"], caps.AVAILABLE)
-        self.assertEqual(sum(1 for r in rows if r["limitations"]), 0)
+        # the one limit a fully mapped site still has: the alarm records are those of FIN's latest read, not an archive (Phase 2: partial)
+        self.assertEqual({r["id"]: r["status"] for r in rows if r["limitations"]}, {"alarms.history_summary": caps.PARTIAL})
 
     def test_a_project_with_nothing_mapped_names_exactly_what_is_missing(self):
         rows = by_id(caps.evaluate(NOTHING_MAPPED, []))
@@ -137,7 +138,7 @@ class EvaluateTests(unittest.TestCase):
         rows = caps.evaluate(NOTHING_MAPPED, [])
         s = caps.summary(rows)
         self.assertEqual(sum(s["counts"].values()), len(rows))
-        self.assertEqual(sum(sum(a[k] for k in (caps.AVAILABLE, caps.UNMAPPED, caps.NOT_SUPPORTED)) for a in s["areas"]), len(rows))
+        self.assertEqual(sum(sum(a[k] for k in (caps.AVAILABLE, caps.PARTIAL, caps.UNMAPPED, caps.NOT_SUPPORTED)) for a in s["areas"]), len(rows))
 
 
 class RouterTests(unittest.TestCase):
@@ -227,8 +228,8 @@ class CapabilityReportTests(ProjectChatBase):
         self.assertNotIn("No severity bands are mapped", a)                                  # the Hospital settings of this suite do map bands
         card = body["card"]
         self.assertEqual(card["tool"], "get_capabilities")
-        self.assertEqual(card["columns"], ["area", "available", "unmapped", "not_supported"])
-        self.assertEqual(sum(r[1] + r[2] + r[3] for r in card["rows"]), len(caps.CAPABILITIES))
+        self.assertEqual(card["columns"], ["area", "available", "partial", "unmapped", "not_supported"])      # Phase 2 added the partial column
+        self.assertEqual(sum(sum(r[1:]) for r in card["rows"]), len(caps.CAPABILITIES))
 
     def test_a_project_without_severity_bands_is_told_its_alarms_are_not_graded(self):
         settings = {k: v for k, v in HOSPITAL.items() if k != "finSeverityBands"}
@@ -340,13 +341,14 @@ class UnavailableAnswerTests(ProjectChatBase):
                               ("Open the alarm dashboard.", "studio.navigate", "Open Studio pages is not supported yet"),
                               ("show work orders", "maintenance.workorders", "Work orders is not supported yet"),
                               ("water consumption today", "utilities.water_gas", "Water and gas consumption is not supported yet"),
-                              ("alarm history for last month", "alarms.history_summary", "The latest alarm records are available")):
+                              ("alarm history for last month", "alarms.history_summary", "is partly available")):
             with self.subTest(q):
                 body = self.ok(q)
                 self.assertEqual(body["route"], "unsupported")
                 self.assertEqual([(t["name"], t["arguments"]) for t in body["tool_calls"]], [("get_capabilities", {"about": cid})])
                 self.assertIn(words, body["answer"])
-                self.assertEqual(body["card"]["rows"][0][1], "not_supported")
+                # Phase 2: the alarm records of the latest read can be summarised, so that capability is partial; the rest are still not supported
+                self.assertEqual(body["card"]["rows"][0][1], "partial" if cid == "alarms.history_summary" else "not_supported")
 
     def test_a_request_to_change_something_is_refused_as_read_only_and_runs_no_tool_that_changes_anything(self):
         self.open(HOSPITAL, HOSPITAL_ID)

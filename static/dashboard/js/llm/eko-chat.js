@@ -51,6 +51,7 @@
   const CODES = {
     chat_disabled:'chat_disabled', llm_not_configured:'llm_not_configured',
     fin_not_connected:'session', unauthorized:'session', session_required:'session', session_expired:'session',
+    project_changed:'project_changed', request_timeout:'request_timeout',
     project_required:'project', project_not_supported:'project', project_mismatch:'project', session_project_mismatch:'project', project_not_validated:'project',
     llm_unavailable:'llm_unavailable', llm_http_error:'llm_unavailable',
     llm_timeout:'timeout',

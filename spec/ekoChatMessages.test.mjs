@@ -53,9 +53,11 @@ test('the same in Arabic, with the names left as they are', () => {
 test('every reason and tool name the backend may send reads in both languages, and only tool_error is an internal error', () => {
   const reasons = ['metric_unavailable', 'period_not_supported', 'online_state_unavailable', 'no_sensors', 'ambiguous', 'notifications_unavailable',
     'notifications_failed', 'alarm_history_unavailable', 'direct_rejected', 'direct_ungrounded', 'stale', 'no_data_yet', 'fin_not_connected',
-    'no_active_project', 'invalid_arguments', 'malformed_tool_call', 'unknown_tool']
+    'no_active_project', 'invalid_arguments', 'malformed_tool_call', 'unknown_tool',
+    // Phase 2: point analytics and the equipment comparison
+    'not_additive', 'unit_conflict', 'same_equipment', 'not_found']
   const tools = ['get_building_snapshot', 'find_equipment', 'get_equipment_status', 'get_alarms', 'get_environment', 'get_energy', 'get_hvac_status',
-    'get_notifications', 'get_capabilities']
+    'get_notifications', 'get_capabilities', 'search_points', 'calculate_metric', 'compare_equipment', 'get_alarm_history']
   for (const lang of ['en', 'ar']) {
     const { toolText } = toolLines(lang)
     for (const reason of reasons) for (const tool of tools) {
@@ -108,8 +110,40 @@ test('the capability card has its headline, columns and cells in both languages'
   for (const lang of ['en', 'ar']) {
     const T = TABLES[lang]
     for (const k of ['capabilities', 'capability', 'capabilitiesUnavailable']) assert.ok(T[`ai.card.h.${k}`] && T[`ai.card.i.${k}`], `${lang} ${k}`)
-    for (const c of ['area', 'available', 'unmapped', 'not_supported', 'capability', 'needs', 'data', 'tags']) assert.ok(T[`ai.card.c.${c}`], `${lang} column ${c}`)
-    for (const v of ['available', 'unmapped', 'not_supported', 'live', 'historical', 'stored']) assert.ok(T[`ai.card.cap.${v}`], `${lang} cell ${v}`)
+    for (const c of ['area', 'available', 'partial', 'unmapped', 'not_supported', 'capability', 'needs', 'data', 'tags']) assert.ok(T[`ai.card.c.${c}`], `${lang} column ${c}`)
+    for (const v of ['available', 'partial', 'unmapped', 'not_supported', 'live', 'historical', 'stored']) assert.ok(T[`ai.card.cap.${v}`], `${lang} cell ${v}`)
   }
   assert.match(js('ai/ask.js'), /col === 'status' \|\| col === 'data'\) return tOr\('ai\.card\.cap\./)
+})
+
+test('the capability headlines name the partly available count in both languages', () => {
+  for (const lang of ['en', 'ar']) {
+    for (const k of ['capabilities', 'capabilitiesUnavailable']) assert.ok(TABLES[lang][`ai.card.h.${k}`].includes('{partial}'), `${lang} ${k}`)
+  }
+})
+
+test('the Phase 2 cards (point search, calculation, comparison, alarm records) have their headline, line, columns and filters in both languages', () => {
+  const heads = { pointSearch: ['label', 'total', 'with_readings'], metricTop: ['label', 'order', 'name', 'value', 'unit'], metricCalc: ['label', 'op', 'value', 'unit'],
+    compare: ['a', 'b', 'compared'], compareAlarms: ['a', 'na', 'b', 'nb'], alarmHistory: ['total', 'open', 'cleared'] }
+  for (const lang of ['en', 'ar']) {
+    const T = TABLES[lang]
+    for (const [k, params] of Object.entries(heads)) {
+      const h = T[`ai.card.h.${k}`]
+      assert.ok(h, `${lang} headline ${k}`)
+      for (const p of params) assert.ok(h.includes(`{${p}}`), `${lang} ${k} keeps {${p}}`)
+    }
+    assert.ok(T['ai.card.h.compareNone'], lang)
+    for (const k of ['pointSearch', 'metricCalc', 'compare', 'alarmHistory']) assert.ok(T[`ai.card.i.${k}`] && T[`ai.card.i.${k}`].includes('{f}'), `${lang} line ${k}`)
+    for (const c of ['rank', 'samples', 'first', 'second', 'difference', 'percent', 'date', 'total', 'name', 'point', 'value', 'unit', 'floor', 'type', 'open_alarms'])
+      assert.ok(T[`ai.card.c.${c}`], `${lang} column ${c}`)
+    for (const f of ['metric', 'op', 'order', 'period', 'focus', 'type', 'severity', 'equipment']) assert.ok(T[`ai.card.f.${f}`], `${lang} filter ${f}`)
+    assert.ok(T['ai.mapping.equipmentPoints'], lang)
+  }
+})
+
+test('the two languages keep the same placeholders in every Phase 2 text', () => {
+  const ph = x => [...String(x).matchAll(/\{(\w+)\}/g)].map(m => m[1]).sort().join(',')
+  const keys = Object.keys(TABLES.en).filter(k => /^ai\.(card\.[hi]\.(pointSearch|metric|compare|alarmHistory|capabilit)|toolName\.(search_points|calculate_metric|compare_equipment|get_alarm_history)|reason\.(not_additive|unit_conflict|same_equipment|not_found))/.test(k))
+  assert.ok(keys.length >= 18, `found ${keys.length}`)
+  for (const k of keys) assert.equal(ph(TABLES.ar[k]), ph(TABLES.en[k]), k)
 })

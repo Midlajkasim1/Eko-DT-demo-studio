@@ -188,18 +188,67 @@ with it is built by code from the tool result. Code: `eko_chat.py`, `eko_chat_ro
   `config.json` ships `["marsaAlArab", "ekoHospital"]`, so a third project needs its FIN project name added there. Names match exactly (case included).
 - **Capabilities.** `eko_chat_capabilities.py` is the inventory of what Eko-Chat covers (equipment, alarms, notifications, indoor environment,
   energy, HVAC, building overview) and of what it does not (comparisons and trends, water and gas, power meters, work orders, documents, Studio
-  controls, and anything that writes). For the open project it reports each capability as `available`, `unmapped` (naming the Dashboard Settings >
-  Data Mapping entry it needs, from the project's own mappings; never a point ID) or `not_supported` (`planned` or `read_only`), and whether the
+  controls, and anything that writes). For the open project it reports each capability as `available`, `partial` (answered, with a stated limit),
+  `unmapped` (naming the Dashboard Settings > Data Mapping entry, or the equipment points, it needs, from the project's own mappings and points; never a
+  point ID) or `not_supported` (`planned` or `read_only`), and whether the
   data behind it is live, historical (FIN's hourly series) or stored (Eko-DT's notification store), and fresh, stale or not read yet. Ask
   "what can you do" (tool `get_capabilities`). A question that names something not supported (a theme change, a comparison, a work order, a
   request to turn something off) is answered with the real reason, where there is no model or the model does not answer; the rules never act on it.
   A wording that fits two readings (a bare "temperature") is asked back in one sentence, before any rule or model could pick one; an explicit
   outdoor or supply-air temperature is answered as not read, before any model (a model would give the indoor value). "What is unavailable / not
   mapped / missing / unsupported in this project" is answered by rules from the same report (`get_capabilities` with `show: "unavailable"`).
+- **Point analytics, comparison and alarm records (Phase 2).** Four more read-only tools, all over the same FIN caches (nothing new is asked of FIN):
+  `search_points` (which equipment has temperature, humidity, CO2 or power points, and which of them have a usable reading), `calculate_metric` (sum, average,
+  min, max, count or a top-N ranking of one of those metrics), `compare_equipment` (two equipment items named exactly: open alarms, and the difference and
+  percentage difference of the numeric points they share) and `get_alarm_history` (counts of the alarm records in FIN's latest alarm read). The arithmetic is
+  `eko_chat_analytics.py`, never a model: units are kept and never combined (a point in another unit than the metric's is left out and counted; a point with
+  no unit takes the metric's unit and is counted as assumed), a point that is missing, not reporting, stale, faulty, a setpoint, not a number or outside a
+  sanity range is left out and counted by reason, ties are ordered by name, a zero denominator is `zero_denominator` (never a number), only power may be
+  summed, and every answer carries its sample count and the time of the read. **What FIN gives it, and what it does not:** an equipment point has a name, a
+  displayed value, a unit, a reporting flag and a status, but the whole equipment cache has ONE read time, so a calculation is over the latest read (a point in
+  time) and says so; stored point history is not read, and a question about a past period of a point is answered as not supported. Alarm records are only the
+  newest 200 of FIN's latest alarm read (the configured read is `alarms(today)`), so `get_alarm_history` states the days that read covers, flags a period it does
+  not reach and a read that is full, gives a severity breakdown only when Severity Bands are mapped, and never counts the open alarms in its place. The points are
+  indexed once per project and read (`eko_chat_analytics.index_for`: one memo entry per project, rebuilt when the cache is not the same object with the same
+  timestamp, at most 4 held), so a message of several questions scans the points once. A project with no point for a metric is told so, with the live point
+  (`ra_co2`) that would answer a single reading and whether the project maps it. Rules route "compare AHU-01 and AHU-02", "which AHU has the highest
+  temperature", "top 3 AHUs by CO2", "highest temperature", "average humidity of the AHUs", "list AHUs with CO2 measurements" and "alarm history / how many
+  alarms were raised today"; in a message of several questions "list their alarms" means the two compared items and "its alarms" the one item just named
+  (nothing else is guessed), and an operation is shared with a bare second metric ("the highest temperature and humidity"). The humidity and CO2 averages of
+  `get_environment` run on the same analytics. The new tools take the same filters-the-user-wrote guard as the old ones (`ASKED_FILTERS`).
 - **Failed reads.** A read that fails is told to the browser as a tool event `{tool, status: "failed", reason, missing?}`. `reason` is one of
   `SAFE_REASONS` in `eko_chat.py` (anything else is an internal error); `missing` holds Data Mapping NAMES only (`{mapping, key}`, at most 6, never a
   point ID, expression or exception text), so the dashboard can say "not mapped: Live Points: avg_zone_temp". Every reason, tool and mapping name has
   an English and an Arabic text in `static/dashboard/js/i18n/en.js` and `ar.js`.
+- **One project, one deadline per request** (`eko_chat_context.py`). Right after the session guard the endpoint captures an immutable project context (the Studio
+  project id and the FIN project name, kept apart) and never rebuilds it from the backend's globals. Before EVERY tool call or model step the same guard runs
+  again and the live project is compared with the captured one; a project change or an ended session abandons the request (HTTP 409 `project_changed`, or 401
+  `session_required`; in a stream an `error` event) and nothing is shown or read for the other project. The whole request has one deadline,
+  `chat.request_deadline_s` (default 90, allowed 0.5 to 600; a bad value falls back to the default): every model call is bounded by what is LEFT of it (the wait
+  for a slot included) and is cancelled when it runs out, and no tool starts after it. If tools had already read something, the answer is those verified
+  results in the code's own words, marked `partial` ("This answer is incomplete..."); otherwise HTTP 504 `request_timeout` (hybrid: a plain "not answered
+  within N seconds" reply). Nothing the model had not finished is ever made up.
+- **Documents.** `GET /api/fin/documents` needs the same session as the other data routes and lists only the manuals of the FIN project that session signed
+  in for and FIN validated (409 for a session of another project or an unvalidated one). The only catalogue configured, `om-warranty.json`, belongs to
+  marsaAlArab, so for EKO HOSPITAL the list is empty; no Hospital catalogue exists in the repository. `/api/fin/file` keeps its own project check.
+- **Answers are Markdown.** Ask EKO shows bold, italic, headings, lists, tables and code blocks. The text is escaped first and turned into a fixed set of tags
+  (`ai/ask.js`, `mdHtml`); raw HTML, links and images are never rendered.
+- **Several questions in one message.** "How many assets are there and how many AHUs are in alarm?", "Show equipment list. Then show open alarms.",
+  "Show notifications, humidity and CO2." `eko_chat_router.plan_parts()` splits the message into at most four questions (sentences first, then `and`,
+  `then`, `also`, `plus`, `&` and commas inside a sentence; `?` `!` `.` and the Arabic `؟` `،` count; a number such as 1,000, a word such as "android"
+  and a message that already matches one rule are never split). A list that shares a verb ("Show notifications, humidity and CO2") borrows it for the
+  pieces that do not route alone. A message is split only when every piece either matches a rule or is plainly a question of its own; "Show critical
+  alerts and warnings" is not a list of questions and goes where it always went. Unsafe text is never split. Each part is routed by the SAME `route()`
+  as a single question and run through the same `execute()`, `direct_text()` and number-grounding check, on the request's pinned view (the session and
+  project guard runs again before every part; a project change abandons the whole request with 409, nothing shown). No language model is called when
+  every part routes. Every part gets a result in the order asked, with one of four statuses: `answered`; `unavailable` (the data cannot be read for this
+  project: not mapped, not read yet, stale, no session; the reason and the missing mapping are named and no value is made up); `unsupported` (a
+  capability that does not exist or only a planner could understand, reason `needs_planner`, or a question beyond the fourth, reason `limit_exceeded`);
+  `failed` (the tool failed, the answer could not be checked, or the request deadline ended before the part ran, reason `request_timeout`; parts already
+  answered are kept). The response keeps the single-answer fields and adds `parts` (`question`, `status`, `answer`, `reason`, `tool`, `rule`, `facts`,
+  `as_of`, `source`, `card`, `missing`) and `multi` (`count`, `answered`, `status` complete or partial, `needs_planner`); `answer` is the same content as
+  headed Markdown for clients that do not draw parts. `route` is `multi`. With the `rules` provider (and `ollama` with the planner off) a part no rule knows is reported; with a
+  tool-calling model (`openai_compatible`, or `ollama` with the planner, Phase 3) such a message, or one over the limit, goes to the model as a whole, as before. Ask EKO shows one section per part.
 - **Alarms and equipment.** The equipment list counts an alarm by the FIN id of the record it is on; `get_alarms` matches an equipment name the same
   way (the alarm rows carry that id internally, never shown) and by name as before, so the two always agree, and the alarm is shown under the equipment's
   own name. When the equipment list shows alarms for an item that the alarm read cannot match, the answer says so. A project with no Severity Bands is told
@@ -229,7 +278,43 @@ with it is built by code from the tool result. Code: `eko_chat.py`, `eko_chat_ro
 - **Load test.** `scripts/eko_chat_load_test.py` needs `--cookie` (the `eko_session` value, or `EKO_SESSION_COOKIE`) and `--project`.
 - **Export.** `eko_chat.py`, `eko_chat_router.py` and `eko_chat_llm.py` are in the backend export list (`src/lib/backendExport.ts`): `main.py` imports them.
 
+### The planner: a local model that plans read-only tool calls and explains the results (Ollama, Phase 3)
+
+`chat.provider = "ollama"` runs the **planner** (`eko_chat_planner.py`) for every question the rules do not answer, unless `chat.planner` is `false` (or
+`LLM_PLANNER=false`), which restores the one-intent path described under Hybrid mode below. The order of a request is unchanged up to the rules: the session
+and project checks, the clarification, the deterministic router, and a message whose parts ALL have a rule are answered with **no model call**. A single
+question for something nothing answers (a change, a theme or page, a trend, a forecast, the outdoor temperature) is also answered by code, before any model.
+What is left (a question the rules do not know, or a message with at least one part they do not) goes to the model as a whole:
+
+1. The model is offered the 13 registered read-only tools (`TOOLS`; `search_points`, `calculate_metric`, `compare_equipment` and `get_alarm_history` included)
+   through Ollama's native tool calling (`/api/chat`, `think` off), and plans: it may call several tools in one step, read their results, and call more.
+2. Every call is checked before it runs: the name against the allowlist, the arguments against that tool's own schema, a `type`, `floor`, name or equipment it
+   passes must be a word of the question or a name an earlier result of this request returned (a severity must be the user's own word), and at most 6 calls
+   run per step. A refused call is reported back to the model, which may ask again; it never reaches a tool. Nothing here can change, start, stop or
+   acknowledge anything: there is no such tool.
+3. Each call runs on the request's pinned project, which is re-checked (session and project) before every call and again before the answer is returned. A
+   change abandons the request: HTTP 409 `project_changed`, or 401 for an ended session, and nothing is shown.
+4. The model writes the final answer from the results it was shown (long results are cut by list, with an `_omitted` count; the answer is checked against that
+   same text). Every number (Arabic-Indic digits and the Arabic decimal mark included), every equipment name and every severity claim in it must come from those
+   results or from the question, also when no tool was used. The model gets one correction request; if the second answer still fails, a fixed reply is shown.
+   The card is built by code from the newest successful read, as before.
+5. A read that failed for a reason of the building's data (not mapped, stale, not read yet) is always told: when the model's answer does not name what is
+   missing (the Data Mapping entries), the code appends "Not available: ..." (Arabic: "غير متاح:") from the tool result. The model's own mistakes (an unknown tool,
+   bad arguments) are not reported as missing data.
+6. At most `chat.planner.max_rounds` model calls (1 to 8, default 4; `LLM_PLANNER_MAX_ROUNDS`); the correction request does not count. At the limit, at the
+   request's one deadline (`chat.request_deadline_s`), or when the model stops answering after tools had read something, the answer is what was read, in the
+   code's own words, marked `partial` and "This answer is incomplete..."; with nothing read it is a plain reply.
+7. The model is local: the same `base_url` (localhost unless `allow_remote_llm`), `model`, `timeout_s` (planner default 60 s), `max_output_tokens` (planner
+   default 512), `num_ctx` (planner default 8192, the 13 tool definitions need more than 2048), cooldown and concurrency settings as the one-intent path.
+   When Ollama is down, slow or without the model, the reply is the short plain message plus the list of supported questions, and the rules keep answering.
+
+The reply has `route: "llm_planner"` and `answer_source: "llm"` when the model's explanation is shown (`"code"` for a fixed, partial or fallback text), and the
+diagnostics line says `handler=planner`. A question in Arabic is answered in Arabic (the prompt asks for it; equipment names, units and digits stay as the
+results give them). A 4B model needs 10 to 40 seconds for a question that takes two or three calls on a laptop GPU; the default overall deadline is 90 s.
+
 ### Hybrid mode: a local model for questions the rules do not know (Ollama)
+
+(The one-intent path below runs when `chat.planner` is `false`.)
 
 `chat.provider = "ollama"` adds a small **local** model behind the rules. The order of a request is unchanged up to the rules:
 session and project checks, then the deterministic router answers everything it knows with **no model call**. Only a question the rules do not
@@ -270,7 +355,8 @@ cd backend; python -m uvicorn main:app --port 8000
 | `LLM_ENABLED` | env | `true` selects `ollama`; `false` is the kill switch (rules only), whatever `config.json` says |
 | `LLM_PROVIDER` | env | `ollama`, `rules` or `openai_compatible` (the older tool-calling provider) |
 | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | env | default `http://localhost:11434`, `qwen3.5:4b`; a `/v1` suffix is ignored |
-| `LLM_TIMEOUT_SECONDS`, `LLM_MAX_OUTPUT_TOKENS` | env | defaults 30 s (config.json: `timeout_s`) and 160 (`max_output_tokens`) |
+| `LLM_TIMEOUT_SECONDS`, `LLM_MAX_OUTPUT_TOKENS` | env | defaults 30 s (config.json: `timeout_s`) and 160 (`max_output_tokens`); the planner's are 60 s and 512 |
+| `LLM_PLANNER`, `LLM_PLANNER_MAX_ROUNDS` | env | `false` selects the one-intent path; `true` turns the planner on; rounds 1 to 8 (config.json: `chat.planner`, `false` or `{"enabled", "max_rounds"}`) |
 | `num_ctx`, `keep_alive`, `llm_cooldown_s`, `max_concurrent_llm` | config.json `chat` | context 2048, model kept loaded 10m, cooldown 30 s, 2 model calls at once |
 | `allow_remote_llm` | config.json `chat` | an Ollama on another machine is refused unless this is `true`; the default is this computer only |
 
@@ -286,7 +372,7 @@ call the model (`/api/chat/stats` shows the runs).
 ```powershell
 cd backend
 $env:EKO_NOTIFICATION_DB = "$env:TEMP\eko-test-notifications.db"      # keeps the tests off the real notification history
-python -m unittest tests.test_eko_chat_rules tests.test_eko_chat_metrics tests.test_eko_chat_projects tests.test_eko_chat_inventory tests.test_eko_chat_capabilities tests.test_eko_chat_messages tests.test_eko_chat_trace tests.test_eko_chat_alarms tests.test_fin_projects
+python -m unittest tests.test_eko_chat_rules tests.test_eko_chat_metrics tests.test_eko_chat_projects tests.test_eko_chat_inventory tests.test_eko_chat_capabilities tests.test_eko_chat_messages tests.test_eko_chat_trace tests.test_eko_chat_alarms tests.test_eko_chat_scope tests.test_eko_chat_multi tests.test_eko_chat_analytics tests.test_eko_chat_points tests.test_eko_chat_analytics_chat tests.test_eko_chat_analytics_capabilities tests.test_eko_chat_planner tests.test_fin_documents tests.test_backend_export tests.test_fin_projects
 cd ..
 python scripts/eko_chat_llm_benchmark.py                 # live: cold start, intent latency, end-to-end, accuracy (needs Ollama + the model)
 python scripts/eko_chat_llm_benchmark.py --unavailable   # how the chat behaves with Ollama off
@@ -294,7 +380,7 @@ python scripts/eko_chat_llm_benchmark.py --simulate      # checks the harness on
 ```
 
 The two test modules cover the rule-based answers (`chat.provider = "rules"`) and the building-metric questions, against a fake FIN (`tests/fake_fin.py`) and a
-throwaway notification database; no model is built or called and there is no network. The hybrid Ollama path (`eko_chat_llm.py`) has no unit tests yet, and
+throwaway notification database; no model is built or called and there is no network. The planner (`test_eko_chat_planner.py`: the Ollama wire against a mock transport, every tool through the planning loop, grounding, rounds, deadline, project and session scope) is tested with scripted models; the one-intent path (`eko_chat_llm.py`) is covered by the older suites with `chat.planner` false, and
 neither test checks a real model's accuracy or speed, or live FIN. `pytest tests/test_eko_chat_rules.py tests/test_eko_chat_metrics.py` also works from `backend/`.
 
 **Limitations.** A 4B model misreads some phrasings (the benchmark's accuracy line shows how many on your machine); a misread becomes a

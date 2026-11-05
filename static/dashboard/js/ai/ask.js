@@ -168,7 +168,7 @@ window.EKO_AI = (function(){
   let chat = null;
   function askBackend(q, turn){
     if(!chat) chat = CHAT().session();
-    Object.assign(turn.a, { backend:true, tools:[], card:null, figures:[], evidence:null, actions:[], sources:'', window:'' });
+    Object.assign(turn.a, { backend:true, tools:[], card:null, parts:null, project:'', figures:[], evidence:null, actions:[], sources:'', window:'' });
     turn.a.shown = '';
     const live = () => !!S.streaming && S.streaming.turn === turn;
     const req = chat.send(q, {
@@ -183,7 +183,10 @@ window.EKO_AI = (function(){
       done(d){
         if(!live()) return;
         turn.a.text = String(d.answer || ''); turn.a.status = d.grounded === false ? 'ungrounded' : 'ok';
+        turn.a.partial = d.partial === true;     /* the backend's deadline passed: what had been read, and nothing more */
         turn.a.card = d.card || null; turn.a.model = d.model || turn.a.model || '';
+        turn.a.parts = Array.isArray(d.parts) && d.parts.length ? d.parts : null;     /* several questions: one section each, in the order asked */
+        turn.a.project = (d.project && d.project.name) || '';
         turn.a.sources = d.card ? t('ai.srcLive', { project: d.card.project || (d.project && d.project.name) || '', t: hhmm(d.card.as_of) }) : '';
       },
       error(d){ if(!live()) return; turn.a.status = 'error'; turn.a.errCode = d.code || 'error'; }
@@ -355,10 +358,90 @@ window.EKO_AI = (function(){
   }
   function toolsHtml(a){ return a.tools && a.tools.length ? `<div class="aitools tCap">${a.tools.map(x => `<div data-status="${esc(x.status)}">${esc(toolText(x))}</div>`).join('')}</div>` : ''; }
   function errText(a){ return a.errCode ? tOr('ai.err.' + a.errCode, t('ai.error')) : t('ai.error'); }
+  /* ---- safe Markdown (Eko-Chat answers) ----
+     The model's text is DATA. It is HTML-escaped first, whole, with the dashboard's own esc(); only then are the few Markdown shapes below turned into a
+     FIXED set of tags (p, h4-h6, ul, ol, li, table, thead, tbody, tr, th, td, pre, code, strong, em), whose only attributes are dir="auto" (each line or
+     cell takes its own direction, so Arabic and English mix) and a class of ours. No raw HTML survives, a [text](url) or ![](url) stays text (no link,
+     no image, no javascript: URL), and nothing from the text becomes an attribute or a style. */
+  function mdInline(s){
+    const codes = [];
+    s = s.replace(/`([^`\n]+)`/g, (m, c) => { codes.push(c); return '\u0001' + (codes.length - 1) + '\u0001'; });
+    s = s.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*\w])\*([^*\s][^*\n]*?)\*(?![*\w])/g, '$1<em>$2</em>');
+    s = s.replace(/(^|[^\w])_([^_\s][^_\n]*?)_(?!\w)/g, '$1<em>$2</em>');      /* only at word edges: avg_zone_temp stays as written */
+    return s.replace(/\u0001(\d+)\u0001/g, (m, i) => '<code>' + String(codes[+i] == null ? '' : codes[+i]) + '</code>');
+  }
+  function mdHtml(text){
+    const lines = esc(String(text == null ? '' : text).replace(/[\u0000\u0001]/g, '')).replace(/\r\n?/g, '\n').split('\n');
+    const cellsOf = row => row.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+    const isSep = ln => ln.includes('|') && ln.includes('-') && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(ln);
+    const out = [];
+    let i = 0, m;
+    while(i < lines.length){
+      const ln = lines[i];
+      if(!ln.trim()){ i++; continue; }
+      if(/^\s*```/.test(ln)){                                       /* a code block: its text is shown as written (already escaped) */
+        const body = [];
+        i++;
+        while(i < lines.length && !/^\s*```/.test(lines[i])) body.push(lines[i++]);
+        i++;
+        out.push('<pre dir="ltr" class="aimdcode"><code>' + body.join('\n') + '</code></pre>');
+        continue;
+      }
+      if((m = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(ln))){
+        const lvl = m[1].length <= 2 ? 4 : m[1].length === 3 ? 5 : 6;
+        out.push('<h' + lvl + ' dir="auto" class="aimdh">' + mdInline(m[2]) + '</h' + lvl + '>');
+        i++;
+        continue;
+      }
+      if(ln.includes('|') && i + 1 < lines.length && isSep(lines[i + 1])){
+        const head = cellsOf(ln);
+        i += 2;
+        const body = [];
+        while(i < lines.length && lines[i].trim() && lines[i].includes('|')) body.push(cellsOf(lines[i++]));
+        out.push('<table class="aimdtbl"><thead><tr>' + head.map(c => '<th dir="auto">' + mdInline(c) + '</th>').join('') + '</tr></thead><tbody>'
+          + body.map(r => '<tr>' + r.map(c => '<td dir="auto">' + mdInline(c) + '</td>').join('') + '</tr>').join('') + '</tbody></table>');
+        continue;
+      }
+      if(/^\s*[-*+]\s+/.test(ln)){
+        const items = [];
+        while(i < lines.length && (m = /^\s*[-*+]\s+(.*)$/.exec(lines[i]))){ items.push(m[1]); i++; }
+        out.push('<ul class="aimdl">' + items.map(x => '<li dir="auto">' + mdInline(x) + '</li>').join('') + '</ul>');
+        continue;
+      }
+      if(/^\s*\d{1,3}[.)]\s+/.test(ln)){
+        const items = [];
+        while(i < lines.length && (m = /^\s*\d{1,3}[.)]\s+(.*)$/.exec(lines[i]))){ items.push(m[1]); i++; }
+        out.push('<ol class="aimdl">' + items.map(x => '<li dir="auto">' + mdInline(x) + '</li>').join('') + '</ol>');
+        continue;
+      }
+      out.push('<p dir="auto">' + mdInline(ln.trim()) + '</p>');
+      i++;
+    }
+    return out.join('');
+  }
+  /* ---- end safe Markdown ---- */
+  /* ---- multi-question parts (Eko-Chat) ----
+     A message of several questions comes back as parts, in the order asked: { question, status, answer, card?, as_of? }. Each part is a section
+     with its question as the heading, its own answer through the same safe Markdown as every answer, its own card, and, unless it was answered,
+     a status label. Every piece of text is escaped first; the status is checked against a fixed list before it is used as an attribute. */
+  const PART_STATUS = ['answered', 'unavailable', 'unsupported', 'failed'];
+  function partsHtml(parts, project){
+    if(!Array.isArray(parts) || !parts.length) return '';
+    return `<div class="aiparts">${parts.map((p, n) => {
+      if(!p || typeof p !== 'object') return '';
+      const st = PART_STATUS.includes(p.status) ? p.status : 'failed';
+      const label = st === 'answered' ? '' : `<span class="aipartst" data-status="${st}">${esc(t('ai.part.' + st))}</span>`;
+      const src = st === 'answered' && p.as_of ? `<p class="aisrc">${esc(t('ai.srcLive', { project: project || '', t: hhmm(p.as_of) }))}</p>` : '';
+      return `<section class="aipart" data-status="${st}"><h5 class="aiparth" dir="auto"><span class="aipartn">${n + 1}</span><span class="aipartq">${esc(String(p.question == null ? '' : p.question))}</span>${label}</h5>
+        <div class="aipartbody aitext">${mdHtml(p.answer)}</div>${st === 'answered' ? cardHtml(p.card) : ''}${src}</section>`;
+    }).join('')}</div>`;
+  }
+  /* ---- end multi-question parts ---- */
   function turnHtml(tr, i){
     const a = tr.a, streaming = S.streaming && S.streaming.turn === tr, text = streaming ? (a.shown || '') : (a.text || '');
-    const paras = text.split(/\n+/).filter(Boolean).map(p => `<p>${esc(p)}</p>`).join('');
-    const note = a.status === 'unreachable' ? t('ai.unreachable') : a.status === 'fallback' ? t('ai.fallback') : a.status === 'ungrounded' ? t('ai.notSupported') : a.stopped ? t('ai.stopped') : a.status === 'regenerated' ? t('ai.regenerated') : '';
+    const paras = mdHtml(text);
+    const note = a.status === 'unreachable' ? t('ai.unreachable') : a.status === 'fallback' ? t('ai.fallback') : a.status === 'ungrounded' ? t('ai.notSupported') : a.stopped ? t('ai.stopped') : a.status === 'regenerated' ? t('ai.regenerated') : a.partial ? t('ai.partial') : '';
     const fb = a.feedback || null;
     const fbForm = S.fbOpen === i ? `<div class="aifb"><input class="aifbin" data-chg="aiFbNote" data-i="${i}" value="${esc((fb && fb.note) || '')}" placeholder="${esc(t('ai.fbNotePh'))}" maxlength="140"><button class="btnG btnSm" data-act="aiFbSave" data-i="${i}">${esc(t('saveW'))}</button></div>` : '';
     return `<div class="aiturn aiq"><div class="aibubble">${esc(tr.q.text)}</div><span class="aitime tMonoS">${esc(hhmm(tr.q.at))}</span></div>
@@ -366,7 +449,7 @@ window.EKO_AI = (function(){
         <div class="aibubble">
           ${a.status === 'pending' ? `<div class="aityping" aria-label="${esc(t('ai.typing'))}"><span></span><span></span><span></span></div>` : ''}
           ${toolsHtml(a)}
-          ${a.status === 'error' ? `<p class="aierr">${esc(errText(a))}</p><button class="btnG btnSm" data-act="aiRetry" data-i="${i}">${esc(t('ai.retry'))}</button>` : `<div class="aitext">${paras}${streaming ? '<span class="aicaret"></span>' : ''}</div>`}
+          ${a.status === 'error' ? `<p class="aierr">${esc(errText(a))}</p><button class="btnG btnSm" data-act="aiRetry" data-i="${i}">${esc(t('ai.retry'))}</button>` : `<div class="aitext">${a.parts && !streaming ? partsHtml(a.parts, a.project) : paras}${streaming ? '<span class="aicaret"></span>' : ''}</div>`}
           ${!streaming && a.status !== 'pending' && a.status !== 'error' ? `${cardHtml(a.card)}${evidenceHtml(a.evidence)}${figsHtml(a.figures)}
             ${a.sources ? `<p class="aisrc">${esc(a.sources)}</p>` : ''}
             ${a.actions && a.actions.length ? `<div class="aiacts2">${a.actions.map(x => `<button class="btnG btnSm" data-act="${esc(x.act)}" data-asset="${esc(x.asset)}">${esc(t(x.key))}</button>`).join('')}</div>` : ''}
@@ -494,5 +577,5 @@ window.EKO_AI = (function(){
     ['pointerup', 'pointercancel', 'pointermove'].forEach(k => document.addEventListener(k, () => { if(hold){ clearTimeout(hold); hold = null; } }, true));
   }
 
-  return { ACTS, ask, open, close, isOpen, panel, launcher, setRoute, after, wire, stop, state:S, convs, cur, feedback:feedbackStore, log:() => S.log.slice(), contextFrom, suggestions, exportMd, exportPdf, get ctx(){ return S.ctx; } };
+  return { md: mdHtml, ACTS, ask, open, close, isOpen, panel, launcher, setRoute, after, wire, stop, state:S, convs, cur, feedback:feedbackStore, log:() => S.log.slice(), contextFrom, suggestions, exportMd, exportPdf, get ctx(){ return S.ctx; } };
 })();

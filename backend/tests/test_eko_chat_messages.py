@@ -69,7 +69,7 @@ class ReasonCodeTests(unittest.TestCase):
         self.assertEqual(EN["ai.reason.tool_error"], "an internal error")
 
     def test_every_tool_has_a_name_in_both_languages(self):
-        self.assertEqual(len(eko_chat.TOOLS), 9)
+        self.assertEqual(len(eko_chat.TOOLS), 13)       # Phase 2 added search_points, calculate_metric, compare_equipment and get_alarm_history
         for tool in eko_chat.TOOLS:
             self.assertTrue(EN.get(f"ai.toolName.{tool}"), f"en {tool}")
             self.assertTrue(AR.get(f"ai.toolName.{tool}") and ARABIC.search(AR[f"ai.toolName.{tool}"]), f"ar {tool}")
@@ -338,8 +338,8 @@ class UnavailableQuestionTests(ProjectChatBase):
         card = self.ok("What information is unavailable in this project?")["card"]
         counts = self.tool("get_capabilities")["counts"]
         self.assertEqual(card["columns"], ["capability", "status", "data", "needs"])
-        self.assertEqual(card["total"], counts["unmapped"] + counts["not_supported"])
-        self.assertEqual({r[1] for r in card["rows"]} - {"unmapped", "not_supported"}, set())
+        self.assertEqual(card["total"], counts["partial"] + counts["unmapped"] + counts["not_supported"])      # Phase 2: what is only partly available is listed too
+        self.assertEqual({r[1] for r in card["rows"]} - {"partial", "unmapped", "not_supported"}, set())
         self.assertIn(["Indoor air quality index", "unmapped", "live", "Dashboard Settings > Data Mapping > Live Points: iaq_index"], card["rows"])
         self.assertEqual(card["headline"]["key"], "capabilitiesUnavailable")
         self.assertEqual(card["tool"], "get_capabilities")
@@ -425,7 +425,7 @@ class UnavailableQuestionTests(ProjectChatBase):
 class SameBehaviourTests(ProjectChatBase):
     def test_the_earlier_answers_are_unchanged(self):
         self.open(HOSPITAL, HOSPITAL_ID)
-        self.assertIn("I can answer 12 kinds of question", self.ok("What can you do?")["answer"])
+        self.assertIn("I can answer 13 kinds of question", self.ok("What can you do?")["answer"])      # 12, and the equipment comparison of Phase 2
         self.assertIn("is not supported yet", self.ok("Change to dark mode.")["answer"])
         self.assertIn("Equipment items: 3.", self.ok("how many assets do we have")["answer"])
         self.assertEqual(self.ok("tell me a joke")["route"], "unsupported")
