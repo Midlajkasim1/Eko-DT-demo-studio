@@ -20,7 +20,8 @@ import main  # noqa: E402
 import notifications  # noqa: E402
 from chat_support import PROJECT_A, PROJECT_B, ChatTestBase, parse_sse, wait_for  # noqa: E402
 
-RULES = {"enabled": True, "provider": "rules"}
+# planner False: the suites built on this config that choose provider "ollama" test the one-intent path; the Phase 3 planner has test_eko_chat_planner.py
+RULES = {"enabled": True, "provider": "rules", "planner": False}
 SITE = "projA"
 
 
