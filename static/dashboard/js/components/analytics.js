@@ -692,7 +692,7 @@ window.EKO_A = (function(){
   }
   function heatZones(d, s, mode){
     const kind = mode === 'comfort' ? 'iaq' : 'is';
-    return d.zones.filter(z => z.kind === kind && (s.hmFloor === 'All' || z.floor === s.hmFloor));
+    return d.zones.filter(z => (z.sample || z.kind === kind) && (s.hmFloor === 'All' || z.floor === s.hmFloor));
   }
   function heatValue(z, mode){
     if(mode === 'comfort') return z.co2;
@@ -808,13 +808,14 @@ window.EKO_A = (function(){
       const label = heatText(z, mode);
       const out = s.hmOutline && heatOver(z, mode);
       const ids = (z.bimIds && z.bimIds.length) ? z.bimIds : (z.bimId ? [z.bimId] : [null]);
+      const pinIds = z.sample && ids.length > 1 ? ids.slice(0, 1) : ids;
       const showDot = !!s.hmLayers.sensors;
       const showLabel = !!s.hmLayers.labels;
       const showValue = !!s.hmLayers.values;
       /* The left speck is the sensor. It stays on the card when the name or
          the value is hidden. With neither, the card is that dot alone. */
       if (!showDot && !showLabel && !showValue) return '';
-      return ids.map((bimId, i) => {
+      return pinIds.map((bimId, i) => {
         const key = 'hm:' + z.nameEn + ':' + i;
         const pin = bimId
           ? (pinFn ? pinFn(bimId, key) : `data-bimid="${esc(bimId)}" data-key="${esc(key)}"`)

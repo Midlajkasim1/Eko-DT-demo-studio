@@ -37,6 +37,29 @@ window.EKO_P = (function(){
     waterPage:        E => window.EKO_A.waterPage(E),
     gasPage:          E => window.EKO_A.gasPage(E),
     heatPanel:        E => window.EKO_A.heatPanel(E),
+    /* E15: the module pages (ESG, Maintenance, Security and life safety, the Priority 2 pages, Executive summary, prediction and proof) */
+    esgSummary:       E => window.EKO_ESG.summary(E),        /* D175: the ESG module */
+    esgPanel:         E => window.EKO_ESG.panel(E),
+    esgTvaPage:       E => window.EKO_ESG.tvaPage(E),
+    esgNzPage:        E => window.EKO_ESG.netZeroPage(E),
+    esgBillsPage:     E => window.EKO_ESG.billsPage(E),
+    esgIeqPage:       E => window.EKO_ESG.ieqPage(E),
+    esgRepPage:       E => window.EKO_ESG.reportingPage(E),
+    mntPage:          E => window.EKO_MNT.page(E),          /* D180: Maintenance */
+    execPage:         E => window.EKO_PERSONA ? window.EKO_PERSONA.execPage(E) : '',   /* E13: the executive summary */
+    predictPage:      E => window.EKO_E14 ? window.EKO_E14.predictPage(E) : '',     /* E14: the prediction (mock 2) */
+    provePage:        E => window.EKO_E14 ? window.EKO_E14.provePage(E) : '',       /* E14: the proof (mock 3) */
+    secSummary:       E => window.EKO_SEC.summary(E),       /* D180: Security and life safety */
+    secPanel:         E => window.EKO_SEC.panel(E),
+    secCamsPage:      E => window.EKO_SEC.camsPage(E),
+    secAccessPage:    E => window.EKO_SEC.accessPage(E),
+    secFirePage:      E => window.EKO_SEC.firePage(E),
+    secPowerPage:     E => window.EKO_SEC.powerPage(E),
+    secEvacPage:      E => window.EKO_EVAC ? window.EKO_EVAC.page(E) : '',
+    secNursePage:     E => window.EKO_EVAC ? window.EKO_EVAC.nursePage(E) : '',   /* D180: S7 nurse call */
+    /* D180: the Priority 2 pages (js/p2.js) */
+    p2Intr:  E => window.EKO_P2.intrPage(E),  p2Health: E => window.EKO_P2.healthPage(E),
+    p2Data:  E => window.EKO_P2.dataPage(E),  p2Other:  E => window.EKO_P2.otherPage(E),  p2Occ: E => window.EKO_P2.occPage(E),
     stubPanel:        E => C().modShell(E, E.t(E.state.moduleLabel||'modOverview'), '', '',
                         `<p class="alempty">${C().esc(E.t('stubBody'))}</p>`)
   };
@@ -110,7 +133,12 @@ window.EKO_P = (function(){
   /* 7. portfolioPage (D103): the estate landing above one twin. */
   function portfolioPage(E){ return window.EKO_PF.page(E); }
   function portfolioSite(E){ return window.EKO_PF.sitePage(E); }   /* D104 */
-  const ARCH = { siteOverview, categoryLanding, detailPage, registerPage, reportPage, reportsHub, portfolioPage, portfolioSite };
+  /* E15: the Security and life safety overview over the model */
+  function securityLanding(E, doc){
+    if(E.stacked()) return categoryLanding(E, doc);
+    return window.EKO_SEC.landing(E, doc);
+  }
+  const ARCH = { siteOverview, categoryLanding, detailPage, registerPage, reportPage, reportsHub, portfolioPage, portfolioSite, securityLanding };
 
   function renderPage(E){
     const doc = window.EKO_LAYOUTS[E.state.pageId];

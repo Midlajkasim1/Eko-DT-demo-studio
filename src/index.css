@@ -1803,11 +1803,11 @@ Wait, if iframe has pointer-events: auto, it works. Let's fix this in iframe bod
 
 .dashboard-settings-tabs {
   display: flex;
+  flex-wrap: wrap;
   padding: 0 24px;
-  gap: 16px;
+  gap: 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-raised);
-  overflow-x: auto;
   flex-shrink: 0;
 }
 

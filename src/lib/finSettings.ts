@@ -176,6 +176,10 @@ export function dashboardProjectInfo(meta: { projectId: string; name: string; ap
     demo: s.dashboardDemo === true,
     /* Hospital HVAC graphics: the project whose FIN project is Eko Hospital's (hospitalHvac.ts); the dashboard's equipment mapping reads this too */
     hospitalHvac: hospitalHvacEnabled(meta),
+    /* the sample data set the demo figures come from; null = Marsa Al Arab */
+    sampleData: s.dashboardDemo === true && s.dashboardSampleData === 'medical' ? 'medical' : null,
+    /* the module set: 'extended' or 'standard' */
+    modules: s.dashboardModules === 'extended' ? 'extended' : 'standard',
     /* the project's own boards; null = the built-in board keys, where the project maps them */
     powerBoards: Array.isArray(s.finPowerBoards) && s.finPowerBoards.length ? s.finPowerBoards : null,
     site: {
@@ -192,6 +196,7 @@ export function dashboardProjectInfo(meta: { projectId: string; name: string; ap
       co2Factor: rateOrNull(s.co2Factor),
       co2FactorName: s.co2FactorName || '',
     },
+    heatmap: s.heatmap && typeof s.heatmap === 'object' ? s.heatmap : null,
   }
 }
 

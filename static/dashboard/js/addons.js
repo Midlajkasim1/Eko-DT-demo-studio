@@ -46,8 +46,11 @@ window.EKO_ADDONS = (function(){
   function saveOverrides(o){ try{ localStorage.setItem(LS, JSON.stringify(o)); }catch(e){} }
   function cfg(E){
     const base = (E.data && E.data.entitlements) || {}, o = overrides();
+    /* E15: the project's module set decides the extra modules (app.js projectSetup); a browser override cannot change them */
+    const om = Object.assign({}, o.modules || {});
+    if(window.EKO_MODULES) ['esg', 'maintenance', 'security'].forEach(k => { delete om[k]; });
     return { showAddOns: o.showAddOns != null ? !!o.showAddOns : base.showAddOns !== false,
-             modules: Object.assign({}, base.modules || {}, o.modules || {}),
+             modules: Object.assign({}, base.modules || {}, om),
              overridden: Object.keys(o).length > 0 };
   }
   const STATES = ['active', 'available', 'hidden'];

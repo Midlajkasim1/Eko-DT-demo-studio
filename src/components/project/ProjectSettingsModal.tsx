@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useProjectStore } from '@/store/useProjectStore'
+import { useModelStore } from '@/store/useModelStore'
 import { useFinStore } from '@/store/useFinStore'
 import { FinProjectPicker } from '@/components/project/FinProjectPicker'
 import { fetchFinResources, fetchMappingSchema, type FinResource, type MappingSchema } from '@/lib/finProjects'
@@ -28,11 +29,137 @@ import {
 } from '@/lib/finSettings'
 import type { JsonObject } from '@/lib/mappingRows'
 import { validateMappings, type ValidationResponse } from '@/lib/mappingValidation'
-import type { ProjectApiSettings } from '@/types'
+import type { HeatmapSetup, ProjectApiSettings } from '@/types'
 
 interface ProjectSettingsModalProps {
   visible: boolean
   onClose: () => void
+}
+
+function HeatmapPane({
+  heat,
+  floors,
+  models,
+  onChange,
+}: {
+  heat: HeatmapSetup | undefined
+  floors: { id: string; name: string }[]
+  models: string[]
+  onChange: (next: HeatmapSetup) => void
+}) {
+  const current = heat ?? {}
+  const patch = (part: HeatmapSetup) => onChange({ ...current, ...part })
+  const namedFade = Array.isArray(current.fadeModels)
+  const faded = new Set(current.fadeModels ?? [])
+  const toggleModel = (name: string) => {
+    const base = namedFade ? [...(current.fadeModels ?? [])] : []
+    const next = base.includes(name) ? base.filter(n => n !== name) : [...base, name]
+    patch({ fadeModels: next })
+  }
+  return (
+    <div className="ds-pane">
+      <h3 className="ds-section-title">Heatmap</h3>
+      <p className="ds-hint">
+        Linked rooms are coloured with sample readings until a FIN value arrives.
+        Turn sample readings off and a room is drawn only when its name is a sensor, such as IS-01 or IAQ-02.
+        IS reads zone temperature and humidity. IAQ reads CO2.
+        Save, then open the heatmap. Leave this as it is and the project keeps the top view of the ground floor, with the models as they are.
+      </p>
+
+      <h3 className="ds-section-title" style={{ marginTop: 24 }}>Sample readings</h3>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
+        <input
+          type="checkbox"
+          checked={current.sampleSpaces !== false}
+          onChange={e => {
+            if (e.target.checked) {
+              const next = { ...current }
+              delete next.sampleSpaces
+              onChange(next)
+            } else patch({ sampleSpaces: false })
+          }}
+        />
+        Fill linked rooms when FIN has no reading
+      </label>
+      <p className="ds-hint">
+        Linked rooms share seven sample sensors, S-01 to S-07. Rooms on one sensor use the same temperature, humidity, and CO2, so the view does not colour every room on its own. You do not rename the rooms. A real FIN reading is kept. Marsa has no linked rooms, so its heatmap stays on the FIN feed. Turn this off to draw only rooms you name IS-01 or IAQ-02.
+      </p>
+
+      <h3 className="ds-section-title" style={{ marginTop: 24 }}>View</h3>
+      <div className="al-filters" style={{ marginBottom: 12 }}>
+        <button type="button" className={`ds-toggle-btn ${current.camera !== 'inside' ? 'active' : ''}`} onClick={() => patch({ camera: 'top' })}>Top view</button>
+        <button type="button" className={`ds-toggle-btn ${current.camera === 'inside' ? 'active' : ''}`} onClick={() => patch({ camera: 'inside', insideWalls: true })}>Inside the floor</button>
+      </div>
+      <div className="al-filters" style={{ marginBottom: 8 }}>
+        <button type="button" className="ds-btn ds-btn-secondary al-small" onClick={() => {
+          const shot = (window as { EKO_HOST_ENGINE?: { captureCamera?: () => { position: [number, number, number]; target: [number, number, number] } | null } }).EKO_HOST_ENGINE?.captureCamera?.()
+          if (!shot) return
+          patch({ camera: 'top', view: shot })
+        }}>Save this top view</button>
+        {current.view && (
+          <button type="button" className="ds-btn ds-btn-secondary al-small" onClick={() => {
+            const next = { ...current }
+            delete next.view
+            onChange(next)
+          }}>Use the automatic top view</button>
+        )}
+      </div>
+      <p className="ds-hint">Point the model, then save this top view. Only the heatmap opens there. Save Settings keeps it. Other panels keep the camera from Save Camera &amp; Render View. Inside the floor still uses its own look.</p>
+      <p className="ds-hint">Inside the floor looks in from a high corner. The ceiling of that storey is cut away, so the colour sits between the walls. Top view does the same while the box below is ticked.</p>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0 16px', fontSize: 13 }}>
+        <input
+          type="checkbox"
+          checked={!!current.insideWalls || current.camera === 'inside'}
+          disabled={current.camera === 'inside'}
+          onChange={e => patch({ insideWalls: e.target.checked })}
+        />
+        Draw the colour inside the room, under the ceiling
+      </label>
+
+      <h3 className="ds-section-title">Floor</h3>
+      <p className="ds-hint">A named storey shows that floor only, with its ceiling opened while the colour is drawn inside. All floors keeps every storey. Leave this on Ground floor and the project keeps the usual ground-floor view.</p>
+      <select
+        value={current.floor || ''}
+        onChange={e => patch({ floor: e.target.value || undefined })}
+        style={{ marginBottom: 16, padding: '6px 10px', borderRadius: 6, background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+      >
+        <option value="">Ground floor</option>
+        <option value="ALL">All floors</option>
+        {floors.filter(f => f.id && f.id !== 'Ground floor').map(f => (
+          <option key={f.id} value={f.id}>{f.name || f.id}</option>
+        ))}
+      </select>
+      {!floors.length && <p className="ds-hint">Open the model to list its storeys here. Ground floor and All floors can be saved before that.</p>}
+
+      <h3 className="ds-section-title" style={{ marginTop: 8 }}>Fade</h3>
+      <p className="ds-hint">Nothing fades until you tick a model. A ticked model stays on screen but light, so the room colour reads through it.</p>
+      {models.length ? models.map(name => (
+        <label key={name} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, fontSize: 13 }}>
+          <input type="checkbox" checked={namedFade && faded.has(name)} onChange={() => toggleModel(name)} />
+          {name.split(/[/\\]/).pop()}
+        </label>
+      )) : <p className="ds-hint">No model is loaded.</p>}
+      {faded.size > 0 && (
+        <button type="button" className="ds-btn ds-btn-secondary al-small" onClick={() => {
+          const next = { ...current }
+          delete next.fadeModels
+          onChange(next)
+        }}>Don't fade any model</button>
+      )}
+      <label style={{ display: 'block', marginTop: 12, fontSize: 13 }}>
+        Stays {Math.round((current.fadeAmount ?? 0.35) * 100)}% solid
+        <input
+          type="range"
+          min={0.15}
+          max={0.8}
+          step={0.05}
+          value={current.fadeAmount ?? 0.35}
+          onChange={e => patch({ fadeAmount: Number(e.target.value) })}
+          style={{ display: 'block', width: '100%', maxWidth: 280 }}
+        />
+      </label>
+    </div>
+  )
 }
 
 // Connection values the modal starts from. A project that never set them is not given them on save.
@@ -121,7 +248,9 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   const currentProject = useProjectStore(s => s.currentProject)
   const folderHandle = useProjectStore(s => s.folderHandle)
 
-  const [activeTab, setActiveTab] = useState<'nav'|'info'|'side'|'fin'|'data'>('fin')
+  const [activeTab, setActiveTab] = useState<'nav'|'info'|'side'|'fin'|'data'|'heat'>('fin')
+  const loadedModels = useModelStore(s => s.models)
+  const [heatFloors, setHeatFloors] = useState<{ id: string; name: string }[]>([])
   
   const [settings, setSettings] = useState<ProjectApiSettings>({
     ...CONNECTION_DEFAULTS,
@@ -182,6 +311,20 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
     )
     return () => { cancelled = true }
   }, [visible, currentProject?.projectId, finConnected, finStatus?.project_id, finStatus?.project_name])
+
+  useEffect(() => {
+    if (!visible || activeTab !== 'heat') return
+    const read = () => {
+      const list = (window as { EKO_HOST_ENGINE?: { listLevels?: () => { id: string; name: string }[] } }).EKO_HOST_ENGINE?.listLevels?.()
+      const next = Array.isArray(list) ? list : []
+      setHeatFloors(prev => (
+        prev.length === next.length && prev.every((f, i) => f.id === next[i]?.id && f.name === next[i]?.name) ? prev : next
+      ))
+    }
+    read()
+    const id = window.setInterval(read, 1000)
+    return () => window.clearInterval(id)
+  }, [visible, activeTab])
 
   useEffect(() => {
     if (visible && currentProject) {
@@ -410,6 +553,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
           <button className={`ds-tab ${activeTab === 'nav' ? 'active' : ''}`} onClick={() => setActiveTab('nav')}>Nav Buttons</button>
           <button className={`ds-tab ${activeTab === 'info' ? 'active' : ''}`} onClick={() => setActiveTab('info')}>Info Cards</button>
           <button className={`ds-tab ${activeTab === 'side' ? 'active' : ''}`} onClick={() => setActiveTab('side')}>Side Panel Dashboards</button>
+          <button className={`ds-tab ${activeTab === 'heat' ? 'active' : ''}`} onClick={() => setActiveTab('heat')}>Heatmap</button>
         </div>
 
         <div className="dashboard-settings-body">
@@ -499,9 +643,28 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                   <input type="checkbox" checked={settings.dashboardDemo === true} style={{ width: 'auto' }}
                     onChange={e => update('dashboardDemo', e.target.checked || undefined)} />
-                  Show the prototype's demo figures (Marsa Al Arab sample data)
+                  Show the prototype's demo figures
                 </label>
                 <p className="ds-hint">Off: the dashboard shows only this project's FIN readings and settings, and modules with no FIN source (anomalies, forecast, benchmark) are hidden.</p>
+              </div>
+              <div className="ds-field">
+                <label>Sample data</label>
+                <select value={settings.dashboardSampleData || ''} disabled={settings.dashboardDemo !== true}
+                  onChange={e => update('dashboardSampleData', e.target.value || undefined)}>
+                  <option value="">Marsa Al Arab</option>
+                  <option value="medical">Medical centre</option>
+                </select>
+                <p className="ds-hint">The sample data set the figures come from while demo figures are on. Takes effect the next time the dashboard opens.</p>
+              </div>
+
+              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Modules</h3>
+              <div className="ds-field">
+                <label>Module set</label>
+                <select value={settings.dashboardModules || ''} onChange={e => update('dashboardModules', e.target.value || undefined)}>
+                  <option value="">Standard</option>
+                  <option value="extended">Extended</option>
+                </select>
+                <p className="ds-hint">Extended adds ESG, Maintenance, and Security and life safety. Works with sample data or live data. Takes effect the next time the dashboard opens.</p>
               </div>
 
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Weather API</h3>
@@ -736,6 +899,15 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 })}
               </div>
             </div>
+          )}
+
+          {activeTab === 'heat' && (
+            <HeatmapPane
+              heat={settings.heatmap}
+              floors={heatFloors}
+              models={loadedModels.map(m => m.originalFileName).filter(Boolean)}
+              onChange={next => update('heatmap', next)}
+            />
           )}
 
         </div>

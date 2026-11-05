@@ -94,6 +94,19 @@ export async function listModelElements(
   return [...out.values()]
 }
 
+/** Which of these GlobalIds this one loaded file has. */
+export async function guidsInModel(engine: FragmentsEngine, modelKey: string, guids: string[]): Promise<string[]> {
+  if (!guids.length) return []
+  for (const [key, model] of engine.fragments.models.list) {
+    const rec = modelRecord(key, model.object.userData?.modelId)
+    const stable = rec?.modelId ?? key
+    if (stable !== modelKey && key !== modelKey) continue
+    const ids = await model.getLocalIdsByGuids(guids)
+    return guids.filter((_, i) => ids[i] != null)
+  }
+  return []
+}
+
 /** Which of these GlobalIds some loaded model has; null when no model is loaded to ask */
 export async function guidsInModels(engine: FragmentsEngine, guids: string[]): Promise<Set<string> | null> {
   const models = [...engine.fragments.models.list.values()]

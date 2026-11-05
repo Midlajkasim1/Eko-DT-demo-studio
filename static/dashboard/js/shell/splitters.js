@@ -230,7 +230,8 @@ window.EKO_SPLIT = (function(){
   }
 
   function resetAll(){
-    Object.keys(localStorage).filter(k => k.indexOf('eko-sp:') === 0)
+    const pre = (window.EKO_STORAGE_NS ? window.EKO_STORAGE_NS + ':' : '') + 'eko-sp:';   /* this project's panel widths (overlay-boot.js) */
+    Object.keys(localStorage).filter(k => k.indexOf(pre) === 0)
       .forEach(k => localStorage.removeItem(k));
     DOC().splits.forEach(s => {
       (window.DASHBOARD_ROOT||document.documentElement).style.removeProperty(s.varName);

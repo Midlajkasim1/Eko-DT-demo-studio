@@ -15,6 +15,26 @@
                set(k,v){ try{sessionStorage.setItem(k,v)}catch(e){} },
                del(k){ try{sessionStorage.removeItem(k)}catch(e){} } };
 
+  /* E15: the project's module set and sample data (Project settings > Modules, Sample data) */
+  const MODULE_STATES = (function projectSetup(){
+    const cfg = window.INJECTED_PROJECT_CONFIG || {}, D = window.EKO_DATA || {};
+    const extended = cfg.modules === 'extended';
+    window.EKO_MODULES = extended ? 'extended' : 'standard';
+    const want = cfg.sampleData;
+    if(want && D[want] && D.marsa && D[want] !== D.marsa){   // the sample site's data takes the place the dashboard reads, with the Studio viewer
+      const site = D[want], row = (D.portfolio || []).find(p => p.key === 'marsa');
+      site.viewer = D.marsa.viewer;
+      delete site.overviewPage;   // its own Overview is not ported yet
+      if(row){ row.nameEn = site.nameEn; row.nameAr = site.nameAr; }   // the top bar names the site from this row
+      D.marsa = site;
+    }
+    const states = extended
+      ? { esg: 'active', maintenance: 'active', security: 'active', 'systems.life': 'hidden', 'systems.security': 'hidden' }
+      : { esg: 'available', maintenance: 'available', security: 'available' };
+    if(D.marsa){ D.marsa.entitlements = D.marsa.entitlements || {}; D.marsa.entitlements.modules = Object.assign({}, D.marsa.entitlements.modules, states); }
+    return states;
+  })();
+
   /* No data on this device (cold start offline): honest empty shell, never a
      number that could be mistaken for current (D65). */
   if(!(window.EKO_DATA && window.EKO_DATA.marsa)){
@@ -31,6 +51,42 @@
     return _pluralRules[lang].select(n);
   }
   /* GlobalIds of the heatmap rooms, once live data has filled them. */
+  function heatSetup() {
+    var h = window.INJECTED_PROJECT_CONFIG && window.INJECTED_PROJECT_CONFIG.heatmap;
+    h = h && typeof h === 'object' ? h : {};
+    var floor = h.floor || 'Ground floor';
+    var view = h.view && h.view.position && h.view.target
+      && h.view.position.length === 3 && h.view.target.length === 3 ? h.view : null;
+    return {
+      camera: h.camera === 'inside' ? 'inside' : 'top',
+      floor: floor,
+      view: view,
+      /* Same rule as the Levels menu. Isolate floor in the toolbar is what shows one floor on its own. */
+      alone: false
+    };
+  }
+  function applyHeatView(app, forceLook) {
+    var s = heatSetup();
+    var layers = ['arch', 'elec', 'int', 'mech'];
+    if (app.state.dock) {
+      app.state.dock.level = s.floor;
+      app.state.dock.floorAlone = s.alone;
+      app.state.dock.layer = layers;
+      app.state.dock.layerContext = true;
+    }
+    if (app.engine && app.engine.isolateLevel) app.engine.isolateLevel(s.floor, true);
+    if (app.engine && app.engine.isolateLayer) app.engine.isolateLayer(layers, true);
+    if (app.engine && app.engine.fadeArch) app.engine.fadeArch(true);
+    if (forceLook) {
+      if (s.camera !== 'inside' && s.view) {
+        window.dispatchEvent(new CustomEvent('eko-heat-camera', { detail: s.view }));
+      } else {
+        window.dispatchEvent(new CustomEvent('eko-look-face', {
+          detail: { face: s.camera === 'inside' ? 'Inside' : 'Top', closer: true, spaceIds: heatSpaceIds(app) }
+        }));
+      }
+    }
+  }
   function heatSpaceIds(app) {
     const zones = (app.data && app.data.heat && app.data.heat.zones) || [];
     const ids = [];
@@ -120,6 +176,28 @@
     /* D122: a DATA phrase in the current language (paramAr whole-phrase map,
        then month/weekday tokens inside dates); English returns the string. */
     ph(x){ return this.lang === 'ar' && typeof x === 'string' && window.EKO_I18N.phrase ? window.EKO_I18N.phrase(x) : x; },
+    /* E15: people are role labels ("the shift engineer"); head = shown on its own, so it starts with a capital */
+    person(x, head){ const s = this.ph(x); if(!head || this.lang === 'ar' || typeof s !== 'string' || !s.startsWith('the ')) return s;
+      return head === 'bare' ? s.charAt(4).toUpperCase() + s.slice(5) : 'T' + s.slice(1); },
+    overviewId(){ return this.data.overviewPage || 'marsa-overview'; },
+    /* E15: "now" to the minute, and a stored instant as "HH:MM" today, "Tue 14:00" this week, "13 Sep 14:00" beyond */
+    nowMs(){ return Math.floor(Date.now() / 60000) * 60000; },
+    clockLabel(ms){
+      const d = new Date(ms), n = new Date(this.nowMs()), hm = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+      const days = Math.round((day(n) - day(d)) / 864e5);
+      const s = days === 0 ? hm : days > 0 && days < 7 ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()] + ' ' + hm
+        : d.getDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()] + ' ' + hm;
+      return this.ph(s);
+    },
+    /* E15: an acknowledgement stores when and who; its age and time derive */
+    makeAck(atMs, who){
+      const E2 = this, k = { who };
+      Object.defineProperty(k, 'atMs', { value: atMs, enumerable: false, writable: true, configurable: true });
+      Object.defineProperty(k, 'ageH', { get(){ return Math.max(0, (E2.nowMs() - atMs) / 36e5); }, enumerable: true, configurable: true });
+      Object.defineProperty(k, 'time', { get(){ return E2.clockLabel(atMs); }, enumerable: true, configurable: true });
+      return k;
+    },
     /* CLDR plural category of a count in the current language (module helper). */
     pluralCat(n){ return pluralCat(this.lang, n); },
     alarm(id){ return this.data.alarms.find(a => a.id === id) },
@@ -221,11 +299,10 @@
                  pageId, module: targetModule, sub: targetSub,
                  mkPop: null, dlg: null, mobMore: false, modelFs: false });
     },
-    /* The model's setup for a page: the heat map isolates the ground floor and looks down; other pages show their layer and go home. */
+    /* The model's setup for a page: the heat map uses this project's floor and camera; other pages show their layer and go home. */
     pageView(pageId, targetModule, targetSub, from, moved){
       const enteringHeat = pageId === 'heatmap' && from !== 'heatmap';
       const leavingHeat = from === 'heatmap' && pageId !== 'heatmap';
-      const HEAT_LAYERS = ['arch','elec','int','mech'];
       /* HVAC & Mechanical share one model. Electrical is the other. Those two and the Heat Map open in Studio, whatever the Style panel's default is.
          Any other page returns to the style it had. */
       const mep = pageId !== 'heatmap' && targetModule === 'systems' && (targetSub === 'hvac' || targetSub === 'mechanical' || targetSub === 'electrical');
@@ -240,14 +317,9 @@
       }
 
       if (pageId === 'heatmap') {
-        if (this.state.dock) { this.state.dock.level = 'Ground floor'; this.state.dock.floorAlone = false; this.state.dock.layer = HEAT_LAYERS; this.state.dock.layerContext = true; }
-        if (this.engine && this.engine.isolateLevel) this.engine.isolateLevel('Ground floor', true);
-        if (this.engine && this.engine.isolateLayer) this.engine.isolateLayer(HEAT_LAYERS, true);
-        if (this.engine && this.engine.fadeArch) this.engine.fadeArch(true);
-        if (enteringHeat || !this.state._heatViewed) {
-          this.state._heatViewed = true;
-          window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true, spaceIds: heatSpaceIds(this) } }));
-        }
+        var look = enteringHeat || !this.state._heatViewed;
+        if (look) this.state._heatViewed = true;
+        applyHeatView(this, look);
       } else if (leavingHeat) {
         if (this.state.dock) { this.state.dock.level = 'ALL'; this.state.dock.floorAlone = false; this.state.dock.layer = 'all'; this.state.dock.layerContext = false; }
         if (this.engine && this.engine.isolateLevel) this.engine.isolateLevel('ALL', true);
@@ -270,6 +342,31 @@
 
   /* 3D engine: ONE config line in the site data picks the adapter; the shell
      only ever talks to the viewer-api surface. */
+  if(window.EKO_SIM && window.EKO_SIM.boot) window.EKO_SIM.boot(E);   /* E15: the sample data's simulation engine writes its figures first */
+  if(E.data.entitlements && E.data.entitlements.modules) Object.assign(E.data.entitlements.modules, MODULE_STATES);   /* the module set wins over the engine */
+  /* E15: a fixture instant moved to the load minute (basis.asOfAt); an alarm with raisedAt gets its age and times from it */
+  (function oneClock(){
+    const cap = Date.parse((E.data.basis || {}).asOfAt || '');
+    const shift = isFinite(cap) ? E.nowMs() - cap : 0;
+    const ms = iso => { const t = Date.parse(iso || ''); return isFinite(t) ? t + shift : null; };
+    E.fxMs = ms;
+    (E.data.alarms || []).forEach(a => {
+      const r = ms(a.raisedAt); if(r == null) return;
+      Object.defineProperty(a, 'raisedAtMs', { value: r, enumerable: false, writable: true, configurable: true });
+      Object.defineProperty(a, 'ageH', { get(){ return (E.nowMs() - r) / 36e5; }, enumerable: true, configurable: true });
+      Object.defineProperty(a, 'raised', { get(){ return E.clockLabel(r); }, enumerable: true, configurable: true });
+      if(a.ack && a.ack.at){ const k = ms(a.ack.at); if(k != null) a.ack = E.makeAck(k, a.ack.who); }
+      if(Array.isArray(a.lifecycle)) a.lifecycle = a.lifecycle.map(([step, v, done]) => {
+        const row = [step, v, done];
+        const when = step === 'Raised' ? () => E.clockLabel(r)
+          : step === 'Issued' && v && v.afterMin != null ? () => E.clockLabel(r + v.afterMin * 60000)
+          : step === 'Acknowledged' ? () => (a.ack ? a.ack.time + ' · ' + a.ack.who : E.t('emptyDash')) : null;
+        if(when) Object.defineProperty(row, 1, { get: when, enumerable: true, configurable: true });
+        if(step === 'Acknowledged') Object.defineProperty(row, 2, { get: () => !!a.ack, enumerable: true, configurable: true });
+        return row; });
+    });
+  })();
+
   E.engine = window.EKO_VIEWER.create(E.data.viewer.engine || 'static');
   E.engine.onCameraChange(() => window.EKO_V.position(E));
   E.engine.onMarkerClick(id => E.set({ born:'pop', mkPop: id, mkPopN: 0 }));   /* D128: a marker opens its popup, never the panel */
@@ -913,15 +1010,23 @@
   E.dropSelection = () => Object.assign(E.state, NO_SEL);
   /* The model as the viewer opens it: camera, floors, layers, tools, heat colours and selection. Mutate only. */
   E.resetModel = () => {
+    E.releaseHeatView();
+    const en = E.engine;
+    ['clearHighlight', 'clearMeasure', 'clearSection'].forEach(k => { if(typeof en[k] === 'function') en[k](); });
+    E.dropSelection();
+  };
+  /* Overview keeps the project camera from Save Camera & Render View.
+     The heatmap's own camera and floor stay on that page only. */
+  E.releaseHeatView = () => {
     const en = E.engine, H = window.EKO_HOST_ENGINE;
     if(H && typeof H.clearSpaceHeat === 'function') H.clearSpaceHeat();
     E.state._heatOn = false;
-    ['clearHighlight', 'clearMeasure', 'clearSection'].forEach(k => { if(typeof en[k] === 'function') en[k](); });
-    if(en.isolateLevel) en.isolateLevel('ALL', true);
-    if(en.setLayerVisibility) en.setLayerVisibility('all', true);
-    if(en.resetView) en.resetView();
-    Object.assign(E.state.dock, { tool: null, slice: false, bloom: null, level: 'ALL', floorAlone: false, layer: 'all' });
-    E.dropSelection();
+    E.state._heatViewed = false;
+    if(en && en.fadeArch) en.fadeArch(false);
+    if(en && en.isolateLevel) en.isolateLevel('ALL', true);
+    if(en && en.setLayerVisibility) en.setLayerVisibility('all', true);
+    if(en && en.resetView) en.resetView();
+    if(E.state.dock) Object.assign(E.state.dock, { level: 'ALL', floorAlone: false, layer: 'all', layerContext: false });
   };
   /* close=true dismisses the floor menu (a pick). The stepper leaves it open. */
   function showLevel(id, close){
@@ -961,9 +1066,7 @@
     E.state.dock.floorAlone = false;   /* Reset goes back to how the viewer opens: the floor filter is cumulative again */
     E.state.dock.layerContext = E.state.pageId === 'heatmap' || !!mepLayer;   /* the layers Reset restores are views, not picks */
     if(E.state.pageId === 'heatmap'){
-      if(E.engine.isolateLevel) E.engine.isolateLevel('Ground floor', true);
-      if(E.engine.isolateLayer) E.engine.isolateLayer(['arch','elec','int','mech'], true);
-      window.dispatchEvent(new CustomEvent('eko-look-face', { detail: { face: 'Top', closer: true, spaceIds: heatSpaceIds(E) } }));
+      applyHeatView(E, true);
     } else if(E.engine.resetView){
       E.engine.resetView();
       if(E.engine.isolateLevel) E.engine.isolateLevel('ALL');
@@ -978,7 +1081,7 @@
     const heat = E.state.pageId === 'heatmap';
     E.set(Object.assign({
       dock: heat
-        ? Object.assign({}, E.state.dock, { tool:null, slice:false, bloom:null, style:E.systemsStyle, tone:'blue', minimap:false, level:'Ground floor', floorAlone:false, layer:['arch','elec','int','mech'], layerContext:true })
+        ? Object.assign({}, E.state.dock, { tool:null, slice:false, bloom:null, style:E.systemsStyle, tone:'blue', minimap:false, level: heatSetup().floor, floorAlone: heatSetup().alone, layer:['arch','elec','int','mech'], layerContext:true })
         : { tool:null, slice:false, bloom:null, style: mepLayer ? E.systemsStyle : E.defaultStyle, tone:'blue', level:'ALL', floorAlone:false, layer: mepLayer || 'all', layerContext: !!mepLayer, alerts:'all', minimap:false },
       histAge:null, measureResult:null
     }, NO_SEL));
@@ -1651,6 +1754,8 @@
   E.state.disclose = loadDisclose();
   try{ const u = new URL(location.href); if(u.searchParams.get('display') === 'wall'){ E.state.wall = true; E.state.wallOpt = { scope: u.searchParams.get('scope') || null, distance: u.searchParams.get('distance'), dwell: u.searchParams.get('dwell'), brightness: u.searchParams.get('brightness'), motion: u.searchParams.get('motion'), shifts: u.searchParams.get('shifts'), scale: u.searchParams.get('scale'), panel: u.searchParams.get('panel'), panelIn: u.searchParams.get('panelIn'), theme: u.searchParams.get('theme'), lock: u.searchParams.get('lock'), id: u.searchParams.get('id') || 'default', viaTab: u.searchParams.get('via') === 'tab' }; if(window.EKO_WALL) window.EKO_WALL.start(E); } }catch(e){}   /* D106 */
   applyTheme(); applyLang(); E.state.born = 'boot'; render();
+  /* A reload opens Overview. Leave the heatmap camera and its floor behind. */
+  if(!E.state.wall && E.state.pageId !== 'heatmap') E.releaseHeatView();
   try{ const op = new URL(location.href).searchParams.get('open'); if(op && !E.state.wall){ const [kind, id] = op.split(':'); if(kind === 'asset' && id) ACTS.openAsset({ dataset: { asset: id } }); else if(kind === 'site' && id && window.EKO_PF) window.EKO_PF.ACTS.siteGo({ dataset: { site: id } }); } }catch(e){}   /* D111: the wall hands a row to the workstation */
   if(window.EKO_NOTIF){
     window.EKO_NOTIF.hooks.onAdd = () => { render(); };

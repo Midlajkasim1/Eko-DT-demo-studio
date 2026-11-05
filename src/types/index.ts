@@ -248,6 +248,31 @@ export interface FinSeverityBands {
   warning?: number
 }
 
+/**
+ * How this project's heatmap is drawn. Absent fields keep the Marsa behaviour:
+ * top view, ground floor, nothing faded, colour filling the whole room height.
+ */
+export interface HeatmapSetup {
+  /** top looks straight down. inside looks in from a high corner, under the ceiling. */
+  camera?: 'top' | 'inside'
+  /** The heatmap top-view camera. Other panels keep the project camera. Absent uses the automatic top look. */
+  view?: ProjectCamera
+  /** A storey id from the model, or ALL. Absent isolates Ground floor. */
+  floor?: string
+  /** File names to fade while the heatmap is open. Absent, or an empty list, fades nothing. */
+  fadeModels?: string[]
+  /** How solid a faded model stays, from 0.15 to 0.8. Absent is 0.35. */
+  fadeAmount?: number
+  /** Pull the colour in under the ceiling so it reads inside the walls. */
+  insideWalls?: boolean
+  /**
+   * Sample readings for linked rooms that have no FIN value. The rooms share seven sensors.
+   * Absent is on. Set false to colour only rooms named IS-01 or IAQ-02.
+   * Marsa has no space links, so its rooms are never filled. A real FIN reading is kept.
+   */
+  sampleSpaces?: boolean
+}
+
 /** Per-project FIN settings live here. A field a project does not set falls back to the
  *  backend config.json default, so projects saved before a field existed keep working. */
 export interface ProjectApiSettings {
@@ -258,6 +283,10 @@ export interface ProjectApiSettings {
   /** Show the prototype's demo figures (Marsa Al Arab fixture) in the dashboard. Off: only FIN
    *  readings and this project's own settings are shown. */
   dashboardDemo?: boolean
+  /** The sample data set the demo figures come from; absent = Marsa Al Arab. Only used with dashboardDemo. */
+  dashboardSampleData?: 'medical'
+  /** The dashboard's module set. 'extended' adds ESG, Maintenance, and Security and life safety; absent = standard. */
+  dashboardModules?: 'extended'
   /** Reporting basis. A cost or CO₂ figure whose rate is not set is reported as unavailable. */
   energyTariff?: number
   gasTariff?: number
@@ -300,6 +329,8 @@ export interface ProjectApiSettings {
   subPanels?: Record<string, { label: string, type: string }>
   modelsConfig?: Array<{ id: string, label: string, name: string, active: boolean }>
   floorsConfig?: Array<{ id: string, label: string, name: string }>
+  /** Heatmap camera, floor, and which models fade. Absent keeps the Marsa heatmap. */
+  heatmap?: HeatmapSetup
 }
 
 /** One distribution board on the Power page */

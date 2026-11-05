@@ -103,7 +103,9 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
       const topOrBottom = ay > 0.9
       const dist = topOrBottom
         ? Math.max(distV, distH, 8) * (closer ? 1.25 : 0.82)
-        : Math.max(size.x, size.y, size.z, 8) * 0.7
+        : closer
+          ? Math.max(distV, distH, size.y, 8) * 1.35
+          : Math.max(size.x, size.y, size.z, 8) * 0.7
       /* Keep world Y-up. A true vertical look locks orbit and mouse rotates the wrong way. */
       if (topOrBottom) dir.set(dir.x, dir.y, dir.z + (dir.y >= 0 ? 0.14 : -0.14)).normalize()
       cam.up.set(0, 1, 0)
@@ -183,6 +185,10 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
   useEffect(() => {
     const onLook = (e: Event) => {
       const detail = (e as CustomEvent).detail || {}
+      if (detail.face === 'Inside') {
+        snapTo([0.42, 0.78, 0.55], [0, 0, 0], true, detail.spaceIds)
+        return
+      }
       const face = detail.face as keyof typeof FACE_VIEWS
       const v = face && FACE_VIEWS[face]
       if (v) snapTo(v[0], v[1], !!detail.closer, detail.spaceIds)

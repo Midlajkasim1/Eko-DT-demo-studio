@@ -98,8 +98,14 @@ window.EKO_C = (function(){
      at a uniform speed — without it, short paths snap in and long paths
      render as marching dashes. */
   const PLEN = g => g.replace(/<(path|rect|circle|line|polyline|polygon|ellipse)\b/g, '<$1 pathLength="60"');
-  const icon = (k, s=16, sw=1.75) =>
-    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PLEN(IC[k]||'')}</svg>`;
+  const icon = (k, s=16, sw=1.75, meta='') =>
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"${meta}>${PLEN(IC[k]||'')}</svg>`;
+  /* E15: a directional icon by meaning; base.css mirrors data-dir start / end under RTL */
+  const MEAN = { end:['chevR','end'], start:['chevL','start'], end2:['chevR2','end'], start2:['chevL2','start'],
+                 down:['chevD','down'], up:['chevU','up'], timePrev:['chevL','fixed'], timeNext:['chevR','fixed'],
+                 exit:['logout','end'], undo:['undo','start'], external:['external','end'], rotate:['reset','fixed'] };
+  const dicon = (meaning, s=16, sw=1.75) => { const m = MEAN[meaning] || MEAN.end;
+    return icon(m[0], s, sw, ` data-glyph="${m[0]}" data-dir="${m[1]}" data-mean="${meaning}"`); };
 
   /* -------------------------- severity glyphs ------------------------------
      Colour AND shape AND text together (spec law, values from the reference):
@@ -1486,7 +1492,21 @@ window.EKO_C = (function(){
     return `<button class="iconbtn icon26 mkeye" data-act="mkToggle" data-on="${on}" aria-pressed="${on}"
       data-tip="${esc(tp)}" aria-label="${esc(tp)}">${icon(on ? 'eye' : 'eyeOff', 14)}</button>`;
   }
-  return { esc, fmt, icon, aiBtn, ctl, sevGlyph, sevAction, sevTipFor, actTip, sparkPath, ribbon, woBtn, brandLogo, utilitiesSummary, mkEye,
+
+  /* E15: the tariff and emission factor a figure was worked out with, in words; null when the site has none */
+  function tariffBasis(E){
+    const b = (E && E.data.basis) || {};
+    if(!(b.aedPerKwh > 0) || !b.tariffId) return null;
+    return { rate: b.aedPerKwh, text: E.t('basisTariff', { r: fmt(b.aedPerKwh, 2), id: b.tariffId + (b.tariffToConfirm ? E.t('basisToConfirm') : ''), v: b.tariffVersion || '' }).trim() + (b.tariffStatus === 'provisional' ? E.t('basisProv') : '') };
+  }
+  function emissionBasis(E){
+    const b = (E && E.data.basis) || {};
+    if(!(b.co2KgPerKwh > 0) || !b.co2FactorId) return null;
+    return { factor: b.co2KgPerKwh, text: E.t('basisEmission', { f: fmt(b.co2KgPerKwh, 2), id: b.co2FactorId + (b.co2FactorToConfirm ? E.t('basisToConfirm') : '') }) + (b.co2FactorStatus === 'provisional' ? E.t('basisProv') : '') };
+  }
+  const kwhBasis = (E, kwh, tb) => E.t('basisKwh', { kwh: fmt(kwh, kwh < 100 ? 2 : 0), basis: tb.text });
+
+  return { esc, fmt, icon, dicon, tariffBasis, emissionBasis, kwhBasis, aiBtn, ctl, sevGlyph, sevAction, sevTipFor, actTip, sparkPath, ribbon, woBtn, brandLogo, utilitiesSummary, mkEye,
            execSummary, energySummary, alarmModPanel, energyModPanel,
            powerPage, consModelPanel, utilitiesPanel, registerTable, assetPanel, summaryShell, treeShell, modShell };
 })();

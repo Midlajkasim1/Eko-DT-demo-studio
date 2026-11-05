@@ -82,6 +82,7 @@
 }
 
 /* RTL mirroring helpers (reference .dirx / chevrons). */.dashboard-native-container[dir="rtl"] .dirx{ transform:scaleX(-1) }
+/* E15: C.dicon's start / end icons */.dashboard-native-container[dir="rtl"] svg[data-dir="start"],.dashboard-native-container[dir="rtl"] svg[data-dir="end"]{ transform:scaleX(-1) }
 
 /* Reduced motion: kill animation globally; components add their static
    equivalents (double ring on the ribbon leader, no flyout spring). */

@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import * as OBC from '@thatopen/components'
 import { useProjectStore } from '@/store/useProjectStore'
+import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import { useAppStore } from '@/store/useAppStore'
 import { useModelStore } from '@/store/useModelStore'
 import { defaultType, foldName, indexLinks, indexSpaceLinks, isGuid } from '@/lib/assetLinks'
@@ -10,7 +11,6 @@ import type { AssetLink } from '@/types'
 import { resetCameraToHome } from '@/lib/cameraUtils'
 import { frameSphereInView } from '@/lib/viewFraming'
 import { createMiniMap } from '@/lib/miniMap'
-import { disciplineOf } from '@/lib/modelDiscipline'
 import {
   classifyLoaded, classifyModel, describeModels, describeUnclassified, hasContentProfile, isProjectSwitch, layerIds, layerVisibility,
   onContentProfiles, pruneContentProfiles, setContentProfile, type ContentProfile,
@@ -89,6 +89,7 @@ function loadScripts(scripts: HTMLScriptElement[], signal: { mounted: boolean })
 export function DashboardOverlay({ visible, engineRef, engineReady = false }: DashboardOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const labelHostRef = useRef<HTMLDivElement>(null)
+  const savedSettings = useRef<object | undefined>(undefined)
   const currentProject = useProjectStore(s => s.currentProject)
   const templateId = useAppStore(s => s.templateId)
   const xrayColor = useAppStore(s => s.xrayColor)
@@ -191,6 +192,78 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       })().finally(() => pending.delete(bimId))
       pending.set(bimId, job)
       return job
+    }
+
+    /* Which saved rooms the model files on this storey. One storey, not every room. */
+    const guidFloor = new Map<string, string>()
+    const floorRooms = new Map<string, Set<string>>()
+    const guidsForFloor = async (levelId: string, wanted: Set<string>) => {
+      const out = new Set<string>()
+      if (!levelId || levelId === 'ALL' || !wanted.size || !engine?.fragments?.models?.list) return out
+      const cached = floorRooms.get(levelId)
+      if (cached) {
+        for (const g of cached) if (wanted.has(g)) out.add(g)
+        return out
+      }
+      const models = [...engine.fragments.models.list.values()]
+      models.sort((a, b) => {
+        const rec = (m: any) => useModelStore.getState().models.find(r => r.modelId === m.modelId)
+        const space = (m: any) => rec(m) && classifyLoaded(rec(m)!).group === 'spaces' ? 0 : 1
+        return space(a) - space(b)
+      })
+      for (const model of models) {
+        const m = model as any
+        if (typeof m.getRelations !== 'function' || typeof m.getGuidsByLocalIds !== 'function') continue
+        const storeys = (await readStoreys(m)).filter(s => s.floor.id === levelId)
+        if (!storeys.length) continue
+        const rels = relationData(await m.getRelations(storeys.map(s => s.localId)))
+        const ids: number[] = []
+        for (const s of storeys) for (const id of rels.get(s.localId)?.ContainsElements || []) ids.push(id)
+        if (!ids.length) continue
+        const guids: Array<string | null> = await m.getGuidsByLocalIds(ids)
+        guids.forEach(g => {
+          if (!g || !wanted.has(g)) return
+          out.add(g)
+          guidFloor.set(g, levelId)
+        })
+        if (out.size) {
+          floorRooms.set(levelId, new Set(out))
+          break
+        }
+      }
+      return out
+    }
+
+    /* Saved rooms: one guid lookup and one box read per model, not one mesh per room. */
+    const locateMany = async (guids: string[]) => {
+      const need = [...new Set(guids.filter(id => isGuid(id) && !located.has(id) && !missing.has(id)))]
+      if (!need.length || !engine?.fragments?.models?.list) return
+      let left = new Set(need)
+      for (const model of engine.fragments.models.list.values()) {
+        if (!left.size) break
+        const m = model as any
+        if (typeof m.getLocalIdsByGuids !== 'function') continue
+        const ask = [...left]
+        let localIds: Array<number | null> = []
+        try { localIds = await m.getLocalIdsByGuids(ask) } catch { continue }
+        const found: { guid: string; localId: number }[] = []
+        localIds.forEach((id, i) => {
+          if (id == null) return
+          found.push({ guid: ask[i], localId: id })
+          left.delete(ask[i])
+        })
+        if (!found.length || typeof m.getBoxes !== 'function') continue
+        m.object.updateMatrixWorld(true)
+        let boxes: THREE.Box3[] = []
+        try { boxes = await m.getBoxes(found.map(item => item.localId)) } catch { boxes = [] }
+        const inv = m.object.matrixWorld.clone().invert()
+        found.forEach((item, i) => {
+          const worldBox = boxes[i]
+          if (!worldBox || worldBox.isEmpty()) return
+          located.set(item.guid, { model: m, localId: item.localId, localBox: worldBox.clone().applyMatrix4(inv) })
+          indexProven = true
+        })
+      }
     }
 
     const worldBoxOf = (entry: Located) => entry.localBox.clone().applyMatrix4(entry.model.object.matrixWorld)
@@ -382,6 +455,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       ghost.group.traverse((o: any) => o.geometry?.dispose())
       ghost = null
     }
+    let heatMoving = false
     const drawGhost = () => {
       labels.setVisible(!!(ghost && ghost.group.visible && active && labelsOn()))
       const hasHeat = heatRoots.size > 0 || alarmGlow.size > 0
@@ -430,7 +504,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const heatDrawn = heatGroups.some(g => g.visible)
       const ghostDrawn = seeThrough.some(g => g.visible)
       try {
-        if (heatDrawn && engine.world?.scene?.three) {
+        /* While the camera is moving, draw the colour on its own. At rest the
+           building covers it the same way a floor pick does, ceiling included. */
+        if (heatDrawn && heatMoving) {
+          renderer.clearDepth()
+          renderer.render(overlay, camera)
+        } else if (heatDrawn && engine.world?.scene?.three) {
           const scene = engine.world.scene.three
           const hidden: THREE.Object3D[] = []
           const prevOverride = scene.overrideMaterial
@@ -485,7 +564,6 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
     }
     const syncGhost = () => {
-      if (archFadeOn) fadeArch(true)
       if (ghost) {
         ghost.group.matrix.copy(ghost.model.object.matrixWorld)
         ghost.group.matrixWorldNeedsUpdate = true
@@ -497,6 +575,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         root.matrixWorldNeedsUpdate = true
         root.visible = model.object.visible !== false
       })
+      syncHeatClip()
       // The selected equipment already has its own highlight
       alarmGlow.forEach((rec, bimId) => {
         rec.group.matrix.copy(rec.model.object.matrixWorld)
@@ -725,6 +804,24 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     let levelSeq = 0
     const floorJobs = new WeakMap<object, Promise<LevelIndex>>()
     const floorCatalog = new Map<string, Floor>()
+    /* World-Y samples per storey, so the heat colour follows the open floor
+       and not a roof that happens to be the highest box. */
+    const floorSamples = new Map<string, number[]>()
+    const noteFloorBoxes = (floorId: string, ids: number[], boxOf: Map<number, THREE.Box3>) => {
+      let list = floorSamples.get(floorId)
+      if (!list) floorSamples.set(floorId, list = [])
+      for (const id of ids) {
+        const b = boxOf.get(id)
+        if (!b || b.isEmpty() || !Number.isFinite(b.min.y) || !Number.isFinite(b.max.y)) continue
+        list.push(b.min.y, b.max.y)
+      }
+    }
+    const spanOf = (floorId: string) => {
+      const list = floorSamples.get(floorId)
+      if (!list || list.length < 4) return null
+      const ys = list.slice().sort((a, b) => a - b)
+      return { yLo: ys[Math.floor(ys.length * 0.05)], yHi: ys[Math.floor(ys.length * 0.95)] }
+    }
     const ORDINALS = ['Ground floor', 'First floor', 'Second floor', 'Third floor', 'Fourth floor', 'Fifth floor', 'Sixth floor', 'Seventh floor', 'Eighth floor', 'Ninth floor', 'Tenth floor', 'Eleventh floor', 'Twelfth floor', 'Thirteenth floor', 'Fourteenth floor', 'Fifteenth floor', 'Sixteenth floor', 'Seventeenth floor', 'Eighteenth floor', 'Nineteenth floor', 'Twentieth floor']
     const attrText = (row: any, key: string) => {
       const v = row?.[key]
@@ -756,7 +853,15 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const n = parseInt(lv[1], 10)
       return Number.isFinite(n) ? numberedFloor(n) : null
     }
+    const storeyCache = new WeakMap<object, Promise<{ localId: number; floor: Floor; elevation: number }[]>>()
     const readStoreys = async (model: any) => {
+      const cached = storeyCache.get(model)
+      if (cached) return cached
+      const job = readStoreysNow(model)
+      storeyCache.set(model, job)
+      return job
+    }
+    const readStoreysNow = async (model: any) => {
       if (typeof model.getItemsOfCategories !== 'function') return [] as { localId: number; floor: Floor; elevation: number }[]
       const cats = await model.getItemsOfCategories([/IFCBUILDINGSTOREY/i])
       const ids = Object.values(cats || {}).flat() as number[]
@@ -886,6 +991,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
             byFloor.get(floorId)!.push(...ids)
           }
         }
+        const boxOfFloor = new Map<number, THREE.Box3>()
+        geom.forEach((id, i) => { if (boxes[i]) boxOfFloor.set(id, boxes[i]) })
+        for (const [floorId, ids] of byFloor) noteFloorBoxes(floorId, ids, boxOfFloor)
         /* What the floor filter treats specially: the ceilings, and the HVAC. A model that cannot
            answer leaves both empty, which is the plain floor filter. */
         const ceilings = new Set<number>()
@@ -945,7 +1053,14 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       try { (window as any).EKO?.set?.({}) } catch { /* dashboard not up yet */ }
     }
     let lastLevelId: string | null = null
+    let levelWait: { id: string; force?: boolean } | null = null
     const isolateLevel = async (levelId: string, force?: boolean) => {
+      /* Indexing a model asks the same worker that is parsing the next file. */
+      if (useLoadingProgressStore.getState().sessionActive) {
+        levelWait = { id: levelId, force }
+        return
+      }
+      levelWait = null
       if (levelId === 'Ground floor' && !floorCatalog.get(levelId)) {
         const gf = [...floorCatalog.values()].find(f => /ground/i.test(f.name) || f.rank === 0)
         if (gf) levelId = gf.id
@@ -979,7 +1094,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         levelHidden.set(m, new Set(hide))
         await setHidden(m, 'level', hide)
       }
-      if (seq === levelSeq) repositionMarkers()
+      if (seq === levelSeq) {
+        repositionMarkers()
+        /* The floor hide lands after the colour pass has started. Paint again
+           for the storey that is actually open. */
+        if (spaceHeatActive && heatReq) void applySpaceHeat(heatReq.zones, heatReq.mode)
+      }
     }
 
     /* TEMPORARY, read-only: why the floor filter hides what it hides, model by model. Reached from the browser
@@ -1034,6 +1154,23 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const heatByBim = new Map<string, { mat: THREE.MeshBasicMaterial; model: any; localId: number }>()
     let heatSheets: THREE.Mesh[] = []
     let heatSig = ''
+    let heatSeq = 0
+    let heatReq: { zones: { bimId?: string; bimIds?: string[]; tempC?: number | null; rh?: number | null; co2?: number | null }[]; mode?: string } | null = null
+    /* Colour sits in the room and is tested against the building, so a ceiling does not hide it from an angled view. */
+    let heatInsideWalls = false
+    const heatInsideOf = () => {
+      const heat = useProjectStore.getState().currentProject?.apiSettings?.heatmap
+      return !!(heat && (heat.insideWalls || heat.camera === 'inside'))
+    }
+    /* The heatmap does not cut the ceiling. A floor pick uses the Levels rule only. */
+    const heatClip = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+    const syncHeatClip = () => {
+      const renderer = engine.world?.renderer?.three as THREE.WebGLRenderer | undefined
+      if (!renderer) return
+      const planes = renderer.clippingPlanes
+      const at = planes.indexOf(heatClip)
+      if (at >= 0) planes.splice(at, 1)
+    }
     /* Two colours per category so the low end and the high end stay distinct.
        The same pairs are in analytics.js heatStops. */
     const HEAT_STOPS: Record<string, [number, number]> = {
@@ -1056,6 +1193,16 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       heatRoots.set(model, root)
       return root
     }
+    /* A flat grid at the top of the room, only when the space has no mesh.
+       A solid box is what made the floor look like coloured crates. */
+    const plateFrom = (localBox: THREE.Box3) => {
+      const size = localBox.getSize(new THREE.Vector3())
+      const center = localBox.getCenter(new THREE.Vector3())
+      const geom = new THREE.PlaneGeometry(Math.max(size.x, 0.2), Math.max(size.z, 0.2), 4, 4)
+      geom.rotateX(-Math.PI / 2)
+      geom.translate(center.x, center.y + size.y / 2, center.z)
+      return geom
+    }
     const geomsFor = async (bimId: string, entry: Located) => {
       const hit = heatGeoms.get(bimId)
       if (hit) return hit
@@ -1074,31 +1221,50 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           geoms.push(geom)
         }
       }
-      if (!geoms.length && entry.localBox && !entry.localBox.isEmpty()) {
-        const size = entry.localBox.getSize(new THREE.Vector3())
-        const center = entry.localBox.getCenter(new THREE.Vector3())
-        const box = new THREE.BoxGeometry(Math.max(size.x, 0.2), Math.max(size.y, 0.2), Math.max(size.z, 0.2))
-        box.translate(center.x, center.y, center.z)
-        geoms.push(box)
-      }
+      if (!geoms.length && entry.localBox && !entry.localBox.isEmpty()) geoms.push(plateFrom(entry.localBox))
       heatGeoms.set(bimId, geoms)
       return geoms
     }
+    const heatFloorSheets = new Map<string, { meshes: THREE.Mesh[]; guids: Set<string>; done: boolean }>()
     const dropHeatSheets = () => {
-      heatSheets.forEach(mesh => {
-        mesh.removeFromParent()
-        mesh.geometry.dispose()
-        const mat = mesh.material as THREE.Material
-        unwatchClipping(mat)
-        mat.dispose()
-      })
+      for (const rec of heatFloorSheets.values()) {
+        for (const mesh of rec.meshes) {
+          mesh.removeFromParent()
+          mesh.geometry.dispose()
+          const mat = mesh.material as THREE.Material
+          unwatchClipping(mat)
+          mat.dispose()
+        }
+      }
+      heatFloorSheets.clear()
       heatSheets = []
     }
+    /* Picked floor first, then the floors under it. Isolate floor is that floor only. */
+    const floorsInView = (levelId: string, alone: boolean) => {
+      const floors = [...floorCatalog.values()]
+      if (!levelId || levelId === 'ALL') return floors.sort((a, b) => b.rank - a.rank).map(f => f.id)
+      const picked = floorCatalog.get(levelId)
+      if (!picked) return [levelId]
+      return floors
+        .filter(f => alone ? f.rank === picked.rank : f.rank <= picked.rank)
+        .sort((a, b) => (a.id === picked.id ? -1 : b.id === picked.id ? 1 : b.rank - a.rank))
+        .map(f => f.id)
+    }
+    const showHeatFloors = (ids: Set<string>) => {
+      for (const [floor, rec] of heatFloorSheets) {
+        const on = ids.has(floor)
+        for (const mesh of rec.meshes) mesh.visible = on
+      }
+    }
     const clearSpaceHeat = async () => {
+      heatSeq++
+      heatReq = null
       spaceHeatActive = false
+      heatInsideWalls = false
+      syncHeatClip()
       applySpacesGate()
-      heatSig = ''
-      dropHeatSheets()
+      showHeatFloors(new Set())
+      heatRoots.forEach(root => { root.visible = false })
       heatByBim.forEach(rec => {
         unwatchClipping(rec.mat)
         rec.mat.dispose()
@@ -1108,11 +1274,6 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         } catch { /* */ }
       })
       heatByBim.clear()
-      heatRoots.forEach(root => {
-        root.removeFromParent()
-        root.clear()
-      })
-      heatRoots.clear()
     }
     /* Split long edges so a room face can change colour across itself, not
        only at its corners. */
@@ -1193,18 +1354,22 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     const paintRoomPlate = (
       geom: THREE.BufferGeometry,
-      own: { x: number; y: number; z: number; t: number; hx: number; hz: number },
+      own: { x: number; y: number; z: number; t: number; hx: number; hy: number; hz: number },
       samples: { x: number; z: number; t: number }[],
       sigma: number,
       low: THREE.Color,
       high: THREE.Color,
+      inset: boolean,
     ) => {
       const g = subdivideHeat(geom, Math.max(sigma * 0.45, 0.4))
       const pos = g.getAttribute('position') as THREE.BufferAttribute
       const sx = own.hx > 0.08 ? Math.max((own.hx - 0.05) / own.hx, 0.85) : 1
       const sz = own.hz > 0.08 ? Math.max((own.hz - 0.05) / own.hz, 0.85) : 1
+      const sy = inset && own.hy > 0.05 ? Math.max(1 - Math.min(0.45, own.hy * 0.45) / own.hy, 0.55) : 1
+      const drop = inset ? (1 - sy) * own.hy * 0.85 : 0
       for (let i = 0; i < pos.count; i++) {
         pos.setX(i, own.x + (pos.getX(i) - own.x) * sx)
+        pos.setY(i, own.y + (pos.getY(i) - own.y) * sy - drop)
         pos.setZ(i, own.z + (pos.getZ(i) - own.z) * sz)
       }
       pos.needsUpdate = true
@@ -1229,6 +1394,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         colors[o + 3] = 0.55
       }
       g.setAttribute('color', new THREE.BufferAttribute(colors, 4))
+      g.computeBoundingBox()
       g.computeBoundingSphere()
       const mesh = new THREE.Mesh(g, heatPlateMat())
       mesh.frustumCulled = false
@@ -1236,61 +1402,127 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       return mesh
     }
     const applySpaceHeat = async (zones: { bimId?: string; bimIds?: string[]; tempC?: number | null; rh?: number | null; co2?: number | null }[], mode?: string) => {
+      heatReq = { zones, mode }
+      /* Locating every room shares the worker that is still parsing the next file. */
+      if (useLoadingProgressStore.getState().sessionActive) return
       spaceHeatActive = true
       applySpacesGate()
+      const inside = heatInsideOf()
+      heatInsideWalls = inside
       const md = mode === 'comfort' || mode === 'hum' ? mode : 'temp'
+      const levelId = ((window as any).EKO?.state?.dock?.level as string) || 'ALL'
       const idsOf = (z: { bimId?: string; bimIds?: string[] }) =>
         (z.bimIds && z.bimIds.length ? z.bimIds : (z.bimId ? [z.bimId] : [])).filter(id => isGuid(id))
-      const sig = md + '|' + (zones || []).map(z => `${idsOf(z).join(',')}:${round1(z.tempC)}:${round1(z.rh)}:${round1(z.co2)}`).join(';')
-      if (sig === heatSig) return
-      heatSig = sig
-      dropHeatSheets()
-      type Room = { model: any; geoms: THREE.BufferGeometry[]; x: number; y: number; z: number; hx: number; hz: number; t: number }
-      const rooms: Room[] = []
+      const jobs: { bimId: string; t: number }[] = []
       for (const z of zones || []) {
         const raw = md === 'comfort' ? z.co2 : md === 'hum' ? z.rh : z.tempC
         const t = heatT(md, raw == null ? null : Number(raw))
         if (t == null) continue
-        for (const bimId of idsOf(z)) {
-          const entry = await locate(bimId)
-          if (!entry?.localBox || entry.localBox.isEmpty()) continue
-          const geoms = await geomsFor(bimId, entry)
-          if (!geoms.length) continue
-          const c = entry.localBox.getCenter(new THREE.Vector3())
-          const size = entry.localBox.getSize(new THREE.Vector3())
-          rooms.push({ model: entry.model, geoms, x: c.x, y: c.y, z: c.z, hx: size.x / 2, hz: size.z / 2, t })
-        }
+        for (const bimId of idsOf(z)) jobs.push({ bimId, t })
+      }
+      const valueSig = (inside ? 'in|' : 'out|') + md + '|' + jobs.map(j => `${j.bimId}:${round1(j.t)}`).join(';')
+      if (valueSig !== heatSig) {
+        dropHeatSheets()
+        heatSig = valueSig
+      }
+      const seq = ++heatSeq
+      const wanted = new Set(jobs.map(job => job.bimId))
+      const alone = !!(window as any).EKO?.state?.dock?.floorAlone
+      if (levelId && levelId !== 'ALL') await guidsForFloor(levelId, wanted)
+      else {
+        for (const model of engine.fragments?.models?.list?.values() ?? []) await readStoreys(model)
+      }
+      if (seq !== heatSeq) return
+      const order = floorsInView(levelId, alone)
+      const show = new Set(order)
+      showHeatFloors(show)
+      const missing = order.filter(id => !heatFloorSheets.get(id)?.done)
+      const wake = engine.world?.renderer as { needsUpdate?: boolean } | undefined
+      if (!missing.length) {
+        syncGhost()
+        if (wake) wake.needsUpdate = true
+        return
       }
       const stops = HEAT_STOPS[md] || HEAT_STOPS.temp
       const low = new THREE.Color(stops[0])
       const high = new THREE.Color(stops[1])
-      const byModel = new Map<any, Room[]>()
-      for (const room of rooms) {
-        const list = byModel.get(room.model) || []
-        list.push(room)
-        byModel.set(room.model, list)
+      const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+      for (const floorId of missing) {
+        if (seq !== heatSeq) return
+        let kept = heatFloorSheets.get(floorId)
+        if (!kept) {
+          kept = { meshes: [], guids: new Set(), done: false }
+          heatFloorSheets.set(floorId, kept)
+        }
+        const guids = await guidsForFloor(floorId, wanted)
+        if (seq !== heatSeq) return
+        await locateMany([...guids])
+        if (seq !== heatSeq) return
+        type Room = { model: any; geoms: THREE.BufferGeometry[]; x: number; y: number; z: number; hx: number; hy: number; hz: number; t: number; guid: string; area: number }
+        const rooms: Room[] = []
+        for (const job of jobs) {
+          if (!guids.has(job.bimId) || kept.guids.has(job.bimId)) continue
+          const entry = located.get(job.bimId)
+          if (!entry?.localBox || entry.localBox.isEmpty()) continue
+          const size = entry.localBox.getSize(new THREE.Vector3())
+          const c = entry.localBox.getCenter(new THREE.Vector3())
+          rooms.push({
+            model: entry.model, geoms: [plateFrom(entry.localBox)],
+            x: c.x, y: c.y, z: c.z, hx: size.x / 2, hy: size.y / 2, hz: size.z / 2,
+            t: job.t, guid: job.bimId, area: Math.abs(size.x * size.z),
+          })
+        }
+        const areas = rooms.map(r => r.area).filter(a => a > 1).sort((a, b) => a - b)
+        const typical = areas.length ? areas[Math.floor(areas.length / 2)] : 0
+        const paint = typical > 0 ? rooms.filter(r => r.area <= typical * 16) : rooms
+        const byModel = new Map<any, Room[]>()
+        for (const room of paint) {
+          const list = byModel.get(room.model) || []
+          list.push(room)
+          byModel.set(room.model, list)
+        }
+        for (const [model, samples] of byModel) {
+          const field = new Map<string, { x: number; z: number; n: number; t: number }>()
+          for (const room of samples) {
+            const key = room.t.toFixed(3)
+            const g = field.get(key) ?? { x: 0, z: 0, n: 0, t: room.t }
+            g.x += room.x
+            g.z += room.z
+            g.n++
+            field.set(key, g)
+          }
+          const graded = samples.length > 24
+            ? [...field.values()].map(g => ({ x: g.x / g.n, z: g.z / g.n, t: g.t }))
+            : samples
+          let near = 0, nearN = 0
+          for (let i = 0; i < graded.length; i++) {
+            let best = Infinity
+            for (let j = 0; j < graded.length; j++) {
+              if (i === j) continue
+              best = Math.min(best, Math.hypot(graded[i].x - graded[j].x, graded[i].z - graded[j].z))
+            }
+            if (isFinite(best) && best > 0) { near += best; nearN++ }
+          }
+          const sigma = Math.max(nearN ? (near / nearN) * 0.85 : 1, 0.5)
+          const root = heatRootOf(model)
+          for (const room of samples) {
+            if (seq !== heatSeq) return
+            for (const geom of room.geoms) {
+              const mesh = paintRoomPlate(geom, room, graded, sigma, low, high, inside)
+              mesh.visible = true
+              root.add(mesh)
+              heatSheets.push(mesh)
+              kept.meshes.push(mesh)
+            }
+            kept.guids.add(room.guid)
+            syncGhost()
+            if (wake) wake.needsUpdate = true
+            await nextFrame()
+          }
+        }
+        if (seq === heatSeq) kept.done = true
       }
-      byModel.forEach((samples, model) => {
-        let near = 0, nearN = 0
-        for (let i = 0; i < samples.length; i++) {
-          let best = Infinity
-          for (let j = 0; j < samples.length; j++) {
-            if (i === j) continue
-            best = Math.min(best, Math.hypot(samples[i].x - samples[j].x, samples[i].z - samples[j].z))
-          }
-          if (isFinite(best) && best > 0) { near += best; nearN++ }
-        }
-        const sigma = Math.max(nearN ? (near / nearN) * 0.85 : 1, 0.5)
-        const root = heatRootOf(model)
-        for (const room of samples) {
-          for (const geom of room.geoms) {
-            const mesh = paintRoomPlate(geom, room, samples, sigma, low, high)
-            root.add(mesh)
-            heatSheets.push(mesh)
-          }
-        }
-      })
-      syncGhost()
+      return
     }
 
     // Same rule as isAlarmed
@@ -1357,10 +1589,15 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       try { (window as { EKO?: { set?: (patch: object) => void } }).EKO?.set?.({}) } catch { /* the dashboard redraws on its next refresh */ }
     })
 
-    /* While the heatmap is up, the architecture model stays present but light,
-       so the room colour reads through the walls. Glass that is already fainter
-       is left as it is. Other disciplines stay solid. */
-    const ARCH_FADE = 0.35
+    /* While the heatmap is up, only the models the project ticked stay light.
+       Nothing fades until a file is named. Glass that is already fainter is left as it is. */
+    const heatFadeOf = () => {
+      const heat = useProjectStore.getState().currentProject?.apiSettings?.heatmap
+      const names = Array.isArray(heat?.fadeModels) ? heat.fadeModels : []
+      const amount = typeof heat?.fadeAmount === 'number' ? Math.min(0.8, Math.max(0.15, heat.fadeAmount)) : 0.35
+      return { names, amount }
+    }
+    const modelFades = (fileName: string) => heatFadeOf().names.includes(fileName)
     let archFadeOn = false
     const modelObject = (rec: { modelId: string; type?: string }) => {
       const fragList = engine.fragments?.models?.list
@@ -1377,22 +1614,23 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     const fadeArch = (on: boolean) => {
       archFadeOn = on
+      const amount = heatFadeOf().amount
       for (const rec of useModelStore.getState().models) {
-        if (disciplineOf(rec.originalFileName || '') !== 'arch') continue
+        const fadeThis = on && modelFades(rec.originalFileName || '')
         const root = modelObject(rec)
         if (!root) continue
         root.traverse((obj: any) => {
           const mats = obj.material ? (Array.isArray(obj.material) ? obj.material : [obj.material]) : []
           for (const mat of mats) {
             if (!mat) continue
-            if (on) {
-              if (mat.userData?.ekoArchFade === ARCH_FADE && mat.opacity === ARCH_FADE && mat.depthWrite === false) continue
-              if (!mat.userData?.ekoArchSaved && mat.transparent && typeof mat.opacity === 'number' && mat.opacity < ARCH_FADE) continue
+            if (fadeThis) {
+              if (mat.userData?.ekoArchFade === amount && mat.opacity === amount && mat.depthWrite === false) continue
+              if (!mat.userData?.ekoArchSaved && mat.transparent && typeof mat.opacity === 'number' && mat.opacity < amount) continue
               if (!mat.userData.ekoArchSaved) {
                 mat.userData.ekoArchSaved = { opacity: mat.opacity, transparent: mat.transparent, depthWrite: mat.depthWrite }
               }
-              mat.userData.ekoArchFade = ARCH_FADE
-              mat.opacity = ARCH_FADE
+              mat.userData.ekoArchFade = amount
+              mat.opacity = amount
               mat.transparent = true
               mat.depthWrite = false
               mat.needsUpdate = true
@@ -1407,7 +1645,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
             }
           }
           if (!obj.isMesh) return
-          if (on) {
+          if (fadeThis) {
             if (obj.userData.ekoArchCast == null) obj.userData.ekoArchCast = !!obj.castShadow
             obj.castShadow = false
           } else if (obj.userData.ekoArchCast != null) {
@@ -1472,6 +1710,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     const profileTries = new Map<string, number>()
     const profiling = new Set<string>()
     const ensureProfiles = () => {
+      if (useLoadingProgressStore.getState().sessionActive) return
       const fragList = engine.fragments?.models?.list
       if (!fragList) return
       for (const rec of useModelStore.getState().models) {
@@ -1544,6 +1783,18 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       miniMap.capture()
     }
 
+    const lookAtView = (view?: { position?: number[]; target?: number[] }) => {
+      const camCtl = engine.world?.camera?.controls as { setLookAt?: Function; updateCameraUp?: Function } | undefined
+      const pos = view?.position
+      const tgt = view?.target
+      if (!camCtl?.setLookAt || !pos || !tgt || pos.length !== 3 || tgt.length !== 3) return false
+      const cam = engine.world?.camera?.three as THREE.PerspectiveCamera | undefined
+      cam?.up.set(0, 1, 0)
+      camCtl.updateCameraUp?.()
+      camCtl.setLookAt(pos[0], pos[1], pos[2], tgt[0], tgt[1], tgt[2], true)
+      return true
+    }
+
     ;(window as any).EKO_HOST_ENGINE = {
       projectPoint,
       resolveAllAssetPositions,
@@ -1558,6 +1809,18 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       listMapped: () => links().list.map(m => ({ id: m.equip, bimId: m.guid })),
       spaceLinks: () => indexSpaceLinks(useProjectStore.getState().currentProject?.assetLinks),
       listLevels: () => levels.map(l => ({ id: l.id, name: l.name })),
+      captureCamera: () => {
+        const cam = engine.world?.camera?.controls as { getPosition?: (out: THREE.Vector3) => void; getTarget?: (out: THREE.Vector3) => void } | undefined
+        if (!cam?.getPosition || !cam?.getTarget) return null
+        const position = new THREE.Vector3()
+        const target = new THREE.Vector3()
+        cam.getPosition(position)
+        cam.getTarget(target)
+        return {
+          position: [position.x, position.y, position.z] as [number, number, number],
+          target: [target.x, target.y, target.z] as [number, number, number],
+        }
+      },
       isolateLevel,
       listLayers: () => layerIds(useModelStore.getState().models).map(id => ({ id, name: id })),
       isolateLayer,
@@ -1620,8 +1883,21 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const V = (window as any).EKO_V
       if (eko && typeof V?.position === 'function') V.position(eko)
     }
-    const controls = engine.world?.camera?.controls
+    const controls = engine.world?.camera?.controls as {
+      addEventListener: Function
+      removeEventListener: Function
+      setLookAt?: Function
+      updateCameraUp?: Function
+    } | undefined
+    const onHeatMove = () => { heatMoving = true }
+    const onHeatRest = () => { heatMoving = false }
+    const onHeatCamera = (e: Event) => {
+      lookAtView((e as CustomEvent).detail)
+    }
     controls?.addEventListener('update', onCameraUpdate)
+    controls?.addEventListener('controlstart', onHeatMove)
+    controls?.addEventListener('rest', onHeatRest)
+    window.addEventListener('eko-heat-camera', onHeatCamera)
     engine.world?.renderer?.onBeforeUpdate?.add(syncGhost)
     engine.world?.renderer?.onAfterUpdate?.add(afterFrame)
 
@@ -1632,7 +1908,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     let nextKey = 0
     const keyOf = (m: object) => modelKeys.get(m) ?? (modelKeys.set(m, ++nextKey), nextKey)
     let modelsSig = ''
+    let modelsWereLoading = useLoadingProgressStore.getState().sessionActive
     const resolveTimer = setInterval(() => {
+      const loading = useLoadingProgressStore.getState().sessionActive
+      if (loading) { modelsWereLoading = true; return }
+      const justLoaded = modelsWereLoading
+      modelsWereLoading = false
       ensureProfiles()
       applySpacesGate()
       const live = [...(engine.fragments?.models?.list?.values() ?? [])]
@@ -1659,9 +1940,19 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
       // A control room opened from its own URL goes home once its models load
       if (modelsChanged && live.length && document.querySelector('.dashboard-native-container[data-wall="1"]')) resetCameraToHome(engine)
+      if (justLoaded && levelWait) {
+        const wait = levelWait
+        levelWait = null
+        void isolateLevel(wait.id, true)
+      }
+      if (justLoaded && heatReq && (window as any).EKO?.state?.pageId === 'heatmap') {
+        void applySpaceHeat(heatReq.zones, heatReq.mode)
+      }
     }, 3000)
-    void resolveAllAssetPositions()
-    void refreshLevels()
+    if (!useLoadingProgressStore.getState().sessionActive) {
+      void resolveAllAssetPositions()
+      void refreshLevels()
+    }
 
     return () => {
       try {
@@ -1674,6 +1965,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         }
       } catch { /* viewer keeps its canvas */ }
       controls?.removeEventListener('update', onCameraUpdate)
+      controls?.removeEventListener('controlstart', onHeatMove)
+      controls?.removeEventListener('rest', onHeatRest)
+      window.removeEventListener('eko-heat-camera', onHeatCamera)
       engine.world?.renderer?.onBeforeUpdate?.remove(syncGhost)
       engine.world?.renderer?.onAfterUpdate?.remove(afterFrame)
       miniMap.dispose()
@@ -1819,7 +2113,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         // The backend serves this project before the dashboard's first poll is trusted
         void useFinStore.getState().syncProjectSettings()
 
-        return loadScripts(Array.from(doc.querySelectorAll('script')), signal)
+        // A script marked data-sample-data belongs to one sample data set: load it only for a project using that set
+        const sampleData = (window as any).INJECTED_PROJECT_CONFIG?.sampleData || null
+        const scripts = Array.from(doc.querySelectorAll('script')).filter(s => !s.dataset.sampleData || s.dataset.sampleData === sampleData)
+        return loadScripts(scripts, signal)
       })
 
     return () => {
@@ -1832,6 +2129,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         ;(window as any).EKO_HOST_ENGINE?.bindWallOrbit?.()
       } catch { /* restore canvas orbit */ }
       // The selection dies with the dashboard: don't leave its equipment coloured
+      try { (window as any).EKO_HOST_ENGINE?.clearSpaceHeat?.() } catch {}
       try { (window as any).EKO_HOST_ENGINE?.clearHighlight?.() } catch {}
       try { (window as any).DashboardOverlayTeardown?.() } catch {}
       try { (window as any).DashboardData?.stop?.() } catch {}
@@ -1839,7 +2137,36 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (containerRef.current) containerRef.current.innerHTML = ''
       delete (window as any).INJECTED_PROJECT_CONFIG
     }
-  }, [visible, currentProject?.projectId, currentProject?.apiSettings])
+  }, [visible, currentProject?.projectId])
+
+  /* Saving settings must not rebuild the dashboard. A rebuild left the ceiling
+     cut on and the model disappeared. The open dashboard reads this live. */
+  useEffect(() => {
+    if (!visible || !currentProject) return
+    const injected = (window as any).INJECTED_PROJECT_CONFIG
+    if (!injected) return
+    Object.assign(injected, dashboardProjectInfo(currentProject))
+    const fin = injected.fin
+    const s = currentProject.apiSettings
+    if (fin && s) {
+      fin.baseUrl = s.finBaseUrl || fin.baseUrl
+      fin.project = s.finProjectName || ''
+      fin.interval = s.finInterval || fin.interval
+      fin.directMode = s.finDirectMode || false
+      if (s.finLivePoints) fin.livePoints = s.finLivePoints
+      if (s.finEndpoints) fin.endpoints = s.finEndpoints
+    }
+    try { (window as any).EKO_HEAT?.relink?.() } catch { /* the next data tick rebuilds the zones */ }
+    try { (window as any).EKO?.set?.({}) } catch { /* the dashboard redraws on its next refresh */ }
+    const prev = savedSettings.current
+    const next = currentProject.apiSettings
+    savedSettings.current = next
+    const page = (window as any).EKO?.state?.pageId
+    /* Save Settings while Overview is open must not keep the heatmap camera. */
+    if (prev !== undefined && prev !== next && page && page !== 'heatmap') {
+      try { (window as any).EKO?.releaseHeatView?.() } catch { /* the home camera is applied on the next open */ }
+    }
+  }, [visible, currentProject, currentProject?.apiSettings])
 
   if (!visible) return null
 

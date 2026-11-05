@@ -21,6 +21,7 @@ import { GodRayShader } from './GodRayShader'
 import { CustomEdgeShader } from './CustomEdgeShader'
 import { InkPass } from './InkPass'
 import { setHidden } from './visibilityCoordinator'
+import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import {
   dressMaterial,
   makeSkyEnvironment,
@@ -816,7 +817,8 @@ export async function initFragmentsEngine(
     if (grid) grid.visible = false
 
     // ── Surfaces ────────────────────────────────────────────────────────────
-    void hideNonPhysical()
+    /* Not while files are still parsing. The category scan uses the same worker. */
+    if (!useLoadingProgressStore.getState().sessionActive) void hideNonPhysical()
     for (const material of fragments.models.materials.list.values()) {
       dressMaterial(material as THREE.Material, surfaces, templateEnv, templateBase)
     }
@@ -1827,7 +1829,15 @@ export async function initFragmentsEngine(
     // ones already in, and stripped of the items a template does not draw
     if (activeTemplate) {
       setTemplateStreaming(true)
-      void hideNonPhysical(model.modelId)
+      /* Category scans share the worker that is parsing the next file. */
+      const hideWhenFree = () => {
+        if (useLoadingProgressStore.getState().sessionActive) {
+          setTimeout(hideWhenFree, 400)
+          return
+        }
+        void hideNonPhysical(model.modelId)
+      }
+      hideWhenFree()
       if (studioActive) paintStudio(model)
     }
     
@@ -1836,7 +1846,11 @@ export async function initFragmentsEngine(
     model.userData.pbrMaterialMap = new Map<string, any>();
     
     if (typeof model.getCategories === 'function' && typeof model.getItemsByQuery === 'function') {
-      setTimeout(async () => {
+      const scanPbr = async () => {
+        if (useLoadingProgressStore.getState().sessionActive) {
+          setTimeout(scanPbr, 400)
+          return
+        }
         try {
           const categories = await model.getCategories();
           for (const mapping of PBR_MATERIAL_MAPPINGS) {
@@ -1926,7 +1940,8 @@ export async function initFragmentsEngine(
             console.warn('Could not compute PBR map for model', err);
           }
         }
-      }, 2000) // 2s delay allows worker to fully initialize the model first
+      }
+      setTimeout(scanPbr, 2000) // after the worker has the model, and after the load session
     }
   })
 

@@ -346,10 +346,10 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
   }, [isReady, currentProjectId])
 
   useEffect(() => {
-    if (isReady && engineRef.current) {
-      engineRef.current.setLightingParams(renderSettings)
-    }
-  }, [renderSettings, isReady])
+    /* Not during the file load. Applying a style scans categories on the same worker. */
+    if (!isReady || !engineRef.current || progressSessionActive) return
+    engineRef.current.setLightingParams(renderSettings)
+  }, [renderSettings, isReady, progressSessionActive])
 
   const loadedIdsRef = useRef<Set<string>>(new Set())
   const isLoadingRef = useRef(false)
@@ -384,10 +384,6 @@ export function ViewerCanvas({ onEngineReady, adminMode = true, isFinProject = f
             rotation: next.rotation,
             scale: next.scale,
           }, adminMode && !hasCamera)
-          
-          if (engineRef.current) {
-            engineRef.current.setLightingParams(pickRenderSettings(useAppStore.getState()))
-          }
         }
       } finally {
         isLoadingRef.current = false

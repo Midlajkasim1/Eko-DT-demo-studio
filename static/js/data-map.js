@@ -2204,6 +2204,106 @@
     return n + 'F';
   }
 
+  function finiteNum(n) {
+    return typeof n === 'number' && isFinite(n);
+  }
+
+  /* On unless this project saved sampleSpaces: false. Marsa has no space links, so this never fills its rooms. */
+  function sampleSpacesOn() {
+    var h = window.INJECTED_PROJECT_CONFIG && window.INJECTED_PROJECT_CONFIG.heatmap;
+    return !h || h.sampleSpaces !== false;
+  }
+
+  /* Hospital rooms share these sensors. One zone per sensor, not one zone per room. */
+  var SAMPLE_SENSOR_COUNT = 7;
+
+  function sampleIndex(key) {
+    var m = String(key || '').match(/(\d+)/);
+    var n = m ? parseInt(m[1], 10) : 1;
+    return isFinite(n) && n > 0 ? n : 1;
+  }
+
+  function sampleIndexFromGuid(guid) {
+    var s = String(guid || '');
+    var n = 0;
+    for (var i = 0; i < s.length; i++) n = (n + s.charCodeAt(i) * (i + 1)) % 97;
+    return (n % 9) + 1;
+  }
+
+  function sampleBucket(guid) {
+    var s = String(guid || '');
+    var n = 0;
+    for (var i = 0; i < s.length; i++) n = (n + s.charCodeAt(i) * (i + 1)) % 97;
+    return n % SAMPLE_SENSOR_COUNT;
+  }
+
+  /* Inside the legend bands: 21–25 °C, 40–80 %, 600–1200 ppm. Not the old Marsa room table. */
+  function sampleTemp(n) { return Math.round((21 + ((n - 1) % 9) * 0.5) * 10) / 10; }
+  function sampleRh(n) { return 40 + ((n - 1) % 9) * 5; }
+  function sampleCo2(n) { return 600 + ((n - 1) % 13) * 50; }
+
+  function seedSampleHistory(id, base) {
+    if (!id || heatHist[id]) return;
+    var days = {};
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var span = base >= 100 ? 40 : (base >= 30 ? 3 : 0.4);
+    for (var i = 0; i < 30; i++) {
+      var day = new Date(today);
+      day.setDate(today.getDate() - i);
+      var slots = [];
+      for (var b = 0; b < 8; b++) {
+        var wobble = Math.sin((i + 1) * 0.35 + b * 0.8) * span;
+        var v = base + wobble;
+        slots.push(base >= 30 ? Math.round(v) : Math.round(v * 10) / 10);
+      }
+      var sum = 0;
+      for (var s = 0; s < slots.length; s++) sum += slots[s];
+      days[ymd(day)] = { v: sum / slots.length, slots: slots };
+    }
+    heatHist[id] = { pending: false, days: days };
+  }
+
+  function fillSampleReadings(zones, links) {
+    if (!sampleSpacesOn() || !links || !links.length) return;
+    var guids = {};
+    links.forEach(function (l) {
+      if (l && l.guid) guids[l.guid] = true;
+    });
+    zones.forEach(function (z) {
+      var ids = z.bimIds && z.bimIds.length ? z.bimIds : (z.bimId ? [z.bimId] : []);
+      var linked = false;
+      for (var i = 0; i < ids.length; i++) if (guids[ids[i]]) linked = true;
+      if (!linked) return;
+      var key = sensorKey(z.nameEn);
+      var n = key ? sampleIndex(key) : sampleIndexFromGuid(z.nameEn || z.bimId || ids[0]);
+      var tag = key || z.nameEn || String(z.bimId || ids[0]);
+      /* One reading for every room on this sensor. */
+      z.sample = true;
+      if (!finiteNum(z.liveTemp)) {
+        z.liveTemp = sampleTemp(n);
+        if (!z.tempId) {
+          z.tempId = 'sample:' + tag + ':temp';
+          seedSampleHistory(z.tempId, z.liveTemp);
+        }
+      }
+      if (!finiteNum(z.liveRh)) {
+        z.liveRh = sampleRh(n);
+        if (!z.rhId) {
+          z.rhId = 'sample:' + tag + ':rh';
+          seedSampleHistory(z.rhId, z.liveRh);
+        }
+      }
+      if (!finiteNum(z.liveCo2)) {
+        z.liveCo2 = sampleCo2(n);
+        if (!z.co2Id) {
+          z.co2Id = 'sample:' + tag + ':co2';
+          seedSampleHistory(z.co2Id, z.liveCo2);
+        }
+      }
+    });
+  }
+
   function applyHeat(list) {
     if (Array.isArray(list)) heatEquip = list;
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
@@ -2240,19 +2340,43 @@
     zones.forEach(function (z) {
       (z.bimIds || []).forEach(function (id) { if (id) usedGuid[id] = true; });
     });
+    /* Unnamed rooms share S-01..S-07. A room already named IS-01 or IAQ-02 stays on that sensor. */
     linkedSpaces.forEach(function (l) {
       if (!l || !l.guid || usedGuid[l.guid]) return;
-      usedGuid[l.guid] = true;
       var key = sensorKey(l.name);
-      var kind = key.indexOf('IAQ') === 0 ? 'iaq' : 'is';
-      zones.push({
-        nameEn: l.name, nameAr: l.name, floor: '', kind: kind,
-        tempC: null, rh: null, co2: null, hours: [],
-        bimId: l.guid,
-        bimIds: [l.guid],
-        spaceName: l.element || l.name
-      });
+      if (!key && !sampleSpacesOn()) return;
+      usedGuid[l.guid] = true;
+      var z;
+      if (key) {
+        z = byKey[key];
+        if (!z) {
+          z = blankZone(key);
+          zones.push(z);
+          byKey[key] = z;
+        }
+      } else {
+        var skey = 'S-' + String(sampleBucket(l.guid) + 1).padStart(2, '0');
+        z = byKey[skey];
+        if (!z) {
+          z = {
+            nameEn: skey, nameAr: skey, floor: '', kind: 'is',
+            tempC: null, rh: null, co2: null, hours: [],
+            bimId: l.guid, bimIds: [],
+            spaceName: skey, sample: true
+          };
+          zones.push(z);
+          byKey[skey] = z;
+        }
+      }
+      if (z.bimIds.indexOf(l.guid) < 0) z.bimIds.push(l.guid);
+      if (!z.bimId) z.bimId = l.guid;
+      z.bimIds.forEach(function (id) { if (id) usedGuid[id] = true; });
+      if (sampleSpacesOn()) z.sample = true;
     });
+    /* Hospital check values. On unless sampleSpaces is saved false.
+       Marsa's SPACE_GUID rooms are built only when there are no space links, and this
+       returns before touching them. A live FIN number is never replaced. */
+    fillSampleReadings(zones, linkedSpaces);
     zones.sort(function (a, b) { return a.nameEn.localeCompare(b.nameEn, undefined, { numeric: true }); });
     zones.forEach(function (z, i) {
       z.rect = [10 + (i % 4) * 22, 16 + Math.floor(i / 4) * 22, 18, 16];

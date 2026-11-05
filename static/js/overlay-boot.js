@@ -10,6 +10,41 @@
   liveRoot();
   window.DASHBOARD_BASE = '/static/dashboard/';
 
+  /* Each project keeps its own dashboard storage: in the Studio an eko- key is stored under the open project's id.
+     Language, theme and the move flag stay shared; notifications already carry the project id. */
+  (function projectStorage() {
+    var cfg = window.INJECTED_PROJECT_CONFIG || {};
+    var ns = window.DASHBOARD_OVERLAY && cfg.projectId ? String(cfg.projectId) : null;
+    window.EKO_STORAGE_NS = ns;
+    var SHARED = { 'eko-lang': 1, 'eko-theme-mode': 1, 'eko-storage-moved-v1': 1 };
+    var own = function (k) { return k.indexOf('eko-') === 0 && !SHARED[k] && k.indexOf('eko-notifs-') !== 0; };
+    var P = Storage.prototype;
+    if (!window.__ekoStorage) {   // the dashboard reloads on every project switch: patch once, then only the namespace changes
+      window.__ekoStorage = { get: P.getItem, set: P.setItem, del: P.removeItem };
+      var scoped = function (k) { k = String(k); return window.EKO_STORAGE_NS && own(k) ? window.EKO_STORAGE_NS + ':' + k : k; };
+      P.getItem = function (k) { return window.__ekoStorage.get.call(this, scoped(k)); };
+      P.setItem = function (k, v) { return window.__ekoStorage.set.call(this, scoped(k), v); };
+      P.removeItem = function (k) { return window.__ekoStorage.del.call(this, scoped(k)); };
+    }
+    /* Once: what was saved before this change came from Marsa, so it moves to the Marsa project */
+    var site = cfg.site || {};
+    var marsa = site.finProject === 'marsaAlArab' || /marsa/i.test(site.name || '') || /marsa/i.test(site.displayName || '');
+    var raw = window.__ekoStorage;
+    try {
+      if (ns && marsa && raw.get.call(localStorage, 'eko-storage-moved-v1') !== '1') {
+        [localStorage, sessionStorage].forEach(function (st) {
+          var keys = [];
+          for (var i = 0; i < st.length; i++) keys.push(st.key(i));
+          keys.filter(own).forEach(function (k) {
+            if (raw.get.call(st, ns + ':' + k) == null) raw.set.call(st, ns + ':' + k, raw.get.call(st, k));
+            raw.del.call(st, k);
+          });
+        });
+        raw.set.call(localStorage, 'eko-storage-moved-v1', '1');
+      }
+    } catch (e) {}
+  })();
+
   var orbitHit = null;
   function dropOrbitHit() {
     if (orbitHit && orbitHit.parentNode) orbitHit.parentNode.removeChild(orbitHit);
@@ -116,6 +151,7 @@
   };
 
   window.DashboardOverlayTeardown = function () {
+    window.EKO_STORAGE_NS = null;
     try {
       if (window.EKO && window.EKO.state) {
         window.EKO.state.wall = false;

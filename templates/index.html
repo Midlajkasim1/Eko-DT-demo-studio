@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/static/dashboard/css/base.css" />
   <link rel="stylesheet" href="/static/dashboard/css/components.css" />
   <link rel="stylesheet" href="/static/dashboard/css/wall.css" />
+  <link rel="stylesheet" href="/static/dashboard/css/prototype-sync.css" />
   <link rel="stylesheet" href="/static/css/overlay.css" />
   <style>
     html, body { margin: 0; height: 100%; }
@@ -31,6 +32,17 @@
   <script src="/static/dashboard/js/i18n/en.js"></script>
   <script src="/static/dashboard/js/i18n/ar.js"></script>
   <script src="/static/dashboard/js/data/site.marsa.js" onerror="window.EKO_DATA_FAILED=true"></script>
+  <!-- E15: the medical centre sample data and its simulation engine; the Studio loads data-sample-data scripts only for a project using that sample data -->
+  <script src="/static/dashboard/js/data/site.medical.js" data-sample-data="medical"></script>
+  <script src="/static/dashboard/js/energy-model.js" data-sample-data="medical"></script>
+  <script src="/static/dashboard/js/sim/medical-config.js" data-sample-data="medical"></script>
+  <script src="/static/dashboard/js/sim/medical-engine.js" data-sample-data="medical"></script>
+  <script src="/static/dashboard/js/sim/medical-fire.js" data-sample-data="medical"></script>
+  <script src="/static/dashboard/js/sim/medical-security.js" data-sample-data="medical"></script>
+  <script src="/static/dashboard/js/sim/medical-other.js" data-sample-data="medical"></script>
+  <script src="/static/dashboard/js/sim/medical-esg.js" data-sample-data="medical"></script>
+  <script src="/static/dashboard/js/sim/medical-apply.js" data-sample-data="medical"></script>
+  <script src="/static/dashboard/js/sim/medical-assets.js" data-sample-data="medical"></script>
   <script src="/static/dashboard/js/data/portfolio.js"></script>
   <script src="/static/dashboard/js/layouts/nav.js"></script>
   <script src="/static/dashboard/js/layouts/marsa-overview.js"></script>
@@ -45,6 +57,7 @@
   <script src="/static/dashboard/js/layouts/systems.js"></script>
   <script src="/static/dashboard/js/layouts/systems-subs.js"></script>
   <script src="/static/dashboard/js/layouts/module-locked.js"></script>
+  <script src="/static/dashboard/js/layouts/maintenance.js"></script>
   <script src="/static/dashboard/js/layouts/bench.js"></script>
   <script src="/static/dashboard/js/layouts/anom.js"></script>
   <script src="/static/dashboard/js/layouts/fcst.js"></script>
@@ -110,9 +123,12 @@
   <script src="/static/dashboard/js/shell/tooltip.js"></script>
   <script src="/static/dashboard/js/shell/feedback.js"></script>
   <script src="/static/dashboard/js/shell/surfaces.js"></script>
+  <!-- E15: the prediction and proof engine -->
+  <script src="/static/dashboard/js/prove.js"></script>
   <script>if(window.EKO_DATA && window.EKO_DATA.marsa) window.EKO_CTL.validate(window.EKO_DATA.marsa);</script>
   <script src="/static/dashboard/js/addons.js"></script>
   <script src="/static/dashboard/js/ai/ask.js"></script>
+  <script src="/static/dashboard/js/personas.js"></script>
   <script src="/static/dashboard/js/app.js"></script>
   <script src="/static/js/data-map.js"></script>
 </body>

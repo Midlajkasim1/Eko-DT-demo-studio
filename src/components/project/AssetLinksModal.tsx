@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { useProjectStore } from '@/store/useProjectStore'
 import { hospitalHvacEnabled } from '@/lib/hospitalHvac'
 import { useFinStore } from '@/store/useFinStore'
+import { useModelStore } from '@/store/useModelStore'
+import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import type { AssetLink } from '@/types'
 import {
@@ -21,7 +23,7 @@ import {
   type ModelElement,
   type Suggestion,
 } from '@/lib/assetLinks'
-import { defaultSpaceModelKeys, guidsInModels, listModelElements, listScannedModels, type ScannedModel } from '@/lib/modelElements'
+import { defaultSpaceModelKeys, guidsInModel, guidsInModels, listModelElements, listScannedModels, type ScannedModel } from '@/lib/modelElements'
 
 interface AssetLinksModalProps {
   visible: boolean
@@ -84,8 +86,13 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
   const [links, setLinks] = useState<AssetLink[]>(initial)
   const [mode, setMode] = useState<Mode>('equip')
   const [elements, setElements] = useState<ModelElement[] | null>(null)
-  const [scan, setScan] = useState<{ state: 'idle' | 'scanning' | 'error'; message?: string }>({ state: 'scanning' })
+  const [scan, setScan] = useState<{ state: 'idle' | 'scanning' | 'error'; message?: string }>({ state: 'idle' })
   const [scanRun, setScanRun] = useState(0)
+  const [spaceScanRun, setSpaceScanRun] = useState(0)
+  const spaceCache = useRef<ModelElement[] | null>(null)
+  const modelSigSeen = useRef<string | null>(null)
+  const modelSig = useModelStore(s => s.models.map(m => `${m.modelId}:${m.originalFileName ?? ''}`).join('|'))
+  const loadingModels = useLoadingProgressStore(s => s.sessionActive)
   const [present, setPresent] = useState<Set<string> | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
@@ -94,6 +101,7 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
   const [manualGuid, setManualGuid] = useState('')
   const [modelChoices, setModelChoices] = useState<ScannedModel[]>([])
   const [pickedKeys, setPickedKeys] = useState<string[]>([])
+  const [savedByModel, setSavedByModel] = useState<Record<string, string[]>>({})
   const spacePick = useRef<string[] | null>(null)
   const [importText, setImportText] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -102,24 +110,11 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
   const [loadingFin, setLoadingFin] = useState(false)
 
   useEffect(() => {
+    if (mode === 'space' || loadingModels) return
     const engine = engineRef.current
     const job = !engine
       ? Promise.reject(new Error('the 3D viewer is not ready.'))
-      : Promise.resolve().then(() => {
-          let keys: string[] | undefined
-          if (mode === 'space') {
-            const models = listScannedModels(engine)
-            const known = new Set(models.map(m => m.key))
-            const picked = spacePick.current == null
-              ? defaultSpaceModelKeys(models)
-              : spacePick.current.filter(k => known.has(k))
-            spacePick.current = picked
-            setModelChoices(models)
-            setPickedKeys(picked)
-            keys = picked
-          }
-          return listModelElements(engine, mode === 'space' ? 'space' : 'equip', keys)
-        })
+      : listModelElements(engine, 'equip')
     let cancelled = false
     job.then(
       found => {
@@ -134,7 +129,52 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
       },
     )
     return () => { cancelled = true }
-  }, [scanRun, engineRef, mode])
+  }, [scanRun, engineRef, mode, loadingModels])
+
+  /* Names of the loaded files only. The rooms themselves wait for Scan. */
+  useEffect(() => {
+    if (mode !== 'space') return
+    const engine = engineRef.current
+    if (!engine) return
+    const models = listScannedModels(engine)
+    const known = new Set(models.map(m => m.key))
+    const picked = spacePick.current == null
+      ? defaultSpaceModelKeys(models)
+      : spacePick.current.filter(k => known.has(k))
+    spacePick.current = picked
+    setModelChoices(models)
+    setPickedKeys(picked)
+    if (modelSigSeen.current == null) {
+      modelSigSeen.current = modelSig
+      return
+    }
+    if (modelSigSeen.current !== modelSig) {
+      modelSigSeen.current = modelSig
+      setNotice('A model was added or changed. Scan to update the room list. Saved rooms stay as they are.')
+    }
+  }, [mode, modelSig, engineRef])
+
+  useEffect(() => {
+    if (!spaceScanRun || mode !== 'space') return
+    const engine = engineRef.current
+    const job = !engine
+      ? Promise.reject(new Error('the 3D viewer is not ready.'))
+      : listModelElements(engine, 'space', spacePick.current ?? [])
+    let cancelled = false
+    job.then(
+      found => {
+        if (cancelled) return
+        spaceCache.current = found
+        setElements(found)
+        setScan({ state: 'idle' })
+      },
+      (e: unknown) => {
+        if (cancelled) return
+        setScan({ state: 'error', message: e instanceof Error ? e.message : String(e) })
+      },
+    )
+    return () => { cancelled = true }
+  }, [spaceScanRun, mode, engineRef])
 
   useEffect(() => {
     const fin = useFinStore.getState()
@@ -144,25 +184,28 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
   const switchMode = (next: Mode) => {
     if (next === mode) return
     setMode(next)
-    setElements(null)
-    setScan({ state: 'scanning' })
     setQuery('')
     setFilter('all')
     setNotice(null)
     setError(null)
+    if (next === 'space') {
+      setElements(spaceCache.current)
+      setScan({ state: 'idle' })
+      return
+    }
+    setElements(null)
+    setScan({ state: 'scanning' })
   }
 
   const rescan = () => {
     setScan({ state: 'scanning' })
-    setScanRun(n => n + 1)
+    if (mode === 'space') setSpaceScanRun(n => n + 1)
+    else setScanRun(n => n + 1)
   }
 
   const applySpacePick = (next: string[]) => {
     spacePick.current = next
     setPickedKeys(next)
-    setElements(null)
-    setScan({ state: 'scanning' })
-    setScanRun(n => n + 1)
   }
 
   const fileLabel = (name: string) => name.split(/[/\\]/).pop() || name
@@ -174,18 +217,41 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
 
   const equipLinks = useMemo(() => links.filter(l => l.kind !== 'space'), [links])
   const spaceLinks = useMemo(() => links.filter(l => l.kind === 'space'), [links])
+  const spaceGuidKey = useMemo(() => spaceLinks.map(l => l.guid).sort().join(','), [spaceLinks])
+  useEffect(() => {
+    if (mode !== 'space' || loadingModels) return
+    const engine = engineRef.current
+    const guids = spaceGuidKey ? spaceGuidKey.split(',') : []
+    if (!engine || !guids.length || !modelChoices.length) {
+      setSavedByModel({})
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      const next: Record<string, string[]> = {}
+      for (const choice of modelChoices) {
+        try {
+          const found = await guidsInModel(engine, choice.key, guids)
+          if (found.length) next[choice.key] = found
+        } catch { /* this file is not ready to answer */ }
+        if (cancelled) return
+      }
+      if (!cancelled) setSavedByModel(next)
+    })()
+    return () => { cancelled = true }
+  }, [mode, loadingModels, spaceGuidKey, modelChoices, engineRef])
 
   const guidKey = useMemo(() => [...new Set(links.map(l => l.guid))].sort().join(','), [links])
   useEffect(() => {
     const engine = engineRef.current
-    if (!engine || !guidKey) return
+    if (loadingModels || !engine || !guidKey) return
     let cancelled = false
     guidsInModels(engine, guidKey.split(',')).then(
       found => { if (!cancelled) setPresent(found) },
       () => { if (!cancelled) setPresent(null) },
     )
     return () => { cancelled = true }
-  }, [guidKey, elements, engineRef])
+  }, [guidKey, elements, engineRef, loadingModels])
 
   const prepared = useMemo(() => (mode === 'equip' && elements ? prepareElements(elements) : []), [elements, mode])
   const byGuid = useMemo(() => new Map((elements ?? []).map(e => [e.guid, e])), [elements])
@@ -336,6 +402,18 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
   }
 
   const unlinkSpace = (guid: string) => setLinks(prev => prev.filter(l => !(l.kind === 'space' && l.guid === guid)))
+  const unlinkAllSpaces = () => {
+    const n = links.filter(l => l.kind === 'space').length
+    if (!n) return
+    setLinks(prev => prev.filter(l => l.kind !== 'space'))
+    setNotice(`Removed ${n} rooms. Save to keep this.`)
+  }
+  const removeSpaces = (guids: string[]) => {
+    const drop = new Set(guids)
+    if (!drop.size) return
+    setLinks(prev => prev.filter(l => !(l.kind === 'space' && drop.has(l.guid))))
+    setNotice(`Removed ${drop.size} rooms. Save to keep this.`)
+  }
 
   const pickedGuid = (text: string | undefined): string | null => {
     const t = (text ?? '').trim()
@@ -424,26 +502,39 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
   const addedCount = spaceRows.filter(r => r.link).length
   const openCount = spaceRows.filter(r => !r.link).length
   const openByModel = new Map<string, ModelElement[]>()
+  const addedByModel = new Map<string, string[]>()
   for (const row of spaceRows) {
-    if (!row.el || row.link) continue
-    const list = openByModel.get(row.el.modelName) ?? []
-    list.push(row.el)
-    openByModel.set(row.el.modelName, list)
+    if (!row.el) continue
+    if (!row.link) {
+      const list = openByModel.get(row.el.modelName) ?? []
+      list.push(row.el)
+      openByModel.set(row.el.modelName, list)
+    } else {
+      const list = addedByModel.get(row.el.modelName) ?? []
+      list.push(row.guid)
+      addedByModel.set(row.el.modelName, list)
+    }
   }
 
-  const scanText = scan.state === 'scanning'
+  const scanText = loadingModels
+    ? 'Models are still loading.'
+    : scan.state === 'scanning'
     ? 'Reading the model…'
     : scan.state === 'error'
       ? `Model not read: ${scan.message}`
-      : elements
-        ? mode === 'space'
+      : mode === 'space'
+        ? elements
           ? !modelChoices.length
             ? 'No model is loaded.'
             : pickedKeys.length
               ? `${elements.length.toLocaleString()} spaces from ${pickedKeys.length} of ${modelChoices.length} models`
-              : 'No model ticked. Tick a model to scrape its rooms.'
-          : `${elements.length.toLocaleString()} equipment elements in the loaded models`
-        : 'No model read yet'
+              : 'No model ticked. Tick a model, then Scan.'
+          : spaceLinks.length
+            ? `${spaceLinks.length} saved rooms. Scan only to look for new ones.`
+            : 'Not scanned. Tick a model, then Scan.'
+        : elements
+          ? `${elements.length.toLocaleString()} equipment elements in the loaded models`
+          : 'No model read yet'
 
   return createPortal(
     <div className="dashboard-settings-overlay" onClick={onClose}>
@@ -468,7 +559,7 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
 
           <p className="ds-hint" style={{ marginTop: 0 }}>
             {mode === 'space'
-              ? 'Adds IfcSpace rooms for the heatmap by IFC GlobalId. Tick which models to scrape. A file with “space” in its name starts ticked, so rooms from the other models stay out until you tick them. Name a room IS-01 or IAQ-02 to take that sensor. Any other name is its own zone.'
+              ? 'Saved rooms stay listed. Tick which models to read, then Scan. A file with “space” in its name starts ticked. Nothing is read from the model until you press Scan. These rooms share seven sample sensors. Leave the heatmap name as the room name. Type IS-01 or IAQ-02 only when a real FIN sensor should take that one room.'
               : 'Links each FIN equipment to its model element by IFC GlobalId. A revised model keeps its GlobalIds, so the links carry over; any that do not are listed as Not in model.'}
           </p>
 
@@ -487,7 +578,7 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
             ) : <span>{spaceLinks.length} spaces added for the heatmap</span>}
             <span>
               {scanText}
-              <button className="ds-btn ds-btn-secondary al-small" onClick={rescan} disabled={scan.state === 'scanning'}>Rescan</button>
+              <button className="ds-btn ds-btn-secondary al-small" onClick={rescan} disabled={scan.state === 'scanning' || loadingModels}>{mode === 'space' && !elements ? 'Scan' : 'Rescan'}</button>
             </span>
           </div>
 
@@ -496,6 +587,7 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
               <span>Scrape from</span>
               {modelChoices.length ? modelChoices.map(m => {
                 const pending = openByModel.get(m.name) ?? []
+                const inFile = [...new Set([...(savedByModel[m.key] ?? []), ...(addedByModel.get(m.name) ?? [])])]
                 return (
                   <span key={m.key} className="al-model">
                     <label>
@@ -518,6 +610,15 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
                         Add all {pending.length}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      className="ds-btn ds-btn-secondary al-small"
+                      disabled={!inFile.length}
+                      title="Removes the saved rooms that are in this file. Save to keep this."
+                      onClick={() => removeSpaces(inFile)}
+                    >
+                      Remove all {inFile.length}
+                    </button>
                   </span>
                 )
               }) : <span>No model is loaded.</span>}
@@ -576,6 +677,26 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
                 Add all {openCount} from ticked models
               </button>
             )}
+            {mode === 'space' && (
+              <button
+                className="ds-btn ds-btn-secondary al-small"
+                onClick={unlinkAllSpaces}
+                disabled={!spaceLinks.length}
+                title="Removes every saved room from the heatmap. Save to keep this."
+              >
+                Remove all {spaceLinks.length}
+              </button>
+            )}
+            {mode === 'space' && (
+              <button
+                className="ds-btn ds-btn-secondary al-small"
+                onClick={rescan}
+                disabled={scan.state === 'scanning' || loadingModels}
+                title="Reads the ticked models again. Saved rooms stay until you add or remove them."
+              >
+                {scan.state === 'scanning' ? 'Reading…' : spaceLinks.length || elements ? 'Rescan' : 'Scan'}
+              </button>
+            )}
             <button className="ds-btn ds-btn-secondary al-small" onClick={() => setImportText(importText === null ? '' : null)}>Import</button>
             <button className="ds-btn ds-btn-secondary al-small" onClick={exportCsv} disabled={!links.length}>Export CSV</button>
           </div>
@@ -596,7 +717,7 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
 
           {mode === 'space' && (
             <div className="al-search-row" style={{ marginBottom: 12 }}>
-              <input placeholder="Heatmap name (IS-01)" value={manualName} onChange={e => setManualName(e.target.value)} />
+              <input placeholder="Heatmap name" value={manualName} onChange={e => setManualName(e.target.value)} />
               <input placeholder="IFC GlobalId" value={manualGuid} onChange={e => setManualGuid(e.target.value)} />
               <button className="ds-btn ds-btn-secondary al-small" disabled={!manualName.trim() || !isGuid(manualGuid.trim())} onClick={addManualSpace}>Add</button>
             </div>
@@ -704,7 +825,7 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
                       <td><span className={`al-status al-${st.tone}`}>{st.text}</span></td>
                       <td>
                         {row.link
-                          ? <button className="ds-btn ds-btn-secondary al-small" onClick={() => unlinkSpace(row.guid)}>Unlink</button>
+                          ? <button className="ds-btn ds-btn-secondary al-small" onClick={() => unlinkSpace(row.guid)}>Remove</button>
                           : <button className="ds-btn ds-btn-secondary al-small" disabled={!row.el} onClick={() => row.el && addSpace(row.el)}>Add</button>}
                       </td>
                     </tr>
@@ -716,7 +837,7 @@ function AssetLinksDialog({ initial, projectName, nameWords, onClose, engineRef 
                       ? 'Nothing matches.'
                       : scan.state === 'scanning'
                         ? 'Reading spaces…'
-                        : 'No spaces in the loaded models. Load the spaces model, or paste a GlobalId above.'}
+                        : 'No rooms yet. Tick a model, then Scan. Or paste a GlobalId above.'}
                   </td></tr>
                 )}
               </tbody>
