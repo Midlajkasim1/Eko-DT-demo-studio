@@ -6,6 +6,7 @@ makes is validated against the existing allowlist and schemas, runs on the reque
 model's final answer must come from the tool results or the question.
 """
 import asyncio
+import dataclasses
 import json
 import os
 import sys
@@ -31,7 +32,7 @@ from test_eko_chat_points import NOW, eq, iso, pt  # noqa: E402
 from test_eko_chat_projects import DEFAULT_CHAT, HOSPITAL, HOSPITAL_ID, MARSA, MARSA_ID, ProjectChatBase  # noqa: E402
 
 CFG = {"provider": "ollama", "model": "qwen3:8b", "planner": {"max_rounds": 4}}
-QUESTION = "Deep dive on the ahu AHU-01 against AHU-02: humidity, CO2 and critical alarms"      # no rule knows it; it names what the calls below use
+QUESTION = "Deep dive on the ahu AHU-01 against AHU-02: humidity, CO2 and anything critical"      # no rule knows it; it names what the calls below use
 
 
 def call(name, **args):
@@ -350,7 +351,7 @@ class GroundingTests(unittest.TestCase):
 
     def test_arabic_indic_digits_do_not_slip_past_the_number_check(self):
         model = Scripted([call("calculate_metric", metric="humidity", op="average", type="ahu"), say("متوسط الرطوبة ٥٢ ٪"), say("متوسط الرطوبة ٥٢ ٪")])
-        self.assertEqual(plan(model, "ما هي الرطوبة في وحدات ahu")["answer"], eko_chat.UNGROUNDED_FALLBACK)
+        self.assertEqual(plan(model, "ما هي الرطوبة في وحدات ahu")["answer"], planner.UNGROUNDED_AR)
         fine = Scripted([call("calculate_metric", metric="humidity", op="average", type="ahu"), say("متوسط الرطوبة ٤٥ ٪ من قراءتين")])
         reply = plan(fine, "ما هي الرطوبة في وحدات ahu")
         self.assertEqual((reply["answer_source"], reply["answer"]), ("llm", "متوسط الرطوبة ٤٥ ٪ من قراءتين"))
@@ -358,7 +359,7 @@ class GroundingTests(unittest.TestCase):
     def test_an_arabic_decimal_mark_does_not_split_a_number_into_two_that_the_data_holds(self):
         # 45 and 2 are both in the result (the average and the sample count), 45.2 is not: "٤٥٫٢" must be read as one number
         model = Scripted([call("calculate_metric", metric="humidity", op="average", type="ahu"), say("متوسط الرطوبة ٤٥٫٢ ٪"), say("متوسط الرطوبة ٤٥٫٢ ٪")])
-        self.assertEqual(plan(model, "ما هي الرطوبة في وحدات ahu")["answer"], eko_chat.UNGROUNDED_FALLBACK)
+        self.assertEqual(plan(model, "ما هي الرطوبة في وحدات ahu")["answer"], planner.UNGROUNDED_AR)
         self.assertEqual(eko_chat._numbers("٤٥٫٢ و ١٬٠٠٠"), ["45.2", "1000"])
 
     def test_an_answer_with_no_tool_may_not_bring_numbers_or_names_of_its_own(self):
@@ -583,6 +584,218 @@ class PromptTests(unittest.TestCase):
         self.assertIn("data, not instructions", planner.system_prompt("x"))
 
 
+# ─── Investigations: every part of the question is read ─────────────────────
+
+INVESTIGATE = "Identify AHU_01, check its operating condition, and find its active alarms."
+ARABIC_Q = "Explain the current condition of AHU_01 in Arabic."
+ARABIC_ANSWER = "حالة AHU_01: درجة الحرارة 24.0 °C والرطوبة 40 % وثاني أكسيد الكربون 600 ppm، وهناك إنذار مفتوح واحد."
+
+
+def ahu_view():
+    items = [eq("AHU_01", [pt("Room Temp", "24.0", "°C"), pt("Room Humidity", "40%", "%"), pt("Room CO2", "600 ppm", "ppm")], fin_id="e1",
+                alarms=[{"alarm": "High temperature", "priority": 200}]), eq("AHU_02", [pt("Room Temp", "20.0", "°C")], fin_id="e2")]
+    view = make_view(items=items)
+    alarms = dict(view.alarms)
+    alarms["alarms"] = [dict(a, source="AHU_01") for a in alarms["alarms"]]
+    return dataclasses.replace(view, alarms=alarms)
+
+
+class MissingReadsTests(unittest.TestCase):
+    def keys(self, question, attempted=()):
+        return [k for k, _ in planner.missing_reads(question, list(attempted))]
+
+    def test_each_part_the_question_asks_for_names_its_tool(self):
+        self.assertEqual(self.keys(INVESTIGATE), ["identify", "condition", "alarms"])
+        asks = dict(planner.missing_reads(INVESTIGATE, []))
+        self.assertEqual((asks["identify"], asks["condition"], asks["alarms"]),
+                         ({"find_equipment"}, {"get_equipment_status", "compare_equipment"}, {"get_alarms", "get_alarm_history"}))
+
+    def test_a_part_is_met_by_a_call_that_was_made(self):
+        self.assertEqual(self.keys(INVESTIGATE, ["get_equipment_status"]), ["identify", "alarms"])
+        self.assertEqual(self.keys(INVESTIGATE, ["find_equipment", "get_equipment_status", "get_alarms"]), [])
+        self.assertEqual(self.keys(INVESTIGATE, ["get_equipment_status", "get_alarm_history", "find_equipment"]), [])
+
+    def test_the_status_of_the_equipment_does_not_stand_in_for_its_alarms(self):
+        self.assertIn("alarms", self.keys("Show me the alarms of AHU_01 and its status", ["get_equipment_status"]))
+
+    def test_a_named_item_always_needs_some_read(self):
+        self.assertEqual(self.keys(ARABIC_Q), ["condition"])
+        self.assertEqual(self.keys("Tell me about AHU_01 in Arabic"), ["any"])
+        self.assertEqual(self.keys("Tell me about AHU_01 in Arabic", ["get_alarms"]), [])
+
+    def test_a_question_that_names_no_equipment_asks_only_for_what_it_says(self):
+        self.assertEqual(self.keys("what is the status of the building"), [])         # the building's overview, not an item's condition
+        self.assertEqual(self.keys("explain the alarms in detail"), ["alarms"])
+        self.assertEqual(self.keys("explain the alarms in detail", ["get_building_snapshot"]), [])
+        for q in ("hello there my friend", "how is it doing", "", "what can you do"):
+            self.assertEqual(self.keys(q), [], q)
+
+    def test_arabic_words_count(self):
+        self.assertEqual(self.keys("ما هي الإنذارات المفتوحة على AHU_01؟"), ["alarms"])
+        self.assertEqual(self.keys("اشرح حالة AHU_01"), ["condition"])
+
+
+class InvestigationLoopTests(unittest.TestCase):
+    def test_a_model_that_reads_only_one_part_is_asked_once_for_the_others(self):
+        model = Scripted([call("get_equipment_status", equipment="AHU_01"), say("AHU_01 reports 3 points."),
+                          calls(("find_equipment", {"name": "AHU_01"}), ("get_alarms", {})),
+                          say("AHU_01 is an ahu on L1; its condition: 3 points reporting; active alarms: 1 critical High temperature.")])
+        reply = plan(model, INVESTIGATE, ahu_view())
+        self.assertEqual(tools_of(reply), ["get_equipment_status", "find_equipment", "get_alarms"])
+        self.assertTrue(all(t["available"] for t in reply["tool_calls"]), reply["tool_calls"])
+        self.assertEqual((reply["answer_source"], reply["route"]), ("llm", "llm_planner"))
+        nudge = model.seen[2][-1]
+        self.assertEqual(nudge["role"], "user")
+        self.assertIn("identify the equipment", nudge["content"])
+        self.assertIn("find_equipment", nudge["content"])
+        self.assertIn("get_alarms", nudge["content"])
+        self.assertNotIn("operating condition", nudge["content"])                   # that part was read
+        self.assertEqual(len(model.seen), 4)
+
+    def test_the_results_of_all_three_reads_go_back_to_the_model_before_its_final_answer(self):
+        model = Scripted([calls(("find_equipment", {"name": "AHU_01"}), ("get_equipment_status", {"equipment": "AHU_01"}), ("get_alarms", {})),
+                          say("AHU_01 is an ahu on L1 with 3 of 3 points reporting and 1 critical High temperature alarm.")])
+        reply = plan(model, INVESTIGATE, ahu_view())
+        self.assertEqual(len(model.seen), 2)                                       # nothing was missing: no extra step
+        back = [json.loads(m["content"]) for m in model.seen[1] if m["role"] == "tool"]
+        self.assertEqual(len(back), 3)
+        self.assertTrue(all(b["available"] for b in back))
+        self.assertEqual(tools_of(reply), ["find_equipment", "get_equipment_status", "get_alarms"])
+
+    def test_one_nudge_does_not_use_up_a_round(self):
+        model = Scripted([call("get_equipment_status", equipment="AHU_01"), say("Done."), calls(("find_equipment", {"name": "AHU_01"}), ("get_alarms", {})),
+                          say("AHU_01 has 1 alarm.")])
+        reply = plan(model, INVESTIGATE, ahu_view(), cfg=dict(CFG, planner={"max_rounds": 3}))
+        self.assertEqual((reply.get("partial"), reply["answer_source"], len(model.seen)), (None, "llm", 4))
+
+    def test_a_part_still_not_read_after_the_nudge_is_said_not_hidden(self):
+        model = Scripted([call("get_equipment_status", equipment="AHU_01"), say("AHU_01 reports 3 points."), say("AHU_01 reports 3 points.")])
+        reply = plan(model, INVESTIGATE, ahu_view())
+        self.assertEqual(len(model.seen), 3)                                       # one nudge, not a loop
+        self.assertTrue(reply["answer"].startswith("AHU_01 reports 3 points."))
+        self.assertIn("Not checked:", reply["answer"])
+        self.assertIn("identify the equipment", reply["answer"])
+        self.assertIn("the alarms", reply["answer"])
+        self.assertNotIn("operating condition", reply["answer"].split("Not checked:")[1])
+        self.assertNotIn("get_alarms", reply["answer"])                            # no tool name reaches the user
+
+    def test_an_answer_written_without_reading_anything_is_never_shown(self):
+        model = Scripted([say("AHU_01 is in an abnormal state with open alarms."), say("AHU_01 is in an abnormal state with open alarms.")])
+        reply = plan(model, INVESTIGATE, ahu_view())
+        self.assertEqual((reply["tool_calls"], reply["answer_source"], reply["route"]), ([], "code", "llm_planner"))
+        self.assertNotIn("abnormal", reply["answer"])
+        self.assertIn("could not read", reply["answer"])
+        self.assertEqual(len(model.seen), 2)
+
+    def test_the_model_may_read_after_the_nudge_and_then_answer(self):
+        model = Scripted([say("AHU_01 is fine."), calls(("find_equipment", {"name": "AHU_01"}), ("get_equipment_status", {"equipment": "AHU_01"}), ("get_alarms", {})),
+                          say("AHU_01 is an ahu with 3 of 3 points reporting and 1 critical alarm.")])
+        reply = plan(model, INVESTIGATE, ahu_view())
+        self.assertEqual((reply["answer_source"], len(reply["tool_calls"])), ("llm", 3))
+
+    def test_a_read_that_failed_still_counts_as_read_and_is_reported_not_nudged(self):
+        stale = make_view(equipment={"timestamp": iso(30), "equipment": [eq("AHU_01")]})
+        model = Scripted([calls(("find_equipment", {"name": "AHU_01"}), ("get_equipment_status", {"equipment": "AHU_01"}), ("get_alarms", {})), say("Nothing to report.")])
+        reply = plan(model, INVESTIGATE, stale)
+        self.assertEqual(len(model.seen), 2)
+        self.assertIn("Not available:", reply["answer"])
+
+    def test_a_call_the_schema_refused_does_not_count_as_a_read(self):
+        model = Scripted([call("get_alarms", severity="urgent"), say("No alarms."), say("No alarms.")])
+        reply = plan(model, "explain the alarms in detail", ahu_view())
+        self.assertEqual((reply["answer_source"], reply["tool_calls"][0]["reason"]), ("code", "invalid_arguments"))
+        self.assertNotIn("No alarms", reply["answer"])                              # nothing was read: the model's claim is not shown
+        self.assertIn("could not read", reply["answer"])
+
+    def test_the_prompt_says_to_read_each_part_and_that_no_tool_stands_in_for_another(self):
+        text = planner.system_prompt(INVESTIGATE)
+        for needle in ("find_equipment", "get_equipment_status", "get_alarms", "separate tool", "not a substitute", "never whether"):
+            self.assertIn(needle, text, needle)
+
+
+class ArabicTests(unittest.TestCase):
+    def test_an_arabic_request_is_found_in_english_and_in_arabic(self):
+        for q in (ARABIC_Q, "answer in arabic please", "Explain AHU_01 بالعربي", "اشرح حالة AHU_01", "باللغة العربية من فضلك", "كم عدد الأصول؟"):
+            self.assertTrue(planner.wants_arabic(q), q)
+        for q in ("Explain the condition of AHU_01", "status of Marsa Al Arab", "", None):
+            self.assertFalse(planner.wants_arabic(q), q)
+
+    def test_the_prompt_asks_for_a_whole_answer_in_arabic_for_every_such_request(self):
+        for q in (ARABIC_Q, "اشرح حالة AHU_01"):
+            text = planner.system_prompt(q)
+            self.assertIn("ENTIRE answer in Arabic", text, q)
+            self.assertIn("equipment IDs", text)
+        self.assertNotIn("in Arabic", planner.system_prompt("Explain the condition of AHU_01"))
+
+    def test_an_english_answer_to_an_arabic_request_is_refused_once(self):
+        model = Scripted([call("get_equipment_status", equipment="AHU_01"), say("AHU_01 is running normally and has one open alarm today."), say(ARABIC_ANSWER)])
+        reply = plan(model, ARABIC_Q, ahu_view())
+        self.assertEqual((reply["answer_source"], reply["answer"]), ("llm", ARABIC_ANSWER))
+        self.assertIn("language", model.seen[2][-1]["content"])
+        self.assertIn("Arabic", model.seen[2][-1]["content"])
+
+    def test_an_answer_that_stays_in_english_is_replaced_by_an_arabic_notice(self):
+        model = Scripted([call("get_equipment_status", equipment="AHU_01"), say("AHU_01 is running normally and has one open alarm today."),
+                          say("AHU_01 is running normally and has one open alarm today.")])
+        reply = plan(model, ARABIC_Q, ahu_view())
+        self.assertEqual(reply["answer_source"], "code")
+        self.assertTrue(planner._ARABIC.search(reply["answer"]))
+        self.assertNotIn("running normally", reply["answer"])
+        self.assertNotEqual(reply["answer"], eko_chat.UNGROUNDED_FALLBACK)
+
+    def test_ids_abbreviations_units_numbers_and_words_from_the_results_stay_as_they_are(self):
+        ok = "الوحدة AHU_01 (نوع ahu): الحرارة 24.0 °C، الرطوبة 40 %، CO2 600 ppm، والإنذار المفتوح: High temperature."
+        model = Scripted([call("get_equipment_status", equipment="AHU_01"), say(ok)])
+        reply = plan(model, ARABIC_Q, ahu_view())
+        self.assertEqual((reply["answer_source"], reply["answer"]), ("llm", ok))
+        self.assertEqual(planner.english_words("AHU_01 FCU-02 CO2 ppm kWh °C", [], ""), [])
+
+    def test_a_changed_equipment_id_is_refused_in_arabic_too(self):
+        bad = "حالة AHU_10: الحرارة 24.0 °C."
+        model = Scripted([call("get_equipment_status", equipment="AHU_01"), say(bad), say(bad)])
+        self.assertEqual(plan(model, ARABIC_Q, ahu_view())["answer_source"], "code")
+
+    def test_what_the_code_adds_is_arabic_for_an_arabic_request(self):
+        model = Scripted([call("get_environment", metric="iaq"), say("لم أجد المؤشر.")])
+        reply = plan(model, "اشرح مؤشر جودة الهواء")
+        self.assertIn("غير متاح:", reply["answer"])
+        self.assertIn("iaq_index", reply["answer"])
+        self.assertNotIn("no live point", reply["answer"])
+        stale = make_view(equipment={"timestamp": iso(30), "equipment": fleet()})
+        reply = plan(Scripted([call("search_points", metric="co2"), say("لا شيء.")]), "ابحث عن حساسات CO2 بالعربي", stale)
+        self.assertIn("قديمة", reply["answer"])
+        self.assertFalse(planner.english_words(reply["answer"].split("غير متاح:")[1], [], ""), reply["answer"])
+
+    def test_nothing_after_the_model_changes_the_language_or_the_text(self):
+        model = Scripted([call("get_equipment_status", equipment="AHU_01"), say(ARABIC_ANSWER)])
+        reply = plan(model, ARABIC_Q, ahu_view())
+        self.assertEqual(reply["answer"], ARABIC_ANSWER)                          # no footer, no translation, no rewrite
+        self.assertEqual(planner.finalize(ARABIC_ANSWER, [], ARABIC_Q, []), ARABIC_ANSWER)
+
+    def test_a_unit_the_model_wrote_as_an_arabic_word_is_written_as_the_data_writes_it(self):
+        said = "الرطوبة 40% والحرارة 24.0°م وثاني أكسيد الكربون 600 جزء في المليون وهناك 3 درجة مئوية و 2.5 كيلوواط ساعة و 4 كيلو واط."
+        fixed = planner.finalize(said, [], ARABIC_Q, [])
+        self.assertEqual(fixed, "الرطوبة 40% والحرارة 24.0°C وثاني أكسيد الكربون 600 ppm وهناك 3 °C و 2.5 kWh و 4 kW.")
+        self.assertEqual(planner.finalize("الحرارة 24.0°س", [], ARABIC_Q, []), "الحرارة 24.0°C")
+        for same in ("الرطوبة 40% والحرارة 24.0 °C و 600 ppm", "°مع", "المنزل", "درجة الحرارة"):
+            self.assertEqual(planner.finalize(same, [], ARABIC_Q, []), same, same)         # words that only look like one are left alone
+
+    def test_the_unit_rule_runs_only_for_an_arabic_request_and_never_touches_ids(self):
+        said = "AHU_01 600 جزء في المليون"
+        self.assertEqual(planner.finalize(said, [], "Explain AHU_01", []), said)
+        self.assertEqual(planner.finalize("AHU_01 600 جزء في المليون", [], ARABIC_Q, []), "AHU_01 600 ppm")
+
+    def test_the_whole_answer_is_otherwise_the_models_own_when_a_unit_is_fixed(self):
+        said = "حالة AHU_01: الحرارة 24.0 °م والرطوبة 40 % وثاني أكسيد الكربون 600 جزء في المليون."
+        model = Scripted([call("get_equipment_status", equipment="AHU_01"), say(said)])
+        reply = plan(model, ARABIC_Q, ahu_view())
+        self.assertEqual((reply["answer_source"], reply["answer"]), ("llm", "حالة AHU_01: الحرارة 24.0 °C والرطوبة 40 % وثاني أكسيد الكربون 600 ppm."))
+
+    def test_an_english_request_is_not_held_to_arabic(self):
+        model = Scripted([call("get_equipment_status", equipment="AHU_01"), say("AHU_01 has 3 of 3 points reporting.")])
+        self.assertEqual(plan(model, "Explain the current condition of AHU_01", ahu_view())["answer_source"], "llm")
+
+
 # ─── Through the endpoint ────────────────────────────────────────────────────
 
 class PlannerEndpoint(ProjectChatBase):
@@ -592,8 +805,8 @@ class PlannerEndpoint(ProjectChatBase):
         self.addCleanup(lambda: eko_chat_llm.BREAKER.update(until=0.0))
         self.addCleanup(self.http.cookies.clear)
 
-    def start(self, settings=HOSPITAL, project_id=HOSPITAL_ID, **chat):
-        self.frozen(settings, project_id, cached_equip_data={"timestamp": datetime.now().isoformat(), "equipment": fleet()})
+    def start(self, settings=HOSPITAL, project_id=HOSPITAL_ID, items=None, **chat):
+        self.frozen(settings, project_id, cached_equip_data={"timestamp": datetime.now().isoformat(), "equipment": items or fleet()})
         main.BASE_CONFIG["chat"] = main.CONFIG["chat"] = {**DEFAULT_CHAT, "provider": "ollama", "model": "qwen3:8b", "planner": {"max_rounds": 4}, **chat}
 
     def model(self, replies, hooks=None):
@@ -725,6 +938,34 @@ class PlannerEndpoint(ProjectChatBase):
         body = self.ok("اشرح لي حالة الإنذارات المفتوحة بالتفصيل")
         self.assertEqual((body["route"], body["answer_source"]), ("llm_planner", "llm"))
         self.assertIn("Arabic", m.seen[0][0]["content"])
+
+    def test_the_investigation_question_reads_all_three_parts_and_answers_once(self):
+        self.start(items=ahu_view().equipment["equipment"])
+        m = self.model([call("get_equipment_status", equipment="AHU_01"), say("AHU_01 reports 3 points."),
+                        calls(("find_equipment", {"name": "AHU_01"}), ("get_alarms", {"equipment": "AHU_01"})),
+                        say("AHU_01 is an ahu on L1 with 3 of 3 points reporting; its alarm list was read.")])
+        body = self.ok(INVESTIGATE)
+        self.assertEqual([t["name"] for t in body["tool_calls"]], ["get_equipment_status", "find_equipment", "get_alarms"])
+        self.assertEqual((body["route"], body["answer_source"]), ("llm_planner", "llm"))
+        self.assertTrue(all(t["available"] for t in body["tool_calls"]), body["tool_calls"])
+        self.assertEqual(len(m.seen), 4)
+        self.assertEqual(body["project"], {"id": HOSPITAL_ID, "name": "ekoHospital"})
+
+    def test_the_arabic_request_is_answered_from_the_equipments_own_data_in_arabic(self):
+        self.start(items=ahu_view().equipment["equipment"])
+        m = self.model([say("AHU_01 is running normally."), call("get_equipment_status", equipment="AHU_01"), say(ARABIC_ANSWER)])
+        body = self.ok(ARABIC_Q)
+        self.assertEqual([t["name"] for t in body["tool_calls"]], ["get_equipment_status"])
+        self.assertEqual((body["answer"], body["answer_source"]), (ARABIC_ANSWER, "llm"))
+        self.assertIn("ENTIRE answer in Arabic", m.seen[0][0]["content"])           # the request was recognised although the question is in English
+        self.assertNotIn("running normally", body["answer"])
+
+    def test_an_arabic_answer_written_without_reading_is_not_shown_through_the_endpoint(self):
+        self.start(items=ahu_view().equipment["equipment"])
+        self.model([say("الوحدة AHU_01 في حالة غير طبيعية."), say("الوحدة AHU_01 في حالة غير طبيعية.")])
+        body = self.ok(ARABIC_Q)
+        self.assertEqual((body["tool_calls"], body["answer_source"]), ([], "code"))
+        self.assertNotIn("غير طبيعية", body["answer"])
 
     def test_the_diagnostics_line_says_the_planner_answered(self):
         self.start()

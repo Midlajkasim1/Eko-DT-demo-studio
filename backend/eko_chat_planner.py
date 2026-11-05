@@ -33,6 +33,7 @@ import eko_chat
 import eko_chat_capabilities as caps
 import eko_chat_context as chat_ctx
 import eko_chat_llm as llm
+import eko_chat_text_ar as text_ar
 import eko_chat_trace as chat_trace
 from eko_chat import HELP_TEXT, LLM_GATE, SEVERITIES, TOOLS, DataView, LLMError, LLMRun, PlanOptions
 
@@ -141,6 +142,11 @@ PROMPT = (
     "You are Eko-Chat, the read-only assistant of the Eko-DT digital twin of ONE building. You answer from the building's FIN data, through tools.\n"
     "- Decide which tools the question needs and call them; several in one step is fine, and you may call more after reading the results. Call a tool before "
     "you say anything about the building: never answer building data from memory.\n"
+    "- If the question asks for several things (for example to identify equipment, check its condition and find its alarms), call a separate tool for each: "
+    "find_equipment to identify it, get_equipment_status for its condition, get_alarms for its alarms. The result of one tool is not a substitute for a tool "
+    "the question asks for.\n"
+    "- Always read the building data before answering about a piece of equipment, even when you are only asked to explain or summarise it, or to write in "
+    "another language: language and style change how you write, never whether you read the data.\n"
     "- Never do arithmetic yourself. For a sum, average, minimum, maximum, count or ranking call calculate_metric; to compare two equipment items call "
     "compare_equipment; for a day-by-day or severity count of alarm records call get_alarm_history.\n"
     "- Give equipment names exactly as the question writes them or as an earlier tool result returned them. Never invent an equipment name, a filter, a "
@@ -155,11 +161,20 @@ PROMPT = (
     "- Do not describe your tools, and never write FIN, Zinc or Axon expressions.\n"
     "- Keep the answer short and useful. Quote numbers exactly as the results give them."
 )
-ARABIC_LINE = ("\n- The user wrote in Arabic: write your whole answer in Arabic. Keep equipment names, units and digits exactly as the tool results give them.")
+ARABIC_LINE = ("\n- The user wants the answer in Arabic: write the ENTIRE answer in Arabic, every sentence. Only equipment IDs (such as AHU_01), abbreviations "
+               "(AHU, FCU, CO2, kWh), units and numbers stay exactly as the tool results give them: never translate or change an equipment ID, and write units "
+               "exactly as they are in the results (°C, ppm, %, kW, kWh), never as Arabic words. Do not write any English sentence.")
+# an Arabic question, or any question that asks for Arabic ("in Arabic", "بالعربي", "باللغة العربية")
+_ARABIC_REQUEST = re.compile(r"\barabic\b|بالعربي|باللغة العربية|بالعربية|عربي", re.I)
+
+
+def wants_arabic(question: Any) -> bool:
+    text = question if isinstance(question, str) else ""
+    return bool(_ARABIC.search(text) or _ARABIC_REQUEST.search(text))
 
 
 def system_prompt(question: str) -> str:
-    return PROMPT + (ARABIC_LINE if _ARABIC.search(question or "") else "")
+    return PROMPT + (ARABIC_LINE if wants_arabic(question) else "")
 
 
 # ─── What the model sees, and what it may say ────────────────────────────────
@@ -202,6 +217,8 @@ def check_answer(answer: str, results: list, question: str) -> list:
     from eko_chat_router import EQUIPMENT_ID          # imported here: the router imports eko_chat
     sources = list(results) + [question]
     problems = [f"number {n}" for n in eko_chat._ungrounded(answer, sources)]
+    if wants_arabic(question) and (len(english_words(answer, results, question)) > 3 or not _ARABIC.search(answer)):
+        problems.append("language (the whole answer must be in Arabic)")
     known = eko_chat._fold(" ".join(sources))
     for m in EQUIPMENT_ID.finditer(answer):
         token = m.group(1)
@@ -218,29 +235,118 @@ def check_answer(answer: str, results: list, question: str) -> list:
     return problems
 
 
+# Latin words that are not English prose in an Arabic answer: abbreviations and units
+_KEEP_LATIN = {"ahu", "fcu", "vav", "fahu", "mahu", "ppm", "kwh", "fin", "iaq", "hvac", "eko", "bim", "ifc", "pmu", "smdb", "mcc", "lvfp", "ats", "ppb"}
+_LATIN_WORD = re.compile(r"[A-Za-z]{3,}")
+
+
+def english_words(answer: str, results: list, question: str) -> list:
+    """The English words of an answer that is meant to be Arabic: Latin words that are not an equipment ID, a known abbreviation or unit, or a word the
+    tool results or the question themselves contain (a point name or an alarm text is quoted as it is)."""
+    from eko_chat_router import EQUIPMENT_ID          # imported here: the router imports eko_chat
+    known = {w.lower() for w in _LATIN_WORD.findall(" ".join(list(results) + [question or ""]))} | _KEEP_LATIN
+    return [w for w in _LATIN_WORD.findall(EQUIPMENT_ID.sub(" ", answer or "")) if w.lower() not in known]
+
+
 def retry_text(problems: list) -> str:
-    return (f"Your answer contains things the tool results do not support: {', '.join(problems)}. Rewrite it using only numbers, equipment names and "
+    text = (f"Your answer contains things the tool results do not support: {', '.join(problems)}. Rewrite it using only numbers, equipment names and "
             "severities that appear in the tool results, or say that the information is not available.")
+    if any(p.startswith("language") for p in problems):
+        text += (" Write the entire answer in Arabic; keep equipment IDs, abbreviations, units and numbers exactly as the tool results give them, and write "
+                 "no English sentence.")
+    return text
 
 
-def _note(result: dict) -> str:
+# ─── Every part of the question is read ──────────────────────────────────────
+# A small model reads one tool's result and stops ("find its alarms" answered from the status result), or answers from memory when it is also asked
+# for a language. The question's own words say which reads it asks for; a final answer that skipped one gets one nudge, and what is still unread is said.
+_ALARM_WORD = re.compile(r"\b(?:alarms?|alerts?)\b|إنذار|انذار|تنبيه")
+_CONDITION_WORD = re.compile(r"\b(?:condition|status|state|operating|health|healthy|performance)\b|حالة|حالتها|أداء|تشغيل")
+_IDENTIFY_WORD = re.compile(r"\bidentif(?:y|ication)\b|حدد")
+_PHRASE = {"identify": "identify the equipment", "condition": "the operating condition", "alarms": "the alarms", "any": "the data of the item the question names"}
+_PHRASE_AR = {"identify": "تحديد المعدة", "condition": "الحالة التشغيلية", "alarms": "الإنذارات", "any": "بيانات المعدة المذكورة"}
+
+
+def missing_reads(question: str, tried: list) -> list:
+    """[(key, tools)] for the reads the question asks for that none of the tools tried answers. With a named equipment item: identify it
+    (find_equipment), its condition (get_equipment_status), its alarms (get_alarms; its status does not stand in for them), or at least some read. Without
+    one: only the alarms, when the question says so."""
+    from eko_chat_router import EQUIPMENT_ID          # imported here: the router imports eko_chat
+    text = question if isinstance(question, str) else ""
+    low, done, out = text.lower(), set(tried), []
+    named = any(re.search(r"\d", m.group(1)) for m in EQUIPMENT_ID.finditer(text))
+
+    def need(key: str, tools: set) -> None:
+        if not (tools & done):
+            out.append((key, tools))
+    if named:
+        asked = False
+        for key, word, tools in (("identify", _IDENTIFY_WORD, {"find_equipment"}), ("condition", _CONDITION_WORD, {"get_equipment_status", "compare_equipment"}),
+                                 ("alarms", _ALARM_WORD, {"get_alarms", "get_alarm_history"})):
+            if word.search(low):
+                asked = True
+                need(key, tools)
+        if not asked:
+            need("any", set(TOOLS))
+    elif _ALARM_WORD.search(low):
+        need("alarms", {"get_alarms", "get_alarm_history", "get_building_snapshot"})
+    return out
+
+
+def nudge_text(unmet: list, question: str) -> str:
+    asks = "; ".join(f"{_PHRASE[k]} (call {' or '.join(sorted(t))})" for k, t in unmet if k != "any") or "the data of the item the question names (call a tool)"
+    return (f"You answered without reading everything the question asks for. Still to read: {asks}. Call those tools now, with the equipment name written "
+            "in the question, and then answer using every result. Do not answer from memory." + (" Write the final answer in Arabic." if wants_arabic(question) else ""))
+
+
+def unread_reply(question: str) -> str:
+    return ("تعذّرت قراءة بيانات المبنى اللازمة للإجابة عن هذا السؤال، لذا لا أستطيع الإجابة عنه. يرجى المحاولة مرة أخرى أو طرح سؤال أكثر تحديدًا."
+            if wants_arabic(question) else
+            "I could not read the building data this question needs, so I cannot answer it. Please try again, or ask a more specific question.")
+
+
+UNGROUNDED_AR = "تعذّر إعداد إجابة مدعومة بالكامل ببيانات المبنى. يرجى إعادة صياغة السؤال أو المحاولة لاحقًا."
+
+
+_AR = "\u0621-\u064a"
+# the units of the data written as Arabic words by the model, in the data's own writing; only these, only in an Arabic answer
+_UNIT_WORDS = [(re.compile(r"جزء(?:اً)?\s+(?:في|بال|من)\s*(?:المليون|مليون)"), "ppm"), (re.compile(r"درج(?:ة|ات)\s+مئوية"), "°C"),
+               (re.compile(rf"°\s?[مس](?![{_AR}])"), "°C"), (re.compile(r"كيلو\s?واط\s*[-/]?\s*ساعة"), "kWh"),
+               (re.compile(rf"كيلو\s?واط(?![{_AR}])"), "kW")]
+
+
+def keep_units(text: str) -> str:
+    """An Arabic answer with the units the model spelled out in Arabic (جزء في المليون, °م, كيلوواط ساعة) written as the data writes them (ppm, °C, kWh): the
+    units of a reading are not translated. Nothing else in the text is touched."""
+    for pattern, unit in _UNIT_WORDS:
+        text = pattern.sub(unit, text)
+    return text
+
+
+def _note(result: dict, arabic: bool = False) -> str:
     from eko_chat_router import _UNAVAILABLE        # imported here: the router imports eko_chat
+    if arabic:
+        return text_ar.unavailable_ar(result)
     return str(_UNAVAILABLE.get(result.get("reason")) or result.get("message") or "This data could not be read right now.")
 
 
-def finalize(answer: str, failed: list, question: str) -> str:
+def finalize(answer: str, failed: list, question: str, unmet: Optional[list] = None) -> str:
     """The answer, and for every read that failed for a reason of the data, one line the code writes from the tool result: unless the model already named
-    what is missing (the Data Mapping entries) or, with nothing to name, already said the same."""
+    what is missing (the Data Mapping entries) or, with nothing to name, already said the same. And a line for each part of the question that no read
+    answered (`unmet`). The lines are in the language of the request; the model's own text is never touched."""
+    arabic = wants_arabic(question)
     notes: list = []
     for result in failed:
-        note = _note(result)
+        note = _note(result, arabic)
         keys = [m.get("key") for m in eko_chat._clean_missing(result.get("missing") or []) if m.get("key")]
         said = all(k in answer for k in keys) if keys else note[:30].lower() in answer.lower()
         if not said and note not in notes:
             notes.append(note)
-    if not notes:
-        return answer
-    return f"{answer}\n\n{'غير متاح:' if _ARABIC.search(question) else 'Not available:'} {' '.join(notes)}"
+    lines = [f"{'غير متاح:' if arabic else 'Not available:'} {' '.join(notes)}"] if notes else []
+    if unmet:
+        names = _PHRASE_AR if arabic else _PHRASE
+        lines.append(f"{'لم يُفحص:' if arabic else 'Not checked:'} {('، ' if arabic else ', ').join(names[k] for k, _ in unmet)}.")
+    return (keep_units(answer) if arabic else answer) + "".join(f"\n\n{line}" for line in lines)
 
 
 def options_for(cfg: dict, message: str) -> PlanOptions:
@@ -249,7 +355,8 @@ def options_for(cfg: dict, message: str) -> PlanOptions:
                "get_equipment_status": ("equipment",), "search_points": ("type",), "calculate_metric": ("type",),
                "compare_equipment": ("equipment_a", "equipment_b"), "get_alarm_history": ("severity", "equipment")}
     return PlanOptions(system_prompt=system_prompt(message), max_rounds=given["max_rounds"], shape=shape_result, check=check_answer, retry_text=retry_text,
-                       filters=filters, finalize=finalize, max_calls=MAX_CALLS_PER_ROUND)
+                       filters=filters, finalize=finalize, max_calls=MAX_CALLS_PER_ROUND, missing=missing_reads, nudge_text=nudge_text,
+                       unread_reply=unread_reply, arabic=wants_arabic(message))
 
 
 # ─── Before the model: what code answers outright ────────────────────────────
@@ -285,7 +392,8 @@ async def planner_reply(cfg: dict, message: str, view_fn: Callable[[], DataView]
         return eko_chat.unsupported(reason)
     run = LLMRun(reason, stream, t0)
     run.trace, run.deadline = trace, deadline
-    down = lambda: llm._reply(llm.LLM_DOWN + HELP_TEXT, "unsupported")      # noqa: E731
+    arabic = wants_arabic(message)
+    down = lambda: llm._reply((text_ar.LLM_DOWN_AR + text_ar.HELP_AR) if arabic else (llm.LLM_DOWN + HELP_TEXT), "unsupported")      # noqa: E731
     try:
         adapter = OllamaPlannerAdapter(cfg)
     except ValueError:
@@ -314,14 +422,19 @@ async def planner_reply(cfg: dict, message: str, view_fn: Callable[[], DataView]
         run.finish("timeout" if exc.code in ("llm_timeout", "request_timeout") else "failure", exc.code)
         _log(stage="plan", outcome=exc.code)
         if exc.code == "request_timeout":
-            return llm._reply(chat_ctx.timeout_text(deadline), "timeout")
+            return llm._reply(text_ar.timeout_text(deadline) if arabic else chat_ctx.timeout_text(deadline), "timeout")
         if exc.code == "max_tool_rounds_exceeded":
-            return llm._reply(f"{exc.message} " + HELP_TEXT, "unsupported", model=adapter.model)
+            rounds = (settings(cfg) or {"max_rounds": DEFAULT_ROUNDS})["max_rounds"]
+            return llm._reply((text_ar.rounds_text(rounds) + text_ar.HELP_AR) if arabic else f"{exc.message} " + HELP_TEXT, "unsupported", model=adapter.model)
         if exc.code == "llm_empty_response":
-            return llm._reply(llm.NOT_UNDERSTOOD + HELP_TEXT, "unsupported", model=adapter.model)
+            return llm._reply((text_ar.NOT_UNDERSTOOD_AR + text_ar.HELP_AR) if arabic else llm.NOT_UNDERSTOOD + HELP_TEXT, "unsupported", model=adapter.model)
         return down()
     calls = result.get("tool_calls") or []
     tool = next((t.get("name") for t in reversed(calls) if t.get("available")), None)
+    if result.get("unread"):
+        trace.mark_fallback("no_tool_read")
+        run.finish("failure", "no_tool_read")
+        return llm._reply(result["answer"], "llm_planner", calls, None, "code", adapter.model)
     if result.get("model_error"):
         cool_down(result["model_error"])
         trace.mark_fallback(result["model_error"])
@@ -335,7 +448,7 @@ async def planner_reply(cfg: dict, message: str, view_fn: Callable[[], DataView]
     if not result.get("grounded"):
         trace.mark_fallback("answer_not_grounded")
         run.finish("failure", "answer_not_grounded")
-        return llm._reply(eko_chat.UNGROUNDED_FALLBACK, "llm_planner", calls, result.get("card"), "code", adapter.model)
+        return llm._reply(UNGROUNDED_AR if wants_arabic(message) else eko_chat.UNGROUNDED_FALLBACK, "llm_planner", calls, result.get("card"), "code", adapter.model)
     trace.mark_used(tool=tool, rule="llm.planner")
     run.finish("success")
     _log(stage="plan", outcome="ok", calls=len(calls))

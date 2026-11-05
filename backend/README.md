@@ -301,10 +301,23 @@ What is left (a question the rules do not know, or a message with at least one p
 5. A read that failed for a reason of the building's data (not mapped, stale, not read yet) is always told: when the model's answer does not name what is
    missing (the Data Mapping entries), the code appends "Not available: ..." (Arabic: "غير متاح:") from the tool result. The model's own mistakes (an unknown tool,
    bad arguments) are not reported as missing data.
-6. At most `chat.planner.max_rounds` model calls (1 to 8, default 4; `LLM_PLANNER_MAX_ROUNDS`); the correction request does not count. At the limit, at the
+6. Every part of the question is read. When the question names an equipment item and asks to identify it, check its condition, or find its alarms, the
+   matching tool (`find_equipment`, `get_equipment_status`, `get_alarms`) must have been tried; the status result does not stand in for the alarms. A final
+   answer that skipped one gets ONE nudge naming the missing reads (it does not use up a round); a part still unread is told ("Not checked: ..."), and an
+   answer written with no read at all is never shown: it is replaced by "I could not read the building data this question needs". The prompt also tells the
+   model to call a separate tool for each part, and to read the data even when it is only asked to explain or to write in another language.
+7. Arabic. A question in Arabic, or one that asks for it ("in Arabic", "بالعربي", "باللغة العربية"), gets the instruction to write the ENTIRE answer in Arabic;
+   the answer is rejected once if it is not (more than three English words that are not an equipment ID, a known abbreviation or unit, or a word of the tool
+   results, or no Arabic at all), then replaced by an Arabic notice. Equipment IDs, abbreviations and numbers are checked as before; units the model spelled out
+   in Arabic (جزء في المليون, °م, كيلوواط ساعة) are written back as the data writes them (ppm, °C, kWh); the lines the code adds ("غير متاح:", "لم يُفحص:") are
+   Arabic. The replies the code writes itself follow the language of the request too (`eko_chat_text_ar.py`): the timeout reply, a partial answer (deadline,
+   planning limit, model stopped) with the sentences that report what was read (all 13 tools; IDs, numbers and units such as AHU_01, 24 °C, 600 ppm, 3.5 kW are
+   the results' own, text from FIN such as an alarm message is quoted as it is), and the replies for a model that is down or not understood. For a request in
+   English they are unchanged. Nothing else in the model's text is changed.
+8. At most `chat.planner.max_rounds` model calls (1 to 8, default 4; `LLM_PLANNER_MAX_ROUNDS`); the correction request does not count. At the limit, at the
    request's one deadline (`chat.request_deadline_s`), or when the model stops answering after tools had read something, the answer is what was read, in the
    code's own words, marked `partial` and "This answer is incomplete..."; with nothing read it is a plain reply.
-7. The model is local: the same `base_url` (localhost unless `allow_remote_llm`), `model`, `timeout_s` (planner default 60 s), `max_output_tokens` (planner
+9. The model is local: the same `base_url` (localhost unless `allow_remote_llm`), `model`, `timeout_s` (planner default 60 s), `max_output_tokens` (planner
    default 512), `num_ctx` (planner default 8192, the 13 tool definitions need more than 2048), cooldown and concurrency settings as the one-intent path.
    When Ollama is down, slow or without the model, the reply is the short plain message plus the list of supported questions, and the rules keep answering.
 
@@ -372,7 +385,7 @@ call the model (`/api/chat/stats` shows the runs).
 ```powershell
 cd backend
 $env:EKO_NOTIFICATION_DB = "$env:TEMP\eko-test-notifications.db"      # keeps the tests off the real notification history
-python -m unittest tests.test_eko_chat_rules tests.test_eko_chat_metrics tests.test_eko_chat_projects tests.test_eko_chat_inventory tests.test_eko_chat_capabilities tests.test_eko_chat_messages tests.test_eko_chat_trace tests.test_eko_chat_alarms tests.test_eko_chat_scope tests.test_eko_chat_multi tests.test_eko_chat_analytics tests.test_eko_chat_points tests.test_eko_chat_analytics_chat tests.test_eko_chat_analytics_capabilities tests.test_eko_chat_planner tests.test_fin_documents tests.test_backend_export tests.test_fin_projects
+python -m unittest tests.test_eko_chat_rules tests.test_eko_chat_metrics tests.test_eko_chat_projects tests.test_eko_chat_inventory tests.test_eko_chat_capabilities tests.test_eko_chat_messages tests.test_eko_chat_trace tests.test_eko_chat_alarms tests.test_eko_chat_scope tests.test_eko_chat_multi tests.test_eko_chat_analytics tests.test_eko_chat_points tests.test_eko_chat_analytics_chat tests.test_eko_chat_analytics_capabilities tests.test_eko_chat_planner tests.test_eko_chat_arabic_partial tests.test_fin_documents tests.test_backend_export tests.test_fin_projects
 cd ..
 python scripts/eko_chat_llm_benchmark.py                 # live: cold start, intent latency, end-to-end, accuracy (needs Ollama + the model)
 python scripts/eko_chat_llm_benchmark.py --unavailable   # how the chat behaves with Ollama off

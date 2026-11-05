@@ -1872,8 +1872,11 @@ class PlanOptions:
       check          (answer, result texts, question) -> what in the answer the data does not support ([] = grounded); runs even when no tool was used
       retry_text     the one correction request for those problems
       filters        tool -> the arguments that must be the user's words or a name an earlier result holds
-      finalize       (answer, failed results, question) -> the answer with a code-written line for what could not be read
+      finalize       (answer, failed results, question, unmet) -> the answer with code-written lines for what could not be read or was not checked
       max_calls      tool calls run per model step; the rest are answered, not run
+      missing        (question, tools tried) -> the reads the question asks for that no call made; [] when it asks for nothing more. With nudge_text and
+                     unread_reply: a final answer that skipped a requested read gets ONE nudge (it does not use up a round); a part still unread is
+                     reported by finalize, and an answer written with no read at all is replaced by unread_reply, never shown
     """
     system_prompt: str
     max_rounds: int
@@ -1881,8 +1884,12 @@ class PlanOptions:
     check: Callable[[str, list, str], list]
     retry_text: Callable[[list], str]
     filters: dict
-    finalize: Callable[[str, list, str], str]
+    finalize: Callable[[str, list, str, list], str]
     max_calls: int = 6
+    missing: Optional[Callable[[str, list], list]] = None
+    nudge_text: Optional[Callable[[list, str], str]] = None
+    unread_reply: Optional[Callable[[str], str]] = None
+    arabic: bool = False         # the request asks for Arabic: the texts the code writes (a partial answer and its prefix) are Arabic (eko_chat_text_ar)
 
 
 # a tool that failed for a reason of the model's own request, not of the building's data: never reported as "not available"
@@ -1939,21 +1946,30 @@ async def conversation(adapter: LLMAdapter, message: str, view_fn: Callable[[], 
     done_tools: list[tuple] = []             # every successful (tool, args, result): what a timeout may still report
     deadline = run.deadline if run is not None else None
     retried = False
+    nudged = False
     rounds = 0
 
-    def out_of_time(prefix: Optional[str] = None) -> dict:
-        """The request's deadline passed (or, with a prefix, the planning limit). What the tools had already read is reported in the code's own words
-        (nothing the model had not finished is invented); with nothing read, a plain timeout."""
+    def out_of_time(kind: str = "deadline") -> dict:
+        """The request's deadline passed ("deadline"), the planning limit was reached ("limit") or the model stopped ("stopped"). What the tools had already
+        read is reported in the code's own words, in the language of the request (nothing the model had not finished is invented); with nothing read, a plain
+        timeout."""
         from eko_chat_router import direct_text      # imported here: the router imports this module
+        import eko_chat_text_ar as text_ar
+        arabic = options is not None and options.arabic
         parts = []
         for tool, args, result in done_tools[-3:]:
             try:
-                parts.append(direct_text({"intent": tool, "parameters": args, "result": result}, ""))
+                out = {"intent": tool, "parameters": args, "result": result}
+                parts.append(text_ar.direct_text_ar(out) if arabic else direct_text(out, ""))
             except Exception:
                 continue
         if not parts:
-            raise ChatFailure("request_timeout", chat_ctx.timeout_text(deadline), 504, trace)
-        return {"answer": (prefix or chat_ctx.partial_prefix(deadline)) + " ".join(parts), "tool_calls": trace, "grounded": True, "partial": True,
+            raise ChatFailure("request_timeout", text_ar.timeout_text(deadline) if arabic else chat_ctx.timeout_text(deadline), 504, trace)
+        if arabic:
+            prefix = text_ar.partial_prefix(kind, {"deadline": deadline.seconds if deadline is not None else text_ar.DEFAULT_DEADLINE_S, "limit": max_rounds}.get(kind, 0))
+        else:
+            prefix = {"limit": LIMIT_PREFIX.format(n=max_rounds), "stopped": MODEL_STOPPED_PREFIX}.get(kind) or chat_ctx.partial_prefix(deadline)
+        return {"answer": prefix + " ".join(parts), "tool_calls": trace, "grounded": True, "partial": True,
                 "card": build_card(*done_tools[-1])}
 
     while True:
@@ -1962,7 +1978,7 @@ async def conversation(adapter: LLMAdapter, message: str, view_fn: Callable[[], 
             return
         if rounds >= max_rounds:
             if options is not None and done_tools:        # the planner reports what it read rather than nothing
-                yield "result", {**out_of_time(LIMIT_PREFIX.format(n=max_rounds)), "limit": True}
+                yield "result", {**out_of_time("limit"), "limit": True}
                 return
             raise ChatFailure("max_tool_rounds_exceeded", f"The model did not finish within {max_rounds} rounds.", 502, trace)
         rounds += 1
@@ -1989,7 +2005,7 @@ async def conversation(adapter: LLMAdapter, message: str, view_fn: Callable[[], 
             return
         except LLMError as exc:
             if options is not None and done_tools:         # the model stopped after the tools had read something: that is reported, not thrown away
-                yield "result", {**out_of_time(MODEL_STOPPED_PREFIX), "model_error": exc.code}
+                yield "result", {**out_of_time("stopped"), "model_error": exc.code}
                 return
             raise ChatFailure(exc.code, exc.message, exc.status, trace)
         calls = reply.get("tool_calls") or []
@@ -1999,6 +2015,19 @@ async def conversation(adapter: LLMAdapter, message: str, view_fn: Callable[[], 
             _debug("model tool", f"none (final answer, round {rounds})")
             if not content:
                 raise ChatFailure("llm_empty_response", "The language model returned an empty answer.", 502, trace)
+            unmet: list = []
+            if options is not None and options.missing is not None:
+                tried = [e["name"] for e in trace if isinstance(e.get("name"), str) and (e.get("available") or e.get("reason") not in MODEL_SIDE_REASONS)]
+                unmet = options.missing(message, tried)
+                if unmet and not nudged:
+                    nudged = True
+                    rounds -= 1          # the one nudge does not use up a planning round
+                    messages.append({"role": "assistant", "content": content})
+                    messages.append({"role": "user", "content": options.nudge_text(unmet, message)})
+                    continue
+                if unmet and not tried:  # an answer about the building written without reading any of it is never shown
+                    yield "result", {"answer": options.unread_reply(message), "tool_calls": trace, "grounded": True, "card": None, "unread": True}
+                    return
             if options is not None:
                 bad = options.check(content, tool_texts, message)
             else:
@@ -2020,7 +2049,7 @@ async def conversation(adapter: LLMAdapter, message: str, view_fn: Callable[[], 
                 yield "result", {"answer": UNGROUNDED_FALLBACK, "tool_calls": trace, "grounded": False,
                                  "ungrounded_numbers": bad, "card": card}
                 return
-            yield "result", {"answer": options.finalize(content, failed, message) if options else content, "tool_calls": trace, "grounded": True, "card": card}
+            yield "result", {"answer": options.finalize(content, failed, message, unmet) if options else content, "tool_calls": trace, "grounded": True, "card": card}
             return
         messages.append({"role": "assistant", "content": content or None, "tool_calls": [
             {"id": c.get("id"), "type": "function",
