@@ -29,6 +29,16 @@ const STATUSISH = /status|sts|run|fbk|feedback/
 export const sensor = (...needs: string[]): PointRule => k =>
   needs.every(n => k.includes(n)) && !isSetpoint(k) && !isCommand(k) && !isFault(k)
 
+/**
+ * A damper, named either by its abbreviation (EA_DAMPER_POS: `abbrs` "ea") or by its air stream (ExhaustAirDamperPos: `streams`
+ * "exhaust"), as FIN spells it. A position point is preferred to a state; a command, set-point or fault is neither.
+ */
+export const damper = (abbrs: string[], streams: string[]): PointRule[] => {
+  const named: PointRule = k => abbrs.some(a => k.includes(a + 'damper')) || (k.includes('damper') && streams.some(s => k.includes(s)))
+  const reading: PointRule = k => named(k) && !isSetpoint(k) && !isCommand(k) && !isFault(k)
+  return [k => reading(k) && k.includes('pos'), reading]
+}
+
 /** A name that is exactly one of these: for names too short to match by part (a bare "status") */
 export const exact = (...names: string[]): PointRule => k => names.includes(k)
 

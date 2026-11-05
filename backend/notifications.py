@@ -238,6 +238,9 @@ USER_HIDEABLE = ("alarm.critical",)
 # that user alone. The baseline row is only ever read, so one user's action cannot reach another's.
 # A real user id never starts with the reserved prefix (_check_user refuses one that does).
 PROJECT_RECIPIENT_PREFIX = "#project:"
+# The eko_role_mapping role that may change a site's own settings. The mapping is server-side data keyed by the site and the
+# signed-in user (the session cookie), so nothing a browser sends can name it.
+ADMIN_ROLE = "superuser"
 
 
 def project_recipient(site_id: str) -> str:
@@ -639,6 +642,39 @@ class Store:
         seam for the later administration phase and for operators."""
         _check_ids("system", site_id)
         self._save_preferences(project_recipient(site_id), site_id, master_enabled, types)
+
+    def map_role(self, site_id: str, user_id: str, eko_role: str, updated_by: str) -> None:
+        """The EKO role of one signed-in user on one site (what role_of reads, and what authorises site settings).
+        No HTTP route reaches this: like update_project_preferences it is the operator's seam, because the
+        server must be able to trust the mapping."""
+        _check_ids(user_id, site_id)
+        _check_user(updated_by)
+        if not isinstance(eko_role, str) or not eko_role.strip() or len(eko_role) > 64:
+            raise ValueError("a role of at most 64 characters is required")
+        with self._write():
+            self.db.execute(
+                "INSERT INTO eko_role_mapping (site_id, user_id, eko_role, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)"
+                " ON CONFLICT (site_id, user_id) DO UPDATE SET eko_role = excluded.eko_role, updated_by = excluded.updated_by,"
+                " updated_at = excluded.updated_at",
+                (site_id, user_id, eko_role.strip(), updated_by, utc_iso(datetime.now(timezone.utc))))
+
+    def set_site_critical(self, site_id: str, enabled: bool, actor_id: str, now: Optional[datetime] = None) -> None:
+        """Switch the site's alarm.critical baseline (whether the site creates those notifications) and record who did it,
+        in one transaction. The caller has already authorised actor_id; nothing else is touched: no user's own
+        preference, no other site, no notification."""
+        _check_ids(actor_id, site_id)
+        if not isinstance(enabled, bool):
+            raise ValueError("enabled must be true or false")
+        owner, stamp = project_recipient(site_id), utc_iso(now or datetime.now(timezone.utc))
+        with self._write():
+            previous = self._saved(owner, site_id).get("alarm.critical")
+            self.db.execute(
+                "INSERT INTO notification_preferences (user_id, site_id, type, enabled) VALUES (?, ?, 'alarm.critical', ?)"
+                " ON CONFLICT (user_id, site_id, type) DO UPDATE SET enabled = excluded.enabled", (owner, site_id, int(enabled)))
+            self.db.execute(
+                "INSERT INTO notification_audit_log (id, site_id, actor_id, action, target_type, target_id, occurred_at, details_json)"
+                " VALUES (?, ?, ?, 'notifications.site_critical_alarms.set', 'site', ?, ?, ?)",
+                ("aud_" + uuid.uuid4().hex, site_id, actor_id, site_id, stamp, json.dumps({"enabled": enabled, "previous": previous})))
 
     def project_wants(self, site_id: str, type_: str, default: bool) -> bool:
         """Whether the SITE creates notifications of this type (its baseline master and toggle,

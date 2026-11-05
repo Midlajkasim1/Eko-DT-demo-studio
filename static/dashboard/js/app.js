@@ -124,6 +124,7 @@
     return ids;
   }
 
+  let roofHost = null;   /* the kept element of the Hospital roof graphic view (openRoofView) */
   const E = window.EKO = {
     data: window.EKO_DATA.marsa,
     nav: window.EKO_LAYOUTS.nav,
@@ -132,6 +133,7 @@
     lang: ls.get('eko-lang') || 'en',
     state: {
       pageId: 'marsa-overview', module: 'overview', sub: null,
+      roofView: false,   /* the Hospital roof graphic is showing in the content area instead of the page (openRoofView) */
       rolePreview: ss.get('eko-role-preview') || null,     /* D105: demo-only role preview, session-scoped */
       disclose: {},                                        /* D105: per-user progressive-disclosure overrides (loaded per role) */
       themeMode: ls.get('eko-theme-mode') || 'auto',
@@ -335,6 +337,7 @@
       if(pageId !== this.state.pageId) this.state._prev = { pageId: this.state.pageId, module: this.state.module, sub: this.state.sub };
       this.state.locFocus = null;   /* any navigation (the logo, a module, search, Back) ends Locate-in-3D focus */
       if(pageId !== 'sec') this.state.secLocated = null;
+      if(this.state.roofView) closeRoofView();   /* ...and the Hospital roof graphic, which stands in the content area */
       if(window.EKO_SURF) window.EKO_SURF.closeAll();          /* R4 (D67) */
       const targetModule = module ?? this.state.module;
       const targetSub = sub ?? null;
@@ -734,7 +737,7 @@
       /* D85/D107: the account MENU — headed sections, a description under every setting. */
       const seg = (grp, v, lbl, on, tip) => `<button class="seg" data-on="${on}" data-act="${grp}" data-v="${v}" aria-pressed="${on}"${tip ? ` data-tip="${esc(tip)}"` : ''}>${esc(lbl)}</button>`;
       const u = E.data.user || {};
-      const roleKey = { technician:'roleTechnician', engineer:'roleEngineer', executive:'roleExecutive', security:'roleSecurity', manager:'roleManager' }[E.role()] || 'roleTechnician';
+      const roleKey = { superuser:'roleSuperUser', technician:'roleTechnician', engineer:'roleEngineer', executive:'roleExecutive', security:'roleSecurity', manager:'roleManager' }[E.role()] || 'roleTechnician';
       const previewing = !!E.state.rolePreview && E.state.rolePreview !== u.role;
       /* D129: the account menu is IDENTITY and ACCOUNT ACTIONS — name and role, Sign out — plus the demo
          section in demo builds. Theme is the top-bar toggle and Settings › Appearance; language is the
@@ -750,6 +753,7 @@
         <div class="accid"><span class="avatar accavatar" aria-hidden="true">${esc(E.initials() || '·')}</span><div class="col accwho"><b>${esc(E.lang==='ar' ? (u.nameAr||u.name||'') : (u.name||''))}</b><span class="accrole">${esc(E.t(roleKey))}${previewing ? ` <span class="accprev">${esc(E.t('rolePreviewTag'))}</span>` : ''}</span></div></div>
         ${demo ? `<div class="accdemobox" data-tip="${esc(E.t('demoRoleNote'))}"><span class="accdemolbl"><span class="accdemotag">${esc(E.t('menuDemo'))}</span>${esc(E.t(window.EKO_PERSONA ? 'per.viewAs' : 'demoRole'))}</span>
           ${window.EKO_PERSONA ? window.EKO_PERSONA.menu(E) : `<div class="segbox row accsegs">${['technician','engineer','executive'].map(r => seg('rolePreview', r, E.t({ technician:'roleTechnician', engineer:'roleEngineer', executive:'roleExecutive' }[r]), E.role() === r)).join('')}</div>`}
+          ${(E.data.roles || {}).superuser ? `<div class="segbox row accsegs">${seg('rolePreview', 'superuser', E.t('roleSuperUser'), E.role() === 'superuser')}</div>` : ''}
           ${(E.data.demoUsers || []).length && window.EKO_HO && window.EKO_HO.enabled() ? `<span class="accdemolbl accdemolbl2" data-tip="${esc(E.t('demoUserTip'))}">${esc(E.t('demoUser'))}</span>
           <div class="segbox row accsegs accsegwrap">${E.data.demoUsers.map(p => seg('previewUser', p.name, E.lang === 'ar' ? (p.nameAr || p.name) : E.person(p.name, 'bare'), u.name === p.name, E.t('demoUserTip'))).join('')}</div>
           <span class="accdemolbl accdemolbl2" data-tip="${esc(E.t('demoClockTip'))}">${esc(E.t('demoClock'))}</span>
@@ -1055,14 +1059,19 @@
       : E.state.born === 'navx' ? 'x'
       : (E.state.born === 'nav' || /^nsub:/.test(E.state.born || '')) ? '1' : '0');
     $('ekonav').innerHTML = navRail();
-    /* E15 port: the page frame (headline, how-to-read line, tiles, tabs) on every page of a project on the extended module set (the Hospital). A project on the standard module set, Marsa Al Arab included, keeps its own page layouts. */
-    const framed = window.EKO_FRAME && window.EKO_MODULES === 'extended';
-    $('mount').innerHTML = NB((stacked ? pagehead() : '') + (framed ? window.EKO_FRAME.apply(E, P.renderPage(E)) : P.renderPage(E)));
-    /* E17: on a phone or a tablet the page's active sub-tab is scrolled into view when the page changes */
-    if(stacked){ const k = E.state.pageId + '/' + (E.state.sub || ''); if(render._phOn !== k){ render._phOn = k;
-      const on = $('mount').querySelector('#pagehead .phsub[data-on="1"]'), strip = on && on.parentElement;
-      if(on && strip && strip.scrollWidth > strip.clientWidth){ const sr = strip.getBoundingClientRect(), r = on.getBoundingClientRect();
-        if(r.left < sr.left) strip.scrollLeft -= sr.left - r.left + 24; else if(r.right > sr.right) strip.scrollLeft += r.right - sr.right + 24; } } }
+    if(E.state.roofView && roofHost){
+      const m = $('mount');
+      if(m.firstElementChild !== roofHost || m.childElementCount !== 1) m.replaceChildren(roofHost);   /* only when it is not already there: moving an iframe reloads it */
+    } else {
+      /* E15 port: the page frame (headline, how-to-read line, tiles, tabs) on every page of a project on the extended module set (the Hospital). A project on the standard module set, Marsa Al Arab included, keeps its own page layouts. */
+      const framed = window.EKO_FRAME && window.EKO_MODULES === 'extended';
+      $('mount').innerHTML = NB((stacked ? pagehead() : '') + (framed ? window.EKO_FRAME.apply(E, P.renderPage(E)) : P.renderPage(E)));
+      /* E17: on a phone or a tablet the page's active sub-tab is scrolled into view when the page changes */
+      if(stacked){ const k = E.state.pageId + '/' + (E.state.sub || ''); if(render._phOn !== k){ render._phOn = k;
+        const on = $('mount').querySelector('#pagehead .phsub[data-on="1"]'), strip = on && on.parentElement;
+        if(on && strip && strip.scrollWidth > strip.clientWidth){ const sr = strip.getBoundingClientRect(), r = on.getBoundingClientRect();
+          if(r.left < sr.left) strip.scrollLeft -= sr.left - r.left + 24; else if(r.right > sr.right) strip.scrollLeft += r.right - sr.right + 24; } } }
+    }
     const fresh = document.getElementById('enginehost');
     if(fresh && keptHost) fresh.replaceWith(keptHost);
     $('mobtabs').innerHTML = mobtabs();
@@ -1285,6 +1294,80 @@
     }, NO_SEL));
   }
 
+  /* The popup frame for a document (O&M and warranty PDFs): #docov, so the surface manager closes it on Escape and navigation.
+     `download` adds the download link; `tab` the open-in-a-new-tab link. */
+  function openFramePopup(o){
+    const title = o.title || '';
+    const dl = C.esc(E.t('docDownload'));
+    const tab = C.esc(E.t('docOpenLarge'));
+    ACTS.docClose();
+    const ov = document.createElement('div');
+    ov.id = 'docov';
+    ov.innerHTML = `<div class="docbox" role="dialog" aria-modal="true" aria-label="${C.esc(title)}">
+        <div class="dochead">
+          <h2 class="doctitle">${C.esc(title)}</h2>
+          <div class="docacts">
+            ${o.download ? `<a class="iconbtn tipU" href="${C.esc(o.download)}" download data-tip="${dl}" aria-label="${dl}">${C.icon('download', 15)}</a>` : ''}
+            ${o.tab ? `<a class="iconbtn tipU" href="${C.esc(o.tab)}" target="_blank" rel="noopener noreferrer" data-tip="${tab}" aria-label="${tab}">${C.icon('external', 15)}</a>` : ''}
+          </div>
+          <button type="button" class="wmaxx docx" data-act="docClose" aria-label="${C.esc(E.t('close'))}">✕</button>
+        </div>
+        <iframe class="docframe" title="${C.esc(title)}"></iframe>
+      </div>`;
+    ov.addEventListener('click', ev => { if (ev.target === ov) ACTS.docClose(); });
+    const frame = ov.querySelector('.docframe');
+    const armed = new WeakSet();
+    /* The PDF viewer keeps its own key presses, so Escape has to be read inside the frame. */
+    const armFrame = () => {
+      try {
+        const win = frame.contentWindow;
+        if (!win || armed.has(win)) return;
+        armed.add(win);
+        win.addEventListener('keydown', ev => {
+          if (ev.key !== 'Escape') return;
+          ev.preventDefault();
+          if (window.EKO_SURF) window.EKO_SURF.escape();
+          else ACTS.docClose();
+        });
+      } catch (e) {}
+    };
+    frame.addEventListener('load', armFrame);
+    frame.src = o.src;
+    (window.DASHBOARD_ROOT || document.body).appendChild(ov);
+    armFrame();
+    ov.querySelector('.docx').focus();
+  }
+  /* The Hospital roof graphic: the client's FIN screen in an iframe that fills the main content area (#mount) in place of the dashboard page,
+     with a Back to Dashboard button. It is not a dialog: no overlay, no backdrop. Nothing is rewritten, proxied or signed in here: the frame is
+     FIN's own page, with whatever FIN session the browser holds. With no FIN server to point at (not connected), it says so and loads nothing.
+     The browser does not tell a page whether FIN refused the frame or sent it to a sign-in page, so the loading note only says the frame has
+     loaded, never that the graphic is showing.
+     render() rebuilds #mount on every state change and live data changes state every few seconds, so the view's element is KEPT (roofHost) and
+     put back as it is: an iframe that is removed and re-inserted reloads, which would restart the FIN page on every data update. */
+  function openRoofView(url, frameTitle){
+    let src = null;
+    try { if (typeof url === 'string' && /^https?:$/.test(new URL(url).protocol)) src = url; } catch (e) {}
+    const title = E.t('roofTitle');
+    roofHost = document.createElement('section');
+    roofHost.className = 'roofview';
+    roofHost.setAttribute('aria-label', title);
+    roofHost.innerHTML = `<div class="roofbar">
+        <button type="button" class="btnG btnSm roofback" data-act="roofBack">${C.esc(E.t('roofBack'))}</button>
+        <h2 class="roofttl">${C.esc(title)}</h2>
+      </div>
+      <div class="roofstage">${src
+        ? `<iframe class="roofframe" title="${C.esc(frameTitle || 'Hospital Roof Graphic')}"></iframe>
+           <div class="roofload" role="status"><span class="wospin" aria-hidden="true"></span><span>${C.esc(E.t('roofLoading'))}</span></div>`
+        : `<div class="roofnone" role="alert"><b>${C.esc(E.t('roofNoFin'))}</b><p>${C.esc(E.t('roofNoFinWhy'))}</p></div>`}
+      </div>`;
+    const frame = roofHost.querySelector('.roofframe');
+    const host = roofHost;
+    if (frame) frame.addEventListener('load', () => { const n = host.querySelector('.roofload'); if (n) n.remove(); }, { once: true });
+    if (frame) frame.src = src;
+    if (window.EKO_SURF) window.EKO_SURF.closeAll();
+    E.set({ roofView: true, assetSel: null, dlg: null, mobMore: false });
+  }
+  function closeRoofView(){ roofHost = null; E.state.roofView = false; }
   const ACTS = {
     goMod(el){ const m = E.nav.modules.find(x=>x.id===el.dataset.mod);
       if(!E.state.exp[m.id]) E.state.born = 'nsub:'+m.id;
@@ -1375,45 +1458,12 @@
           download = url + '&download=1';
         } else return;
       } catch (e) { return; }
-      const title = el.dataset.title || 'PDF';
-      const dl = C.esc(E.t('docDownload'));
-      const tab = C.esc(E.t('docOpenLarge'));
-      ACTS.docClose();
-      const ov = document.createElement('div');
-      ov.id = 'docov';
-      ov.innerHTML = `<div class="docbox" role="dialog" aria-modal="true" aria-label="${C.esc(title)}">
-        <div class="dochead">
-          <h2 class="doctitle">${C.esc(title)}</h2>
-          <div class="docacts">
-            <a class="iconbtn tipU" href="${C.esc(download)}" download data-tip="${dl}" aria-label="${dl}">${C.icon('download', 15)}</a>
-            <a class="iconbtn tipU" href="${C.esc(url)}" target="_blank" rel="noopener noreferrer" data-tip="${tab}" aria-label="${tab}">${C.icon('external', 15)}</a>
-          </div>
-          <button type="button" class="wmaxx docx" data-act="docClose" aria-label="${C.esc(E.t('close'))}">✕</button>
-        </div>
-        <iframe class="docframe" title="${C.esc(title)}" src="${C.esc(url)}"></iframe>
-      </div>`;
-      ov.addEventListener('click', ev => { if (ev.target === ov) ACTS.docClose(); });
-      const frame = ov.querySelector('.docframe');
-      const armed = new WeakSet();
-      /* The PDF viewer keeps its own key presses, so Escape has to be read inside the frame. */
-      const armFrame = () => {
-        try {
-          const win = frame.contentWindow;
-          if (!win || armed.has(win)) return;
-          armed.add(win);
-          win.addEventListener('keydown', ev => {
-            if (ev.key !== 'Escape') return;
-            ev.preventDefault();
-            if (window.EKO_SURF) window.EKO_SURF.escape();
-            else ACTS.docClose();
-          });
-        } catch (e) {}
-      };
-      frame.addEventListener('load', armFrame);
-      (window.DASHBOARD_ROOT || document.body).appendChild(ov);
-      armFrame();
-      ov.querySelector('.docx').focus();
+      openFramePopup({ title: el.dataset.title || 'PDF', src: url, download, tab: url });
     },
+    /* The Eko Hospital roof graphic (the client's own FIN screen), listed in the Assets register for that project only. It opens in the main
+       content area (not a popup) with a Back to Dashboard button. The URL is the Studio's: the connected FIN server + the client's route, read now. */
+    roofOpen(){ const g = (window.INJECTED_PROJECT_CONFIG || {}).roofGraphic; openRoofView(g && g.url, g && g.title); },
+    roofBack(){ closeRoofView(); E.set({}); },
     docClose(){ const ov = document.getElementById('docov'); if (ov) ov.remove(); },
     /* Asset panel wide mode: a real state toggle (not a snapshot) so the
        tabs, work-order buttons and live values keep working while wide. */

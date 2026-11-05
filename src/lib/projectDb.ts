@@ -6,6 +6,7 @@ import { hasMap, pruneMapConfig } from '@/lib/mapConfig'
 import { documentCatalogText } from '@/lib/finDocuments'
 import { exportedSiteConfig, finExportMappings } from '@/lib/finSettings'
 import { BACKEND_EXPORT_FILES } from '@/lib/backendExport'
+import { startViewerWindowsBat } from '@/lib/startViewerBat'
 import type { MapAsset, ProjectMeta, ProjectModel, RecentProjectCard, TextureAsset } from '@/types'
 
 // Only used to CACHE folder handles for "recent projects" — no actual data stored here
@@ -518,6 +519,8 @@ export async function exportProjectAsZip(handle: FileSystemDirectoryHandle, meta
   const catalog = documentCatalogText(meta.apiSettings?.finDocuments)
   if (catalog != null) zip.file('backend/om-warranty.json', catalog)
 
+  // NOTE: backend/config.json is replaced when a newer ZIP is extracted over an installation. The operator's own settings live in backend/config.local.json, which an export
+  // must never contain (config_overlay.py lays it over this file at startup; the local AI setup writes only there).
   // config.json — start from the repo file and overlay only the connection fields
   // the settings modal owns. Point maps are deliberately left alone: config.json
   // holds equipment_classes / meter_profile / realtime_endpoints and an audited
@@ -531,31 +534,9 @@ export async function exportProjectAsZip(handle: FileSystemDirectoryHandle, meta
     }
   } catch { /* skip if not available */ }
 
-  // Launch script: installs deps and starts the FastAPI backend (serves viewer + API)
-  const winBat = [
-    '@echo off',
-    'echo ============================================',
-    'echo   EKO Digital Twin Viewer + FIN Backend',
-    'echo ============================================',
-    'echo.',
-    'echo Checking Python...',
-    'python --version >nul 2>&1 || (echo Python not found. Please install Python 3.10+ && pause && exit /b 1)',
-    'echo.',
-    'echo Installing backend dependencies...',
-    'cd /d "%~dp0backend"',
-    'pip install -r requirements.txt --quiet',
-    'echo.',
-    'echo Starting server on port 8000.',
-    'echo   This device:    http://127.0.0.1:8000/',
-    'echo   Other devices:  http://[this-machine-ip]:8000/',
-    'echo.',
-    'echo Sign in when the page opens. Press Ctrl+C to stop.',
-    'echo.',
-    'python start_viewer.py',
-    'pause',
-  ].join('\r\n')
-
-  zip.file('Start_Viewer_Windows.bat', winBat)
+  // Launch script: checks Python, installs deps, sets up the optional local AI assistant (backend/local_ai_setup.py) and starts the FastAPI backend
+  // (serves viewer + API). Its text is startViewerBat.ts.
+  zip.file('Start_Viewer_Windows.bat', startViewerWindowsBat())
 
   return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 3 } })
 }

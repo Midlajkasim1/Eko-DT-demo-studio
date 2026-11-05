@@ -27,6 +27,8 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import config_overlay
+import eko_chat
 from fin_client import (
     PROJECT_ID_RE,
     FinScramClient,
@@ -53,6 +55,15 @@ CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.j
 
 with open(CONFIG_PATH, "r") as f:
     BASE_CONFIG = json.load(f)
+
+# config.json is replaced by every update (the export writes it); config.local.json is the operator's file, which an update cannot touch (the export never
+# contains it), laid over it here. See config_overlay.py. A file that cannot be read keeps the AI assistant off.
+LOCAL_CONFIG_PATH = os.path.join(os.path.dirname(CONFIG_PATH), config_overlay.LOCAL_NAME)
+BASE_CONFIG, LOCAL_CONFIG_INFO = config_overlay.apply_local(BASE_CONFIG, LOCAL_CONFIG_PATH)
+if LOCAL_CONFIG_INFO["error"]:
+    print(f"[config] {LOCAL_CONFIG_INFO['error']}: it is ignored and the AI assistant is off until it is fixed")
+elif LOCAL_CONFIG_INFO["overridden"]:
+    print("[config] config.local.json overrides: " + ", ".join(LOCAL_CONFIG_INFO["overridden"]))
 
 # CONFIG is what the polling loops and parsers read. It starts as the file defaults and is
 # replaced by BASE_CONFIG overlaid with the open project's settings (see below). Whether
@@ -159,12 +170,15 @@ def merge_project_settings(base: dict, settings: Optional[dict], isolated: bool 
     A project value replaces the default whole (never a key-by-key merge, so one
     site's point IDs cannot leak into another's). With `isolated`, the five FIN mapping
     blocks start empty instead of from config.json: a block the project did not set is
-    not configured, and config.json's own site mappings are never used for it.
+    not configured, and config.json's own site mappings are never used for it. The same
+    goes for config.json's distribution boards (power_boards, which Eko-Chat reads): they
+    are its own site's, and no project brings its own to the backend.
     """
     merged = copy.deepcopy(base)
     if isolated:
         for key in PROJECT_DICT_SETTINGS.values():
             merged[key] = {}
+        merged["power_boards"] = []
         # config.json's work-order query reads its own site's table (workOrderMarsa)
         merged["workorder_expr"] = ""
     for key, value in project_overrides(settings).items():
@@ -359,11 +373,14 @@ def _pdf_filename(name: str) -> str:
     return cleaned
 
 
-def load_documents() -> dict:
+def load_documents(project: Optional[str] = None) -> dict:
     """Re-read the catalog each call so an edit shows up on the next poll.
 
     A project that saved its own list does not read om-warranty.json. A manual is a record of
-    ONE FIN project, so only the active project's are listed."""
+    ONE FIN project, so only that project's are listed: another project's equipment is never
+    matched to this site's manuals. `project` is the validated FIN project of the request (see
+    _documents_project); without one, the backend's active project."""
+    wanted = PROJECT_NAME if project is None else project
     families = []
     for fam in _stored_document_families():
         if not isinstance(fam, dict):
@@ -382,7 +399,7 @@ def load_documents() -> dict:
                 continue
             ref = str(doc["ref"])
             had_doc = True
-            if _ref_project(ref) != PROJECT_NAME:
+            if _ref_project(ref) != wanted:
                 continue
             item[kind] = {
                 "name": str(doc.get("name") or ""),
@@ -407,6 +424,7 @@ cached_building_data: dict = {}
 cached_sensor_avg: dict = {"temp": None, "humidity": None, "co2": None}
 cached_power_history: dict = {}
 cached_point_units: dict = {}
+cached_power_history_at: Optional[str] = None   # when cached_power_history was last read from FIN: the cache itself carries no time
 cached_fdd_summary: list = []
 cached_meter_data: dict = {}
 cached_alarm_data: dict = {}
@@ -418,7 +436,7 @@ cached_workorders: dict = {}
 
 async def realtime_loop():
     """Fetch equipment, alarms, histories, and derived summaries."""
-    global cached_equip_data, cached_building_data, cached_power_history
+    global cached_equip_data, cached_building_data, cached_power_history, cached_power_history_at
     global cached_fdd_summary, cached_meter_data, cached_alarm_data, cached_facility
 
     rt_endpoints = CONFIG.get("realtime_endpoints", {})
@@ -443,6 +461,7 @@ async def realtime_loop():
                                   getattr(client, "last_alarm_read_ok", False))
             cached_facility = _compute_facility_services(realtime)
             cached_power_history, hist_units = await client.fetch_power_histories(pw_endpoints)
+            cached_power_history_at = datetime.now().isoformat()
             for key, unit in hist_units.items():
                 if unit:
                     cached_point_units[key] = unit
@@ -696,6 +715,8 @@ def _flatten_alarms(rows: list, bands: dict) -> dict:
             # FIN's own record id, as sent (None when FIN sends none: never made up)
             "id": safe_get(row.get("id"), "val") or None,
             "source": safe_get(source, "dis") or safe_get(source, "val") or "",
+            # FIN's id of the record the alarm is on, the key the equipment list counts alarms by (never shown by Eko-Chat)
+            "source_id": _alarm_source(row) or None,
             "message": message,
             "detail": detail,
             "priority": priority,
@@ -817,6 +838,7 @@ def _compute_facility_services(realtime: dict) -> dict:
     total_maintenance = 0
     total_equipment = 0
     online_equipment = 0
+    online_names: list[str] = []
     all_equipment = 0
     by_type: dict[str, int] = {}
 
@@ -873,6 +895,7 @@ def _compute_facility_services(realtime: dict) -> dict:
             
             if is_system and has_connectivity and not is_faulty:
                 online_equipment += 1
+                online_names.append(str(equipment.get('name') or ''))
 
     uptime = 99.8
     if total_equipment > 0:
@@ -886,12 +909,23 @@ def _compute_facility_services(realtime: dict) -> dict:
         'avgUptime': round(uptime, 1),
         'totalEquipment': total_equipment,      # systems only (AHU/FCU/pumps)
         'onlineEquipment': online_equipment,
+        'onlineNames': online_names,            # which systems that count is made of (Eko-Chat names them)
         'allEquipment': all_equipment,          # every equip record in the project
         'byType': by_type,
     }
 
 
 # ─── FastAPI App ─────────────────────────────────────────────────────────────
+
+def _notification_db_line() -> str:
+    """Which notification database this backend will use and why: for the operator, and creates nothing."""
+    configured = BASE_CONFIG.get("notification_db_path")
+    why = "EKO_NOTIFICATION_DB" if os.environ.get("EKO_NOTIFICATION_DB") else "notification_db_path" if configured else "default for this account"
+    try:
+        return f"[notifications] database: {notifications.resolve_db_path(configured)} (from {why})"
+    except ValueError as exc:
+        return f"[notifications] database path refused: {exc}"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -901,6 +935,7 @@ async def lifespan(app: FastAPI):
     apply_project_settings(*_bundled_project())
     # a deployment setting, never a project's: projects cannot point the history elsewhere
     notifications.configure(BASE_CONFIG.get("notification_db_path"))
+    print(_notification_db_line())
     yield
     # Cleanup
     global polling_tasks, client
@@ -991,7 +1026,7 @@ async def _sleep_while_watched(seconds: float) -> bool:
 def _reset_caches():
     """Drop data polled under the previous configuration so it is never served for the next."""
     global cached_equip_data, cached_power_data, cached_building_data, cached_sensor_avg
-    global cached_power_history, cached_point_units, cached_fdd_summary, cached_meter_data, cached_alarm_data
+    global cached_power_history, cached_power_history_at, cached_point_units, cached_fdd_summary, cached_meter_data, cached_alarm_data
     global cached_facility, cached_workorders
     cached_equip_data = {}
     cached_power_data = {}
@@ -999,6 +1034,7 @@ def _reset_caches():
     cached_sensor_avg = {"temp": None, "humidity": None, "co2": None}
     cached_power_history = {}
     cached_point_units = {}
+    cached_power_history_at = None
     cached_fdd_summary = []
     cached_meter_data = {}
     cached_alarm_data = {}
@@ -1043,11 +1079,14 @@ app.add_middleware(
 # /models/*: those are already-compressed or huge, and deflating them costs
 # seconds of the single uvicorn worker for a few percent.
 COMPRESSIBLE_PREFIXES = ("/api/", "/assets/")
+# Eko-Chat streams Server-Sent Events; gzip would hold them back until its buffer fills
+UNCOMPRESSED_PATHS = ("/api/chat",)
 
 
 class PathScopedGZipMiddleware(GZipMiddleware):
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or not scope["path"].startswith(COMPRESSIBLE_PREFIXES):
+        if scope["type"] != "http" or not scope["path"].startswith(COMPRESSIBLE_PREFIXES) \
+                or scope["path"] in UNCOMPRESSED_PATHS:
             await self.app(scope, receive, send)
             return
         await super().__call__(scope, receive, send)
@@ -1345,6 +1384,7 @@ async def _switch_project(req: ProjectSettingsRequest, request: Request):
     # Rows read for the previous project feed /his-points and the alarm views until the next poll
     client.last_alarm_rows = []
     client.last_point_rows = []
+    client.last_alarm_read_ok = None   # the previous project's "FIN answered" says nothing about this one
     name_source = _name_source(bool(kept) and "project_name" not in ACTIVE_OVERRIDES)
     PROJECT_CHECK = {
         "validated": await _validate_project(client) if PROJECT_NAME else None,
@@ -1567,7 +1607,9 @@ async def get_fin_projects(request: Request):
     endpoint and expression come from config.json `project_discovery`.
     """
     _require_user(request)
-    cfg = CONFIG.get("project_discovery") or {}
+    cfg = CONFIG.get("project_discovery")
+    if not isinstance(cfg, dict):
+        cfg = {}
     endpoint = str(cfg.get("endpoint") or "").strip()
     expr = str(cfg.get("expr") or "").strip()
     if not endpoint or not expr or str(cfg.get("method") or "GET").upper() != "GET":
@@ -1797,13 +1839,15 @@ def _severity_bands_configured() -> bool:
 
 def _notification_setup(site: str) -> dict:
     """What the notification panel needs to tell "not set up" from "off" from "nothing yet", and nothing
-    that is a secret: the critical-alarm state, whether alarms can be graded, whether work orders are read."""
+    that is a secret: the critical-alarm state, whether alarms can be graded, whether work orders are read, and
+    whether FIN's last alarm read worked (None before the first one), so a failed read is not shown as "no alarms"."""
     try:
         critical = _critical_alarms_state(notifications.store(), site)
     except (notifications.StoreError, sqlite3.Error, ValueError):
         critical = "unknown"
     return {"critical_alarms": critical, "severity_bands": _severity_bands_configured(),
-            "workorders": bool((CONFIG.get("workorder_expr") or "").strip())}
+            "workorders": bool((CONFIG.get("workorder_expr") or "").strip()),
+            "alarms_read": getattr(client, "last_alarm_read_ok", None)}
 
 
 def _note_critical_alarms(site: str, alarms: list, read_ok: bool) -> None:
@@ -1991,6 +2035,16 @@ async def notifications_dismiss_opened(request: Request, response: Response):
     return {"updated": _notif_call(lambda s: s.dismiss_opened(who, site))}
 
 
+def _notification_admin(request: Request) -> tuple[str, str]:
+    """(user id, site) for a request that changes a SITE setting. The same session and project checks as every notification
+    route, then the server's own role for this user on this site must be the administrator's. A frontend role label, a
+    header or a body field is never consulted."""
+    who, site = _notification_scope(request)
+    if _notif_call(lambda s: s.role_of(site, who)) != notifications.ADMIN_ROLE:
+        raise NotificationApiError(403, "forbidden", "Only a superuser of this project can change its notification settings.")
+    return who, site
+
+
 def _preferences_answer(who: str, site: str) -> dict:
     """The signed-in user's own preferences, plus read-only facts about the SITE next to them so the
     page can tell the two apart. site.critical_alarms is true/false, or null when it cannot be read
@@ -2000,7 +2054,11 @@ def _preferences_answer(who: str, site: str) -> dict:
         enabled = _critical_alarms_enabled(notifications.store(), site)
     except (notifications.StoreError, sqlite3.Error, ValueError):
         enabled = None
-    answer["site"] = {"critical_alarms": enabled}
+    try:   # lets the panel offer the site switch to the one role that may use it; the server still decides on every request
+        admin = notifications.store().role_of(site, who) == notifications.ADMIN_ROLE
+    except (notifications.StoreError, sqlite3.Error, ValueError):
+        admin = None
+    answer["site"] = {"critical_alarms": enabled, "can_administer": admin}
     return answer
 
 
@@ -2023,6 +2081,22 @@ async def notifications_preferences_update(request: Request, response: Response)
         raise NotificationApiError(400, "invalid_input", "Only master_enabled and types can be set.")
     _notif_call(lambda s: s.update_preferences(who, site, master_enabled=body.get("master_enabled"), types=body.get("types")))
     return _preferences_answer(who, site)
+
+
+@app.put(NOTIF_BASE + "/site-settings")
+async def notifications_site_settings(request: Request, response: Response):
+    """A superuser of this project switches its critical-alarm notifications on or off for everyone on it. The site comes from
+    the session, never the request; only the site's baseline alarm.critical row changes, and the change is audited."""
+    who, site = _notification_admin(request)
+    _stamp(response)
+    try:
+        body = await request.json()
+    except ValueError:
+        raise NotificationApiError(400, "invalid_input", "The body must be JSON.")
+    if not isinstance(body, dict) or set(body) != {"critical_alarms"} or not isinstance(body["critical_alarms"], bool):
+        raise NotificationApiError(400, "invalid_input", "The body must be exactly {\"critical_alarms\": true | false}.")
+    _notif_call(lambda s: s.set_site_critical(site, body["critical_alarms"], who))
+    return {"site": _preferences_answer(who, site)["site"], "setup": _notification_setup(site)}
 
 
 @app.get("/api/fin/workorders")
@@ -2378,11 +2452,24 @@ async def logout(request: Request, response: Response):
         return {"status": "disconnected"}
 
 
+def _documents_project(request: Request) -> str:
+    """The FIN project whose manuals this request may list: the one the backend serves, that FIN validated, and that THIS browser's session
+    signed in for. Same session and project checks as the notification and chat routes; nothing the request states is read."""
+    user = _require_user(request)
+    site = client.project_name or ""
+    if not site or PROJECT_CHECK.get("validated") is not True:
+        raise HTTPException(status_code=409, detail="The open project is not validated on FIN.")
+    if user.get("site") != site:
+        raise HTTPException(status_code=409, detail="You signed in for another project. Sign in again for this one.")
+    return site
+
+
 @app.get("/api/fin/documents")
-async def get_documents(response: Response):
-    """O&M and warranty manuals. Each link stays on this server."""
+async def get_documents(request: Request, response: Response):
+    """O&M and warranty manuals of the signed-in user's own project. Each link stays on this server."""
+    project = _documents_project(request)
     _stamp(response)
-    return load_documents()
+    return load_documents(project)
 
 
 @app.get("/api/fin/file")
@@ -2619,6 +2706,91 @@ async def serve_viewer():
             headers={"Cache-Control": "no-store, must-revalidate"},
         )
     return {"error": "Viewer not found. Make sure static/ folder is present."}
+
+
+# ─── Eko-Chat ────────────────────────────────────────────────────────────────
+# Read-only tools over the caches above; registered before the static mount so it is reachable.
+
+def _chat_view() -> eko_chat.DataView:
+    """What the chat tools may read, taken from the current globals (never the FIN client itself)."""
+    return eko_chat.DataView(
+        authenticated=bool(client and client.is_authenticated),
+        project_id=ACTIVE_PROJECT_ID,
+        project_name=PROJECT_NAME,
+        power=cached_power_data,
+        equipment=cached_equip_data,
+        alarms=cached_alarm_data,
+        facility=cached_facility,
+        fdd=cached_fdd_summary,
+        sensor_avg=cached_sensor_avg,
+        notifications=_chat_notifications,
+        alarm_records=_chat_alarm_records,
+        power_history=cached_power_history,
+        power_history_at=cached_power_history_at,
+        power_boards=CONFIG.get("power_boards") or [],
+        mapped=_chat_mapped(),
+    )
+
+
+def _chat_mapped() -> dict:
+    """The Data Mapping NAMES the open project has, for Eko-Chat's capability report: key names and yes/no, never a point ID or an expression."""
+    def keys(block: str) -> list:
+        value = CONFIG.get(block)
+        return sorted(k for k in value if isinstance(k, str) and not k.startswith("_")) if isinstance(value, dict) else []
+    bands = CONFIG.get("severity_bands") if isinstance(CONFIG.get("severity_bands"), dict) else {}
+    number = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)   # noqa: E731
+    return {"finLivePoints": keys("live_point_ids"), "finEndpoints": keys("power_endpoints"),
+            "finEquipmentClasses": bool(keys("equipment_classes")), "finMeterProfile": bool(keys("meter_profile")),
+            "equipmentTypes": bool((CONFIG.get("equipment_classes") or {}).get("type_priority")),
+            "finSeverityBands": number(bands.get("critical")) or number(bands.get("warning"))}
+
+
+def _chat_alarm_records() -> list:
+    """The newest alarm records, open or cleared, of the last FIN alarm read, graded by the configured bands. It is what that
+    read returned (the same grid the open-alarm list is made from), not an archive."""
+    bands = CONFIG.get("severity_bands", {})
+    out = []
+    for row in (client.last_alarm_rows if client else None) or []:
+        if not row or row.get("alarm") is not True:
+            continue
+        source = row.get("sourceRef")
+        priority = row.get("priority") if isinstance(row.get("priority"), (int, float)) else None
+        out.append({"source": safe_get(source, "dis") or safe_get(source, "val") or "", "source_id": _alarm_source(row) or None,
+                    "message": clip_decimals(str(row.get("message") or "")), "priority": priority,
+                    "severity": severity_for(priority, bands), "occurred": row.get("occurred") or row.get("created"),
+                    "state": row.get("state"), "open": alarm_is_open(row)})
+    out.sort(key=lambda a: str(a.get("occurred") or ""), reverse=True)
+    return out[:eko_chat.ALARM_RECORDS_CAP]
+
+
+def _chat_notifications(user: str, site: str, **filters) -> dict:
+    """The signed-in user's notifications on their project for the chat tool; read-only, same store as the bell."""
+    s = notifications.store()
+    page = s.list_notifications(user, site, **{k: v for k, v in filters.items() if v is not None})
+    return {"items": page["items"], "more": page["next_cursor"] is not None, "unread": s.unread_count(user, site)}
+
+
+def _chat_guard(request: Request) -> tuple[str, str]:
+    """Who may use Eko-Chat: the signed-in user of the open project, nobody else. The same checks as every notification
+    route (the FIN connection, this browser's own session cookie, the X-Eko-Project header against the project the backend
+    serves, and the project the session signed in for), re-raised in the {"error", "message"} shape the chat client reads.
+    Nothing a request says about who it is or which site it wants is trusted: the user and site come from the session.
+    Any project that passes those checks may use chat; it reads that project's own caches and mappings (_chat_view). An
+    operator can still narrow chat to some projects with chat.allowed_projects (FIN project names). Absent means no
+    narrowing; present it must be a list that names the project, so a list that is empty or not a list admits no one."""
+    try:
+        user, site = _notification_scope(request)
+    except NotificationApiError as exc:
+        code = "fin_not_connected" if exc.code == "unauthenticated" else exc.code
+        raise HTTPException(status_code=exc.status, detail={"error": code, "message": exc.message})
+    allowed = (CONFIG.get("chat") or {}).get("allowed_projects")
+    if allowed is not None and not (isinstance(allowed, list) and site in allowed):
+        raise HTTPException(status_code=403, detail={"error": "project_not_supported",
+                                                     "message": "Eko-Chat is not available for this project yet."})
+    return user, site
+
+
+app.include_router(eko_chat.build_router(_chat_view, lambda: CONFIG.get("chat") or {}, _chat_guard))
 
 
 if os.path.exists(STATIC_DIR):

@@ -245,6 +245,11 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      '/api/chat': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false,
+      },
     },
   },
   resolve: {
