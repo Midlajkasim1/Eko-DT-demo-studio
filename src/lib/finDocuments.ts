@@ -229,11 +229,49 @@ export function documentCatalogText(families: FinDocumentFamily[] | undefined): 
   return JSON.stringify({ families }, null, 2) + '\n'
 }
 
+const HEADER_ALIAS: Record<string, string> = {
+  group: 'group', name: 'group', equipment: 'group', 'equipment group': 'group',
+  om: 'om_name', 'o&m': 'om_name', 'om name': 'om_name', manual: 'om_name', 'o&m name': 'om_name',
+  'om ref': 'om_ref', 'om record': 'om_ref', 'o&m record': 'om_ref', 'o&m ref': 'om_ref',
+  warranty: 'warranty_name', 'warranty name': 'warranty_name',
+  'warranty ref': 'warranty_ref', 'warranty record': 'warranty_ref',
+}
+
+function normalizeRef(raw: string, finProject: string): string {
+  const text = raw.trim()
+  const found = text.match(/@p:[A-Za-z0-9_]+:r:[0-9a-fA-F-]+/)
+  if (found) return found[0]
+  const bare = text.match(/^p:[A-Za-z0-9_]+:r:[0-9a-fA-F-]+$/)
+  if (bare) return `@${bare[0]}`
+  const id = text.match(/^[0-9a-fA-F-]{8,}$/)
+  if (id && finProject && /^[A-Za-z0-9_]+$/.test(finProject)) return `@p:${finProject}:r:${id[0]}`
+  return text
+}
+
+function fillDraft(row: DocumentDraft): DocumentDraft {
+  const guessed = suggestDocuments([
+    { name: row.omName, ref: row.omRef || '@p:x:r:0' },
+    { name: row.wName, ref: row.wRef || '@p:x:r:0' },
+  ])[0]
+  const name = row.name.trim() || guessed?.name || row.omName.trim() || row.wName.trim()
+  const next = { ...row, name }
+  if (![next.tags, next.codes, next.types, next.names].some(part => part.trim())) {
+    const code = name.toUpperCase().replace(/[^A-Z0-9]+/g, '')
+    next.tags = guessed?.tags || name.toLowerCase().replace(/[^a-z0-9]+/g, '')
+    next.codes = guessed?.codes || code
+    next.types = guessed?.types || name.toLowerCase()
+    next.names = guessed?.names || code
+  }
+  return next
+}
+
 export function importDocumentsCsv(text: string, finProject: string): { drafts: DocumentDraft[]; error: string | null } {
   const table = parseCsv(text)
   if (!table.length) return { drafts: [], error: 'The CSV is empty.' }
-  const head = table[0].map(cell => cell.trim().toLowerCase())
-  if (!head.includes('group')) return { drafts: [], error: 'The CSV needs a group column.' }
+  const head = table[0].map(cell => HEADER_ALIAS[cell.trim().toLowerCase()] || cell.trim().toLowerCase())
+  if (!head.includes('group') && !head.includes('om_name') && !head.includes('warranty_name')) {
+    return { drafts: [], error: 'The CSV needs a group, O&M name, or warranty name column.' }
+  }
   const at = (row: string[], name: string) => {
     const index = head.indexOf(name)
     return index >= 0 && index < row.length ? row[index].trim() : ''
@@ -241,7 +279,7 @@ export function importDocumentsCsv(text: string, finProject: string): { drafts: 
   const drafts: DocumentDraft[] = []
   for (const row of table.slice(1)) {
     if (row.every(cell => !cell.trim())) continue
-    drafts.push({
+    drafts.push(fillDraft({
       ...blankDraft(),
       id: at(row, 'id'),
       name: at(row, 'group'),
@@ -251,14 +289,12 @@ export function importDocumentsCsv(text: string, finProject: string): { drafts: 
       names: at(row, 'names'),
       omName: at(row, 'om_name'),
       omNameAr: at(row, 'om_name_ar'),
-      omRef: at(row, 'om_ref'),
+      omRef: normalizeRef(at(row, 'om_ref'), finProject),
       wName: at(row, 'warranty_name'),
       wNameAr: at(row, 'warranty_name_ar'),
-      wRef: at(row, 'warranty_ref'),
-    })
+      wRef: normalizeRef(at(row, 'warranty_ref'), finProject),
+    }))
   }
   if (!drafts.length) return { drafts: [], error: 'The CSV has no equipment groups.' }
-  const problem = draftProblem(drafts, finProject)
-  if (problem) return { drafts: [], error: problem }
-  return { drafts, error: null }
+  return { drafts, error: draftProblem(drafts, finProject) }
 }

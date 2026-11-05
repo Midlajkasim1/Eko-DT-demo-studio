@@ -385,14 +385,16 @@
         pmu: b.meter ? String(b.meter) : null, hue: HUES[i % HUES.length] };
     });
   })();
-  /* The project's own meters (Dashboard Settings → Data Mapping → Meters), in its order */
-  var CONFIGURED_METERS = (function () {
-    var list = injected && Array.isArray(injected.meters) ? injected.meters : null;
+  /* The project's own meters, read when they are applied: a settings save reloads this file, and the
+     list must be the one just injected, not a copy taken before the project settings existed */
+  function configuredMeters() {
+    var cfg = window.INJECTED_PROJECT_CONFIG;
+    var list = cfg && Array.isArray(cfg.meters) ? cfg.meters : null;
     if (!list || !list.length) return null;
     return list.filter(function (m) { return m && m.name; }).map(function (m) {
       return { name: String(m.name), equip: String(m.equip || ""), his: m.his ? String(m.his) : null, main: m.main === true };
     });
-  })();
+  }
   /* Whose board ↔ meter links to trust: the project's configured ones, else Marsa Al Arab's own */
   var boardMeterLinks = !!CONFIGURED_BOARDS || fixtureSite;
   /* Configured boards are listed from the start, readings unknown ("--") until FIN answers for this
@@ -407,6 +409,15 @@
     ["zoneHourly", "zoneLast24", "zoneWeekly", "zoneMonthly", "zoneWTD", "zoneMTD", "zoneYesterday", "zonePrevWeek", "zonePrevMonth"]
       .forEach(function (k) { pw[k] = []; });
     pw.pmuFlats = {};
+  })();
+  (function seedConfiguredMeters() {
+    var meters = configuredMeters();
+    var pw = window.EKO_DATA && window.EKO_DATA.marsa && window.EKO_DATA.marsa.power;
+    if (!meters || !pw) return;
+    pw.pmus = meters.map(function (m) {
+      return { id: m.name, db: m.equip || m.name, kw: null, a: null, hz: null, kwh: null, v: null, pf: null, fin: false, main: m.main, boardMeter: null };
+    });
+    pw.anomIds = meters.map(function (m) { return m.name; });
   })();
   /* The boards to show: the configured ones; else the built-in ones this project maps (its live
      key is served, or its history endpoint is) */
@@ -437,7 +448,7 @@
     var hourlyChart = !!((historyHas(p, 'Hourly_Energy_Consumption_his') || mapsKey(p, 'current_month')) && (!injected || injected.energyFromHourly !== false));
     var todayLive = boardsLive || historyHas(p, 'Hourly_Energy_Consumption_his');
     var waterLive = historyHas(p, 'Total_Water_Consumption_his');
-    var metersLive = (CONFIGURED_METERS || []).some(function (m) { return m.his && historyHas(p, m.his); });
+    var metersLive = (configuredMeters() || []).some(function (m) { return m.his && historyHas(p, m.his); });
     var held = [], blank = [];
     function hold(obj, keys, live) {
       if (!obj || live) return;
@@ -484,9 +495,21 @@
     };
   }
 
+  function showConfiguredMeters() {
+    var meters = configuredMeters();
+    var pw = window.EKO_DATA && window.EKO_DATA.marsa && window.EKO_DATA.marsa.power;
+    if (!meters || !pw) return;
+    pw.pmus = meters.map(function (m) {
+      var prev = (pw.pmus || []).find(function (u) { return u && u.id === m.name; });
+      return prev || { id: m.name, db: m.equip || m.name, kw: null, a: null, hz: null, kwh: null, v: null, pf: null, fin: false, main: m.main, boardMeter: null };
+    });
+    pw.anomIds = meters.map(function (m) { return m.name; });
+  }
+
   function applyPower(p) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !p || !site.metrics) return;
+    showConfiguredMeters();
     var m = site.metrics;
     var el = site.energyLanding;
     var changed = false;
@@ -1171,7 +1194,7 @@
         if (boardMeterLinks) {
           boardList.forEach(function (b, i) { if (b.pmu) site.power.pmuFlats[meterKey(b.pmu)] = flats[i]; });
         }
-        (CONFIGURED_METERS || []).forEach(function (m) {
+        (configuredMeters() || []).forEach(function (m) {
           if (m.his && historyHas(p, m.his)) site.power.pmuFlats[m.name] = hourlyUse(flattenHist(p.power_history[m.his]));
         });
         var peakFlat = flattenHist(p.power_history.Peak_Demand_his);
@@ -1576,7 +1599,7 @@
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !meters || !site.power) return;
     // FIN reports no meter: demo figures and sample data keep the sample's meters until it does
-    if (!Object.keys(meters).length && (!realMode || sampleFill)) return;
+    if (!Object.keys(meters).length && !configuredMeters() && (!realMode || sampleFill)) return;
     /* /pmu-live lists the meters the project's own meter profile matched (its prefixes, FIN's meter
        tags and the meters named in Settings), so every one is shown. Marsa Al Arab's are keyed by
        PMU number, which its board names and history follow; another site's meter keeps its own name. */
@@ -1617,12 +1640,15 @@
     });
     // no meter reported: the boards' meters are listed (readings "--"); a site that names none lists none
     if (!ids.length) ids = boards.map(function (b) { return meterKey(b.pmu); });
-    if (CONFIGURED_METERS) {
+    var chosen = configuredMeters();
+    if (chosen) {
       var byName = {};
       Object.keys(byKey).forEach(function (k) { byName[byKey[k].name.toUpperCase()] = byKey[k]; });
-      site.power.pmus = CONFIGURED_METERS.map(function (m) {
-        var row = rowOf(m.name, m.equip, byKey[meterKey(m.equip)] || byName[m.equip.toUpperCase()]);
+      site.power.pmus = chosen.map(function (m) {
+        var row = rowOf(m.name, m.equip, byKey[meterKey(m.equip)] || byName[(m.equip || m.name).toUpperCase()]);
         row.main = m.main;
+        var flat = m.his && site.power.pmuFlats && site.power.pmuFlats[m.name];
+        if (row.kwh == null && flat && flat.length) row.kwh = trunc1(flat[flat.length - 1].val);
         return row;
       });
     } else {
