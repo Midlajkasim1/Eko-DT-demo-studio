@@ -286,7 +286,7 @@ window.EKO_DG = (function(){
     dgColReset(el){ const c = cur(el); if(!c) return; const s = c.s; s.cols = defCols(c.spec); s.order = c.spec.columns.map(x => x.key); s.widths = {}; s.dirty = true; persist(E, c.spec, s); rerender(); },
     dgExpand(el){ const c = cur(el); if(!c) return; const s = c.s, id = el.dataset.id; if(s.open.has(id)) s.open.delete(id); else s.open.add(id); rerender(); },
     dgRowAck(el){ const c = cur(el); if(!c) return; const r = c.spec.rows(E).find(x => String(x[c.spec.rowKey]) === el.dataset.id); const b = (c.spec.bulk || []).find(x => x.id === 'ack');
-      const n = (r && b) ? b.run(E, [r]) : 0; c.s.menu = null; toast(E.t('dgBulkAckDone', { n })); rerender(); },
+      const res = (r && b) ? b.run(E, [r]) : 0; c.s.menu = null; settled(res, (n, later) => { if(n || !later) toast(E.t('dgBulkAckDone', { n })); rerender(); }); },
     dgCopyId(el){ const c = cur(el); if(!c) return; const id = el.dataset.id; try{ if(navigator.clipboard) navigator.clipboard.writeText(id).catch(() => {}); }catch(e){} c.s.menu = null; toast(E.t('dgCopied', { id })); rerender(); },
     dgSel(el){ const c = cur(el); if(!c) return; const s = c.s, id = el.dataset.id; if(s.selAll){ s.selAll = false; rowsOf(E, c.spec, s).forEach(r => s.sel.add(r[c.spec.rowKey])); }
       if(s.sel.has(id)) s.sel.delete(id); else s.sel.add(id); rerender(); },
@@ -298,13 +298,15 @@ window.EKO_DG = (function(){
       const b = (c.spec.bulk || []).find(x => x.id === el.dataset.v); if(!b) return;
       if(b.id === 'tag'){ s.menu = 'tag'; rerender(); return; }
       if(b.id === 'export'){ const n = exportRows(E, c.spec, s, rows, 'csv'); toast(E.t('dgExported', { n })); return; }
-      const n = b.run(E, rows); toast(E.t(b.doneKey, { n })); rerender(); },
+      settled(b.run(E, rows), (n, later) => { if(n || !later) toast(E.t(b.doneKey, { n })); rerender(); }); },
     dgBulkTagApply(el){ const c = cur(el); if(!c) return; const s = c.s; const inp = c.w.querySelector('.dgtagin'); const tag = (inp && inp.value.trim()) || ''; if(!tag){ if(inp) inp.focus(); return; }
       const rows = rowsOf(E, c.spec, s).filter(r => s.selAll || s.sel.has(r[c.spec.rowKey]));
       const b = (c.spec.bulk || []).find(x => x.id === 'tag'); const n = b.run(E, rows, tag); s.menu = null; s.tagDraft = ''; toast(E.t('dgTagged', { n, tag })); rerender(); },
     dgExport(el){ const c = cur(el); if(!c) return; const n = exportRows(E, c.spec, c.s, rowsOf(E, c.spec, c.s), el.dataset.v); c.s.menu = null; toast(E.t('dgExported', { n })); rerender(); }
   };
   const toast = msg => { if(window.EKO_FB) window.EKO_FB.toast({ text: msg, tone:'ok' }); };
+  /* a bulk action's result is a count, or a promise of one when the server has to confirm it first (acknowledging on a live project) */
+  const settled = (res, done) => (res && typeof res.then === 'function') ? res.then(n => done(n, true)) : done(res, false);
 
   /* inputs: search and filter fields re-render the grid only (the caret survives) */
   let deb = null;

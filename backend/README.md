@@ -156,6 +156,40 @@ another project a 409 (`session_project_mismatch`); a notification or site that 
 - Migration 4 changes no row; it writes one `notifications.per_user_state` audit row per site with how
   many notifications and preferences were inherited as the baseline. The database is backed up first
   (see `notification_db_path`).
+- **Alarm lifecycle (only for a site whose critical-alarm notifications are on, by the same gates).** Each is stored once, from the
+  stored state, so polling, a restart or a reconnect adds nothing.
+  - `alarm.critical`: a critical FIN alarm that is open, keyed by FIN's own alarm id; resolved when FIN stops reporting it.
+  - `alarm.cleared`: told once when a notified alarm clears (how long it was open is in `params.dur`).
+  - `alarm.reraised`: told once when a critical alarm appears on the same equipment with the same message within 24 hours of one clearing
+    (FIN gives a returning alarm a new id; `params.previous_alarm_id` names the earlier one).
+  - `alarm.ack_recorded`: `POST /api/notifications/v1/alarm-acknowledgements` with exactly `{"alarm_id": "<FIN alarm id>"}`, from a
+    **superuser** of the open project (the same server-side role as the site setting). The user, project and role are the session's; the
+    equipment, message and occurrence are read from the open alarm list this backend already holds, so an alarm FIN is not reporting open
+    is a 404 and nothing in the request can name equipment or a user. It is **Eko-DT's own record** (`alarm_acknowledgements`,
+    `fin_sync_status = 'not_sent'`, plus an audit row): nothing is written to FIN, FIN's alarm state is unchanged, and the answer says
+    `fin_acknowledged: false`. Every acknowledgement is recorded once per occurrence; only one on a critical alarm of a site with the
+    gates open also creates the notification, which is linked to the alarm's `alarm.critical` row (`params.critical_notification_id`,
+    and that row gains `acknowledged_by` / `acknowledged_at`). Whether a user has *opened* a notification (read/unread) is separate and
+    never touches either.
+  A user can switch each of these four types off for themselves in the preference matrix.
+- **Who may read notifications (superusers, enforced on the server).** Every route under `/api/notifications/v1` except the site setting
+  (which already needs a superuser) answers **403 `forbidden`** unless the signed-in user's server-side `eko_role_mapping` row for the open
+  project is `superuser`: the list, one notification, opened / dismissed state, the preferences and the stored acknowledgements. The session
+  and project checks (401, 400, 409) come first and are unchanged. The bell has no push channel: it polls those same routes every 30 s, so
+  polling is refused the same way, and the browser then shows a notice and stops polling. Eko-Chat's notifications tool reads the same store,
+  so it applies the same role check (it answers "unavailable"); the rest of Eko-Chat stays open to any signed-in user of the project. The role
+  is per project: being a superuser of one gives nothing on another. **Until the operator maps a first superuser (the command above), nobody
+  can read a project's notifications.**
+- **Restoring acknowledgements.** `GET /api/notifications/v1/alarm-acknowledgements` (superuser) returns Eko-DT's stored acknowledgements of the
+  alarms FIN reports open on this project right now, so a reloaded dashboard shows them. Each item says `recorded_in: "eko-dt"`,
+  `fin_acknowledged: false` and `fin_sync_status: "not_sent"`: it is Eko-DT's record, FIN's own acknowledgement state is neither written nor read.
+  The dashboard marks an alarm acknowledged only after the server confirmed the record (a refusal shows why and marks nothing), and words it as
+  "ack in Eko-DT ... not in FIN".
+- **Work-order and collaboration notifications: no backend producer yet.** Nothing in this backend creates `wo.*`, `assign.to_you`,
+  `mention.comment` or `shift.handover` events. In a real project the only such rows are the CMMS adapter's own outcomes (work order accepted,
+  status events, a failed hand-over), which the browser records in its own localStorage (`static/dashboard/js/cmms/cmms-api.js`); they are not
+  stored here, not shared between users or browsers, and not covered by the superuser rule. Mentions and shift handovers have no producer outside
+  the demo seed, which a real project never runs. No event of these kinds is made up.
 
 **Limits.** There is still one FIN polling connection, used for the latest sign-in's project. Per-user
 state does not change that: events are created from that one connection's project only, so users who

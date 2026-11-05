@@ -8,6 +8,16 @@
    SELF-ACTION is refused unless the type is a system confirmation.
    Dedup / threading / flood-control PIPELINE lands in stage 3 — the object
    already carries dedupKey and groupKey.
+
+   WHERE EACH KIND COMES FROM in a real project (nothing here is invented):
+   · alarm.critical / alarm.cleared / alarm.reraised / alarm.ack_recorded and
+     int.sync_failed (FIN work-order read): created by the BACKEND and read from
+     it below (superusers of the project only).
+   · work-order (wo.*) and collaboration (assign / mention / handover) rows: the
+     backend has NO event producer for them yet. The only wo.* / int.sync_failed
+     rows made in the browser are the CMMS adapter's own outcomes (cmms-api.js),
+     kept in this browser's localStorage; mentions and handovers have no producer
+     at all outside the demo seed, which a real project never runs.
    ============================================================================ */
 window.EKO_NOTIF = (function(){
   'use strict';
@@ -46,7 +56,8 @@ window.EKO_NOTIF = (function(){
   const REMOTE = REAL && !!PROJECT_ID && !(INJ.fin && INJ.fin.directMode) && typeof fetch === 'function';
   const API = '/api/notifications/v1', REMOTE_LIMIT = 100, REFRESH_MS = 30000;
   let remote = [], remoteUnread = 0, remoteMore = false, remotePrefs = null, remoteSetup = null, remoteError = null, timer = null, self = null;
-  /* checking | ok | signin (401: no session here) | mismatch (409) | error (network/server: retryable) */
+  let acks = {};   /* FIN alarm id -> { user, at }: Eko-DT's own stored acknowledgements of the alarms FIN reports open */
+  /* checking | ok | signin (401: no session here) | forbidden (403: signed in, not a superuser of this project) | mismatch (409) | error (network/server: retryable) */
   let remoteState = 'checking', remoteCode = null;
   const live = () => window.EKO_NOTIF === self;   /* a switched-away project's store stops talking */
   const changed = () => { if(hooks.onAdd) hooks.onAdd(null); };
@@ -62,7 +73,7 @@ window.EKO_NOTIF = (function(){
       });
   }
   function failure(status, code){ const e = new Error('HTTP ' + status); e.status = status; e.code = code || null; return e; }
-  function clearRemote(){ remote = []; remoteUnread = 0; remoteMore = false; remotePrefs = null; remoteSetup = null; }
+  function clearRemote(){ remote = []; remoteUnread = 0; remoteMore = false; remotePrefs = null; remoteSetup = null; acks = {}; }
   /* 401: this browser is not signed in (or no longer). Nothing of the last session stays on
      screen: the server rows, and this browser's own rows for the project, go. 409: kept polling,
      the backend may switch back. Anything else: retryable, the last good rows stay. */
@@ -74,7 +85,8 @@ window.EKO_NOTIF = (function(){
     if(status === 401){
       stop(); clearRemote(); remoteState = 'signin';
       items = []; if(LS){ try{ localStorage.removeItem(LS); }catch(e){} }
-    } else if(status === 409){ clearRemote(); remoteState = 'mismatch'; }
+    } else if(status === 403 && remoteCode === 'forbidden'){ stop(); clearRemote(); remoteState = 'forbidden'; }   /* the server's role decides; nothing of the project stays on screen */
+    else if(status === 409){ clearRemote(); remoteState = 'mismatch'; }
     else remoteState = 'error';
     changed();
   }
@@ -103,8 +115,10 @@ window.EKO_NOTIF = (function(){
   function refresh(){
     if(!REMOTE) return Promise.resolve();
     if(!live()){ stop(); return Promise.resolve(); }
-    return Promise.all([api('GET', '/notifications?limit=' + REMOTE_LIMIT), api('GET', '/preferences')])
-      .then(([page, p]) => {
+    return Promise.all([api('GET', '/notifications?limit=' + REMOTE_LIMIT), api('GET', '/preferences'),
+        /* a hiccup on the acknowledgements alone keeps the last ones; a refusal is a refusal for all three */
+        api('GET', '/alarm-acknowledgements').catch(err => { if(err && [401, 403, 409].includes(err.status)) throw err; return null; })])
+      .then(([page, p, a]) => {
         if(!live()) return;
         remotePrefs = p && typeof p === 'object' ? p : null;
         /* the server already leaves out what this user switched off, so its rows, pages and count agree */
@@ -113,7 +127,10 @@ window.EKO_NOTIF = (function(){
         /* how this project is set up (critical alarms: not_configured | disabled_project | disabled_site | enabled), so an empty list can say why */
         remoteSetup = page.setup && typeof page.setup === 'object' ? page.setup : null;
         remoteUnread = typeof page.unread_count === 'number' ? page.unread_count : 0;
-        remoteError = null; remoteCode = null; remoteState = 'ok'; changed();
+        if(a && Array.isArray(a.items)){
+          acks = {}; a.items.forEach(i => { if(i && typeof i.alarm_id === 'string') acks[i.alarm_id] = { user: String(i.user_id || ''), at: i.acknowledged_at }; });
+        }
+        remoteError = null; remoteCode = null; remoteState = 'ok'; applyAcks(); changed();
       })
       .catch(failed);
   }
@@ -153,6 +170,38 @@ window.EKO_NOTIF = (function(){
     const s = REMOTE && remotePrefs && remotePrefs.site;
     return !!(s && s.can_administer === true);
   }
+  /* An acknowledgement of one open FIN alarm, recorded by the server. Only the FIN alarm id is sent: the user, the project and
+     the right to do it are the server's (its session, its role mapping), and what the notification says comes from FIN's own
+     list. It resolves { ok: true } only when the server confirmed it, else { ok: false, status, code } (never rejects), and then
+     reads everything back, so what is shown is what is stored. It is Eko-DT's record: the alarm in FIN is not acknowledged. */
+  function recordAck(finId){
+    if(!REMOTE || typeof finId !== 'string' || !finId) return Promise.resolve({ ok: false, status: 0, code: 'not_recorded' });
+    return api('POST', '/alarm-acknowledgements', { alarm_id: finId })
+      .then(data => ({ ok: true, status: 200, code: null, data }),
+            err => ({ ok: false, status: (err && err.status) || 0, code: (err && err.code) || null }))
+      .then(res => refresh().then(() => res));
+  }
+  /* the words for a refused acknowledgement (translation keys): nothing was recorded in any of these */
+  function ackErrorKey(res){
+    const s = res && res.status;
+    return s === 401 ? 'ackErrSignIn' : s === 403 ? 'ackErrForbidden' : s === 404 ? 'ackErrGone' : s === 409 ? 'ackErrProject' : 'ackErrFailed';
+  }
+  /* Eko-DT's stored acknowledgements onto the alarms on screen (a reload, a poll, another user's acknowledgement). Matched by
+     FIN's own alarm id, which the server has already limited to alarms FIN reports open on this project. The mark says where it
+     came from (source 'eko', fin false): it is never FIN's own acknowledgement state. */
+  function applyAcks(quiet){
+    const E = window.EKO, site = window.EKO_DATA && window.EKO_DATA.marsa;
+    if(!REMOTE || !live() || !E || !site || !Array.isArray(site.alarms) || typeof E.makeAck !== 'function') return;
+    let any = false;
+    site.alarms.forEach(a => {
+      const r = a && a.finId && acks[a.finId], ms = r ? Date.parse(r.at) : NaN;
+      if(!r || isNaN(ms) || (a.ack && a.ack.source === 'eko')) return;
+      a.ack = Object.assign(E.makeAck(ms, r.user), { source: 'eko', fin: false });
+      any = true;
+    });
+    if(any && !quiet && typeof E.set === 'function') E.set({});
+  }
+
   /* the site's switch for everyone on this project: asked of the server, which decides; then read back, never assumed */
   function setSiteCritical(on){
     if(!REMOTE) return Promise.resolve();
@@ -348,7 +397,7 @@ window.EKO_NOTIF = (function(){
       source: { kind: 'integration', id: 'bms-poll' },
       actions: [ { labelKey: 'na.viewStale', kind: 'primary', target: 'staleAssets' } ] });
     S(220, { type: 'alarm.ack_recorded', actorId: ME,
-      params: { alarm: 'al-vav', asset: 'VAV-L11-W' },
+      params: { alarm: 'al-vav', asset: 'VAV-L11-W', user: 'Arman Y.', project: 'marsa', at: iso(220) },
       source: { kind: 'alarm', id: 'al-vav' } });
     S(150, { type: 'shift.handover', actorId: 'M. Haddad',
       params: { user: 'M. Haddad', n: 4 }, source: { kind: 'user', id: 'mhaddad' } });
@@ -406,7 +455,7 @@ window.EKO_NOTIF = (function(){
 
   self = { add, list, unread, badge, otherUnread, markRead, markAllRead, archive, unarchive,
            archiveRead, seed, startStream, stopStream, hooks, ME, SITE,
-           prefOn, setPref, siteCritical, siteAdmin, setSiteCritical, REMOTE, refresh, confirmSession, remoteError: () => remoteError,
+           prefOn, setPref, siteCritical, siteAdmin, setSiteCritical, recordAck, ackErrorKey, applyAcks, REMOTE, refresh, confirmSession, remoteError: () => remoteError,
            remoteState: () => remoteState, remoteCode: () => remoteCode, setup: () => remoteSetup };
   if(REMOTE){   /* after this file returns, so live() sees this store as window.EKO_NOTIF */
     setTimeout(confirmSession, 0);
