@@ -25,6 +25,10 @@ export interface FinEquipment {
   inAlarm: boolean
   alarms: FinAlarm[]
   bimId: string
+  /** FIN's equipment record id */
+  finId?: string
+  type?: string
+  tags?: string[]
   points: FinEquipmentPoint[]
 }
 

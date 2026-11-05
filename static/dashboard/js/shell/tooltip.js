@@ -23,7 +23,7 @@ window.EKO_TIP = (function(){
   const SEL = '[data-tip]';
   let E = null, box = null, cur = null, mode = null, timer = null, raf = 0;
   let hold = null, holdEl = null, hx = 0, hy = 0, swallow = false, mute = null;
-  let lastX = -1, lastY = -1;
+  let lastX = -1, lastY = -1, touchAt = 0;   /* E17: the time of the last touch */
 
   function layer(){
     if(box) return box;
@@ -327,6 +327,7 @@ window.EKO_TIP = (function(){
     }, true);
     /* keyboard focus */
     document.addEventListener('focusin', ev => {
+      if(Date.now() - touchAt < 1500) return;                /* E17: focus moved by a tap (or by the app after one) shows no tooltip */
       const t = closest(ev.target);
       if(t && t.matches(':focus-visible')) show(t, 'focus');
     });
@@ -336,6 +337,7 @@ window.EKO_TIP = (function(){
       swallow = false;
       const t = closest(ev.target);
       if(ev.pointerType === 'touch'){
+        touchAt = Date.now(); hide();                         /* E17: a tap ends any tooltip ("Back to Brief" stayed on screen after one) */
         cancelHold();
         if(t && eligible(t)){
           holdEl = t; hx = ev.clientX; hy = ev.clientY;
@@ -350,6 +352,7 @@ window.EKO_TIP = (function(){
     }, true);
     const release = ev => {
       if(ev.pointerType !== 'touch') return;
+      touchAt = Date.now();
       cancelHold();
       if(mode === 'touch') hide();
     };

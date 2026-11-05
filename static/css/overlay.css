@@ -20,8 +20,121 @@
   background: transparent;
   pointer-events: none;
 }
+/* Evacuation Model view. #vpmain is already clear, but .pwarea paints --s0 over
+   the whole page, so the canvas never showed. A sheet behind the cards has a
+   hole the size of .evxvis (syncHole writes the box). The Ask EKO reserve is a
+   margin; with #vpmain on the page #mount is clear too, and the canvas showed
+   in that strip. The reserve stays padding, inside the sheet. No routes. */
+.dashboard-native-container .pwarea.evxpage:has(.evxvis):not(:has(.evxdemo)) {
+  position: relative;
+  background: transparent;
+  margin-block-end: 0;
+  padding-block-end: calc(14px + var(--aiCornerH, 56px));
+}
+/* The medical demo paints its own model in the visual. The page stays opaque,
+   including the Ask EKO strip, so the Studio canvas does not show around it. */
+.dashboard-native-container .pwarea.evxpage:has(.evxdemo) {
+  margin-block-end: 0;
+  padding-block-end: calc(14px + var(--aiCornerH, 56px));
+  background: var(--s0);
+}
+.dashboard-native-container .pwarea.evxpage:has(.evxvis):not(:has(.evxdemo))::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--s0);
+  pointer-events: none;
+  mask-image: linear-gradient(#fff, #fff), linear-gradient(#fff, #fff);
+  mask-repeat: no-repeat;
+  mask-size: 100% 100%, var(--evx-w, 0px) var(--evx-h, 0px);
+  mask-position: 0 0, var(--evx-x, 0px) var(--evx-y, 0px);
+  mask-composite: exclude;
+}
+.dashboard-native-container .pwarea.evxpage:has(.evxvis):not(:has(.evxdemo)) > * {
+  position: relative;
+  z-index: 1;
+}
+.dashboard-native-container #mount > .pwarea.evxpage:has(.evxvis):not(:has(.evxdemo)):not(#vpmain) {
+  pointer-events: none;
+}
+.dashboard-native-container .pwarea.evxpage:has(.evxvis):not(:has(.evxdemo)) :is(.opshl, .pwhero, .evxvbar, .pfpanel, [data-frame="top"]) {
+  pointer-events: auto;
+}
+.dashboard-native-container .pwarea.evxpage .pfvisual > div:has(> .evxvis) {
+  border: 1px solid var(--bd1);
+  border-radius: 10px;
+}
+.dashboard-native-container .pwarea.evxpage .evxvis,
+.dashboard-native-container .pwarea.evxpage .evxvis #vpmain,
+.dashboard-native-container .pwarea.evxpage .evxvis #enginehost {
+  background: transparent;
+  border: 0;
+  pointer-events: none;
+}
+.dashboard-native-container .pwarea.evxpage .evxvis :is(#vbottom, #vcap, .minimap, .histbanner) {
+  display: none;
+}
+.dashboard-native-container .pwarea.evxpage .evxvis.evxdemo,
+.dashboard-native-container .pwarea.evxpage .evxvis.evxdemo #vpmain,
+.dashboard-native-container .pwarea.evxpage .evxvis.evxdemo #evxhost {
+  background: var(--s0);
+  pointer-events: auto;
+}
+.dashboard-native-container .pwarea.evxpage .evxvis.evxdemo #vpmain {
+  position: relative;
+  height: 100%;
+  min-height: 240px;
+}
+.dashboard-native-container .pwarea.evxpage .evxvis.evxdemo #evxhost {
+  position: absolute;
+  inset: 0;
+}
+/* 3D / Plan / Furniture sits on the model. The canvas behind stays the hit target. */
+.dashboard-native-container .e3dsw { pointer-events: auto; }
 .dashboard-native-container .v3tint,
 .dashboard-native-container .v3glow {
+  display: none;
+}
+/* Phone and tablet: the Studio canvas sits behind the dashboard. The full-screen
+   model panel was an opaque sheet, so Close model opened a blank page, and its
+   pointer-events stopped orbit. The panel is a hole; the buttons stay clickable. */
+.dashboard-native-container #modelfs,
+.dashboard-native-container .mpeek {
+  background: transparent;
+}
+.dashboard-native-container #modelfs {
+  pointer-events: none;
+}
+.dashboard-native-container #modelfs .v3tint,
+.dashboard-native-container #modelfs .v3glow,
+.dashboard-native-container .mpeek .v3tint,
+.dashboard-native-container .mpeek .v3glow {
+  display: none;
+}
+.dashboard-native-container #modelfs :is(.mfsclose, #vbar, #vbottom, .vfab, #vcap, .vpback, .secloc, .minimap, .histbanner, .mk, .mkpop, .vradial, .vsheet, .scrim) {
+  pointer-events: auto;
+}
+/* Open model is a full-screen view of the canvas. The summary and the alarms
+   stay in the page under the transparent panel, so they have to go. The page
+   boxes also have to stop taking the pointer, or a drag never reaches the canvas.
+   The header, Close model, and the model tools stay clickable. */
+.dashboard-native-container[data-modelfs="1"] .mpage > :not(#modelfs) {
+  display: none;
+}
+.dashboard-native-container[data-modelfs="1"] body,
+.dashboard-native-container[data-modelfs="1"] #app,
+.dashboard-native-container[data-modelfs="1"] #shellmain,
+.dashboard-native-container[data-modelfs="1"] #mount {
+  pointer-events: none;
+  background: transparent;
+}
+.dashboard-native-container[data-modelfs="1"] #mount > .mpage:not(#vpmain) {
+  pointer-events: none;
+  background: transparent;
+}
+/* Close model sits on the same corner as the header's Model button. */
+.dashboard-native-container[data-modelfs="1"] #pagehead [data-act="modelFs"] {
   display: none;
 }
 .dashboard-native-container #topbar,
@@ -39,7 +152,8 @@
 .dashboard-native-container .histbanner,
 .dashboard-native-container #statusband,
 .dashboard-native-container #overlays > *,
-.dashboard-native-container #mount > *:not(#vpmain) {
+.dashboard-native-container #mount > *:not(#vpmain),
+.dashboard-native-container #bfocus {
   pointer-events: auto;
 }
 /* The Assets register's model strip sits directly in #mount, so the rule
@@ -67,6 +181,7 @@
 }
 .dashboard-native-container .mklayer .mk,
 .dashboard-native-container .vpback,
+.dashboard-native-container .secloc,
 .dashboard-native-container .pmuchip,
 .dashboard-native-container .mkpop,
 .dashboard-native-container .vradial,
@@ -111,6 +226,15 @@
   --card-face: #ffffff;
   --card-shade: #dbe2e9;
   --card-ink: #93a1af;
+  --card-glow: 0;
+  --card-line: 1.5px;
+}
+.dashboard-native-container .mztileimg[data-sty="studio"] {
+  --card-sky: linear-gradient(180deg, #F4F5F7 0%, #E3E6EA 100%);
+  --card-horizon: #E3E6EA;
+  --card-face: #F2F3F5;
+  --card-shade: #E4E7EB;
+  --card-ink: #222222;
   --card-glow: 0;
   --card-line: 1.5px;
 }

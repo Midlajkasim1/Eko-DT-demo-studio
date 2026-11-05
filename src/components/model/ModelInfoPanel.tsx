@@ -77,6 +77,8 @@ export function ModelInfoPanel({ engineRef }: ModelInfoPanelProps) {
       const isCurrentlyVisible = modelVisibility[modelId] !== false
       object3D.visible = !isCurrentlyVisible
       toggleVisibilityState(modelId)
+      const renderer = engine.world?.renderer as { needsUpdate?: boolean } | undefined
+      if (renderer) renderer.needsUpdate = true
     }
   }
 

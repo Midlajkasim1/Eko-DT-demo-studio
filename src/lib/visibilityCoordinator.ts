@@ -1,15 +1,6 @@
-/**
- * Item visibility on a fragments model has more than one writer: the Levels
- * picker, the template's non-physical hiding, and the dashboard's model tree.
- * `setVisible` is last-write-wins and `resetVisible` wipes everyone's hides, so
- * each writer used to undo the others. Every writer now states which items IT
- * wants hidden, and this module shows only what no writer hides.
- *
- * Whole-model visibility (the Layers picker's `model.object.visible`) is a
- * separate gate and is not handled here.
- */
 
-export type HideSource = 'tree' | 'level' | 'nonPhysical'
+
+export type HideSource = 'tree' | 'level' | 'nonPhysical' | 'furniture'
 
 export interface VisibilityModel {
   setVisible(localIds: number[] | undefined, visible: boolean): Promise<void>

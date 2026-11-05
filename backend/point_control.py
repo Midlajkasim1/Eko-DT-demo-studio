@@ -14,6 +14,8 @@ EQUIPMENT_NAME_RE = re.compile(r"^(MAHU|FAHU|AHU|FCU|VAV)(?=[^A-Z]|$)")
 ZINC_UNIT_RE = re.compile(r"^[A-Za-z%_/$\u0080-\uffff]+$")
 LIFE_SAFETY_RE = re.compile(r"fire|smoke|life|emergency", re.IGNORECASE)
 NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
+# A FIN number written with its unit glued on: 16°C, 800ppm, 250Pa, 30Hz.
+MEAS_RE = re.compile(r"^(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(°C|°F|%RH|ppm|Pa|kPa|Hz|%)$")
 
 
 def fold(name: Any) -> str:
@@ -41,18 +43,71 @@ def equipment_class(name: str, tags: list, policy: dict) -> Optional[str]:
     return cls if cls in allowed else None
 
 
+def _kind(point: dict) -> str:
+    """FIN's kind tag, else the display kind. A unit glued on the value is still a number."""
+    kind = point.get("pointKind")
+    if isinstance(kind, str) and kind:
+        return kind
+    if _glued_unit(point.get("curVal")) or _glued_unit(point.get("currentValue")):
+        return "Number"
+    kind = point.get("kind")
+    return kind if isinstance(kind, str) else ""
+
+
+def _glued_unit(value: Any) -> str:
+    if isinstance(value, dict) and value.get("unit"):
+        return str(value["unit"])
+    match = MEAS_RE.fullmatch(str(value or "").replace(" ", ""))
+    return match.group(2) if match else ""
+
+
+def _unit(point: dict, role: str) -> str:
+    """The unit tag, else the unit glued onto the value, else a guess from the point name."""
+    unit = str(point.get("unit") or "").strip()
+    if unit:
+        return unit
+    for key in ("curVal", "currentValue"):
+        found = _glued_unit(point.get(key))
+        if found:
+            return found
+    folded = fold(point.get("navName"))
+    if role == "output":
+        if any(part in folded for part in ("damper", "coil", "valve")):
+            return "%"
+        return ""
+    if "temp" in folded:
+        return "°C"
+    if "co2" in folded:
+        return "ppm"
+    if "hum" in folded:
+        return "%RH"
+    if "pressure" in folded:
+        return "Pa"
+    return ""
+
+
+def _enum_words(point: dict) -> list:
+    enum = point.get("enum")
+    words = [w.strip() for w in enum.split(",")] if isinstance(enum, str) else []
+    return words if len(words) >= 2 and all(words) else []
+
+
 def point_role(point: dict, roles: list, policy: dict) -> Optional[str]:
-    """setpoint or status when the point is one of those and its equipment class allows it."""
+    """setpoint, status, output or choice when the point is one of those and its class allows it."""
     name = str(point.get("navName") or "")
     if not point.get("writable") or LIFE_SAFETY_RE.search(name):
         return None
     folded = fold(name)
-    kind = point.get("pointKind")
-    status_names = {fold(n) for n in policy.get("status_points") or []}
-    if "status" in roles and kind == "Bool" and folded in status_names:
+    kind = _kind(point)
+    names = lambda key: {fold(n) for n in policy.get(key) or []}
+    if "status" in roles and kind == "Bool" and folded in names("status_points"):
         return "status"
+    if "choice" in roles and kind == "Str" and folded in names("choice_points") and _enum_words(point):
+        return "choice"
     if "setpoint" in roles and kind == "Number" and (point.get("sp") or folded.endswith("sp")):
         return "setpoint"
+    if "output" in roles and kind == "Number" and folded in names("output_points"):
+        return "output"
     return None
 
 
@@ -67,13 +122,15 @@ def control_for(point: dict, eq_class: Optional[str], policy: dict) -> Optional[
     level = int(policy.get("write_level") or 8)
     manual = number_of(point.get("writeLevel")) == level
     if role == "status":
-        enum = point.get("enum")
-        words = [w.strip() for w in enum.split(",")] if isinstance(enum, str) else []
-        if len(words) != 2 or not all(words):
+        words = _enum_words(point)
+        if len(words) != 2:
             words = ["Off", "On"]
         return {"role": "status", "options": [{"value": False, "label": words[0]}, {"value": True, "label": words[1]}],
                 "level": level, "manual": manual}
-    unit = str(point.get("unit") or "")
+    if role == "choice":
+        return {"role": "choice", "options": [{"value": w, "label": w} for w in _enum_words(point)],
+                "level": level, "manual": manual}
+    unit = _unit(point, role)
     preset = (policy.get("setpoint_ranges") or {}).get(unit) or {}
     own_low, own_high = number_of(point.get("minVal")), number_of(point.get("maxVal"))
     site_low, site_high = number_of(preset.get("min")), number_of(preset.get("max"))
@@ -91,12 +148,22 @@ def control_for(point: dict, eq_class: Optional[str], policy: dict) -> Optional[
     return {"role": "setpoint", "unit": unit, "min": low, "max": high, "step": step, "level": level, "manual": manual}
 
 
+def _zinc_str(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("\n", "\\n") + '"'
+
+
 def encode_value(control: dict, value: Any) -> str:
     """The Zinc literal for a requested value; ValueError when the policy does not allow it."""
     if control.get("role") == "status":
         if not isinstance(value, bool):
             raise ValueError("Status takes one of its two states.")
         return "T" if value else "F"
+    if control.get("role") == "choice":
+        words = [o.get("value") for o in control.get("options") or []]
+        match = next((w for w in words if isinstance(w, str) and isinstance(value, str) and w.lower() == value.strip().lower()), None)
+        if match is None:
+            raise ValueError("Choose one of the point's values.")
+        return _zinc_str(match)
     number = number_of(value) if not isinstance(value, str) or value.strip() else None
     if number is None:
         raise ValueError("Enter a number.")

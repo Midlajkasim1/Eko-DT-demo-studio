@@ -1,5 +1,7 @@
 import type { PowerBoard, ProjectApiSettings } from '@/types'
+import { MAPPING_CATALOG, boardKey, historyExpression, isStandardHistory, normalizeRef, pointRefOf } from '@/lib/finMappingCatalog'
 import type { JsonObject } from '@/lib/mappingRows'
+import { hospitalHvacEnabled } from '@/lib/hospitalHvac'
 
 /** The apiSettings fields edited as JSON in Dashboard Settings → Data Mapping */
 export type MappingField =
@@ -18,8 +20,8 @@ export const MAPPING_FIELDS: MappingField[] = [
 ]
 
 export const MAPPING_TITLES: Record<MappingField, string> = {
-  finLivePoints: 'FIN Live Points Mapping',
-  finEndpoints: 'FIN Historical Endpoints',
+  finLivePoints: 'Live readings (FIN Live Points)',
+  finEndpoints: 'Chart history (FIN Historical Endpoints)',
   finEquipmentClasses: 'Equipment Classes',
   finMeterProfile: 'Meter Profile',
   finSeverityBands: 'Severity Configuration',
@@ -87,21 +89,43 @@ export function isTimeZone(tz: string): boolean {
   }
 }
 
-/** A board as typed in the editor: every field text, possibly blank */
-export interface PowerBoardRow { name: string; liveKey: string; historyKey: string; meter: string }
+/** A board as typed in the editor: every field text, possibly blank. With `point`, the keys are made from the name. */
+export interface PowerBoardRow { name: string; liveKey: string; historyKey: string; meter: string; point: string; history: string }
 
 /** The boards to save: trimmed, wholly blank rows dropped, optional fields left out when empty.
  *  undefined when no board is left, so the project falls back to the built-in boards. */
 export function powerBoardsFromRows(rows: PowerBoardRow[]): PowerBoard[] | undefined {
-  const out = rows
-    .map(r => ({ name: r.name.trim(), liveKey: r.liveKey.trim(), historyKey: r.historyKey.trim(), meter: r.meter.trim() }))
-    .filter(r => r.name || r.liveKey || r.historyKey || r.meter)
-    .map(r => ({ name: r.name, liveKey: r.liveKey, ...(r.historyKey ? { historyKey: r.historyKey } : {}), ...(r.meter ? { meter: r.meter } : {}) }))
+  const out: PowerBoard[] = []
+  for (const row of rows) {
+    const r = { name: row.name.trim(), liveKey: row.liveKey.trim(), historyKey: row.historyKey.trim(), meter: row.meter.trim(), point: row.point.trim(), history: row.history.trim() }
+    if (!r.name && !r.liveKey && !r.historyKey && !r.meter && !r.point) continue
+    if (r.point) {
+      const key = boardKey(r.name)
+      out.push({ name: r.name, liveKey: key, point: r.point, ...(r.history ? { historyKey: `${key}_his`, history: r.history } : {}), ...(r.meter ? { meter: r.meter } : {}) })
+    } else {
+      out.push({ name: r.name, liveKey: r.liveKey, ...(r.historyKey ? { historyKey: r.historyKey } : {}), ...(r.meter ? { meter: r.meter } : {}) })
+    }
+  }
   return out.length ? out : undefined
 }
 
 export function powerBoardRows(boards: PowerBoard[] | undefined): PowerBoardRow[] {
-  return (boards ?? []).map(b => ({ name: b.name ?? '', liveKey: b.liveKey ?? '', historyKey: b.historyKey ?? '', meter: b.meter ?? '' }))
+  return (boards ?? []).map(b => ({
+    name: b.name ?? '', liveKey: b.point ? '' : b.liveKey ?? '', historyKey: b.point ? '' : b.historyKey ?? '',
+    meter: b.meter ?? '', point: b.point ?? '', history: b.history ?? '',
+  }))
+}
+
+/** Live points and history queries with each board's own point added, for whatever polls FIN with them */
+export function pointsWithBoards(s: ProjectApiSettings): { live?: JsonObject; history?: JsonObject } {
+  let live = s.finLivePoints
+  let history = s.finEndpoints
+  for (const b of s.finPowerBoards ?? []) {
+    if (!b.point || !b.liveKey) continue
+    live = { ...(live ?? {}), [b.liveKey]: b.point }
+    if (b.history && b.historyKey) history = { ...(history ?? {}), [b.historyKey]: b.history }
+  }
+  return { live, history }
 }
 
 /** The Data Mapping keys a board can name: the keys the backend serves this project.
@@ -118,8 +142,15 @@ export function boardKeyOptions(
 ): { live: string[]; history: string[]; standard: boolean; unverifiedStandard: boolean } {
   const standard = !!schema.standardProject && schema.standardProjectId === projectId && finProjectName === schema.standardProject
   const unverifiedStandard = !standard && !!finProjectName && finProjectName === schema.standardProfile
-  if (standard) return { live: schema.finLivePoints ?? [], history: schema.finEndpoints ?? [], standard, unverifiedStandard }
-  return { live: Object.keys(own.live ?? {}), history: Object.keys(own.history ?? {}), standard, unverifiedStandard }
+  const catalogLive = MAPPING_CATALOG.filter(e => e.block === 'live').map(e => e.key)
+  const catalogHistory = MAPPING_CATALOG.filter(e => e.block === 'history').map(e => e.key)
+  const join = (...lists: (string[] | undefined)[]) => [...new Set(lists.flatMap(list => list ?? []))]
+  return {
+    live: join(catalogLive, schema.finLivePoints, Object.keys(own.live ?? {})),
+    history: join(catalogHistory, schema.finEndpoints, Object.keys(own.history ?? {})),
+    standard,
+    unverifiedStandard,
+  }
 }
 
 /** The first problem with the boards, or null when they can be saved */
@@ -129,15 +160,23 @@ export function powerBoardsProblem(
   meterPrefix?: string,
 ): string | null {
   const seen = new Set<string>()
+  const keysSeen = new Set<string>()
   for (const [i, b] of (boards ?? []).entries()) {
     const at = `Power board ${i + 1}${b.name ? ` (${b.name})` : ''}`
     if (!b.name) return `${at}: a name is required.`
     const folded = b.name.toLowerCase()
     if (seen.has(folded)) return `${at}: another board already has this name.`
     seen.add(folded)
-    if (!b.liveKey) return `${at}: choose its live key from FIN Live Points Mapping.`
-    if (!keys.live.includes(b.liveKey)) return `${at}: "${b.liveKey}" is not a key of this project's FIN Live Points Mapping.`
-    if (b.historyKey && !keys.history.includes(b.historyKey)) return `${at}: "${b.historyKey}" is not a key of this project's FIN Historical Endpoints.`
+    if (b.point) {
+      if (!normalizeRef(b.point)) return `${at}: "${b.point}" is not a FIN point ID.`
+      if (keysSeen.has(b.liveKey)) return `${at}: the name is too close to another board's.`
+      keysSeen.add(b.liveKey)
+      if (b.history && !isStandardHistory(b.history)) return `${at}: its chart history is not a history query for one point.`
+    } else {
+      if (!b.liveKey) return `${at}: choose its FIN point.`
+      if (!keys.live.includes(b.liveKey)) return `${at}: "${b.liveKey}" is not a key of this project's Live readings.`
+      if (b.historyKey && !keys.history.includes(b.historyKey)) return `${at}: "${b.historyKey}" is not a key of this project's Chart history.`
+    }
     if (b.meter && meterPrefix && !b.meter.toUpperCase().startsWith(meterPrefix.toUpperCase())) {
       return `${at}: meter "${b.meter}" does not match this project's meter prefix "${meterPrefix}".`
     }
@@ -173,8 +212,24 @@ export function dashboardProjectInfo(meta: { projectId: string; name: string; ap
   return {
     projectId: meta.projectId,
     demo: s.dashboardDemo === true,
+    /* the sample data set: the layout, and with demo off the figures the project maps no FIN data for; null = Marsa Al Arab */
+    sampleData: s.dashboardSampleData === 'medical' ? 'medical' : null,
+    /* the module set: 'extended' or 'standard' */
+    modules: s.dashboardModules === 'extended' ? 'extended' : 'standard',
+    /* Hospital HVAC graphics: the project whose FIN project is Eko Hospital's (hospitalHvac.ts); the dashboard's equipment mapping reads this too */
+    hospitalHvac: hospitalHvacEnabled(meta),
     /* the project's own boards; null = the built-in board keys, where the project maps them */
     powerBoards: Array.isArray(s.finPowerBoards) && s.finPowerBoards.length ? s.finPowerBoards : null,
+    energyFromHourly: s.energyFromHourly === true,
+    equipPoints: {
+      ahuTemp: s.ahuTemp || '',
+      ahuSetpoint: s.ahuSetpoint || '',
+      fcuTemp: s.fcuTemp || '',
+      fcuSetpoint: s.fcuSetpoint || '',
+    },
+    energyMonthOwn: pointRefOf(s.finLivePoints?.current_month || '') != null
+      && pointRefOf(s.finEndpoints?.Hourly_Energy_Consumption_his || '') != null
+      && pointRefOf(s.finLivePoints?.current_month || '') !== pointRefOf(s.finEndpoints?.Hourly_Energy_Consumption_his || ''),
     site: {
       name: meta.name,
       displayName: s.finDisplayName || '',
@@ -189,6 +244,7 @@ export function dashboardProjectInfo(meta: { projectId: string; name: string; ap
       co2Factor: rateOrNull(s.co2Factor),
       co2FactorName: s.co2FactorName || '',
     },
+    heatmap: s.heatmap && typeof s.heatmap === 'object' ? s.heatmap : null,
   }
 }
 
@@ -201,11 +257,12 @@ export function apiConfigFor(settings: ProjectApiSettings | undefined, fallbackN
     display_name: s.finDisplayName,
     direct_mode: true, // Always true for FIN standalone viewer
     polling_interval: s.finInterval || 5000,
-    live_point_ids: s.finLivePoints || {},
-    power_endpoints: s.finEndpoints || {},
+    live_point_ids: pointsWithBoards(s).live || {},
+    power_endpoints: pointsWithBoards(s).history || {},
     equipment_classes: s.finEquipmentClasses,
     meter_profile: s.finMeterProfile,
     severity_bands: s.finSeverityBands,
+    ...(Array.isArray(s.finDocuments) ? { documents: s.finDocuments } : {}),
     // Only a key the user entered for this project; no shared key is ever written into a project
     weather: {
       lat: s.weatherLat ?? 24.469,
@@ -269,5 +326,11 @@ export function toBackendSettings(settings: ProjectApiSettings | undefined): Pro
   for (const field of MAPPING_FIELDS) {
     if (s[field]) Object.assign(out, { [field]: s[field] })
   }
+  const energyRef = pointRefOf(out.finLivePoints?.current_month || '')
+  const historyRef = pointRefOf(out.finEndpoints?.Hourly_Energy_Consumption_his || '')
+  if (energyRef && !historyRef) {
+    out.finEndpoints = { ...(out.finEndpoints || {}), Hourly_Energy_Consumption_his: historyExpression(energyRef) }
+  }
+  if (Array.isArray(s.finDocuments)) out.finDocuments = s.finDocuments
   return out
 }

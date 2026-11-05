@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import {
-  HvacPoint,
-  COIL_CLOSED, COIL_OPEN, COIL_IDLE, FAN_ON, FAN_OFF, FILTER_CLEAN, FILTER_DIRTY,
-  clean, numberOf, findPoint, shown, isRunning,
+  HvacPoint, HvacSchematicOptions,
+  COIL_CLOSED, COIL_OPEN, COIL_IDLE, FAN_ON, FAN_OFF, FILTER_CLEAN, FILTER_DIRTY, NO_DATA,
+  clean, numberOf, findPoint, shown, stateOf, dirtyOf, setDamper,
   resolveFrame, makeHvacCtx,
   buildCoil, buildValve, buildCentrifugalFan, buildFanOpening,
   buildDamper, buildPanelFilter, buildBagFilter, buildSensorProbe,
@@ -13,14 +13,16 @@ export type AhuPoint = HvacPoint
 export type AhuReading = {
   faDamperOpen:    number | null
   faDamperPos:     string
-  preFilterDirty:  boolean
+  /** null when the filter point is missing: unknown is not clean */
+  preFilterDirty:  boolean | null
   preFilter:       string
   coolingValvePos: number | null
   coolingValveCmd: string
-  sfFanOn:         boolean
+  /** From the supply fan's run status; null when FIN sends none */
+  sfFanOn:         boolean | null
   sfFanStatus:     string
   sfFanRate:       number
-  bagFilterDirty:  boolean
+  bagFilterDirty:  boolean | null
   bagFilter:       string
   raTemp:     string
   raHum:      string
@@ -32,10 +34,13 @@ export type AhuReading = {
 
 export type AhuAnchor = {
   key:      'faDamperPos' | 'preFilter' | 'coolingValveCmd' | 'sfFanStatus' | 'bagFilter'
+          | 'raHum' | 'raCo2' | 'raTemp' | 'saHum' | 'saPressure' | 'saTemp'
   /** The FIN point the label would be for */
   title:    string
   position: THREE.Vector3
   side:     'above' | 'below'
+  /** Shown only while FIN sends the point (the six sensors: not every unit reports all of them) */
+  optional?: boolean
 }
 
 export type AhuSchematic = {
@@ -83,24 +88,25 @@ export function readAhuPoints(points: AhuPoint[]): AhuReading {
     coolingValvePos = Math.min(1, Math.max(0, frac ? cvPosN : cvPosN / 100))
   }
 
-  const sfFanOn   = isRunning(sfFanRaw)
+  const sfFanOn   = stateOf(sfFanRaw)
   const sfFanRate = sfFanOn ? 1.9 : 0
 
-  const preFilterDirty = preFilterRaw != null && /dirty|alarm|fault|high/i.test(preFilterRaw)
-  const bagFilterDirty = bagRaw       != null && /dirty|alarm|fault|high/i.test(bagRaw)
+  const preFilterDirty = dirtyOf(preFilterRaw)
+  const bagFilterDirty = dirtyOf(bagRaw)
+  const filterText = (d: boolean | null) => d == null ? '—' : d ? 'Dirty' : 'Clean'
 
   return {
     faDamperOpen,
     faDamperPos:     shown(faDamperRaw, ' %'),
     preFilterDirty,
-    preFilter:       preFilterDirty ? 'Dirty' : 'Clean',
+    preFilter:       filterText(preFilterDirty),
     coolingValvePos,
     coolingValveCmd: shown(cvCmdRaw, ' %'),
     sfFanOn,
-    sfFanStatus:     sfFanOn ? 'On' : 'Off',
+    sfFanStatus:     sfFanOn == null ? '—' : sfFanOn ? 'On' : 'Off',
     sfFanRate,
     bagFilterDirty,
-    bagFilter:       bagFilterDirty ? 'Dirty' : 'Clean',
+    bagFilter:       filterText(bagFilterDirty),
     raTemp:          shown(raTempRaw,  ' °C'),
     raHum:           shown(raHumRaw,   ' %RH'),
     raCo2:           shown(raCo2Raw,   ' ppm'),
@@ -114,7 +120,10 @@ export function createAhuSchematic(
   localBox:    THREE.Box3,
   modelMatrix: THREE.Matrix4,
   casing?:     THREE.Object3D,
+  options:     HvacSchematicOptions = {},
 ): AhuSchematic | null {
+  // Off (every project but the Hospital): the AHU as it was, with no sensor labels and the clean/off look when no point is read
+  const hospital = options.hospitalHvac === true
   const frame = resolveFrame(localBox, modelMatrix, casing)
   if (!frame) return null
   let { center, long, up, width, hx, hy, hz } = frame
@@ -165,12 +174,18 @@ export function createAhuSchematic(
   const sensorY = hy * 0.8
   const raX = -hx * 0.86
   const saX =  hx * 0.92
-  buildSensorProbe(ctx, group, raX, sensorY, -hz * 0.46, hy, 0xbfdbfe) // RA humidity
-  buildSensorProbe(ctx, group, raX, sensorY,  0,         hy, 0xbbf7d0) // RA CO2
-  buildSensorProbe(ctx, group, raX, sensorY,  hz * 0.46, hy, 0xf8fafc) // RA temp
-  buildSensorProbe(ctx, group, saX, sensorY,  hz * 0.46, hy, 0xbfdbfe) // SA humidity
-  buildSensorProbe(ctx, group, saX, sensorY, -hz * 0.46, hy, 0xfde68a) // SA pressure
-  buildSensorProbe(ctx, group, saX, sensorY,  0,         hy, 0xf8fafc) // SA temp
+  const probe = (key: AhuAnchor['key'], title: string, x: number, z: number, tint: number, side: AhuAnchor['side']): AhuAnchor => {
+    buildSensorProbe(ctx, group, x, sensorY, z, hy, tint)
+    return { key, title, position: new THREE.Vector3(x, sensorY, z), side, optional: true }
+  }
+  const sensors: AhuAnchor[] = [
+    probe('raHum',      'RA_HUMIDITY', raX, -hz * 0.46, 0xbfdbfe, 'above'),
+    probe('raCo2',      'RA_CO2',      raX,  0,         0xbbf7d0, 'above'),
+    probe('raTemp',     'RA_TEMP',     raX,  hz * 0.46, 0xf8fafc, 'above'),
+    probe('saHum',      'SA_HUMIDITY', saX,  hz * 0.46, 0xbfdbfe, 'above'),
+    probe('saPressure', 'SA_PRESSURE', saX, -hz * 0.46, 0xfde68a, 'above'),
+    probe('saTemp',     'SA_TEMP',     saX,  0,         0xf8fafc, 'above'),
+  ]
 
   const anchors: AhuAnchor[] = [
     { key: 'faDamperPos',     title: 'FA_DAMPER_POS',     position: new THREE.Vector3(damperX,    -hy * 0.9, 0), side: 'below' },
@@ -178,22 +193,35 @@ export function createAhuSchematic(
     { key: 'bagFilter',       title: 'BAG_FILTER',        position: new THREE.Vector3(bagFilterX,    hy * 0.9, 0), side: 'above' },
     { key: 'coolingValveCmd', title: 'COOLING_VALVE_CMD', position: new THREE.Vector3(coilX,       -hy * 0.9, 0), side: 'below' },
     { key: 'sfFanStatus',     title: 'SF_FAN_STS',        position: new THREE.Vector3(fanX,        -hy * 0.9, 0), side: 'below' },
+    ...(hospital ? sensors : []),
   ]
 
   let rate = 0
   const apply = (points: AhuPoint[]): AhuReading => {
     const r = readAhuPoints(points || [])
 
-    const open = r.faDamperOpen == null ? 0.62 : r.faDamperOpen
-    damperBlades.forEach(b => { b.rotation.z = open * Math.PI * 0.45 })
+    if (!hospital) {
+      // The look before the Hospital graphics: an unread damper at its default angle, an unread filter clean, an unread fan off
+      damperBlades.forEach(b => { b.rotation.z = (r.faDamperOpen == null ? 0.62 : r.faDamperOpen) * Math.PI * 0.45 })
+      preFilterMat.color.copy(r.preFilterDirty === true ? FILTER_DIRTY : FILTER_CLEAN)
+      bagFilterMat.color.copy(r.bagFilterDirty === true ? FILTER_DIRTY : FILTER_CLEAN)
+      if (r.coolingValvePos == null) coilMat.color.copy(COIL_IDLE)
+      else coilMat.color.copy(COIL_CLOSED).lerp(COIL_OPEN, r.coolingValvePos)
+      bladeMat.color.copy(r.sfFanOn === true ? FAN_ON : FAN_OFF)
+      rate = r.sfFanRate
+      return r
+    }
 
-    preFilterMat.color.copy(r.preFilterDirty ? FILTER_DIRTY : FILTER_CLEAN)
-    bagFilterMat.color.copy(r.bagFilterDirty ? FILTER_DIRTY : FILTER_CLEAN)
+    setDamper(damperBlades, r.faDamperOpen)
+
+    const filterColour = (d: boolean | null) => d == null ? NO_DATA : d ? FILTER_DIRTY : FILTER_CLEAN
+    preFilterMat.color.copy(filterColour(r.preFilterDirty))
+    bagFilterMat.color.copy(filterColour(r.bagFilterDirty))
 
     if (r.coolingValvePos == null) coilMat.color.copy(COIL_IDLE)
     else coilMat.color.copy(COIL_CLOSED).lerp(COIL_OPEN, r.coolingValvePos)
 
-    bladeMat.color.copy(r.sfFanOn ? FAN_ON : FAN_OFF)
+    bladeMat.color.copy(r.sfFanOn == null ? NO_DATA : r.sfFanOn ? FAN_ON : FAN_OFF)
     rate = r.sfFanRate
 
     return r

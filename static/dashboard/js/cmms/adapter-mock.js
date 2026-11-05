@@ -23,8 +23,8 @@ window.EKO_CMMS_MOCK = (function(){
                         assetId: payload.assetId, createdAt: new Date().toISOString() };
         resolve({ externalId: number, number, status: 'accepted' });
         /* scripted lifecycle: assigned then completed, via subscribe() */
-        setTimeout(() => emit(number, payload.assetId, 'assigned', 'S. Khan'), 6000);
-        setTimeout(() => emit(number, payload.assetId, 'completed', 'S. Khan'), 14000);
+        setTimeout(() => emit(number, payload.assetId, 'assigned', 'the shift engineer'), 6000);
+        setTimeout(() => emit(number, payload.assetId, 'completed', 'the shift engineer'), 14000);
       }, 600);
     });
   }

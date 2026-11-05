@@ -146,8 +146,9 @@ window.EKO_R = (function(){
     'derived.wasteAedMtd':        E => { const v = mul(E.data.energyLanding.wasteTotalKwh, E.data.basis.aedPerKwh);
       return { win:'fixed', value:v, unit:cur(E), d:1, labelKey:'rpF.wasteMtd', sources:['model.opt'], basis:basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) }; },
     /* derived: emission */
-    'derived.co2TodayT':          E => { const v = mul(E.data.metrics.energyTodayMwh, E.data.basis.co2KgPerKwh);
-      return { win:'today', value:v, unit:'t CO₂', d:1, labelKey:'rpF.co2Today', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.mwhTimesFactor' }) }; },
+    'derived.co2TodayT':          E => { const kwh = E.data.metrics.energyTodayKwh != null ? E.data.metrics.energyTodayKwh : (E.data.metrics.energyTodayMwh != null ? E.data.metrics.energyTodayMwh * 1000 : null);
+      const v = mul(kwh, E.data.basis.co2KgPerKwh, 0.001);
+      return { win:'today', value:v, unit:'t CO₂', d:1, labelKey:'rpF.co2Today', sources:['meters.main'], basis:basisFor(E, { sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.kwhTimesFactor' }) }; },
     'derived.co2MtdT':            E => { const v = mul(E.data.energyLanding.mtdKwh, E.data.basis.co2KgPerKwh, 0.001);
       return { win:'fixed', value:v, unit:'t CO₂', d:1, labelKey:'pwCarbon', sources:['meters.main'], basis:basisFor(E, Object.assign({ sources:['meters.main'], emission:emission(E), formulaKey:'rpFx.kwhTimesFactor' }, mtd(E))) }; },
     'derived.co2PrevMonthT':      E => { const v = mul(E.data.power.prevMonthKwh, E.data.basis.co2KgPerKwh, 0.001);
@@ -187,7 +188,7 @@ window.EKO_R = (function(){
     'incident.ageH': (E, per, params) => { const a = E.data.alarms.find(x => x.id === params.alarmId); if(!a) return null;
       return { win:'fixed', value:a.ageH, unit:'h', d:a.ageH < 1 ? 1 : 0, labelKey:'rpF.alarmAge', sources:['alarms'], basis:basisFor(E, Object.assign({ sources:['alarms'] }, at(E))) }; },
     /* forecast (sub-module locked on this site: the section says so) */
-    'fcst.monthEndMwh': E => ({ win:'fixed', value:E.data.fcst.monthEndMwh, unit:'MWh', d:0, labelKey:'rpF.monthEnd', sources:['model.fcst'], basis:basisFor(E, { sources:['model.fcst'], from:null, to:null, windowKey:'rpWin.monthEnd', windowParams:{} }) })
+    'fcst.monthEndMwh': E => ({ win:'fixed', value:E.data.fcst.monthEndMwh == null ? null : E.data.fcst.monthEndMwh * 1000, unit:'kWh', d:0, labelKey:'rpF.monthEnd', sources:['model.fcst'], basis:basisFor(E, { sources:['model.fcst'], from:null, to:null, windowKey:'rpWin.monthEnd', windowParams:{} }) })
   };
   const hoursOf = per => per.kind === 'last' ? per.h : per.kind === 'days' ? per.n * 24 : per.kind === 'month' || per.kind === 'prevMonth' ? 24 * 31 : 24;
 
@@ -253,7 +254,7 @@ window.EKO_R = (function(){
     const figures = {};
     const fig = id => {
       if(figures[id]) return figures[id];
-      const r = FIG[id] ? FIG[id](E, per, params) : null;
+      let r = null; try{ r = FIG[id] ? FIG[id](E, per, params) : null; }catch(e){ r = null; }   /* E15: a figure whose data the site does not have is left out, never a broken report; an empty value keeps its dash */
       if(!r) return null;
       const value = num(r.value);
       const f = Object.assign({ id }, r, { value, fmt: fmt(value, r.d) });
@@ -288,10 +289,10 @@ window.EKO_R = (function(){
         if(w.type === 'table.boards') return Object.assign({}, w, { rows: E.data.power.boards, basis: basisFor(E, Object.assign({ sources:['pmu'] }, at(E))) });
         if(w.type === 'table.waste') return Object.assign({}, w, { rows: E.data.energyLanding.kpis, tariff: tariff(E), basis: basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) });
         if(w.type === 'table.anom') return Object.assign({}, w, { rows: E.data.anom.items, tariff: tariff(E), basis: basisFor(E, Object.assign({ sources:['model.anom'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) });
-        if(w.type === 'table.bench') return Object.assign({}, w, { rows: E.data.bench.rows, basis: basisFor(E, Object.assign({ sources:['bench'] }, mtd(E))) });
+        if(w.type === 'table.bench') return Object.assign({}, w, { rows: benchRows(E), basis: basisFor(E, Object.assign({ sources:['bench'] }, mtd(E))) });
         if(w.type === 'status.leak'){ const l = E.data.water.leak; return Object.assign({}, w, { ready: num(l.nightsCollected) != null && num(l.nightsNeeded) != null && l.nightsCollected >= l.nightsNeeded, params:{ got:l.nightsCollected, need:l.nightsNeeded } }); }
         if(w.type === 'period.energy'){
-          return Object.assign({}, w, { available: per.kind === 'today', figures: per.kind === 'today' ? [fig('metrics.energyTodayMwh'), fig('derived.energyCostTodayAed'), fig('derived.co2TodayT')] : [] });
+          return Object.assign({}, w, { available: per.kind === 'today', figures: per.kind === 'today' ? [fig('metrics.energyTodayMwh'), fig('derived.energyCostTodayAed'), fig('derived.co2TodayT')].filter(Boolean) : [] });
         }
         /* generic tables: rows are localised at build time — the document is
            a fixed artefact in one language */
@@ -331,6 +332,8 @@ window.EKO_R = (function(){
         if(w.type === 'table.lifecycle' && incident){
           return { type:'table', labelKey:w.labelKey, head:[E.t('rpCol.step'), E.t('rpCol.when'), E.t('rpCol.state')], rows:incident.lifecycle.map(l => [E.t('rpLc.' +l[0].toLowerCase().replace(/\s+/g, '')), l[1], E.t(l[2] ? 'rpVal.done' : 'rpVal.pending')]), basis:basisFor(E, Object.assign({ sources:['alarms','cmms'] }, at(E))) };
         }
+        /* E15: a handover's PDF: the notes are the handover itself (js/handover.js) */
+        if(w.type === 'text.notes' && params.handoverId && window.EKO_HO){ const lines = window.EKO_HO.notesFor(E, params.handoverId); if(lines) return { type:'text', labelKey:w.labelKey, lines }; }
         if(w.type === 'text.notes') return { type:'text', labelKey:w.labelKey, textKey:'rpEmpty.notes' };
         return Object.assign({}, w);
       }).filter(Boolean);
@@ -381,7 +384,10 @@ window.EKO_R = (function(){
   /* ---- immutability: deep freeze + store --------------------------------- */
   function deepFreeze(o){ if(o && typeof o === 'object' && !Object.isFrozen(o)){ Object.freeze(o); Object.keys(o).forEach(k => deepFreeze(o[k])); } return o; }
   let docs = null;
-  function loadStore(){ if(docs) return docs; try{ docs = JSON.parse(localStorage.getItem(LS_STORE) || '[]'); }catch(e){ docs = []; } docs.forEach(deepFreeze); return docs; }
+  function loadStore(){ if(docs) return docs; try{ docs = JSON.parse(localStorage.getItem(LS_STORE) || '[]'); }catch(e){ docs = []; }
+    /* E15: the "morning-brief" template became the Morning report ("brief" now names the Brief); a document kept before keeps its content and takes the new name */
+    docs.forEach(d => { if(d.templateId === 'morning-brief'){ d.templateId = 'morning-report'; d.titleKey = 'rpT.morningReport'; } });
+    docs.forEach(deepFreeze); return docs; }
   function saveStore(){ try{ localStorage.setItem(LS_STORE, JSON.stringify(docs)); }catch(e){} }
   /* Removal is SOFT (D92): a document is immutable and its id stays unique
      and citable; "remove" hides it from the library, is audited, and can be
@@ -425,5 +431,22 @@ window.EKO_R = (function(){
     return doc;
   }
 
-  return { siteTimeOpts, build, generate, period, periodOf, periodId, PERIODS, dataQuality, basisText, sourceLabel, fmt, num, mul, div, tr, MISSING, tariffText, emissionText, SOURCES, FIG, templates: T, store, audit, auditFor, title, lockedIds, hoursOf };
+  /* E15: a site benchmarked against its design (bench.design) has no ready rows; they are made here from the same
+     systems, as Wh per m² against the design band, so the executive report renders on every site */
+  function benchRows(E){
+    const b = E.data.bench || {}; if(Array.isArray(b.rows)) return b.rows;
+    const d = b.design, area = (E.data.energyModel || {}).floorAreaM2; if(!d || !Array.isArray(d.systems) || !area) return [];
+    const tol = (d.tolPct || 5) / 100, wh = mwh => Math.round(mwh * 1e6 / area);
+    return d.systems.map(x => { const p = x.designMwh ? (x.actualMwh / x.designMwh - 1) * 100 : 0, n = E.t('rpB.vsDesign', { p: (p > 0 ? '+' : '') + Math.round(p) });
+      return { sysEn: x.sysEn, sysAr: x.sysAr, whm2: wh(x.actualMwh), bandLo: wh(x.designMwh * (1 - tol)), bandHi: wh(x.designMwh * (1 + tol)), noteEn: n, noteAr: n }; });
+  }
+
+  /* E15: THE delivery path: audit, then the notification with its deep link (a handover, the scheduled Brief) */
+  function deliver(E, notif, action, id){
+    if(action) audit(E, action, id || notif.type, notif.params || {});
+    if(window.EKO_NOTIF) return window.EKO_NOTIF.add(notif);
+    return null;
+  }
+
+  return { siteTimeOpts, build, generate, deliver, period, periodOf, periodId, PERIODS, dataQuality, basisText, sourceLabel, fmt, num, mul, div, tr, MISSING, tariffText, emissionText, SOURCES, FIG, templates: T, store, audit, auditFor, title, lockedIds, hoursOf };
 })();

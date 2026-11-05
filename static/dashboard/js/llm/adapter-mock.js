@@ -31,6 +31,20 @@ window.EKO_LLM_MOCK = (function(){
         if(ctx.alarms && ctx.alarms.length) text += ' ' + t('rpMock.askAlarm', { asset: ctx.alarms[0].asset, sev: ctx.alarms[0].sev, what: ctx.alarms[0].what });
       } else if(ctx.kind === 'summary'){
         text = t('rpMock.summary', { site: ctx.site, window: win, n: String(ctx.sectionCount) }) + ' ' + figs.map(f => t('rpMock.figure', { label: f.label, value: f.fmt, unit: f.unit ? ' ' + f.unit : '' })).join(' ');
+      } else if(ctx.kind === 'brief'){
+        /* D139/D140: the Brief's contract — { headline, recommendation } as JSON. ONE sentence
+           over the computed deltas; the recommendation's wording comes back verbatim
+           from the context, so no figure enters that the platform did not give. */
+        /* D140: the HEADLINE names the most important change in plain language —
+           built from the platform's lead, never a count */
+        /* D144: nothing needs you — the calm sentence is the headline; the engineer's
+           recurrence is framed as a pattern; a lead's own full stop is not doubled */
+        const lead = String(ctx.lead || '').replace(/[.۔]\s*$/, '');
+        /* E14c: the Brief's summary sentence is already the sentence: the stand-in returns it as written (a model may only reword it) */
+        const head = ctx.summary && lead ? lead + '.' : ctx.calm ? ctx.calm : !lead ? t('rpMock.briefQuiet', { window: win })
+          : t(ctx.lens === 'engineer' && ctx.recurrence && ctx.lead === ctx.recurrence ? 'rpMock.briefHeadRecur' : ({ engineer: 'rpMock.briefHeadEng', executive: 'rpMock.briefHeadExec' }[ctx.lens] || 'rpMock.briefHead'), { lead });
+        text = JSON.stringify({ headline: head,
+          recommendation: ctx.recommendation || null });
       } else if(ctx.kind === 'recommendations'){
         text = t('rpMock.reco', { first: figs[0] ? figs[0].label : '', dq: String(ctx.dqCount) });
       } else {

@@ -4,6 +4,7 @@ export const BACKEND_EXPORT_FILES = [
   'workorders.py',
   'point_control.py',
   'notifications.py',
+  'fdd_recommendations.py',
   'start_viewer.py',
   'requirements.txt',
   'login.html',

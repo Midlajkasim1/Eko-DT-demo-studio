@@ -75,7 +75,7 @@ function TemplateCard({
   template, active, onPick,
 }: { template: ViewTemplate; active: boolean; onPick: (id: TemplateId) => void }) {
   const { card } = template
-  
+
   const style = {
     '--card-sky': skyCss(card.sky),
     '--card-horizon': card.horizon,

@@ -212,7 +212,7 @@
     'Kitchen channel 1': 'قناة المطبخ 1',
     'Kitchen channel 2': 'قناة المطبخ 2',
     'Kitchen channel 3': 'قناة المطبخ 3',
-    'MWh today': 'ميجاواط ساعة اليوم',
+    'kWh today': 'كيلوواط ساعة اليوم',
     'Widen panel': 'توسيع اللوحة',
     'Narrow panel': 'تضييق اللوحة',
     'events': 'أحداث',
@@ -278,7 +278,7 @@
   const cursorMs = () => (timeCursor ? timeCursor.getTime() : null);
 
   // Keys on the power payload that are not instantaneous readings
-  const POWER_PASSTHROUGH = new Set(['timestamp', 'unit', 'power_history', 'fdd', 'facilityServices']);
+  const POWER_PASSTHROUGH = new Set(['timestamp', 'unit', 'units', 'power_history', 'fdd', 'facilityServices']);
   const histMemo = { srcPower: null, power: null, srcEquip: null, equip: null };
 
   function powerAtCursor(p) {
@@ -370,8 +370,6 @@
     const power = live.power;
     const hist = power && power.power_history ? power.power_history : null;
     let nested = hist ? hist[key] : null;
-    if (!nested && hist && key === 'Hourly_Energy_Consumption_his') nested = hist.Total_Power_Consumption_his;
-    if (!nested && hist && key === 'Total_Power_Consumption_his') nested = hist.Hourly_Energy_Consumption_his;
     if (!nested) return [];
     const flat = flattenHistory(nested);
     return raw ? flat : clampToCursor(flat);
@@ -391,7 +389,6 @@
     return count ? { sum, count } : null;
   }
 
-  // Fallback for when the FIN total_power point is not reporting.
   function pmuLiveSum() {
     const meters = live.meters;
     if (!meters) return null;
@@ -405,10 +402,8 @@
 
   function liveLoadKw() {
     const power = live.power;
-    if (power && power.hourly_energy != null) return power.hourly_energy;
-    if (power && power.total_power != null) return power.total_power;
-    const pmu = pmuLiveSum();
-    return pmu ? pmu.sum : null;
+    if (!power || !Object.prototype.hasOwnProperty.call(power, 'hourly_energy')) return null;
+    return power.hourly_energy;
   }
 
   // Per-PMU historian keys in the power_history payload (PMU04_MCC_02_his …)
@@ -489,45 +484,30 @@
   function energyKpis() {
     const series = historySeries('Hourly_Energy_Consumption_his');
     const now = new Date();
-    const today = daySumWithPmuFallback(series, now);
+    const today = sumDay(series, now);
     const lastMonthDay = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
-    const lastMonth = daySumWithPmuFallback(series, lastMonthDay);
+    const lastMonth = sumDay(series, lastMonthDay);
     const lastMonthSameHours = today ? sumDay(series, lastMonthDay, now.getHours() + 1) : null;
     let momPct = null;
     if (today && lastMonthSameHours && lastMonthSameHours.sum > 0) {
       momPct = ((today.sum - lastMonthSameHours.sum) / lastMonthSameHours.sum) * 100;
     }
 
-    // FIN total → live PMU sum → Peak_Demand; loadSrc labels which one answered.
     const power = live.power;
-    const finLoad = power ? (power.hourly_energy != null ? power.hourly_energy : power.total_power) : null;
-    const pmu = finLoad == null ? pmuLiveSum() : null;
-    let load = finLoad != null ? finLoad : (pmu ? pmu.sum : null);
-    let loadSrc = finLoad != null ? '' : (pmu ? 'pmu' : '');
-    if (load == null && power && power.peak_demand != null) {
-      load = power.peak_demand;
-      loadSrc = 'peak';
-    }
-
-    // The fallback point changes the unit too (kWh/h → kW), so sparkSrc reports it.
-    let spark = series.slice(-24);
-    let sparkSrc = 'energy';
-    if (!spark.length) {
-      spark = historySeries('Peak_Demand_his').slice(-24);
-      sparkSrc = 'peak';
-    }
+    const load = power && power.hourly_energy != null ? power.hourly_energy : null;
+    const spark = series.slice(-24);
 
     return {
       consumed: today ? today.sum : null,
-      consumedFromPmu: !!(today && today.fromPmu),
+      consumedFromPmu: false,
       eod: eodForecast(series, now, today),
       lastMonth: lastMonth ? lastMonth.sum : null,
       momPct,
       load,
-      loadSrc,
-      loadPmuCount: pmu ? pmu.count : 0,
+      loadSrc: '',
+      loadPmuCount: 0,
       spark,
-      sparkSrc,
+      sparkSrc: 'energy',
     };
   }
 
@@ -617,7 +597,7 @@
       if (item.id === 'waste') { const n = activeFindings().length; return n ? `${n} ${t('findings')}` : '—'; }
       if (item.id === 'lbm') { const m = live.meters; const n = m ? Object.keys(m).length : 0; return n ? `${n} ${t('meters live')}` : '—'; }
       if (item.id === 'anom') { const n = pmuHistKeys().length; return n ? `${n} ${t('PMU trends')}` : '—'; }
-      if (item.id === 'cons') { const k = energyKpis(); return k.consumed != null ? `${shortNum(k.consumed / 1000, 1)} ${t('MWh today')}` : '—'; }
+      if (item.id === 'cons') { const k = energyKpis(); return k.consumed != null ? `${shortNum(k.consumed, 0)} ${t('kWh today')}` : '—'; }
       if (item.id === 'bench') return t('Requires portfolio');
       if (item.id === 'budget') return t('Requires targets');
       if (item.id === 'fcst') return t('In design');
@@ -3444,6 +3424,7 @@
         { id: 'default', label: 'Default' },
         { id: 'photoreal', label: 'Photoreal' },
         { id: 'minimal', label: 'Minimalist' },
+        { id: 'studio', label: 'Studio' },
         { id: 'xray', label: 'X-ray' }
       ];
 

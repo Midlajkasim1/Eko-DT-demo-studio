@@ -3,8 +3,10 @@ import { useShallow } from 'zustand/react/shallow'
 import {
   pickRenderSettings,
   SHADOW_MAP_SIZES,
+  studioAdjustOf,
   TONE_MAPPING_OPTIONS,
   type RenderSettings,
+  type StudioAdjust,
   type ToneMappingId,
 } from '@/constants/renderSettings'
 import { useAppStore } from '@/store/useAppStore'
@@ -199,6 +201,10 @@ export function RenderPanel() {
 
   const activeTemplate = getViewTemplate(s.templateId)
   const templated = activeTemplate.scene !== null
+  const studio = studioAdjustOf(s.studioAdjust)
+  const setStudio = (patch: Partial<StudioAdjust>) => {
+    setLightingParams({ studioAdjust: { ...studio, ...patch } })
+  }
 
   const formatTime = (time: number) => {
     const hours   = Math.floor(time)
@@ -222,7 +228,7 @@ export function RenderPanel() {
       </button>
 
       {/* Panel body */}
-      <div className="position-panel-body" style={{ maxHeight: '380px', overflowY: 'auto' }}>
+      <div className="position-panel-body" style={{ maxHeight: s.templateId === 'studio' ? 'min(720px, calc(100vh - 140px))' : '460px', overflowY: 'auto' }}>
         <div className="position-panel-header">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14" style={{ color: 'var(--accent)' }}>
             <circle cx="12" cy="12" r="5" />
@@ -246,6 +252,57 @@ export function RenderPanel() {
               onChange={v => setLightingParams({ templateSwitcher: v })}
             />
           </div>
+
+          {/* ── Studio adjustments ────────────────────────────── */}
+          {s.templateId === 'studio' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+              <SectionDivider label="Studio" />
+              <p style={{ fontSize: '9px', lineHeight: 1.4, color: 'var(--text-secondary)', margin: 0 }}>
+                Saved with the Studio style when you export, and used again when that style is chosen in the dashboard.
+              </p>
+              <Slider label="Sun Intensity" value={studio.sunIntensity} min={0} max={4} step={0.05}
+                onChange={v => setStudio({ sunIntensity: v })} />
+              <Slider label="Ambient Light" value={studio.ambient} min={0} max={2} step={0.05}
+                onChange={v => setStudio({ ambient: v })} />
+              <Slider label="Exposure" value={studio.exposure} min={0.2} max={2.5} step={0.05}
+                onChange={v => setStudio({ exposure: v })} />
+              <Toggle label="Cast Shadows"
+                checked={studio.shadows}
+                onChange={v => setStudio({ shadows: v })} />
+              {studio.shadows && (
+                <>
+                  <Toggle label="Soft Shadows"
+                    title="PCF soft filtering. Off gives a hard shadow edge."
+                    checked={studio.softShadows}
+                    onChange={v => setStudio({ softShadows: v })} />
+                  {studio.softShadows && (
+                    <Slider label="Shadow Softness" value={studio.shadowRadius} min={0} max={12} step={0.5}
+                      format={v => v.toFixed(1)} onChange={v => setStudio({ shadowRadius: v })} />
+                  )}
+                </>
+              )}
+              <Toggle label="Ambient Occlusion"
+                title="Contact shading in corners. Pauses while orbiting."
+                checked={studio.ambientOcclusion}
+                onChange={v => setStudio({ ambientOcclusion: v })} />
+              {studio.ambientOcclusion && (
+                <>
+                  <Slider label="AO Radius" value={studio.aoRadius} min={0.2} max={8} step={0.1}
+                    onChange={v => setStudio({ aoRadius: v })} />
+                  <Slider label="AO Intensity" value={studio.aoIntensity} min={0} max={2} step={0.05}
+                    onChange={v => setStudio({ aoIntensity: v })} />
+                </>
+              )}
+              <Toggle label="Fine Outlines"
+                title="Thin grey edges. Pauses while orbiting."
+                checked={studio.edges}
+                onChange={v => setStudio({ edges: v })} />
+              {studio.edges && (
+                <Slider label="Edge Strength" value={studio.edgeStrength} min={0} max={1} step={0.05}
+                  onChange={v => setStudio({ edgeStrength: v })} />
+              )}
+            </div>
+          )}
 
           {/* ── Render Mode ───────────────────────────────────── */}
           {!templated && (
@@ -278,9 +335,6 @@ export function RenderPanel() {
           )}
           {/* <Toggle label="Ground Grid" checked={s.gridVisible}
             onChange={v => setLightingParams({ gridVisible: v })} /> */}
-
-          {/* Template settings section is intentionally empty — all controls are owned
-              by the template itself. The description above the picker explains each one. */}
 
           {/* ── Render Lite settings ───────────────────────────── */}
           {s.renderLite && !s.realisticMode && !templated && (

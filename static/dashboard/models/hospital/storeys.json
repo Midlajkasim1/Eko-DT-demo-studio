@@ -1,0 +1,74 @@
+{
+ "units": "m",
+ "up": "Y",
+ "note": "Level 1 floor at 0; the model is turned 26 degrees about Y and centred",
+ "storeys": [
+  {
+   "id": "L0",
+   "names": [
+    "EAST CANOPY",
+    "GYM ROOF",
+    "LEVEL 0",
+    "LEVEL 0 FOUNDATION",
+    "Level 0",
+    "Mock-Up Standards",
+    "PENTHOUSE ROOF"
+   ],
+   "elevation": -0.8
+  },
+  {
+   "id": "L1",
+   "names": [
+    "LEVEL 1",
+    "LEVEL 1.1",
+    "Level 1"
+   ],
+   "elevation": 0.0
+  },
+  {
+   "id": "L2",
+   "names": [
+    "LEVEL 2",
+    "LEVEL 2.1",
+    "Level 2"
+   ],
+   "elevation": 4.2
+  },
+  {
+   "id": "L3",
+   "names": [
+    "LEVEL 3",
+    "LEVEL 3 / PENTHOUSE",
+    "LEVEL 3.1",
+    "LEVEL 3.2",
+    "Level 3",
+    "Level 3 (OLD)"
+   ],
+   "elevation": 8.4
+  },
+  {
+   "id": "L4",
+   "names": [
+    "LEVEL 4",
+    "LEVEL 4 / GYM ROOF"
+   ],
+   "elevation": 10.3
+  },
+  {
+   "id": "L5",
+   "names": [
+    "LEVEL 5",
+    "LEVEL 5 / ROOF"
+   ],
+   "elevation": 12.6
+  },
+  {
+   "id": "L6",
+   "names": [
+    "LEVEL 6",
+    "LEVEL 6 / PENTHOUSE ROOF"
+   ],
+   "elevation": 16.2
+  }
+ ]
+}

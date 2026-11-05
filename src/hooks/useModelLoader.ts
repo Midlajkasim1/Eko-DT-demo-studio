@@ -118,19 +118,8 @@ export function useModelLoader(engineRef: React.MutableRefObject<FragmentsEngine
         progress.updateEntry(modelId, { parseMs: performance.now() - parseStart })
         useModelStore.getState().markModelLoadedInEngine(modelId)
 
-        // IFC spaces
-        try {
-          const spaceLocalIds = await model.getItemsByQuery({
-            categories: [/IFCSPACE/]
-          })
-          
-          if (spaceLocalIds && spaceLocalIds.length > 0) {
-            await model.setOpacity(spaceLocalIds, 0.01)
-            // await model.setColor(spaceLocalIds, new THREE.Color(0x88ccff))
-          }
-        } catch (e) {
-          console.warn('[GlassSpaces] Could not apply glass spaces styling:', e)
-        }
+        /* Rooms are not read here. The spaces file stays hidden until the heatmap,
+           and Equipment & Spaces reads IfcSpace only when Scan is pressed. */
 
         if (fitToBox) {
           try {

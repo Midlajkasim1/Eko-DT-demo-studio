@@ -123,7 +123,34 @@ def project_overrides(settings: Optional[dict]) -> dict:
     interval = settings.get("finInterval")
     if isinstance(interval, (int, float)) and not isinstance(interval, bool) and interval > 0:
         out["polling.live_ms"] = interval
+    # A saved list, including an empty one, replaces om-warranty.json. Absent keeps the file.
+    if isinstance(settings.get("finDocuments"), list):
+        out["document_families"] = clean_document_families(settings.get("finDocuments"))
     return out
+
+
+_BOARD_KEY = re.compile(r"^board_[a-z0-9_]{1,60}$")
+_BOARD_POINT = re.compile(r"^p:\{project\}:r:[\w.-]+$")
+_BOARD_HISTORY = re.compile(
+    r"^/api/\{project\}/eval\?expr=hisRead\(@p:\{project\}:r:[\w.-]+,\d{4}-\d{2}-\d{2}\.\.today\(\)%2C%7B-limit%7D\)$")
+
+
+def board_points(settings: Optional[dict]) -> tuple:
+    """The live points and history queries of the boards that name their own FIN point."""
+    live: dict = {}
+    history: dict = {}
+    boards = settings.get("finPowerBoards") if isinstance(settings, dict) else None
+    for board in boards if isinstance(boards, list) else []:
+        if not isinstance(board, dict):
+            continue
+        key, point = board.get("liveKey"), board.get("point")
+        if not (isinstance(key, str) and _BOARD_KEY.match(key) and isinstance(point, str) and _BOARD_POINT.match(point)):
+            continue
+        live[key] = point
+        hkey, expr = board.get("historyKey"), board.get("history")
+        if hkey == key + "_his" and isinstance(expr, str) and _BOARD_HISTORY.match(expr) and "@" + point + "," in expr:
+            history[hkey] = expr
+    return live, history
 
 
 def merge_project_settings(base: dict, settings: Optional[dict], isolated: bool = False) -> dict:
@@ -145,6 +172,11 @@ def merge_project_settings(base: dict, settings: Optional[dict], isolated: bool 
             merged["polling"] = {**(merged.get("polling") or {}), "live_ms": value}
         else:
             merged[key] = copy.deepcopy(value)
+    live, history = board_points(settings)
+    if live:
+        merged["live_point_ids"] = {**(merged.get("live_point_ids") or {}), **live}
+    if history:
+        merged["power_endpoints"] = {**(merged.get("power_endpoints") or {}), **history}
     return merged
 
 
@@ -206,6 +238,71 @@ def _block_source(key: str) -> str:
     return "not_configured" if ACTIVE_ISOLATED else "default"
 
 
+_DOC_REF_RE = re.compile(r"@p:[A-Za-z0-9_]+:r:[0-9a-fA-F-]+")
+
+
+def _str_list(value) -> list:
+    if isinstance(value, str):
+        value = re.split(r"[,;\n]+", value)
+    if not isinstance(value, list):
+        return []
+    out = []
+    for item in value:
+        text = str(item).strip()
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
+def _manual(value) -> Optional[dict]:
+    if not isinstance(value, dict):
+        return None
+    ref = str(value.get("ref") or "").strip()
+    name = str(value.get("name") or "").strip()
+    if not name or not _DOC_REF_RE.fullmatch(ref):
+        return None
+    doc = {"name": name, "ref": ref}
+    name_ar = str(value.get("nameAr") or "").strip()
+    if name_ar:
+        doc["nameAr"] = name_ar
+    return doc
+
+
+def clean_document_families(raw) -> list:
+    """Families the dashboard can match. A group with no usable manual is dropped."""
+    if not isinstance(raw, list):
+        return []
+    families = []
+    seen = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        fam_id = str(item.get("id") or "").strip()
+        if not fam_id or fam_id in seen:
+            continue
+        om = _manual(item.get("om"))
+        warranty = _manual(item.get("warranty"))
+        if not om and not warranty:
+            continue
+        seen.add(fam_id)
+        fam = {
+            "id": fam_id,
+            "tags": _str_list(item.get("tags")),
+            "codes": _str_list(item.get("codes")),
+            "types": _str_list(item.get("types")),
+            "names": _str_list(item.get("names")),
+        }
+        label = str(item.get("label") or "").strip()
+        if label:
+            fam["label"] = label
+        if om:
+            fam["om"] = om
+        if warranty:
+            fam["warranty"] = warranty
+        families.append(fam)
+    return families
+
+
 def _documents_path() -> str:
     name = CONFIG.get("documents_file") or "om-warranty.json"
     if os.path.isabs(name):
@@ -230,13 +327,22 @@ def _ref_project(ref: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
-def _catalog_doc(ref: str) -> Optional[dict]:
+def _stored_document_families() -> list:
+    """The list this project saved, or om-warranty.json when it saved none."""
+    if "document_families" in ACTIVE_OVERRIDES:
+        raw = CONFIG.get("document_families")
+        return raw if isinstance(raw, list) else []
     try:
         with open(_documents_path(), "r", encoding="utf-8") as handle:
             raw = json.load(handle)
     except (OSError, json.JSONDecodeError):
-        return None
-    for fam in raw.get("families") or []:
+        return []
+    families = raw.get("families") if isinstance(raw, dict) else None
+    return families if isinstance(families, list) else []
+
+
+def _catalog_doc(ref: str) -> Optional[dict]:
+    for fam in _stored_document_families():
         if not isinstance(fam, dict):
             continue
         for kind in ("om", "warranty"):
@@ -256,15 +362,10 @@ def _pdf_filename(name: str) -> str:
 def load_documents() -> dict:
     """Re-read the catalog each call so an edit shows up on the next poll.
 
-    A manual is a record of ONE FIN project, so only the active project's are listed: another
-    project's equipment is never matched to this site's manuals."""
-    try:
-        with open(_documents_path(), "r", encoding="utf-8") as handle:
-            raw = json.load(handle)
-    except (OSError, json.JSONDecodeError):
-        return {"families": []}
+    A project that saved its own list does not read om-warranty.json. A manual is a record of
+    ONE FIN project, so only the active project's are listed."""
     families = []
-    for fam in raw.get("families") or []:
+    for fam in _stored_document_families():
         if not isinstance(fam, dict):
             continue
         item = {
@@ -305,6 +406,7 @@ cached_power_data: dict = {}
 cached_building_data: dict = {}
 cached_sensor_avg: dict = {"temp": None, "humidity": None, "co2": None}
 cached_power_history: dict = {}
+cached_point_units: dict = {}
 cached_fdd_summary: list = []
 cached_meter_data: dict = {}
 cached_alarm_data: dict = {}
@@ -340,14 +442,12 @@ async def realtime_loop():
             _note_critical_alarms(client.project_name, cached_alarm_data["alarms"],
                                   getattr(client, "last_alarm_read_ok", False))
             cached_facility = _compute_facility_services(realtime)
-            cached_power_history = await client.fetch_power_histories(pw_endpoints)
-            if (
-                "Hourly_Energy_Consumption_his" in cached_power_history
-                and "Total_Power_Consumption_his" not in cached_power_history
-            ):
-                cached_power_history["Total_Power_Consumption_his"] = cached_power_history[
-                    "Hourly_Energy_Consumption_his"
-                ]
+            cached_power_history, hist_units = await client.fetch_power_histories(pw_endpoints)
+            for key, unit in hist_units.items():
+                if unit:
+                    cached_point_units[key] = unit
+            if cached_power_data is not None:
+                cached_power_data["units"] = dict(cached_point_units)
             cached_building_data = {
                 "status": "success",
                 "Building_Info": {
@@ -384,12 +484,15 @@ async def live_loop():
                 *(client.fetch_live_point(pid) for pid in live_ids.values()),
                 return_exceptions=True,
             )
-            live_results = {
-                key: None if isinstance(val, Exception) else val
-                for key, val in zip(live_ids, values)
-            }
-            if "hourly_energy" in live_results and "total_power" not in live_results:
-                live_results["total_power"] = live_results["hourly_energy"]
+            live_results = {}
+            for key, pair in zip(live_ids, values):
+                if isinstance(pair, Exception):
+                    live_results[key] = None
+                    continue
+                val, unit = pair
+                live_results[key] = val
+                if unit:
+                    cached_point_units[key] = unit
             cached_power_data = {
                 "timestamp": datetime.now().isoformat(),
                 **live_results,
@@ -397,7 +500,7 @@ async def live_loop():
                 "avg_temp": cached_sensor_avg.get("temp"),
                 "avg_hum": cached_sensor_avg.get("humidity"),
                 "avg_co2": cached_sensor_avg.get("co2"),
-                "unit": "kWh",
+                "units": dict(cached_point_units),
                 "fdd": cached_fdd_summary,
                 "facilityServices": cached_facility,
             }
@@ -602,6 +705,7 @@ def _flatten_equip(realtime: dict) -> list[dict]:
                     "inAlarm": len(alarms) > 0,
                     "alarms": alarms,
                     "bimId": eq.get("bimId", ""),
+                    "finId": eq.get("finId") or "",
                     "equipId": eq.get("equipId") or "",
                     "points": _with_control(eq_name, tags, eq.get("points", [])),
                 })
@@ -647,9 +751,14 @@ def _compute_sensor_averages(realtime: dict):
         cached_sensor_avg["co2"] = round(sum(co2_vals) / len(co2_vals), 2)
 
 
+# A record's own type marker, for a project that configures no type priority
+TYPE_MARKERS = ["ahu", "fahu", "mahu", "fcu", "vav", "chiller", "boiler", "coolingTower", "pump", "condenser", "fan", "exhaust",
+                "compressor", "meter", "pmu", "btu", "elecPanel", "smdb", "ats", "ups", "generator", "lift", "cctv"]
+
+
 def _equip_type(tags: list, priority: list) -> str:
     """First matching marker tag, in configured priority order."""
-    for t in priority:
+    for t in priority or TYPE_MARKERS:
         if t in (tags or []):
             return t
     return "other"
@@ -843,13 +952,14 @@ async def _sleep_while_watched(seconds: float) -> bool:
 def _reset_caches():
     """Drop data polled under the previous configuration so it is never served for the next."""
     global cached_equip_data, cached_power_data, cached_building_data, cached_sensor_avg
-    global cached_power_history, cached_fdd_summary, cached_meter_data, cached_alarm_data
+    global cached_power_history, cached_point_units, cached_fdd_summary, cached_meter_data, cached_alarm_data
     global cached_facility, cached_workorders
     cached_equip_data = {}
     cached_power_data = {}
     cached_building_data = {}
     cached_sensor_avg = {"temp": None, "humidity": None, "co2": None}
     cached_power_history = {}
+    cached_point_units = {}
     cached_fdd_summary = []
     cached_meter_data = {}
     cached_alarm_data = {}
@@ -1458,16 +1568,76 @@ async def get_fin_resources(request: Request, project: str):
         if not pid:
             continue
         equip = safe_get(row.get("equipRef"), "dis")
+        nav = row.get("navName") if isinstance(row.get("navName"), str) else None
+        name = safe_get(row.get("id"), "dis") or row.get("dis") or nav or pid
+        # an unexpanded display macro ("$pointRef AlarmStatus") names nothing on its own
+        if "$" in str(name):
+            name = " ".join(x for x in (equip, nav) if x) or pid
         items.append({
             "id": pid,
             "ref": pid.replace(f":{project}:", ":{project}:", 1) if f":{project}:" in pid else pid,
-            "name": safe_get(row.get("id"), "dis") or row.get("dis") or row.get("navName") or pid,
-            "navName": row.get("navName") if isinstance(row.get("navName"), str) else None,
+            "name": name,
+            "navName": nav,
             "equip": equip or None,
             "unit": row.get("unit") if isinstance(row.get("unit"), str) else None,
+            "kind": row.get("kind") if row.get("kind") in ("Bool", "Number", "Str") else None,
             "his": row.get("his") is True,
         })
     return {"project": project, "resources": items, "truncated": len(rows) > MAX_RESOURCES}
+
+
+_FILE_QUERIES = ("readAll(file)", "readAll(pdf)", "readAll(doc)")
+MAX_FILES = 2000
+
+
+@app.get("/api/fin/files")
+async def get_fin_files(request: Request, project: str):
+    """The files of ONE FIN project, so O&M and warranty can be picked by name.
+
+    Read-only, and keyed by the project asked about. The three queries are fixed; nothing
+    the browser sends is evaluated.
+    """
+    _require_user(request)
+    if not PROJECT_ID_RE.match(project):
+        raise HTTPException(status_code=400, detail="Not a FIN project identifier.")
+    if client is None or not client.is_authenticated:
+        raise HTTPException(status_code=401, detail="Connect to FIN first.")
+    found: dict = {}
+    truncated = False
+    any_ok = False
+    last_status: Optional[int] = None
+    for expr in _FILE_QUERIES:
+        if len(found) >= MAX_FILES:
+            truncated = True
+            break
+        endpoint = f"/api/{quote(project, safe='')}/eval?expr={quote(expr, safe='')}"
+        status, text = await client.fetch_probe(endpoint)
+        last_status = status
+        if status != 200 or text is None or _is_error_grid(text):
+            continue
+        any_ok = True
+        rows = parse_zinc_csv(text)
+        if len(found) + len(rows) > MAX_FILES:
+            truncated = True
+        for row in rows:
+            if len(found) >= MAX_FILES:
+                break
+            pid = str(safe_get(row.get("id"), "val") or "")
+            if not pid:
+                continue
+            ref = pid if pid.startswith("@") else "@" + pid
+            if not _DOC_REF_RE.fullmatch(ref) or ref in found:
+                continue
+            dis = safe_get(row.get("id"), "dis")
+            if not dis and isinstance(row.get("dis"), str):
+                dis = row.get("dis")
+            if not dis and isinstance(row.get("navName"), str):
+                dis = row.get("navName")
+            found[ref] = {"ref": ref, "name": str(dis or ref)}
+    if not any_ok and not found:
+        raise _fin_failure(last_status, None, "files")
+    files = sorted(found.values(), key=lambda item: str(item["name"]).lower())
+    return {"project": project, "files": files, "truncated": truncated}
 
 
 @app.get("/api/fin/mapping-schema")
@@ -1846,7 +2016,11 @@ async def get_power_history(request: Request, response: Response):
     """Get the historian series. Refreshed once per realtime cycle, not per live poll."""
     _require_user(request)
     _stamp(response)
-    return cached_power_history or {}
+    out = dict(cached_power_history or {})
+    units = {k: cached_point_units[k] for k in out if cached_point_units.get(k)}
+    if units:
+        out["_units"] = units
+    return out
 
 
 @app.get("/api/fin/pmu-live")
@@ -1920,6 +2094,12 @@ def _write_landed(record: dict, control: dict, literal: Optional[str], action: s
         return not held
     if control["role"] == "status":
         return held and bool_state(record.get("curVal")) == (literal == "T")
+    if control["role"] == "choice":
+        wanted = str(literal or "").strip()
+        if len(wanted) >= 2 and wanted[0] == wanted[-1] == '"':
+            wanted = wanted[1:-1]
+        current = record.get("curVal")
+        return held and isinstance(current, str) and current.strip().lower() == wanted.lower()
     current, wanted = number_of(record.get("curVal")), number_of(literal)
     return held and current is not None and wanted is not None and abs(current - wanted) < 1e-6
 

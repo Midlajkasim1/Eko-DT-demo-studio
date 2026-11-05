@@ -5,6 +5,7 @@ import { useModelStore } from '@/store/useModelStore'
 import { useMapStore } from '@/store/useMapStore'
 import { streamProjectModels } from '@/lib/projectLoad'
 import { hasMap } from '@/lib/mapConfig'
+import { savedTemplateId } from '@/constants/renderSettings'
 import { getStudioOpenOnMap, setStudioOpenOnMap } from '@/lib/studioPrefs'
 import { ProjectListSkeleton } from '@/components/project/ProjectListSkeleton'
 import type { ProjectMeta, RecentProjectCard } from '@/types'
@@ -81,7 +82,7 @@ export function ProjectListPage({ engineRef }: ProjectListPageProps) {
       useAppStore.getState().reset()
       if (openedMeta.renderSettings) {
         setRealisticMode(openedMeta.renderSettings.realisticMode)
-        setLightingParams(openedMeta.renderSettings)
+        setLightingParams({ ...openedMeta.renderSettings, templateId: savedTemplateId(openedMeta.renderSettings) })
       }
       useMapStore.getState().reset()
       setStep('map')
@@ -99,7 +100,7 @@ export function ProjectListPage({ engineRef }: ProjectListPageProps) {
     // Restore settings before the models stream in
     if (meta.renderSettings) {
       setRealisticMode(meta.renderSettings.realisticMode)
-      setLightingParams(meta.renderSettings)
+      setLightingParams({ ...meta.renderSettings, templateId: savedTemplateId(meta.renderSettings) })
     }
 
     // Map is still on the card's map button. Auto-opening it here blocks editing.

@@ -8,7 +8,8 @@ import { useProjectStore } from '@/store/useProjectStore'
 import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import { useMapStore } from '@/store/useMapStore'
 import { hasMap } from '@/lib/mapConfig'
-import { dashboardProjectInfo } from '@/lib/finSettings'
+import { savedTemplateId } from '@/constants/renderSettings'
+import { dashboardProjectInfo, pointsWithBoards } from '@/lib/finSettings'
 import { MapLayer } from '@/components/map/MapLayer'
 import { SignInOverlay, checkSession } from '@/viewer/SignInOverlay'
 import { EkoLoading } from '@/components/viewer/EkoLoading'
@@ -52,7 +53,7 @@ export default function ViewerApp() {
   const applyRenderSettings = useCallback((meta: ProjectMeta) => {
     if (meta.renderSettings) {
       setRealisticMode(meta.renderSettings.realisticMode)
-      setLightingParams(meta.renderSettings)
+      setLightingParams({ ...meta.renderSettings, templateId: savedTemplateId(meta.renderSettings) })
     }
   }, [setRealisticMode, setLightingParams])
 
@@ -181,14 +182,15 @@ export default function ViewerApp() {
               project: s.finProjectName || '',
               interval: s.finInterval || 5000,
               directMode: s.finDirectMode || false,
-              livePoints: s.finLivePoints || undefined,
-              endpoints: s.finEndpoints || undefined,
+              livePoints: pointsWithBoards(s).live || undefined,
+              endpoints: pointsWithBoards(s).history || undefined,
               realtimeMs: s.finRealtimeMs || undefined,
               workorderExpr: s.finWorkorderExpr || '',
               meterProfile: s.finMeterProfile || undefined,
               severityBands: s.finSeverityBands || undefined,
               equipmentClasses: s.finEquipmentClasses || undefined,
               realtimeEndpoints: s.finRealtimeEndpoints || undefined,
+              documents: Array.isArray(s.finDocuments) ? s.finDocuments : undefined,
             },
             weather: {
               lat: s.weatherLat ?? 24.469,

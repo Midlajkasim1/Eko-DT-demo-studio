@@ -3724,6 +3724,25 @@
   background:linear-gradient(90deg, #6BCB77, #C45C26)
 }
 
+.dashboard-native-container .hmgrad[data-mode="occ"] {
+  background:linear-gradient(90deg, #60a5fa, #fbbf24, #ef4444)
+}
+
+.dashboard-native-container .hmocc {
+  display:flex;
+  align-items:center;
+  gap:12px
+}
+
+.dashboard-native-container .hmocc i {
+  display:inline-block;
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  margin-inline-end:5px;
+  vertical-align:middle
+}
+
 .dashboard-native-container .hmrank {
   display:flex;
   align-items:center;
@@ -11169,11 +11188,23 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
     padding-block-end:calc(64px + env(safe-area-inset-bottom));
     scrollbar-width:thin;
     scrollbar-color:var(--bd2) transparent;
-    overscroll-behavior:contain;
+    overscroll-behavior:auto;
     -webkit-overflow-scrolling:touch
   }
   .dashboard-native-container #mount > * {
     flex:none
+  }
+  /* One scroller: #mount. A child with overscroll-behavior:contain accepts the
+     downward wheel, then swallows the upward one, so the page cannot come back.
+     The alarms list is not its own scroller here; the asset sheet and dialogs are. */
+  .dashboard-native-container #modcontent,
+  .dashboard-native-container .ovpad,
+  .dashboard-native-container .mpage {
+    overflow:visible;
+    overscroll-behavior:auto
+  }
+  .dashboard-native-container .mpeek #vpmain {
+    touch-action:pan-y
   }
   .dashboard-native-container #pagehead {
     position:sticky;

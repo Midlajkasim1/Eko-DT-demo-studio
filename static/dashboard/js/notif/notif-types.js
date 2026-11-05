@@ -25,7 +25,7 @@ window.EKO_NOTIF_TYPES = (function(){
      integrations · staleAssets → register filtered to stale · model → viewer ·
      controlTab → asset panel Control · module → that module's landing ·
      security → Settings > Security · report → the stored report document (D90) ·
-     overview → site Overview. */
+     overview → site Overview · brief → the Brief · handover → the Brief with that handover (E15). */
   const T = (type, category, level, defaultOn, deepLink) => ({
     type, category, level, defaultOn, deepLink,
     icon: CATEGORIES[category].icon,
@@ -57,7 +57,8 @@ window.EKO_NOTIF_TYPES = (function(){
     /* D. ASSIGNMENT AND COLLABORATION */
     T('assign.to_you',          'collaboration',  'info',      true,  'workOrder'),
     T('mention.comment',        'collaboration',  'info',      true,  'asset'),
-    T('shift.handover',         'collaboration',  'info',      true,  'overview'),
+    T('shift.handover',         'collaboration',  'info',      true,  'handover'),   /* E15: opens the Brief with the handover on top */
+    T('handover.mention',       'collaboration',  'info',      true,  'handover'),   /* E15: named in a handover */
     /* E. PLATFORM AND ADMIN */
     T('admin.setpoint_changed', 'platform',       'attention', true,  'controlTab'),  /* ruling: the one platform event an operator must not miss */
     T('admin.module_unlocked',  'platform',       'info',      true,  'module'),
@@ -65,6 +66,7 @@ window.EKO_NOTIF_TYPES = (function(){
     T('report.ready',           'platform',       'info',      true,  'report'),
     /* F. DIGEST */
     T('digest.morning',         'digest',         'info',      true,  'overview'),
+    T('brief.ready',            'digest',         'info',      true,  'brief'),      /* E15: the scheduled Brief (off by default) */
     T('digest.weekly_benchmark','digest',         'info',      false, 'overview')
   ];
 

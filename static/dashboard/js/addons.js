@@ -46,8 +46,11 @@ window.EKO_ADDONS = (function(){
   function saveOverrides(o){ try{ localStorage.setItem(LS, JSON.stringify(o)); }catch(e){} }
   function cfg(E){
     const base = (E.data && E.data.entitlements) || {}, o = overrides();
+    /* E15: the project's module set decides the extra modules (app.js projectSetup); a browser override cannot change them */
+    const om = Object.assign({}, o.modules || {});
+    if(window.EKO_MODULES) ['esg', 'maintenance', 'security'].forEach(k => { delete om[k]; });
     return { showAddOns: o.showAddOns != null ? !!o.showAddOns : base.showAddOns !== false,
-             modules: Object.assign({}, base.modules || {}, o.modules || {}),
+             modules: Object.assign({}, base.modules || {}, om),
              overridden: Object.keys(o).length > 0 };
   }
   const STATES = ['active', 'available', 'hidden'];
@@ -61,7 +64,9 @@ window.EKO_ADDONS = (function(){
   function apply(E){
     const c = cfg(E);
     const stamp = (obj, key) => { const st = state(E, key); obj.locked = st !== 'active'; obj.hidden = st === 'hidden' || (st === 'available' && !c.showAddOns); obj.teaser = obj.locked ? key : undefined; };
-    ((E.nav || {}).modules || []).forEach(m => { if(CATALOGUE[m.id]) stamp(m, m.id); (m.subs || []).forEach(s => { const k = m.id + '.' + s.id; if(CATALOGUE[k]) stamp(s, k); }); });
+    /* E15 port (D169): a key outside the catalogue can only be hidden (nothing to offer): the site has no data for it */
+    const hideOnly = (obj, key) => { if(c.modules[key] === 'hidden'){ obj.locked = true; obj.hidden = true; obj.teaser = '#hidden'; } };
+    ((E.nav || {}).modules || []).forEach(m => { if(CATALOGUE[m.id]) stamp(m, m.id); else hideOnly(m, m.id); (m.subs || []).forEach(s => { const k = m.id + '.' + s.id; if(CATALOGUE[k]) stamp(s, k); else hideOnly(s, k); }); });
     (((E.data || {}).systems || {}).groups || []).forEach(g => { const k = 'systems.' + g.id; if(CATALOGUE[k]) stamp(g, k); });
   }
   /* the add-on key that gates a route, or null */

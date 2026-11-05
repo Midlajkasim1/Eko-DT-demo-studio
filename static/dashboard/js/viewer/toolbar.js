@@ -29,13 +29,13 @@ window.EKO_VT = (function(){
   /* Every non-default view setting, named for people (D71). */
   const LBL = { all:'layAll', arch:'layArch', elec:'layElec', int:'layInt', mech:'layMech', str:'layStr', equip:'layEquip', site:'laySite', land:'layLand', other:'layOther' };
   const chosenLayers = d => Array.isArray(d.layer) ? d.layer : (d.layer && d.layer !== 'all' ? [d.layer] : []);
-  const STY = { default:'styDefault', photo:'styPhoto', minimal:'styMinimal', xray:'styXray' };
+  const STY = { default:'styDefault', photo:'styPhoto', minimal:'styMinimal', studio:'styStudio', xray:'styXray' };
   const levelName = (E, l) => /^L\d+$/.test(l) ? E.t('lvlName', { n: l.slice(1) }) : l;
   const styleName = (E, d) => E.t(STY[d.style] || 'styDefault');
   function viewState(E){
     const d = E.state.dock, items = [];
     if(d.level !== 'ALL') items.push({ k:'level', text: levelName(E, d.level) });
-    if(d.style !== 'default') items.push({ k:'style', text: styleName(E, d) });
+    if(d.style !== T().defaultStyle) items.push({ k:'style', text: styleName(E, d) });
     const layersOn = chosenLayers(d);
     if(layersOn.length) items.push({ k:'layer', text: layersOn.map(id => E.t(LBL[id] || id)).join(', ') });
     if(d.minimap) items.push({ k:'minimap', text: E.t('dockMinimap') });
@@ -57,7 +57,7 @@ window.EKO_VT = (function(){
       case 'levels':  on = d.bloom === 'levels' || d.level !== 'ALL'; tag = d.level !== 'ALL' ? d.level : null; break;
       case 'layers': on = chosenLayers(d).length > 0; break;   /* the button keeps its name; the pressed state says a layer is chosen */
       case 'minimap': on = !!d.minimap; break;
-      case 'style':   on = d.style !== 'default'; tag = on ? E.t(STY[d.style] || 'styDefault') : null; break;
+      case 'style':   on = d.style !== T().defaultStyle; tag = on ? E.t(STY[d.style] || 'styDefault') : null; break;
       case 'more':    on = BLOOMS_MORE.includes(d.bloom); dot = viewState(E).length > 0; break;
       case 'reset':   on = resetList(E).length > 0; muted = !on; break;
     }
@@ -170,12 +170,16 @@ window.EKO_VT = (function(){
       const i = lv.indexOf(d.level);
       const rows = groups.map(G => `<span class="mzflyT vpgrp">${C().esc(t(G.k))}</span>` +
         G.items.map(l => `<button class="mzopt mzfan vprow" data-act="setLevel" data-v="${C().esc(l)}" data-on="${d.level === l}" data-q="${C().esc(levelName(E, l).toLowerCase())}">${C().esc(levelName(E, l))}</button>`).join('')).join('');
+      /* All and Isolate floor sit outside the scrolling list, under the search field, so they stay in view
+         while the floors scroll. The row keeps .vprow so the search and Enter/ArrowDown treat it as before. */
+      const allRow = opt('setLevel', 'ALL', t('lvlAll'), d.level === 'ALL').replace('class="mzopt', 'class="vprow mzopt').replace('data-on', 'data-q="all ' + C().esc(t('lvlAll').toLowerCase()) + '" data-on');
       return `<div class="vpick"><div class="row gap6 vphead">${title('dockLevels')}<span class="grow"></span>
           <button class="iconbtn icon26" data-act="lvlStep" data-v="up" data-tip="${C().esc(t('lvlUp'))}" aria-label="${C().esc(t('lvlUp'))}" ${i <= 0 && d.level !== 'ALL' ? 'disabled' : ''}>${C().icon('chevR2', 13)}</button>
           <button class="iconbtn icon26" data-act="lvlStep" data-v="down" data-tip="${C().esc(t('lvlDown'))}" aria-label="${C().esc(t('lvlDown'))}" ${(i >= lv.length - 1) ? 'disabled' : ''}>${C().icon('chevL2', 13)}</button></div>
-        <button class="mzopt mzfan" role="switch" aria-checked="${!!d.floorAlone}" data-act="floorAlone" data-on="${!!d.floorAlone}">${C().esc(t('lvlAlone'))}</button>
         <input class="vpq" type="search" placeholder="${C().esc(t('pickFloor'))}" aria-label="${C().esc(t('pickFloor'))}" autocomplete="off">
-        <div class="vplist">${opt('setLevel', 'ALL', t('lvlAll'), d.level === 'ALL').replace('class="mzopt', 'class="vprow mzopt').replace('data-on', 'data-q="all ' + C().esc(t('lvlAll').toLowerCase()) + '" data-on')}${rows}</div></div>`;
+        ${allRow}
+        <button class="mzopt mzfan" role="switch" aria-checked="${!!d.floorAlone}" data-act="floorAlone" data-on="${!!d.floorAlone}">${C().esc(t('lvlAlone'))}</button>
+        <div class="vplist">${rows}</div></div>`;
     }
     if(which === 'more'){
       const note = '';
@@ -194,7 +198,8 @@ window.EKO_VT = (function(){
         <div class="vplist">${rows}</div></div>`;
     }
     if(which === 'style'){
-      const DEFS = [['default', t('styDefault')], ['photo', t('styPhoto')], ['minimal', t('styMinimal')], ['xray', t('styXray')]];
+      /* Photo is not offered here; the Systems pages still use it, and STY above still names it */
+      const DEFS = [['default', t('styDefault')], ['minimal', t('styMinimal')], ['studio', t('styStudio')], ['xray', t('styXray')]];
       const tiles = DEFS.map(sd =>
         `<button class="mztile mzfan" data-act="setStyle" data-v="${sd[0]}" data-on="${d.style === sd[0]}">
            <span class="mztileimg tpl-shot" data-sty="${sd[0]}" aria-hidden="true"><span class="tpl-sun"></span><span class="tpl-ground"></span><span class="tpl-mass tpl-mass--tall"></span><span class="tpl-mass tpl-mass--low"></span></span>

@@ -138,7 +138,7 @@ export function createHvacLabels(getHost: () => HTMLElement | null, noValue = 'â
       }
       const rects: LabelRect[] = items.map(it => {
         const p = projectAnchor(camera, schematic!.group, it.anchor.position, canvas, hostBox)
-        if (!p) return { x: 0, y: 0, w: it.w, h: it.h, on: false }
+        if (!p || (it.anchor.optional && it.text === noValue)) return { x: 0, y: 0, w: it.w, h: it.h, on: false }
         const x = p.x - it.w / 2
         const y = it.anchor.side === 'above' ? p.y - OFFSET - it.h : p.y + OFFSET
         return { x, y, w: it.w, h: it.h, on: x + it.w > 0 && x < hostBox.width && y + it.h > 0 && y < hostBox.height }
