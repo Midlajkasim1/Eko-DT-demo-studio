@@ -278,6 +278,45 @@ with it is built by code from the tool result. Code: `eko_chat.py`, `eko_chat_ro
 - **Load test.** `scripts/eko_chat_load_test.py` needs `--cookie` (the `eko_session` value, or `EKO_SESSION_COOKIE`) and `--project`.
 - **Export.** `eko_chat.py`, `eko_chat_router.py` and `eko_chat_llm.py` are in the backend export list (`src/lib/backendExport.ts`): `main.py` imports them.
 
+### Local AI setup in `Start_Viewer_Windows.bat` (Phase 4)
+
+The batch file every export carries (its text is `src/lib/startViewerBat.ts`) checks Python and installs the dependencies exactly as before, then runs one **optional**
+step, `backend/local_ai_setup.py` (Python standard library only), and then starts the backend as before. The step:
+
+1. reads the configuration (`config.json` with `config.local.json` laid over it, see below) and acts only if `chat.local_ai` is `"auto"` (the exports write that). It does nothing, and installs nothing, when `chat.local_ai` is `"off"`,
+   when `LLM_ENABLED` is off or `LLM_PROVIDER` is something other than `ollama` in the environment, when `chat.provider` is another provider, when `chat.base_url` is not
+   the default local Ollama, or when chat was turned off in `config.json` after this step turned it on (marker `chat.local_ai_enabled_by_setup`). An older folder without
+   `chat.local_ai` is left alone.
+2. finds Ollama (`PATH`, `%LOCALAPPDATA%\Programs\Ollama`, `%ProgramFiles%\Ollama`) and **installs it only if it is missing**: `OllamaSetup.exe` next to the batch file if
+   present (offline PCs), else the official download (`https://ollama.com/download/OllamaSetup.exe`, redirects only to GitHub release hosts, 1.6 GB, with the machine's
+   own proxy settings and nothing done to get around them). The file is run, silently and for this user only (no administrator rights), only if its Authenticode signature
+   is valid and issued to `CN=Ollama Inc.`
+3. checks the service on `http://127.0.0.1:11434` and starts `ollama serve` (with `OLLAMA_HOST=127.0.0.1:11434`) if it is not answering. An `OLLAMA_HOST` that exposes it
+   to the network is warned about, never changed.
+4. checks the model list and **downloads `qwen3:8b` only if it is missing** (about 5 GB; 8 GB of free disk are required first; progress is shown; a stall or an error
+   is a failure). Any other model is never downloaded: a model the administrator chose is only checked.
+5. verifies the API, the model and its tool support (a warm-up call after a download only), and **only then** records these `chat` keys in **`config.local.json`** (never in `config.json`): `enabled`,
+   `provider` (`ollama`, only if it was `rules`), `base_url` and `model` (only if absent or the rules defaults), and the marker. Every other setting, credential reference
+   and custom value stays; a file that was already there is copied to `config.local.json.pre-local-ai.bak` once; the write is atomic. A second run finds everything in
+   place and downloads, installs and writes nothing.
+
+If anything fails, the step prints `WARNING: ... Eko-DT will start in rules-only mode`, logs to `%LOCALAPPDATA%\EKO-DT\logs\local-ai-setup.log` (or `EKO_LOCAL_AI_LOG_DIR`),
+exits 1, and the batch file starts Eko-DT anyway. `EKO_SKIP_LOCAL_AI=1` skips the step. When a proxy is configured, the batch file adds `127.0.0.1,localhost` to `NO_PROXY`
+for the backend (so Ollama on loopback is not sent to the proxy; FIN and everything else keep using it). To keep the assistant off on a machine, put
+`{"chat": {"local_ai": "off"}}` in `config.local.json` (or set `LLM_ENABLED=false` for the machine).
+
+**Updating an installation (`config.local.json`).** Every export writes `backend/config.json`, so extracting a newer ZIP over an installation replaces it, before any
+script runs; nothing kept in `config.json` can survive an update. The operator's settings therefore live in `backend/config.local.json`, which no export contains: the
+backend lays it over `config.json` when it starts (`config_overlay.py`: dicts merge key by key, a list or a value replaces the shipped one, a key it does not mention keeps
+the release's value, so an update can still change a default or add a setting). The local AI setup records its settings there, never in `config.json`, so after an update:
+an administrator's `local_ai: "off"` stays off, a chat the administrator turned off after the setup stays off, a custom provider, model or connection stays, the
+assistant that was set up keeps working with no new setup (the next start finds Ollama and the model in place and writes nothing), and `config.json` is the new release's.
+Credentials are not kept in either file (an API key is read from the environment variable `chat.api_key_env` names); the file is yours, and the backend prints the NAMES
+of the keys it overrides at startup, never their values. A `config.local.json` that cannot be read is ignored and **the assistant is turned off** until it is fixed.
+A folder set up by the earlier build, which wrote into `config.json`, has its AI settings (and only those) copied into `config.local.json` the first time the new setup
+runs, if `config.json` still has them (for example when you chose to keep the old file when extracting). Settings an update has already overwritten cannot be recovered:
+for a fleet, set the machine-wide `LLM_ENABLED=false`, or create `config.local.json` before the first update.
+
 ### The planner: a local model that plans read-only tool calls and explains the results (Ollama, Phase 3)
 
 `chat.provider = "ollama"` runs the **planner** (`eko_chat_planner.py`) for every question the rules do not answer, unless `chat.planner` is `false` (or
@@ -385,7 +424,7 @@ call the model (`/api/chat/stats` shows the runs).
 ```powershell
 cd backend
 $env:EKO_NOTIFICATION_DB = "$env:TEMP\eko-test-notifications.db"      # keeps the tests off the real notification history
-python -m unittest tests.test_eko_chat_rules tests.test_eko_chat_metrics tests.test_eko_chat_projects tests.test_eko_chat_inventory tests.test_eko_chat_capabilities tests.test_eko_chat_messages tests.test_eko_chat_trace tests.test_eko_chat_alarms tests.test_eko_chat_scope tests.test_eko_chat_multi tests.test_eko_chat_analytics tests.test_eko_chat_points tests.test_eko_chat_analytics_chat tests.test_eko_chat_analytics_capabilities tests.test_eko_chat_planner tests.test_eko_chat_arabic_partial tests.test_fin_documents tests.test_backend_export tests.test_fin_projects
+python -m unittest tests.test_eko_chat_rules tests.test_eko_chat_metrics tests.test_eko_chat_projects tests.test_eko_chat_inventory tests.test_eko_chat_capabilities tests.test_eko_chat_messages tests.test_eko_chat_trace tests.test_eko_chat_alarms tests.test_eko_chat_scope tests.test_eko_chat_multi tests.test_eko_chat_analytics tests.test_eko_chat_points tests.test_eko_chat_analytics_chat tests.test_eko_chat_analytics_capabilities tests.test_eko_chat_planner tests.test_eko_chat_arabic_partial tests.test_local_ai_setup tests.test_config_overlay tests.test_fin_documents tests.test_backend_export tests.test_fin_projects
 cd ..
 python scripts/eko_chat_llm_benchmark.py                 # live: cold start, intent latency, end-to-end, accuracy (needs Ollama + the model)
 python scripts/eko_chat_llm_benchmark.py --unavailable   # how the chat behaves with Ollama off

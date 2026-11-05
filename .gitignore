@@ -64,3 +64,6 @@ map_export.md
 /tests
 
 
+
+# the operator's own backend settings (not part of any export)
+backend/config.local.json

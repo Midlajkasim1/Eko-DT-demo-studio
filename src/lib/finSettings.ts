@@ -238,6 +238,10 @@ export function exportedSiteConfig(cfg: JsonObject, settings: ProjectApiSettings
   if (s.finProjectName) out.project_name = s.finProjectName
   if (s.finBaseUrl) out.fin_server_url = s.finBaseUrl
   if (s.finInterval) out.polling = { ...(isObject(cfg.polling) ? cfg.polling : {}), live_ms: s.finInterval }
+  // The export's Start_Viewer_Windows.bat may set up the local AI assistant (Ollama) on the machine it runs on; chat.local_ai = "auto" is what allows that.
+  // An administrator's "off" stays off, and the other chat settings are the repo file's own.
+  const chat = isObject(cfg.chat) ? cfg.chat : {}
+  out.chat = { ...chat, local_ai: chat.local_ai ?? 'auto' }
   return out
 }
 

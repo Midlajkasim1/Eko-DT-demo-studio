@@ -15,6 +15,8 @@ export const BACKEND_EXPORT_FILES = [
   'notifications.py',
   'fdd_recommendations.py',
   'start_viewer.py',
+  'local_ai_setup.py',
+  'config_overlay.py',
   'requirements.txt',
   'login.html',
   'om-warranty.json',

@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import config_overlay
 import eko_chat
 from fin_client import (
     PROJECT_ID_RE,
@@ -54,6 +55,15 @@ CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.j
 
 with open(CONFIG_PATH, "r") as f:
     BASE_CONFIG = json.load(f)
+
+# config.json is replaced by every update (the export writes it); config.local.json is the operator's file, which an update cannot touch (the export never
+# contains it), laid over it here. See config_overlay.py. A file that cannot be read keeps the AI assistant off.
+LOCAL_CONFIG_PATH = os.path.join(os.path.dirname(CONFIG_PATH), config_overlay.LOCAL_NAME)
+BASE_CONFIG, LOCAL_CONFIG_INFO = config_overlay.apply_local(BASE_CONFIG, LOCAL_CONFIG_PATH)
+if LOCAL_CONFIG_INFO["error"]:
+    print(f"[config] {LOCAL_CONFIG_INFO['error']}: it is ignored and the AI assistant is off until it is fixed")
+elif LOCAL_CONFIG_INFO["overridden"]:
+    print("[config] config.local.json overrides: " + ", ".join(LOCAL_CONFIG_INFO["overridden"]))
 
 # CONFIG is what the polling loops and parsers read. It starts as the file defaults and is
 # replaced by BASE_CONFIG overlaid with the open project's settings (see below). Whether
