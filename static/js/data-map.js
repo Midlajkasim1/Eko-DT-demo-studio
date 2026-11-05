@@ -1778,22 +1778,25 @@
       spHis: !!(s && s.his && s.id)
     };
   }
-  function comparePairs(eq) {
-    var points = eq.points || [];
-    var id = String(eq.name || "").toUpperCase();
-    var type = String(eq.type || "").toUpperCase();
-    var kind = "gen";
-    if (id.indexOf("FAHU") === 0 || type.indexOf("FAHU") !== -1) kind = "fahu";
-    else if (id.indexOf("MAHU") === 0 || type.indexOf("MAHU") !== -1) kind = "mahu";
-    else if (id.indexOf("AHU") === 0 || type.indexOf("AHU") !== -1) kind = "ahu";
-    else if (id.indexOf("VAV") === 0 || type.indexOf("VAV") !== -1) kind = "vav";
-    else if (id.indexOf("FCU") === 0 || type.indexOf("FCU") !== -1) kind = "fcu";
+  function equipKind(name, finType) {
+    var id = String(name || "").toUpperCase();
+    var type = String(finType || "").toUpperCase();
+    if (id.indexOf("FAHU") === 0 || type.indexOf("FAHU") !== -1) return "fahu";
+    if (id.indexOf("MAHU") === 0 || type.indexOf("MAHU") !== -1) return "mahu";
+    if (id.indexOf("AHU") === 0 || type.indexOf("AHU") !== -1) return "ahu";
+    if (id.indexOf("VAV") === 0 || type.indexOf("VAV") !== -1) return "vav";
+    if (id.indexOf("FCU") === 0 || type.indexOf("FCU") !== -1) return "fcu";
     // The type as a whole word inside the name ("HOSPITAL_AHU_01"), for a unit FIN gives no type. Only a project that
     // turned the Hospital HVAC graphics on: every other project classifies by the prefix and FIN type alone, as before.
-    else if (hospitalHvac) {
+    if (hospitalHvac) {
       var word = (" " + id.replace(/[^A-Z0-9]+/g, " ") + " ").match(/ (FAHU|MAHU|AHU|VAV|FCU) /);
-      if (word) kind = word[1].toLowerCase();
+      if (word) return word[1].toLowerCase();
     }
+    return "gen";
+  }
+  function comparePairs(eq) {
+    var points = eq.points || [];
+    var kind = equipKind(eq.name, eq.type);
     var names = equipPointWords();
     var specs = [];
     var zoneTemps = names.fcuTemp.length ? [names.fcuTemp] : [["zonetemp"], ["spacetemp"], ["roomtemp"]];
@@ -2099,6 +2102,19 @@
             c.capEn = healthPct >= 95 ? 'Healthy' : healthPct >= 80 ? 'Fair' : 'Critical';
             c.capAr = healthPct >= 95 ? 'سليم' : healthPct >= 80 ? 'مقبول' : 'حرج';
             c.tone = healthPct >= 95 ? 'ok' : 'warn';
+          }
+          if (/AIR HANDLING/i.test(c.labelEn || '')) {
+            var ahusLive = list.filter(function (a) { return equipKind(a.id, a.typeEn) === 'ahu'; });
+            if (ahusLive.length) {
+              var ahuAlarm = ahusLive.filter(function (a) { return a.st === 'alarm'; }).length;
+              c.v = ahusLive.length + ' / ' + ahusLive.length;
+              c.capEn = 'Total: ' + ahusLive.length + (ahuAlarm ? '' : ', all running');
+              c.capAr = 'الإجمالي: ' + ahusLive.length + (ahuAlarm ? '' : '، كلها تعمل');
+              c.chipEn = ahuAlarm ? ahuAlarm + ' with an alarm' : '';
+              c.chipAr = ahuAlarm ? ahuAlarm + ' عليها إنذار' : '';
+              c.tone = ahuAlarm ? 'warn' : 'ok';
+              c.wash = ahuAlarm ? 'warn' : '';
+            }
           }
           if (/EQUIPMENT|METERS/i.test(c.labelEn || '')) {
             if (total > 0) {
