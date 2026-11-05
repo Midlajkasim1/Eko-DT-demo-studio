@@ -467,7 +467,7 @@ async def realtime_loop():
 
 async def live_loop():
     """Poll configured live points; failed reads stay null, never a fake 0."""
-    global cached_power_data
+    global cached_power_data, cached_alarm_data
 
     live_ids = {
         k: v
@@ -493,6 +493,20 @@ async def live_loop():
                 live_results[key] = val
                 if unit:
                     cached_point_units[key] = unit
+            alarm_ep = (CONFIG.get("realtime_endpoints") or {}).get("alarms")
+            if isinstance(alarm_ep, str) and alarm_ep.startswith("/"):
+                try:
+                    await client.refresh_alarms(alarm_ep)
+                    cached_alarm_data = _flatten_alarms(
+                        client.last_alarm_rows, CONFIG.get("severity_bands", {})
+                    )
+                    _note_critical_alarms(
+                        client.project_name,
+                        cached_alarm_data["alarms"],
+                        getattr(client, "last_alarm_read_ok", False),
+                    )
+                except Exception as alarm_err:
+                    print(f"[FIN] alarm poll error: {alarm_err}")
             cached_power_data = {
                 "timestamp": datetime.now().isoformat(),
                 **live_results,

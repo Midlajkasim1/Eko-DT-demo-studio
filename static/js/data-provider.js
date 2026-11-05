@@ -210,21 +210,24 @@
   // poller (the previous project's dashboard) must not hand its late answers to the next one.
   async function pollLive() {
     const generation = state.generation;
-    const data = await state.provider.getLiveValues();
+    const [data, alarms] = await Promise.all([
+      state.provider.getLiveValues(),
+      state.provider.getAlarms(),
+    ]);
     if (generation !== state.generation) return;
-    if (data && data.otherProject) { retrySoon(generation); return; }
+    if ((data && data.otherProject) || (alarms && alarms.otherProject)) { retrySoon(generation); return; }
     if (usable(data)) {
       state.power = withHistory(data);
       emit('power', state.power);
     }
+    if (usable(alarms)) { state.alarms = alarms; emit('alarms', alarms); }
     setConnected(usable(data));
   }
 
   async function pollRealtime() {
     const generation = state.generation;
-    const [equipment, alarms, meters, history, documents, workorders, alarmHistory] = await Promise.all([
+    const [equipment, meters, history, documents, workorders, alarmHistory] = await Promise.all([
       state.provider.getEquipment(),
-      state.provider.getAlarms(),
       state.provider.getMeters(),
       state.provider.getPowerHistory(),
       state.provider.getDocuments(),
@@ -232,7 +235,7 @@
       state.provider.getAlarmHistory(2),
     ]);
     if (generation !== state.generation) return;
-    if ([equipment, alarms, meters, history, documents, workorders, alarmHistory].some(function (d) { return d && d.otherProject; })) retrySoon(generation);
+    if ([equipment, meters, history, documents, workorders, alarmHistory].some(function (d) { return d && d.otherProject; })) retrySoon(generation);
     if (usable(history)) {
       state.historyUnits = history._units || null;
       var series = Object.assign({}, history);
@@ -244,7 +247,6 @@
       }
     }
     if (usable(equipment)) { state.equipment = equipment; emit('equipment', equipment); }
-    if (usable(alarms)) { state.alarms = alarms; emit('alarms', alarms); }
     if (usable(meters)) { state.meters = meters; emit('meters', meters); }
     if (usable(documents)) { state.documents = documents; emit('documents', documents); }
     if (usable(workorders)) { state.workorders = workorders; emit('workorders', workorders); }

@@ -792,6 +792,16 @@ class FinScramClient:
         parts.append(''.join(current).strip())
         return parts
 
+    async def refresh_alarms(self, endpoint: str) -> list[dict]:
+        """Read only the alarm list, so it is not waiting on equipment or history."""
+        text = await self.fetch_api(self._resolve_endpoint(endpoint), is_text=True)
+        alarms = await asyncio.to_thread(parse_zinc_csv, text or "")
+        await asyncio.to_thread(attach_alarm_details, text or "", alarms)
+        self.last_alarm_rows = alarms
+        first = (text or "").lstrip("\ufeff").lstrip().split("\n", 1)[0]
+        self.last_alarm_read_ok = first.startswith("ver:") and not re.search(r"\berr\b", first)
+        return alarms
+
     async def fetch_realtime_data(self, endpoints: dict[str, str]) -> dict:
         """Fetch realtime points, equipment, and alarms. Returns floor-wise structure."""
         resolved = {k: self._resolve_endpoint(v) for k, v in endpoints.items()}
