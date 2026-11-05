@@ -208,49 +208,111 @@
 
   // Every poll checks, after its await, that this poller was not stopped meanwhile: a stopped
   // poller (the previous project's dashboard) must not hand its late answers to the next one.
+  let liveBusy = false;
+  let alarmBusy = false;
+  let realtimeBusy = false;
+
   async function pollLive() {
+    if (liveBusy) return;
+    liveBusy = true;
     const generation = state.generation;
-    const [data, alarms] = await Promise.all([
-      state.provider.getLiveValues(),
-      state.provider.getAlarms(),
-    ]);
-    if (generation !== state.generation) return;
-    if ((data && data.otherProject) || (alarms && alarms.otherProject)) { retrySoon(generation); return; }
-    if (usable(data)) {
-      state.power = withHistory(data);
-      emit('power', state.power);
+    try {
+      const data = await state.provider.getLiveValues();
+      if (generation !== state.generation) return;
+      if (data && data.otherProject) { retrySoon(generation); return; }
+      if (usable(data) && data.timestamp) {
+        state.power = withHistory(data);
+        emit('power', state.power);
+      }
+      setConnected(usable(data));
+    } finally {
+      liveBusy = false;
     }
-    if (usable(alarms)) { state.alarms = alarms; emit('alarms', alarms); }
-    setConnected(usable(data));
+  }
+
+  async function pollAlarms() {
+    if (alarmBusy) return;
+    alarmBusy = true;
+    const generation = state.generation;
+    try {
+      const alarms = await state.provider.getAlarms();
+      if (generation !== state.generation) return;
+      if (alarms && alarms.otherProject) { retrySoon(generation); return; }
+      if (usable(alarms) && alarms.timestamp) { state.alarms = alarms; emit('alarms', alarms); }
+    } finally {
+      alarmBusy = false;
+    }
+  }
+
+  function takeOne(generation, data, apply) {
+    if (generation !== state.generation) return;
+    if (data && data.otherProject) { retrySoon(generation); return; }
+    if (usable(data)) apply(data);
   }
 
   async function pollRealtime() {
+    if (realtimeBusy) return;
+    realtimeBusy = true;
     const generation = state.generation;
-    const [equipment, meters, history, documents, workorders, alarmHistory] = await Promise.all([
-      state.provider.getEquipment(),
-      state.provider.getMeters(),
-      state.provider.getPowerHistory(),
-      state.provider.getDocuments(),
-      state.provider.getWorkOrders(),
-      state.provider.getAlarmHistory(2),
-    ]);
-    if (generation !== state.generation) return;
-    if ([equipment, meters, history, documents, workorders, alarmHistory].some(function (d) { return d && d.otherProject; })) retrySoon(generation);
-    if (usable(history)) {
-      state.historyUnits = history._units || null;
-      var series = Object.assign({}, history);
-      delete series._units;
-      state.powerHistory = series;
-      if (state.power) {
-        state.power = withHistory(state.power);
-        emit('power', state.power);
-      }
+    const provider = state.provider;
+    const jobs = [
+      provider.getEquipment().then(function (data) {
+        takeOne(generation, data, function (equipment) { state.equipment = equipment; emit('equipment', equipment); });
+      }),
+      provider.getMeters().then(function (data) {
+        takeOne(generation, data, function (meters) { state.meters = meters; emit('meters', meters); });
+      }),
+      provider.getPowerHistory().then(function (history) {
+        takeOne(generation, history, function (data) {
+          if (!data || !Object.keys(data).filter(function (k) { return k !== '_units'; }).length) return;
+          state.historyUnits = data._units || null;
+          var series = Object.assign({}, data);
+          delete series._units;
+          state.powerHistory = series;
+          if (state.power) {
+            state.power = withHistory(state.power);
+            emit('power', state.power);
+          }
+        });
+      }),
+      provider.getDocuments().then(function (data) {
+        takeOne(generation, data, function (documents) { state.documents = documents; emit('documents', documents); });
+      }),
+      provider.getWorkOrders().then(function (data) {
+        takeOne(generation, data, function (workorders) { state.workorders = workorders; emit('workorders', workorders); });
+      }),
+      provider.getAlarmHistory(2).then(function (data) {
+        takeOne(generation, data, function (alarmHistory) { state.alarmHistory = alarmHistory; emit('alarmHistory', alarmHistory); });
+      }),
+    ];
+    try {
+      await Promise.all(jobs);
+    } finally {
+      realtimeBusy = false;
     }
-    if (usable(equipment)) { state.equipment = equipment; emit('equipment', equipment); }
-    if (usable(meters)) { state.meters = meters; emit('meters', meters); }
-    if (usable(documents)) { state.documents = documents; emit('documents', documents); }
-    if (usable(workorders)) { state.workorders = workorders; emit('workorders', workorders); }
-    if (usable(alarmHistory)) { state.alarmHistory = alarmHistory; emit('alarmHistory', alarmHistory); }
+  }
+
+  let firstFill = null;
+  function armFirstFill(generation) {
+    if (firstFill) clearInterval(firstFill);
+    let tries = 0;
+    firstFill = setInterval(function () {
+      if (generation !== state.generation || ++tries > 12) {
+        clearInterval(firstFill);
+        firstFill = null;
+        return;
+      }
+      const ready = state.power && state.power.timestamp && state.alarms && state.alarms.timestamp
+        && state.equipment && state.powerHistory;
+      if (ready) {
+        clearInterval(firstFill);
+        firstFill = null;
+        return;
+      }
+      if (!state.power || !state.power.timestamp) pollLive();
+      if (!state.alarms || !state.alarms.timestamp) pollAlarms();
+      if (!state.equipment || !state.powerHistory) pollRealtime();
+    }, 1000);
   }
 
   // The backend polls FIN only while a dashboard holds this id. A closed tab stops
@@ -300,10 +362,12 @@
     if (generation !== state.generation) return;
     state.provider = state.config && state.config.directMode ? new DirectProvider(state.config) : new BackendProvider(state.config && state.config.projectId);
     holdWatch();
-    await Promise.all([pollRealtime(), pollLive()]);
+    armFirstFill(generation);
+    await Promise.all([pollRealtime(), pollLive(), pollAlarms()]);
     // stop() during either await would otherwise be undone by the timers below
     if (generation !== state.generation) return;
     state.timers.push(setInterval(pollLive, state.config ? state.config.liveMs : 5000));
+    state.timers.push(setInterval(pollAlarms, 15000));
     state.timers.push(setInterval(pollRealtime, state.config ? state.config.realtimeMs : 30000));
   }
 
@@ -312,6 +376,7 @@
     state.timers.forEach(clearInterval);
     state.timers = [];
     state.historyUnits = null;
+    if (firstFill) { clearInterval(firstFill); firstFill = null; }
     if (catchUp) { clearTimeout(catchUp); catchUp = null; }
     releaseWatch();
   }

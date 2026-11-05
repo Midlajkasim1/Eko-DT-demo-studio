@@ -465,9 +465,36 @@ async def realtime_loop():
                 return
 
 
+async def alarm_loop():
+    """Alarms are a heavy FIN read, so they refresh on their own, slower than the live points."""
+    global cached_alarm_data
+    alarm_ep = (CONFIG.get("realtime_endpoints") or {}).get("alarms")
+    if not isinstance(alarm_ep, str) or not alarm_ep.startswith("/"):
+        return
+    while client and client.is_authenticated:
+        if not _dashboard_open():
+            return
+        try:
+            await client.refresh_alarms(alarm_ep)
+            cached_alarm_data = _flatten_alarms(
+                client.last_alarm_rows, CONFIG.get("severity_bands", {})
+            )
+            _note_critical_alarms(
+                client.project_name,
+                cached_alarm_data["alarms"],
+                getattr(client, "last_alarm_read_ok", False),
+            )
+            if not await _sleep_while_watched(15):
+                return
+        except Exception as e:
+            print(f"[FIN] alarm poll error: {e}")
+            if not await _sleep_while_watched(15):
+                return
+
+
 async def live_loop():
     """Poll configured live points; failed reads stay null, never a fake 0."""
-    global cached_power_data, cached_alarm_data
+    global cached_power_data
 
     live_ids = {
         k: v
@@ -493,20 +520,6 @@ async def live_loop():
                 live_results[key] = val
                 if unit:
                     cached_point_units[key] = unit
-            alarm_ep = (CONFIG.get("realtime_endpoints") or {}).get("alarms")
-            if isinstance(alarm_ep, str) and alarm_ep.startswith("/"):
-                try:
-                    await client.refresh_alarms(alarm_ep)
-                    cached_alarm_data = _flatten_alarms(
-                        client.last_alarm_rows, CONFIG.get("severity_bands", {})
-                    )
-                    _note_critical_alarms(
-                        client.project_name,
-                        cached_alarm_data["alarms"],
-                        getattr(client, "last_alarm_read_ok", False),
-                    )
-                except Exception as alarm_err:
-                    print(f"[FIN] alarm poll error: {alarm_err}")
             cached_power_data = {
                 "timestamp": datetime.now().isoformat(),
                 **live_results,
@@ -916,6 +929,7 @@ def _start_polling():
     polling_tasks = [
         asyncio.create_task(realtime_loop()),
         asyncio.create_task(live_loop()),
+        asyncio.create_task(alarm_loop()),
     ]
 
 
