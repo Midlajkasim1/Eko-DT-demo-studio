@@ -288,7 +288,7 @@ window.EKO_R = (function(){
           return Object.assign({}, w, { rows: alarmRows(hours, filter), hours }); }
         if(w.type === 'table.boards') return Object.assign({}, w, { rows: E.data.power.boards, basis: basisFor(E, Object.assign({ sources:['pmu'] }, at(E))) });
         if(w.type === 'table.waste') return Object.assign({}, w, { rows: E.data.energyLanding.kpis, tariff: tariff(E), basis: basisFor(E, Object.assign({ sources:['model.opt'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) });
-        if(w.type === 'table.anom') return Object.assign({}, w, { rows: E.data.anom.items, tariff: tariff(E), basis: basisFor(E, Object.assign({ sources:['model.anom'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) });
+        if(w.type === 'table.anom') return Object.assign({}, w, { rows: (E.data.anom || {}).items || [], tariff: tariff(E), basis: basisFor(E, Object.assign({ sources:['model.anom'], tariff:tariff(E), formulaKey:'rpFx.kwhTimesTariff' }, mtd(E))) });
         if(w.type === 'table.bench') return Object.assign({}, w, { rows: benchRows(E), basis: basisFor(E, Object.assign({ sources:['bench'] }, mtd(E))) });
         if(w.type === 'status.leak'){ const l = E.data.water.leak; return Object.assign({}, w, { ready: num(l.nightsCollected) != null && num(l.nightsNeeded) != null && l.nightsCollected >= l.nightsNeeded, params:{ got:l.nightsCollected, need:l.nightsNeeded } }); }
         if(w.type === 'period.energy'){

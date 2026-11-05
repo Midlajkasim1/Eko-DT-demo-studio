@@ -34,7 +34,7 @@ import type { HvacSchematic } from '@/lib/hvacGeometry'
 import { hospitalHvacEnabled, isLiveSchematic } from '@/lib/hospitalHvac'
 import { useFinStore } from '@/store/useFinStore'
 import type { ProjectApiSettings } from '@/types'
-import { dashboardProjectInfo, pointsWithBoards } from '@/lib/finSettings'
+import { dashboardProjectInfo, meterEquipNames, pointsWithBoards } from '@/lib/finSettings'
 
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
 import { DashboardModelTree } from '@/components/viewer/DashboardModelTree'
@@ -2938,6 +2938,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
               endpoints: ${pointsWithBoards(apiSettings).history ? JSON.stringify(pointsWithBoards(apiSettings).history) : 'undefined'},
               workorderExpr: ${JSON.stringify(apiSettings.finWorkorderExpr || '')},
               meterProfile: ${apiSettings.finMeterProfile ? JSON.stringify(apiSettings.finMeterProfile) : 'undefined'},
+              meterNames: ${JSON.stringify(meterEquipNames(apiSettings))},
               severityBands: ${apiSettings.finSeverityBands ? JSON.stringify(apiSettings.finSeverityBands) : 'undefined'},
               equipmentClasses: ${apiSettings.finEquipmentClasses ? JSON.stringify(apiSettings.finEquipmentClasses) : 'undefined'},
               realtimeEndpoints: ${apiSettings.finRealtimeEndpoints ? JSON.stringify(apiSettings.finRealtimeEndpoints) : 'undefined'},
@@ -3000,6 +3001,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (polled.live) fin.livePoints = polled.live
       if (polled.history) fin.endpoints = polled.history
       fin.documents = Array.isArray(s.finDocuments) ? s.finDocuments : null
+      fin.meterNames = meterEquipNames(s)
     }
     try { (window as any).EKO_HEAT?.relink?.() } catch { /* the next data tick rebuilds the zones */ }
     try { (window as any).EKO?.set?.({}) } catch { /* the dashboard redraws on its next refresh */ }

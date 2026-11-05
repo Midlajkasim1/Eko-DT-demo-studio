@@ -210,6 +210,39 @@ export function findPointByName(text: string, views: PointView[]): PointView | n
 /** The live key a board with its own FIN point is read under; its chart history adds `_his` */
 export const boardKey = (name: string) => 'board_' + (name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'unnamed')
 
+export const meterHistoryKey = (name: string) => boardKey(name).replace(/^board_/, 'meter_') + '_his'
+
+const ENERGY_UNITS = ['kWh', 'MWh', 'Wh']
+
+/** "PMU, EM; MSB" → ['PMU', 'EM', 'MSB'] */
+export const meterPrefixes = (text: string) => String(text || '').split(/[,;]/).map(p => p.trim().toUpperCase()).filter(Boolean)
+
+/** Equipment with voltage, current and energy points reads like an electricity meter, whatever its name */
+function meterLike(list: PointView[]): boolean {
+  const has = (word: RegExp, units: string[]) => list.some(v => units.includes(v.unit) || word.test(v.point))
+  return has(/volt/i, ['V', 'kV']) && has(/current|amps?\b/i, ['A']) && has(/energy|kwh/i, ENERGY_UNITS)
+}
+
+export function meterEnergyPoint(views: PointView[]): PointView | undefined {
+  const kept = views.filter(v => v.his && v.kind !== 'Bool' && v.kind !== 'Str')
+  const named = (v: PointView) => /energy|kwh/i.test(v.point)
+  return kept.find(v => ENERGY_UNITS.includes(v.unit) && /total|import|active/i.test(v.point))
+    ?? kept.find(v => ENERGY_UNITS.includes(v.unit))
+    ?? kept.find(named)
+}
+
+export function meterSuggestions(views: PointView[], prefix: string): { equip: string; point?: PointView; byName: boolean }[] {
+  const wanted = meterPrefixes(prefix)
+  const byEquip = new Map<string, PointView[]>()
+  for (const v of views) if (v.equip) byEquip.set(v.equip, [...(byEquip.get(v.equip) ?? []), v])
+  return [...byEquip.entries()]
+    .flatMap(([equip, list]) => {
+      const byName = wanted.some(p => equip.toUpperCase().startsWith(p))
+      return byName || meterLike(list) ? [{ equip, point: meterEnergyPoint(list), byName }] : []
+    })
+    .sort((a, b) => a.equip.localeCompare(b.equip, undefined, { numeric: true }))
+}
+
 const ACRONYMS = /^(hvac|ahu|fahu|fcu|ups|it|ev|mcc|smdb|mdb|lv|mv|ats)$/i
 
 function boardName(part: string): string {

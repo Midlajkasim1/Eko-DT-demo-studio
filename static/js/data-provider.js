@@ -28,6 +28,7 @@
       powerEndpoints: fin.endpoints || fin.powerEndpoints || raw.power_endpoints || {},
       workorderExpr: fin.workorderExpr || raw.workorder_expr || '',
       meterProfile: fin.meterProfile || raw.meter_profile || null,
+      meterNames: Array.isArray(fin.meterNames) ? fin.meterNames : [],
       severityBands: fin.severityBands || raw.severity_bands || null,
       equipmentClasses: fin.equipmentClasses || raw.equipment_classes || null,
       realtimeEndpoints: fin.realtimeEndpoints || raw.realtime_endpoints || null,

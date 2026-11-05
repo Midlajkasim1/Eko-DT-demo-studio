@@ -354,6 +354,10 @@ export interface ProjectApiSettings {
    *  project maps them (Marsa Al Arab's six through config.json). Each board names Data Mapping
    *  keys, never a FIN point ID. */
   finPowerBoards?: PowerBoard[]
+  /** The meters on Energy › Anomalies. Absent: every meter FIN reports. */
+  finMeters?: MeterLink[]
+  /** PMU measurement: Anomalies leads with every meter, not only the main ones */
+  anomalyAllMeters?: boolean
   finBaseUrl?: string
   finProjectName?: string
   finDisplayName?: string
@@ -401,6 +405,15 @@ export interface PowerBoard {
   point?: string
   /** The hisRead query for that point, read under historyKey */
   history?: string
+}
+
+export interface MeterLink {
+  name: string
+  equip: string
+  /** Its energy point, p:{project}:r:… */
+  point?: string
+  history?: string
+  main?: boolean
 }
 
 export interface ProjectModel extends ProjectModelEntry {

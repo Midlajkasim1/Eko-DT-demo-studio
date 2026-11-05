@@ -558,10 +558,21 @@ def _build_fdd_summary(realtime: dict) -> list[dict]:
     return summary
 
 
+def _meter_prefixes(profile: dict) -> list:
+    return [p.strip().upper() for p in re.split(r"[,;]", str(profile.get("prefix") or "")) if p.strip()]
+
+
+def _is_meter(eq: dict, prefixes: list) -> bool:
+    """Its name starts with a profile prefix ("PMU, EM"), or FIN tags it an electricity meter."""
+    name = str(eq.get("name", "")).upper()
+    tags = eq.get("tags") or []
+    return any(name.startswith(p) for p in prefixes) or "elecMeter" in tags or ("meter" in tags and "elec" in tags)
+
+
 def _extract_meters(realtime: dict, profile: dict) -> dict:
-    prefix = str(profile.get("prefix", "")).upper()
+    prefixes = _meter_prefixes(profile)
     point_map = profile.get("point_map", {})
-    if not prefix or not point_map:
+    if not point_map:
         return {}
 
     meters: dict = {}
@@ -572,7 +583,7 @@ def _extract_meters(realtime: dict, profile: dict) -> dict:
                 continue
             for eq in items:
                 name = str(eq.get("name", ""))
-                if not name.upper().startswith(prefix):
+                if not _is_meter(eq, prefixes):
                     continue
                 metrics: dict = {key: None for key in point_map}
                 for pt in eq.get("points", []):
@@ -1450,10 +1461,11 @@ def _meter_items(profile: dict) -> dict:
     meters = _extract_meters(realtime, {"prefix": prefix, "point_map": point_map}) if prefix and point_map else {}
     items: dict = {}
     if prefix:
-        found = any(str(eq.get("name", "")).upper().startswith(prefix.upper())
+        wanted = _meter_prefixes({"prefix": prefix})
+        found = any(str(eq.get("name", "")).upper().startswith(tuple(wanted))
                     for fd in realtime.values() if isinstance(fd, dict)
                     for eq in fd.get("hvac", []) if isinstance(eq, dict))
-        items["prefix"] = _item("valid") if found else _item("not_found", f"No equipment name starts with {prefix}.")
+        items["prefix"] = _item("valid") if found else _item("not_found", f"No equipment name starts with {', '.join(wanted)}.")
     for key in point_map:
         if not meters:
             items[key] = _item("cannot_validate", "No meter matched the prefix to read this metric from.")

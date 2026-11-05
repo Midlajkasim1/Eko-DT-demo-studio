@@ -31,6 +31,7 @@ import { validateMappings, type ValidationResponse } from '@/lib/mappingValidati
 import { FinPointMapping } from '@/components/project/FinPointMapping'
 import { FinDocumentsEditor } from '@/components/project/FinDocumentsEditor'
 import { PowerBoardsEditor } from '@/components/project/FinPowerBoards'
+import { MetersEditor } from '@/components/project/FinMeters'
 import { importMappingCsv, mappingCsv, pointListCsv, pointViews } from '@/lib/finMappingCatalog'
 import type { HeatmapSetup, ProjectApiSettings } from '@/types'
 
@@ -253,7 +254,7 @@ const MAPPING_SECTIONS: { field: MappingField; hint: string }[] = [
   { field: 'finLivePoints', hint: 'One FIN point each. Empty shows --.' },
   { field: 'finEndpoints', hint: 'One history point each.' },
   { field: 'finEquipmentClasses', hint: 'Equipment tags for systems and meters.' },
-  { field: 'finMeterProfile', hint: 'Meter name prefix and point aliases.' },
+  { field: 'finMeterProfile', hint: 'Meter name prefixes, comma-separated, and point aliases. FIN equipment tagged elecMeter is a meter whatever its name.' },
   { field: 'finSeverityBands', hint: 'Alarm priority: critical, warning, info.' },
 ]
 
@@ -314,6 +315,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   const [mappings, setMappings] = useState<MappingStates>(() => mappingStatesFrom({}))
   // remounts the Power boards editor when its content is replaced (opening a project, Clear)
   const [boardsRev, setBoardsRev] = useState(0)
+  const [metersRev, setMetersRev] = useState(0)
   const [docsRev, setDocsRev] = useState(0)
   const [docsError, setDocsError] = useState<string | null>(null)
   const [revs, setRevs] = useState<Record<MappingField, number>>(
@@ -439,7 +441,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
     const keys = boardKeyOptions(currentProject.projectId, settings.finProjectName,
       { live: mappings.finLivePoints.value, history: mappings.finEndpoints.value }, sch)
     const prefix = !keys.standard && typeof mappings.finMeterProfile.value?.prefix === 'string' ? mappings.finMeterProfile.value.prefix : undefined
-    const problem = powerBoardsProblem(settings.finPowerBoards, keys, prefix)
+    const problem = powerBoardsProblem(settings.finPowerBoards, keys, prefix, settings.finMeters)
     if (!problem) return null
     if (!loaded) return `${problem} The Eko-DT backend could not be reached to check which mapping keys it serves this project, so only this project's own Data Mapping keys are accepted.`
     if (keys.unverifiedStandard) return `${problem} config.json's standard keys are accepted only once the backend has verified ${sch.standardProfile}'s records on the FIN server it is signed in to: connect to FIN with this project open, then save again.`
@@ -730,7 +732,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                     onChange={e => update('dashboardDemo', e.target.checked || undefined)} />
                   Show the prototype's demo figures
                 </label>
-                <p className="ds-hint">Off: the dashboard shows this project's FIN readings and settings. With Medical centre sample data, a reading this project maps in FIN shows FIN's value (-- when FIN has none), and everything else stays as sample data. With Marsa Al Arab the rest is left empty, and modules with no FIN source (anomalies, forecast, benchmark) are hidden.</p>
+                <p className="ds-hint">Off: the dashboard shows this project's FIN readings and settings. With Medical centre sample data, a reading this project maps in FIN shows FIN's value (-- when FIN has none), and everything else stays as sample data. With Marsa Al Arab the rest is left empty, and modules with no FIN source (forecast, benchmark) are hidden. Anomalies shows empty until FIN reports meters.</p>
               </div>
               <div className="ds-field">
                 <label>Sample data</label>
@@ -947,6 +949,30 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                   value={settings.finPowerBoards}
                   points={finPoints}
                   onChange={boards => update('finPowerBoards', boards)}
+                />
+              </MappingSection>
+
+              <MappingSection
+                title="Meters"
+                hint="The meters on Energy › Anomalies, in this order. From FIN offers equipment that matches a Meter Profile prefix or has voltage, current and energy points. A meter's energy point gives its chart when FIN keeps its history."
+                hasValue={!!settings.finMeters?.length}
+                unsetText="No meters set. Anomalies lists every meter FIN reports. It leads with the meters named in Power Boards (Meter), or with all of them when no board names one."
+                onLoad={() => { update('finMeters', undefined); setMetersRev(r => r + 1) }}
+              >
+                <div className="ds-field">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={settings.anomalyAllMeters === true} style={{ width: 'auto' }}
+                      onChange={e => update('anomalyAllMeters', e.target.checked || undefined)} />
+                    Show every meter (PMU measurement)
+                  </label>
+                  <p className="ds-hint">Off: the page leads with the main meters, those ticked Main meter below and those Power Boards name in Meter, as on Marsa Al Arab. With no main meter it shows every meter. The meter list on the right shows them all either way.</p>
+                </div>
+                <MetersEditor
+                  key={`${currentProject.projectId}-meters-${metersRev}`}
+                  value={settings.finMeters}
+                  points={finPoints}
+                  prefix={typeof mappings.finMeterProfile.value?.prefix === 'string' && mappings.finMeterProfile.value.prefix.trim() ? mappings.finMeterProfile.value.prefix : 'PMU'}
+                  onChange={meters => update('finMeters', meters)}
                 />
               </MappingSection>
             </div>

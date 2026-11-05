@@ -81,7 +81,7 @@
 
   /* REAL mode: every sample figure FIN does not replace is cleared, for every project (Marsa's too,
      whose fixture figures are not FIN readings either). Lists start empty and fill from FIN;
-     modules with no FIN source at all (anomalies, forecast, benchmark) are hidden. */
+     modules with no FIN source at all (forecast, benchmark) are hidden. */
   function clearFixtureFigures(site) {
     if (site.metrics) { site.metrics.contractedKw = null; site.metrics.baselineKw = null; }
     site.load24hMw = null;
@@ -101,7 +101,7 @@
     if (site.bench) { site.bench.rows = []; site.bench.siteWhm2 = null; }
     site.entitlements = site.entitlements || {};
     site.entitlements.modules = Object.assign({}, site.entitlements.modules,
-      { 'energy.anom': 'hidden', 'energy.fcst': 'hidden', 'energy.bench': 'hidden' });
+      { 'energy.fcst': 'hidden', 'energy.bench': 'hidden' });
   }
 
   /* REAL mode: costs and CO2 use only the rates saved for this project (Dashboard Settings → FIN
@@ -385,6 +385,14 @@
         pmu: b.meter ? String(b.meter) : null, hue: HUES[i % HUES.length] };
     });
   })();
+  /* The project's own meters (Dashboard Settings → Data Mapping → Meters), in its order */
+  var CONFIGURED_METERS = (function () {
+    var list = injected && Array.isArray(injected.meters) ? injected.meters : null;
+    if (!list || !list.length) return null;
+    return list.filter(function (m) { return m && m.name; }).map(function (m) {
+      return { name: String(m.name), equip: String(m.equip || ""), his: m.his ? String(m.his) : null, main: m.main === true };
+    });
+  })();
   /* Whose board ↔ meter links to trust: the project's configured ones, else Marsa Al Arab's own */
   var boardMeterLinks = !!CONFIGURED_BOARDS || fixtureSite;
   /* Configured boards are listed from the start, readings unknown ("--") until FIN answers for this
@@ -429,6 +437,7 @@
     var hourlyChart = !!((historyHas(p, 'Hourly_Energy_Consumption_his') || mapsKey(p, 'current_month')) && (!injected || injected.energyFromHourly !== false));
     var todayLive = boardsLive || historyHas(p, 'Hourly_Energy_Consumption_his');
     var waterLive = historyHas(p, 'Total_Water_Consumption_his');
+    var metersLive = (CONFIGURED_METERS || []).some(function (m) { return m.his && historyHas(p, m.his); });
     var held = [], blank = [];
     function hold(obj, keys, live) {
       if (!obj || live) return;
@@ -462,7 +471,7 @@
     hold(summaryRow(site, 'energy'), ['spark', 'sparkCompare', 'deltaEn', 'deltaAr'], todayLive);
     hold(pw.bva && pw.bva.ranges, ['today'], todayLive);
     hold(pw, ['boards', 'zones', 'zonesAr', 'zoneHues', 'zoneHourly', 'zoneLast24', 'zoneWeekly', 'zoneMonthly', 'zoneWTD',
-      'zoneMTD', 'zoneYesterday', 'zonePrevWeek', 'zonePrevMonth', 'pmuFlats', 'weekRange', 'trendX'], boardsLive || hourlyChart);
+      'zoneMTD', 'zoneYesterday', 'zonePrevWeek', 'zonePrevMonth', 'pmuFlats', 'weekRange', 'trendX'], boardsLive || hourlyChart || metersLive);
     hold(site, ['timeline24'], boardsLive);
     hold(pw, ['peakLast24', 'peakWeekly', 'peakMonthly', 'peakSeries', 'peakAvgKw'], historyHas(p, 'Peak_Demand_his'));
     hold(site.water, ['todayM3', 'avgDrawM3Day', 'sparkToday', 'hourly', 'todayH', 'weekly', 'monthly'], waterLive);
@@ -1162,6 +1171,9 @@
         if (boardMeterLinks) {
           boardList.forEach(function (b, i) { if (b.pmu) site.power.pmuFlats[meterKey(b.pmu)] = flats[i]; });
         }
+        (CONFIGURED_METERS || []).forEach(function (m) {
+          if (m.his && historyHas(p, m.his)) site.power.pmuFlats[m.name] = hourlyUse(flattenHist(p.power_history[m.his]));
+        });
         var peakFlat = flattenHist(p.power_history.Peak_Demand_his);
         var allFlats = flats.concat([peakFlat]);
         site.power.zones = boardList.map(function (b) { return b.name; });
@@ -1457,8 +1469,9 @@
       }
       if (Array.isArray(site.power.pmus)) {
         site.power.pmus.forEach(function (row) {
-          if (row && lastBoardKwh[row.id] != null) {
-            var next = trunc1(lastBoardKwh[row.id]);
+          var link = row && (row.boardMeter || row.id);
+          if (row && lastBoardKwh[link] != null) {
+            var next = trunc1(lastBoardKwh[link]);
             if (row.kwh !== next) { row.kwh = next; changed = true; }
           }
         });
@@ -1562,10 +1575,11 @@
   function applyMeters(meters) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !meters || !site.power) return;
-    if (sampleFill && !Object.keys(meters).length) return;
-    /* /pmu-live lists the meters the project's own meter profile matched (its prefix and point
-       aliases), so every one is shown. Marsa Al Arab's are keyed by PMU number, which its board
-       names and history follow; another site's meter keeps its own name. */
+    // FIN reports no meter: demo figures and sample data keep the sample's meters until it does
+    if (!Object.keys(meters).length && (!realMode || sampleFill)) return;
+    /* /pmu-live lists the meters the project's own meter profile matched (its prefixes, FIN's meter
+       tags and the meters named in Settings), so every one is shown. Marsa Al Arab's are keyed by
+       PMU number, which its board names and history follow; another site's meter keeps its own name. */
     var byKey = {};
     Object.keys(meters).forEach(function (name) {
       var k = meterKey(name);
@@ -1577,35 +1591,91 @@
         if (k && !byKey[k]) byKey[k] = { name: a.id, row: {} };
       });
     }
-    function rowOf(meta, live) {
+    var boards = meterBoards();
+    function rowOf(id, equip, live) {
       var r = live && live.row;
-      var db = meta.db;
+      var board = boards.find(function (b) { return sameMeter(id, b.pmu) || (equip && sameMeter(equip, b.pmu)); });
+      var link = board ? meterKey(board.pmu) : null;
+      var db = board ? board.name : null;
       if (!db && live && live.name) db = live.name.replace(/^PMU\d+[_\- ]*/i, "").replace(/_/g, " ").trim();
       return {
-        id: meta.id,
-        db: db || meta.id,
+        id: id,
+        db: db || id,
         kw: r ? asNum(r.active_power) : null,
         a: r ? asNum(r.current) : null,
         hz: r ? asNum(r.frequency) : null,
-        kwh: lastBoardKwh[meta.id] != null ? lastBoardKwh[meta.id] : (r ? asNum(r.total_energy) : null),
+        kwh: link && lastBoardKwh[link] != null ? lastBoardKwh[link] : (r ? asNum(r.total_energy) : null),
         v: r ? asNum(r.voltage) : null,
-        pf: null
+        pf: null,
+        fin: !!live,
+        boardMeter: link
       };
     }
-    /* each meter's board name: the project's configured boards, else Marsa Al Arab's own */
-    var canonDb = {};
-    if (CONFIGURED_BOARDS) CONFIGURED_BOARDS.forEach(function (b) { if (b.pmu) canonDb[meterKey(b.pmu)] = b.name; });
-    else if (fixtureSite) PMU_CANON.forEach(function (m) { canonDb[m.id] = m.db; });
     var ids = Object.keys(byKey);
     ids.sort(function (a, b) {
       return (parseInt(a.replace(/\D/g, ""), 10) || 0) - (parseInt(b.replace(/\D/g, ""), 10) || 0) || (a < b ? -1 : a > b ? 1 : 0);
     });
-    // no meter reported: the known meters are listed (readings "--"); a site that knows none lists none
-    if (!ids.length) ids = Object.keys(canonDb);
-    site.power.pmus = ids.map(function (id) {
-      return rowOf({ id: id, db: canonDb[id] }, byKey[id]);
-    });
+    // no meter reported: the boards' meters are listed (readings "--"); a site that names none lists none
+    if (!ids.length) ids = boards.map(function (b) { return meterKey(b.pmu); });
+    if (CONFIGURED_METERS) {
+      var byName = {};
+      Object.keys(byKey).forEach(function (k) { byName[byKey[k].name.toUpperCase()] = byKey[k]; });
+      site.power.pmus = CONFIGURED_METERS.map(function (m) {
+        var row = rowOf(m.name, m.equip, byKey[meterKey(m.equip)] || byName[m.equip.toUpperCase()]);
+        row.main = m.main;
+        return row;
+      });
+    } else {
+      site.power.pmus = ids.map(function (id) { return rowOf(id, null, byKey[id]); });
+    }
+    site.power.anomIds = featuredMeters(site.power.pmus, boards);
     paint();
+  }
+
+  /* configured boards, else Marsa Al Arab's own */
+  function meterBoards() {
+    var list = CONFIGURED_BOARDS || (fixtureSite ? PMU_CANON.map(function (m) { return { name: m.db, pmu: m.id }; }) : []);
+    return list.filter(function (b) { return b && b.pmu; });
+  }
+
+  /* A board's Meter names a meter by its whole name or its leading part (PMU01 for PMU01_MSB_1) */
+  function sameMeter(id, text) {
+    var a = String(id || "").toUpperCase(), b = String(meterKey(String(text || "").trim())).toUpperCase();
+    if (!a || !b) return false;
+    return a === b || (a.indexOf(b) === 0 && /[^A-Z0-9]/.test(a.charAt(b.length)));
+  }
+
+  /* The meters Anomalies leads with: every one for PMU measurement; else the main ones (ticked Main, then those boards name); else all */
+  function featuredMeters(pmus, boards) {
+    var all = pmus.map(function (u) { return u.id; });
+    if (injected && injected.anomalyAllMeters === true) return all;
+    var main = pmus.filter(function (u) { return u.main; }).map(function (u) { return u.id; });
+    boards.forEach(function (b) {
+      pmus.forEach(function (u) { if (u.boardMeter === meterKey(b.pmu) && main.indexOf(u.id) < 0) main.push(u.id); });
+    });
+    return main.length ? main : all;
+  }
+
+  /* A running total becomes the energy used each hour; an hourly reading is returned as is */
+  function hourlyUse(flat) {
+    var pts = (flat || []).slice().sort(function (a, b) {
+      return Date.UTC(a.y, a.m, a.d, a.h) - Date.UTC(b.y, b.m, b.d, b.h);
+    });
+    if (pts.length < 3) return pts;
+    var drops = 0;
+    for (var i = 1; i < pts.length; i++) if (pts[i].val < pts[i - 1].val) drops++;
+    // a rare drop is the meter resetting, not an hourly reading
+    if (drops > Math.max(1, pts.length * 0.01)) return pts;
+    var steps = [];
+    for (var j = 1; j < pts.length; j++) {
+      var gap = (Date.UTC(pts[j].y, pts[j].m, pts[j].d, pts[j].h) - Date.UTC(pts[j - 1].y, pts[j - 1].m, pts[j - 1].d, pts[j - 1].h)) / 36e5;
+      var used = pts[j].val - pts[j - 1].val;
+      if (gap === 1 && used >= 0) steps.push({ y: pts[j].y, m: pts[j].m, d: pts[j].d, h: pts[j].h, val: used });
+    }
+    var sorted = steps.map(function (p) { return p.val; }).sort(function (a, b) { return a - b; });
+    var typical = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+    // a bad reading in the total makes one hour jump back up by the whole total
+    return typical > 0 ? steps.filter(function (p) { return p.val <= typical * 50; }) : steps;
   }
 
 

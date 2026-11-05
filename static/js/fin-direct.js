@@ -702,11 +702,20 @@
     return summary;
   }
 
-  function extractMeters(floors, profile) {
+  /* A meter: its name starts with a profile prefix ("PMU, EM"), Settings names it, or FIN tags it an electricity meter */
+  function isMeter(eq, prefixes, named) {
+    var upper = String(eq.name || '').toUpperCase();
+    var tags = eq.tags || [];
+    return prefixes.some(function (p) { return upper.indexOf(p) === 0; }) || named.indexOf(upper) >= 0
+      || tags.indexOf('elecMeter') >= 0 || (tags.indexOf('meter') >= 0 && tags.indexOf('elec') >= 0);
+  }
+
+  function extractMeters(floors, profile, names) {
     profile = profile || {};
-    var prefix = String(profile.prefix || '').toUpperCase();
+    var prefixes = String(profile.prefix || '').split(/[,;]/).map(function (p) { return p.trim().toUpperCase(); }).filter(Boolean);
     var pointMap = profile.point_map || {};
-    if (!prefix || !Object.keys(pointMap).length) return {};
+    var named = (names || []).map(function (n) { return String(n).toUpperCase(); });
+    if (!Object.keys(pointMap).length) return {};
     var meters = {};
     Object.keys(floors || {}).forEach(function (floor) {
       var data = floors[floor];
@@ -715,7 +724,7 @@
         if (!Array.isArray(items)) return;
         items.forEach(function (eq) {
           var name = String(eq.name || '');
-          if (name.toUpperCase().indexOf(prefix) !== 0) return;
+          if (!isMeter(eq, prefixes, named)) return;
           var metrics = {};
           Object.keys(pointMap).forEach(function (key) { metrics[key] = null; });
           (eq.points || []).forEach(function (pt) {
@@ -1041,6 +1050,7 @@
       powerEndpoints: filled(raw.powerEndpoints) ? raw.powerEndpoints : {},
       workorderExpr: raw.workorderExpr || DEFAULT_WO,
       meterProfile: filled(raw.meterProfile) ? raw.meterProfile : DEFAULT_METER,
+      meterNames: Array.isArray(raw.meterNames) ? raw.meterNames : [],
       severityBands: filled(raw.severityBands) ? raw.severityBands : DEFAULT_BANDS,
       equipmentClasses: filled(raw.equipmentClasses) ? raw.equipmentClasses : DEFAULT_CLASSES,
       realtimeEndpoints: filled(raw.realtimeEndpoints) ? raw.realtimeEndpoints : DEFAULT_RT,
@@ -1102,7 +1112,7 @@
     return {
       equipment: equipment,
       alarms: flattenAlarms(built.alarms, cfg.severityBands),
-      meters: extractMeters(built.floors, cfg.meterProfile),
+      meters: extractMeters(built.floors, cfg.meterProfile, cfg.meterNames),
       workorders: this.workorderPayload
     };
   };

@@ -280,8 +280,8 @@ window.EKO_A = (function(){
     }
   }
   function anomEvidenceSeries(power, range, daySel, pmuIds, pmus){
-    const ids = ['PMU09','PMU04','PMU05','PMU06','PMU07','PMU08'];
-    const hues = ['#4EA3E8','#F0A93B','#45C79A','#E48FC4','#A78BFA','#E06C75'];
+    const ids = (pmus || []).map(u => u.id);
+    const hues = ['#4EA3E8','#F0A93B','#45C79A','#E48FC4','#A78BFA','#E06C75','#5FC4C9','#C9A65F','#8FA3E4','#E4A38F'];
     const want = pmuIds && pmuIds.length ? pmuIds : ids;
     const now = anomNow();
     const daySet = daySel && daySel.length ? daySel : null;
@@ -318,7 +318,9 @@ window.EKO_A = (function(){
     const idx = {};
     keys.forEach((k,i2) => { idx[k.id] = i2; });
     const per = want.map((id, pi) => {
-      const flat = (power && power.pmuFlats && power.pmuFlats[id]) || [];
+      const meter = (pmus || []).find(x => x.id === id);
+      const flats = (power && power.pmuFlats) || {};
+      const flat = flats[id] || (meter && meter.boardMeter && flats[meter.boardMeter]) || [];
       const sum = keys.map(() => 0);
       const n = keys.map(() => 0);
       (flat||[]).forEach(p => {
@@ -338,7 +340,7 @@ window.EKO_A = (function(){
       return {
         id,
         n: u ? (u.db ? id+' · '+u.db : id) : id,
-        c: hues[gi >= 0 ? gi : pi] || '#F0A93B',
+        c: hues[(gi >= 0 ? gi : pi) % hues.length],
         vals: keys.map((_, i2) => n[i2] ? (hourly ? sum[i2]/n[i2] : sum[i2]) : null)
       };
     });
@@ -354,16 +356,24 @@ window.EKO_A = (function(){
   }
 
   /* ------------------------------ ANOMALIES -------------------------------- */
+  /* for a site with no time-of-day block of its own */
+  const TOD_PARTS = [
+    { en: 'Early Morning', ar: '\u0627\u0644\u0635\u0628\u0627\u062d \u0627\u0644\u0628\u0627\u0643\u0631', range: '00:00-06:00' },
+    { en: 'Morning', ar: '\u0627\u0644\u0635\u0628\u0627\u062d', range: '06:00-11:00' },
+    { en: 'Afternoon', ar: '\u0628\u0639\u062f \u0627\u0644\u0638\u0647\u0631', range: '11:00-15:00' },
+    { en: 'Evening', ar: '\u0627\u0644\u0645\u0633\u0627\u0621', range: '15:00-19:00' },
+    { en: 'Night', ar: '\u0627\u0644\u0644\u064a\u0644', range: '19:00-24:00' } ];
   function anomPage(E){
-    const d = E.data.anom, ar = E.lang === 'ar';
+    const d = E.data.anom || {}, ar = E.lang === 'ar';
     const pmus = E.data.power.pmus || [];
-    const boardIds = ['PMU09','PMU04','PMU05','PMU06','PMU07','PMU08'];
+    /* anomIds comes from data-map.js; the standalone prototype keeps Marsa Al Arab's six */
+    const boardIds = E.data.power.anomIds || ['PMU09','PMU04','PMU05','PMU06','PMU07','PMU08'];
     const boards = boardIds.map(id => pmus.find(u => u.id === id)).filter(Boolean);
     const nd = (v, d2) => (v == null || !isFinite(Number(v))) ? '--' : fmt(v, d2 == null ? 1 : d2);
     const kwhVals = pmus.map(u => Number(u.kwh)).filter(v => isFinite(v));
     const maxKwh = kwhVals.length ? Math.max(...kwhVals) : 0;
     const totKwh = kwhVals.reduce((s2, v) => s2 + v, 0);
-    const heroes = (boards.length ? boards : pmus.slice(0, 6)).map(u => {
+    const heroes = (boards.length ? boards : pmus).slice(0, 6).map(u => {
       const bar = maxKwh && u.kwh != null ? Math.max(0, Math.round(Number(u.kwh) / maxKwh * 100)) : 0;
       return `<div class="pwtile"><div class="pwth"><span class="ovklbl">${esc(u.id)}</span>${C().ctl(E, u.id, u.db, { topic:'peak' })}</div>
         <div class="ovkval"><span class="ovknum">${nd(u.kwh)}</span><span class="ovkunit">kWh</span></div>
@@ -418,7 +428,7 @@ window.EKO_A = (function(){
       <div class="pwwh"><span class="alcardt">${esc(E.t('anomTod'))}</span>
         <span class="alcardm msA">${esc(E.t('anomTodCap'))}</span>${chrome2}</div>
       <span class="todate39 tMonoS">${esc(todDate)}</span>
-      ${(d.todParts||[]).map(pp => `<div class="todrow39">
+      ${(d.todParts || TOD_PARTS).map(pp => `<div class="todrow39">
         <div class="todlab39"><span>${esc(ar?pp.ar:pp.en)}</span><i class="tMonoS">${esc(pp.range)}</i></div>
         <span class="todcell39">--</span></div>`).join('')}
       <span class="ovkcap">${esc(E.t('anomTodEmpty'))}</span></article>`;

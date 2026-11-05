@@ -44,7 +44,7 @@
     (d.meters || []).forEach(m => { if(m.domain === 'energy'){ m.last = Math.round(d0.total * 1000); m.lastAt = hhmm(now); if(m.sparkUnit === 'MWh/d' || m.sparkUnit === 'kWh/d'){ m.sparkUnit = 'kWh/d'; m.spark7 = days7.map(v => Math.round(v * 1000)); } } });
     (d.summary || []).forEach(s => { if(s.key === 'energy'){ const sp = []; for(let k = 11; k >= 0; k--) sp.push(Math.round(e.hour(now - k * 2 * HOUR, false).total / 1000 * 2 * 10) / 10); s.spark = sp;
       const typ = e.day(-7).total * d0.part; s.deltaEn = (d0.total >= typ ? '+' : '') + Math.round((d0.total / typ - 1) * 100) + '% vs typical'; s.deltaAr = '‎' + s.deltaEn.replace(' vs typical', ' مقابل المعتاد'); } });
-    if(d.power){ (d.power.pmus || []).forEach(p => { p.kw = Math.round(h.total); p.kwh = Math.round(d0.total * 1000); });
+    if(d.power){ (d.power.pmus || []).forEach(p => { if(p.fin) return; p.kw = Math.round(h.total); p.kwh = Math.round(d0.total * 1000); });
       if(d.power.subview){ d.power.subview.loadNowKw = Math.round(h.total); d.power.subview.baselineKw = Math.round(hd.total); } }
     if(d.energyLanding){ d.energyLanding.currentKw = Math.round(h.total); d.energyLanding.baselineKw = Math.round(hd.total); }
     /* the energy model reads the engine's days (js/energy-model.js) */
@@ -225,7 +225,7 @@
       for(let ms = q0; ms <= now; ms += Q) q.push(+(e.hour(ms, false).total * (1 + V(EL.quarterScatter) * e.N('q15' + Math.floor(ms / Q))) / 1000).toFixed(3));
       pw.peakSeriesMw = q; const n = q.length - 1; pw.peakSeriesLabels = [0, Math.round(n / 3), Math.round(2 * n / 3), n].map(i => hm(q0 + i * Q));
       if(pw.heroCharts && pw.heroCharts.current){ pw.heroCharts.current.value = +(h.total / sv.scaleMaxKw * 100).toFixed(1); }
-      (pw.pmus || []).forEach(p => { p.pf = pf; p.v = +(vv * (1 + 0.002 * e.N('pv' + Math.floor(now / HOUR)))).toFixed(1); p.a = Math.round(h.total * 1000 / (Math.sqrt(3) * p.v * pf)); p.hz = 50; });
+      (pw.pmus || []).forEach(p => { if(p.fin) return; p.pf = pf; p.v = +(vv * (1 + 0.002 * e.N('pv' + Math.floor(now / HOUR)))).toFixed(1); p.a = Math.round(h.total * 1000 / (Math.sqrt(3) * p.v * pf)); p.hz = 50; });
       /* the budget charts: today by hour, this week and this month by day, against the 4-week baseline */
       if(pw.bva && pw.bva.ranges){ const R = pw.bva.ranges, hk = ms => e.hour(ms, false).total;
         const td = { a: [], b: [], l: [] };
