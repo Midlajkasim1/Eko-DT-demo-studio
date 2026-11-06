@@ -53,7 +53,7 @@ import notifications
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
-with open(CONFIG_PATH, "r") as f:
+with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
     BASE_CONFIG = json.load(f)
 
 # config.json is replaced by every update (the export writes it); config.local.json is the operator's file, which an update cannot touch (the export never
