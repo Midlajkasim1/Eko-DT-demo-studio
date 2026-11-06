@@ -38,11 +38,11 @@ window.EKO_BVA = (function(){
       sa += a; sb += bl; n++; c += bl - a; cum.push(c);
     });
     const diff = sb - sa;                                   /* positive = avoided */
-    const mwh = r.unit === 'MWh' ? diff : diff / 1000;
+    const kwh = r.unit === 'kWh' ? diff : diff * 1000;
     const rate = E.data.basis.aedPerKwh;
-    const aed = mwh * 1000 * rate;
+    const aed = kwh * rate;
     const pct = sb > 0 ? (sa - sb) / sb * 100 : null;      /* zero denominator → null → dash */
-    return { key, r, b, unit:r.unit, sa, sb, n, diff, mwh, avoided: diff >= 0, aed, rate, pct, gaps, cum, prov: E.data.basis.tariffStatus === 'provisional' };
+    return { key, r, b, unit:'kWh', sa, sb, n, diff, kwh, avoided: diff >= 0, aed, rate, pct, gaps, cum, prov: E.data.basis.tariffStatus === 'provisional' };
   }
   const label = (E, r, i) => r.labelKeys ? E.t(r.labels[i]) : r.labels[i];
   const gapList = (E, s) => s.gaps.map(i => label(E, s.r, i)).join(', ');
@@ -54,7 +54,7 @@ window.EKO_BVA = (function(){
     const adjText = (adj.weather && adj.occupancy) ? t('bvaAdjBoth') : (adj.weather ? t('bvaAdjWeather') : adj.occupancy ? t('bvaAdjOcc') : t('bvaAdjNone'));
     const prov = s.prov ? ` <span class="rpprov">${esc(t('rpB.prov'))}</span>` : '';
     const sumKey = s.avoided ? 'bvaSumAvoided' : 'bvaSumExcess';
-    const sumHtml = `<span class="bvasumv"><b class="tMono">${esc(fmt(Math.abs(s.mwh), 1))}</b> MWh</span>
+    const sumHtml = `<span class="bvasumv"><b class="tMono">${esc(fmt(Math.abs(s.kwh), 0))}</b> kWh</span>
       <span class="bvasumt">${esc(t(sumKey, { window:win }))}</span>
       <span class="bvasumaed">AED <b class="tMono">${esc(fmt(Math.abs(s.aed), 0))}</b> ${esc(t('bvaAtRate', { rate:fmt(s.rate, 2) }))}${prov}</span>
       <span class="bvasumpct" data-tip="${esc(s.pct == null ? t('bvaNoBaseWhy') : t('bvaVsTip'))}">${s.pct == null ? esc(t('bvaNoBase')) : esc(t('bvaVs', { pct:(s.pct >= 0 ? '+' : '') + fmt(s.pct, 1) }))}</span>`;

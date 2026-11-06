@@ -9,7 +9,6 @@ import {
   KeyValueEditor,
   MappingSection,
   MeterProfileEditor,
-  PowerBoardsEditor,
   SeverityEditor,
   type EditorState,
 } from '@/components/project/FinMappingEditors'
@@ -29,6 +28,12 @@ import {
 } from '@/lib/finSettings'
 import type { JsonObject } from '@/lib/mappingRows'
 import { validateMappings, type ValidationResponse } from '@/lib/mappingValidation'
+import { FinPointMapping } from '@/components/project/FinPointMapping'
+import { FinDocumentsEditor } from '@/components/project/FinDocumentsEditor'
+import { PowerBoardsEditor } from '@/components/project/FinPowerBoards'
+import { PointControlEditor } from '@/components/project/PointControlEditor'
+import { MetersEditor } from '@/components/project/FinMeters'
+import { importMappingCsv, mappingCsv, pointListCsv, pointViews } from '@/lib/finMappingCatalog'
 import type { HeatmapSetup, ProjectApiSettings } from '@/types'
 
 interface ProjectSettingsModalProps {
@@ -59,12 +64,7 @@ function HeatmapPane({
   return (
     <div className="ds-pane">
       <h3 className="ds-section-title">Heatmap</h3>
-      <p className="ds-hint">
-        Linked rooms are coloured with sample readings until a FIN value arrives.
-        Turn sample readings off and a room is drawn only when its name is a sensor, such as IS-01 or IAQ-02.
-        IS reads zone temperature and humidity. IAQ reads CO2.
-        Save, then open the heatmap. Leave this as it is and the project keeps the top view of the ground floor, with the models as they are.
-      </p>
+      <p className="ds-hint">Rooms are coloured from FIN readings.</p>
 
       <h3 className="ds-section-title" style={{ marginTop: 24 }}>Sample readings</h3>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
@@ -81,9 +81,80 @@ function HeatmapPane({
         />
         Fill linked rooms when FIN has no reading
       </label>
-      <p className="ds-hint">
-        Linked rooms share seven sample sensors, S-01 to S-07. Rooms on one sensor use the same temperature, humidity, and CO2, so the view does not colour every room on its own. You do not rename the rooms. A real FIN reading is kept. Marsa has no linked rooms, so its heatmap stays on the FIN feed. Turn this off to draw only rooms you name IS-01 or IAQ-02.
-      </p>
+      <p className="ds-hint">Off: only rooms named after a sensor (IS-01, IAQ-02) are coloured.</p>
+
+      <h3 className="ds-section-title" style={{ marginTop: 24 }}>Occupancy</h3>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
+        <input
+          type="checkbox"
+          checked={current.stillRooms !== false}
+          onChange={e => {
+            if (e.target.checked) {
+              const next = { ...current }
+              delete next.stillRooms
+              onChange(next)
+            } else patch({ stillRooms: false })
+          }}
+        />
+        Stand still in rooms
+      </label>
+      <p className="ds-hint">On, people stand still. They walk only in a room whose name contains a word below, and they stay inside that room. Off, everyone walks, still inside their own room.</p>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
+        People
+        <input
+          type="number"
+          min={0}
+          max={400}
+          value={current.people ?? 80}
+          onChange={e => patch({ people: Math.max(0, Math.min(400, Math.round(Number(e.target.value) || 0))) })}
+          style={{ width: 72, padding: '4px 8px', borderRadius: 6, background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+        />
+      </label>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
+        Speed
+        <input
+          type="range"
+          min={0.4}
+          max={2}
+          step={0.1}
+          value={current.speed ?? 1}
+          onChange={e => patch({ speed: Number(e.target.value) })}
+        />
+        <span>{(current.speed ?? 1).toFixed(1)}</span>
+      </label>
+      <p className="ds-hint">People walk in rooms whose name contains:</p>
+      {['Corridor', 'Circulation', 'Public area', 'Lobby', 'Waiting', 'Lounge'].map(word => {
+        const on = (current.walkRooms ?? ['Corridor', 'Circulation', 'Public area', 'Lobby', 'Waiting', 'Lounge']).some(w => w.toLowerCase() === word.toLowerCase())
+        return (
+          <label key={word} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={on}
+              onChange={() => {
+                const base = current.walkRooms ?? ['Corridor', 'Circulation', 'Public area', 'Lobby', 'Waiting', 'Lounge']
+                const next = on ? base.filter(w => w.toLowerCase() !== word.toLowerCase()) : [...base, word]
+                patch({ walkRooms: next })
+              }}
+            />
+            {word}
+          </label>
+        )
+      })}
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0 16px', fontSize: 13 }}>
+        Also
+        <input
+          type="text"
+          placeholder="atrium, concourse"
+          value={(current.walkRooms ?? []).filter(w => !['corridor', 'circulation', 'public area', 'lobby', 'waiting', 'lounge'].includes(w.toLowerCase())).join(', ')}
+          onChange={e => {
+            const known = (current.walkRooms ?? ['Corridor', 'Circulation', 'Public area', 'Lobby', 'Waiting', 'Lounge'])
+              .filter(w => ['corridor', 'circulation', 'public area', 'lobby', 'waiting', 'lounge'].includes(w.toLowerCase()))
+            const extra = e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+            patch({ walkRooms: [...known, ...extra] })
+          }}
+          style={{ flex: 1, padding: '4px 8px', borderRadius: 6, background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+        />
+      </label>
 
       <h3 className="ds-section-title" style={{ marginTop: 24 }}>View</h3>
       <div className="al-filters" style={{ marginBottom: 12 }}>
@@ -104,8 +175,7 @@ function HeatmapPane({
           }}>Use the automatic top view</button>
         )}
       </div>
-      <p className="ds-hint">Point the model, then save this top view. Only the heatmap opens there. Save Settings keeps it. Other panels keep the camera from Save Camera &amp; Render View. Inside the floor still uses its own look.</p>
-      <p className="ds-hint">Inside the floor looks in from a high corner. The ceiling of that storey is cut away, so the colour sits between the walls. Top view does the same while the box below is ticked.</p>
+      <p className="ds-hint">The heatmap opens on the saved top view.</p>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0 16px', fontSize: 13 }}>
         <input
           type="checkbox"
@@ -113,11 +183,10 @@ function HeatmapPane({
           disabled={current.camera === 'inside'}
           onChange={e => patch({ insideWalls: e.target.checked })}
         />
-        Draw the colour inside the room, under the ceiling
+        Colour inside the room, under the ceiling
       </label>
 
       <h3 className="ds-section-title">Floor</h3>
-      <p className="ds-hint">A named storey shows that floor only, with its ceiling opened while the colour is drawn inside. All floors keeps every storey. Leave this on Ground floor and the project keeps the usual ground-floor view.</p>
       <select
         value={current.floor || ''}
         onChange={e => patch({ floor: e.target.value || undefined })}
@@ -129,10 +198,10 @@ function HeatmapPane({
           <option key={f.id} value={f.id}>{f.name || f.id}</option>
         ))}
       </select>
-      {!floors.length && <p className="ds-hint">Open the model to list its storeys here. Ground floor and All floors can be saved before that.</p>}
+      {!floors.length && <p className="ds-hint">Open the model to list its floors.</p>}
 
       <h3 className="ds-section-title" style={{ marginTop: 8 }}>Fade</h3>
-      <p className="ds-hint">Nothing fades until you tick a model. A ticked model stays on screen but light, so the room colour reads through it.</p>
+      <p className="ds-hint">Ticked models stay light so the colour shows through.</p>
       {models.length ? models.map(name => (
         <label key={name} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, fontSize: 13 }}>
           <input type="checkbox" checked={namedFade && faded.has(name)} onChange={() => toggleModel(name)} />
@@ -183,26 +252,11 @@ const mappingStatesFrom = (s: ProjectApiSettings): MappingStates =>
 // What each Data Mapping block controls. No other site's values are offered here: a project's
 // mapping is only what the user enters for it.
 const MAPPING_SECTIONS: { field: MappingField; hint: string }[] = [
-  {
-    field: 'finLivePoints',
-    hint: 'Maps dashboard metrics (e.g. total_power) to FIN point IDs. Use {project} for the FIN project name.',
-  },
-  {
-    field: 'finEndpoints',
-    hint: 'Maps history queries (e.g. Total_Power_Consumption_his) to FIN API expressions.',
-  },
-  {
-    field: 'finEquipmentClasses',
-    hint: 'Which equipment tags count as plant systems or meters, and the order used to pick an equipment type.',
-  },
-  {
-    field: 'finMeterProfile',
-    hint: 'The name prefix that identifies power meters, and the point-name aliases for each meter metric.',
-  },
-  {
-    field: 'finSeverityBands',
-    hint: 'How a FIN alarm priority maps to critical / warning / info. "desc": a higher number is more severe.',
-  },
+  { field: 'finLivePoints', hint: 'One FIN point each. Empty shows --.' },
+  { field: 'finEndpoints', hint: 'One history point each.' },
+  { field: 'finEquipmentClasses', hint: 'Equipment tags for systems and meters.' },
+  { field: 'finMeterProfile', hint: 'Meter name prefixes, comma-separated, and point aliases. FIN equipment tagged elecMeter is a meter whatever its name.' },
+  { field: 'finSeverityBands', hint: 'Alarm priority: critical, warning, info.' },
 ]
 
 const DEFAULT_DASHBOARD_CONFIG = {
@@ -262,6 +316,9 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   const [mappings, setMappings] = useState<MappingStates>(() => mappingStatesFrom({}))
   // remounts the Power boards editor when its content is replaced (opening a project, Clear)
   const [boardsRev, setBoardsRev] = useState(0)
+  const [metersRev, setMetersRev] = useState(0)
+  const [docsRev, setDocsRev] = useState(0)
+  const [docsError, setDocsError] = useState<string | null>(null)
   const [revs, setRevs] = useState<Record<MappingField, number>>(
     () => Object.fromEntries(MAPPING_FIELDS.map(f => [f, 0])) as Record<MappingField, number>
   )
@@ -270,6 +327,8 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   const [validation, setValidation] = useState<ValidationResponse | null>(null)
   const [validating, setValidating] = useState(false)
   const [validateError, setValidateError] = useState<string | null>(null)
+  const [csvNotice, setCsvNotice] = useState<string | null>(null)
+  const csvInput = useRef<HTMLInputElement>(null)
   const finConnected = useFinStore(s => s.isConnected)
   const finStatus = useFinStore(s => s.status)
   const openProjectId = useRef<string | undefined>(undefined)
@@ -332,6 +391,8 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
       setMappings(mappingStatesFrom(savedSettings))
       setRevs(prev => Object.fromEntries(MAPPING_FIELDS.map(f => [f, prev[f] + 1])) as typeof prev)
       setBoardsRev(r => r + 1)
+      setDocsRev(r => r + 1)
+      setDocsError(null)
       setSaveError(null)
       setValidation(null)
       setValidateError(null)
@@ -381,14 +442,12 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
     const keys = boardKeyOptions(currentProject.projectId, settings.finProjectName,
       { live: mappings.finLivePoints.value, history: mappings.finEndpoints.value }, sch)
     const prefix = !keys.standard && typeof mappings.finMeterProfile.value?.prefix === 'string' ? mappings.finMeterProfile.value.prefix : undefined
-    const problem = powerBoardsProblem(settings.finPowerBoards, keys, prefix)
+    const problem = powerBoardsProblem(settings.finPowerBoards, keys, prefix, settings.finMeters)
     if (!problem) return null
     if (!loaded) return `${problem} The Eko-DT backend could not be reached to check which mapping keys it serves this project, so only this project's own Data Mapping keys are accepted.`
     if (keys.unverifiedStandard) return `${problem} config.json's standard keys are accepted only once the backend has verified ${sch.standardProfile}'s records on the FIN server it is signed in to: connect to FIN with this project open, then save again.`
     return problem
   }
-  const boardKeys = boardKeyOptions(currentProject.projectId, settings.finProjectName,
-    { live: mappings.finLivePoints.value, history: mappings.finEndpoints.value }, schema)
   const boardsError = boardsCheck(schema, schemaLoaded)
   // isFin only decides FIN-specific side effects below; every settings tab is for every project
   const isFin = !!currentProject.isFinProject
@@ -433,6 +492,30 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
     setRevs(prev => ({ ...prev, [field]: prev[field] + 1 }))
   }
 
+  const finPoints = resources?.state === 'ready' && resources.project === selectedFinProject ? resources.items : undefined
+  const csvName = (what: string) => `${(selectedFinProject || currentProject.name || 'project').replace(/[^\w-]+/g, '_')}-${what}.csv`
+  const saveCsv = (name: string, text: string) => {
+    const url = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+  const downloadMappingCsv = () => saveCsv(csvName('fin-mapping'), mappingCsv(mappings.finLivePoints.value, mappings.finEndpoints.value,
+    pointViews(finPoints), { live: schema.finLivePoints, history: schema.finEndpoints }))
+  const downloadPointsCsv = () => saveCsv(csvName('fin-points'), pointListCsv(pointViews(finPoints)))
+  const importCsv = async (file: File) => {
+    const r = importMappingCsv(await file.text(), pointViews(finPoints))
+    if (r.error) { setCsvNotice(`Not imported: ${r.error}`); return }
+    if (Object.keys(r.live).length) loadMapping('finLivePoints', { ...(mappings.finLivePoints.value ?? {}), ...r.live })
+    if (Object.keys(r.history).length) loadMapping('finEndpoints', { ...(mappings.finEndpoints.value ?? {}), ...r.history })
+    const missing = r.unresolved.length
+      ? ` Not found by name${finPoints ? '' : ' (the FIN point list is not loaded)'}: ${r.unresolved.join('; ')}.`
+      : ''
+    setCsvNotice(`${r.applied} ${r.applied === 1 ? 'mapping' : 'mappings'} imported from ${file.name}.${missing} Save Settings to keep them.`)
+  }
+
   const handleSave = async () => {
     if (!folderHandle) {
       setSaveError('Not saved: this project has no folder open.')
@@ -462,6 +545,11 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
         setSaveError(`Not saved. ${problem}`)
         return
       }
+    }
+    if (docsError) {
+      setActiveTab('data')
+      setSaveError(`Not saved. ${docsError}`)
+      return
     }
     const basisError = basisProblem(settings)
     if (basisError) {
@@ -645,16 +733,16 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                     onChange={e => update('dashboardDemo', e.target.checked || undefined)} />
                   Show the prototype's demo figures
                 </label>
-                <p className="ds-hint">Off: the dashboard shows only this project's FIN readings and settings, and modules with no FIN source (anomalies, forecast, benchmark) are hidden.</p>
+                <p className="ds-hint">Off: the dashboard shows this project's FIN readings and settings. With Medical centre sample data, a reading this project maps in FIN shows FIN's value (-- when FIN has none), and everything else stays as sample data. With Marsa Al Arab the rest is left empty, and modules with no FIN source (forecast, benchmark) are hidden. Anomalies shows empty until FIN reports meters.</p>
               </div>
               <div className="ds-field">
                 <label>Sample data</label>
-                <select value={settings.dashboardSampleData || ''} disabled={settings.dashboardDemo !== true}
+                <select value={settings.dashboardSampleData || ''}
                   onChange={e => update('dashboardSampleData', e.target.value || undefined)}>
                   <option value="">Marsa Al Arab</option>
                   <option value="medical">Medical centre</option>
                 </select>
-                <p className="ds-hint">The sample data set the figures come from while demo figures are on. Takes effect the next time the dashboard opens.</p>
+                <p className="ds-hint">The dashboard's tabs and panels, and the sample figures. Takes effect the next time the dashboard opens.</p>
               </div>
 
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Modules</h3>
@@ -664,7 +752,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                   <option value="">Standard</option>
                   <option value="extended">Extended</option>
                 </select>
-                <p className="ds-hint">Extended adds ESG, Maintenance, and Security and life safety. Works with sample data or live data. Takes effect the next time the dashboard opens.</p>
+                <p className="ds-hint">Extended adds ESG, Maintenance, and Security and life safety, with the Other systems, Data health, Occupancy, Evacuation and Nurse call views. Works with sample data or live data. Takes effect the next time the dashboard opens.</p>
               </div>
 
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Weather API</h3>
@@ -688,8 +776,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
           {/* Kept mounted (just hidden) so rows being edited survive a switch of tab */}
           {(
             <div className="ds-pane" style={activeTab === 'data' ? undefined : { display: 'none' }}>
-              <h3 className="ds-section-title">Standalone Mode (Direct API)</h3>
-              <p className="ds-hint">Enable this to bypass the Python backend and fetch data directly from FIN (useful when hosting this viewer inside the FIN framework).</p>
+              <h3 className="ds-section-title">Direct FIN</h3>
               <div className="ds-field">
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                   <input 
@@ -698,29 +785,65 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                     onChange={e => update('finDirectMode', e.target.checked)} 
                     style={{ width: 'auto' }}
                   />
-                  Use Direct FIN API (No Backend)
+                  Direct FIN API
                 </label>
+              </div>
+
+              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Equipment charts</h3>
+              <p className="ds-hint">Leave these blank. AHU, FAHU, and MAHU use supply air, then return air. FCU and VAV use zone temp, then space temp. Fill a box only when that project uses another name.</p>
+              <div className="ds-field-row">
+                <div className="ds-field">
+                  <label>AHU temperature</label>
+                  <input type="text" value={settings.ahuTemp || ''} placeholder="sa temp" onChange={e => update('ahuTemp', e.target.value || undefined)} />
+                </div>
+                <div className="ds-field">
+                  <label>AHU setpoint</label>
+                  <input type="text" value={settings.ahuSetpoint || ''} placeholder="sp" onChange={e => update('ahuSetpoint', e.target.value || undefined)} />
+                </div>
+              </div>
+              <div className="ds-field-row">
+                <div className="ds-field">
+                  <label>FCU temperature</label>
+                  <input type="text" value={settings.fcuTemp || ''} placeholder="zone temp, space temp" onChange={e => update('fcuTemp', e.target.value || undefined)} />
+                </div>
+                <div className="ds-field">
+                  <label>FCU setpoint</label>
+                  <input type="text" value={settings.fcuSetpoint || ''} placeholder="sp" onChange={e => update('fcuSetpoint', e.target.value || undefined)} />
+                </div>
+              </div>
+
+              <PointControlEditor value={settings.pointControl} onChange={next => update('pointControl', next)} />
+
+              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Energy history</h3>
+              <div className="ds-field">
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={settings.energyFromHourly === true}
+                    onChange={e => update('energyFromHourly', e.target.checked || undefined)}
+                    style={{ width: 'auto' }}
+                  />
+                  Use the hourly history for consumption
+                </label>
+                <p className="ds-hint">One Energy point with history fills hourly, today, week, and month. A separate month point is used only for the month.</p>
               </div>
 
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Mapping validation</h3>
               {MAPPING_FIELDS.every(f => !mappings[f].value) && (
-                <p className="ds-hint">
-                  — Not Configured. No project-specific mappings configured for this {isFin ? 'FIN ' : ''}project.
-                </p>
+                <p className="ds-hint">No mappings yet.</p>
               )}
               {!selectedFinProject && (
-                <p className="ds-hint">No FIN project selected. Choose one in FIN Config to load its points here.</p>
+                <p className="ds-hint">Choose a FIN project in FIN Config.</p>
               )}
               {selectedFinProject && finConnected && resources?.project !== selectedFinProject && (
-                <p className="ds-hint" data-testid="fin-resources-status">Loading the points of FIN project {selectedFinProject}...</p>
+                <p className="ds-hint" data-testid="fin-resources-status">Loading points…</p>
               )}
               {selectedFinProject && finConnected && resources?.project === selectedFinProject && (
                 <p className="ds-hint" data-testid="fin-resources-status">
                   {resources.state === 'ready' && (
-                    `${resources.items.length} points available from FIN project ${resources.project}${resources.truncated ? ' (list cut short)' : ''}. ` +
-                    'In FIN Live Points, click a Value field and choose a point; which point is which stays your decision.'
+                    `${resources.items.length} points${resources.truncated ? ', list cut short' : ''}.`
                   )}
-                  {resources.state === 'error' && `Could not load the points of ${resources.project}: ${resources.message}. Mappings can still be typed.`}
+                  {resources.state === 'error' && `Could not load points. Type a point ID.`}
                 </p>
               )}
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '8px' }}>
@@ -734,20 +857,28 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 >
                   {validating ? 'Validating…' : 'Validate Mapping'}
                 </button>
-                {!finConnected && <span className="ds-hint" style={{ margin: 0 }}>Connect to FIN to validate.</span>}
+                {!finConnected && <span className="ds-hint" style={{ margin: 0 }}>Connect to FIN first.</span>}
                 {finConnected && validateBlocked && (
-                  <span className="ds-hint" style={{ margin: 0 }}>
-                    Save Settings first: validation checks the FIN project this session serves
-                    ({finStatus?.project_name || 'none'}), not the one just selected.
-                  </span>
+                  <span className="ds-hint" style={{ margin: 0 }}>Save Settings first.</span>
                 )}
                 {validation && (
-                  <span className="ds-hint" style={{ margin: 0 }}>
-                    Checked against FIN project {validation.project_name}. Nothing was changed.
-                  </span>
+                  <span className="ds-hint" style={{ margin: 0 }}>Checked. Nothing changed.</span>
                 )}
               </div>
               {validateError && <div style={{ color: 'var(--red)', fontSize: '12px', marginBottom: '8px' }}>{validateError}</div>}
+
+              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Import and export</h3>
+              <p className="ds-hint">CSV of readings and points. A blank cell stays as it is.</p>
+              <div className="fpm-csv">
+                <button type="button" className="ds-btn ds-btn-secondary fpm-btn" onClick={downloadMappingCsv}>Download mapping CSV</button>
+                <button type="button" className="ds-btn ds-btn-secondary fpm-btn" disabled={!finPoints?.length}
+                  title={finPoints?.length ? undefined : 'Load the FIN project\'s points first (FIN Config)'} onClick={downloadPointsCsv}>
+                  Download FIN point list
+                </button>
+                <button type="button" className="ds-btn ds-btn-secondary fpm-btn" onClick={() => csvInput.current?.click()}>Import mapping CSV</button>
+                <input ref={csvInput} type="file" accept=".csv,text/csv" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importCsv(f) }} />
+              </div>
+              {csvNotice && <p className="ds-hint" style={{ marginTop: 0 }} data-testid="csv-notice">{csvNotice}</p>}
 
               {MAPPING_SECTIONS.map(section => {
                 const { field } = section
@@ -763,7 +894,17 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                     onLoad={value => loadMapping(field, value)}
                     result={validation?.blocks[field]}
                   >
-                    {field === 'finMeterProfile' ? (
+                    {field === 'finLivePoints' || field === 'finEndpoints' ? (
+                      <FinPointMapping
+                        key={`${editorKey}-${schema[field]?.length ?? 0}`}
+                        block={field === 'finLivePoints' ? 'live' : 'history'}
+                        value={mappings[field].value}
+                        onChange={onChange}
+                        points={finPoints}
+                        results={validation?.blocks[field]?.items}
+                        suggestedKeys={schema[field]}
+                      />
+                    ) : field === 'finMeterProfile' ? (
                       <MeterProfileEditor key={editorKey} value={mappings[field].value} onChange={onChange} results={validation?.blocks[field]?.items} suggestedKeys={schema.finMeterProfile} />
                     ) : field === 'finSeverityBands' ? (
                       <SeverityEditor key={editorKey} value={mappings[field].value} onChange={onChange} />
@@ -771,9 +912,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                       <KeyValueEditor
                         key={editorKey}
                         value={mappings[field].value}
-                        kind={field === 'finEquipmentClasses' ? 'list' : 'string'}
-                        suggestions={field === 'finLivePoints' && resources?.state === 'ready' && resources.project === selectedFinProject
-                          ? resources.items : undefined}
+                        kind="list"
                         suggestedKeys={schema[field]}
                         onChange={onChange}
                         results={validation?.blocks[field]?.items}
@@ -784,21 +923,59 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
               })}
 
               <MappingSection
+                title="O&M and warranty"
+                hint="Equipment groups and their manuals."
+                hasValue={!!settings.finDocuments?.length || !!docsError}
+                unsetText="Not set. Marsa Al Arab still uses om-warranty.json."
+                error={docsError ?? undefined}
+                onLoad={() => { update('finDocuments', undefined); setDocsError(null); setDocsRev(r => r + 1) }}
+              >
+                <FinDocumentsEditor
+                  key={`${currentProject.projectId}-docs-${docsRev}`}
+                  value={settings.finDocuments}
+                  finProject={selectedFinProject}
+                  finConnected={finConnected}
+                  onChange={(families, error) => { update('finDocuments', families); setDocsError(error) }}
+                />
+              </MappingSection>
+
+              <MappingSection
                 title="Power Boards"
-                hint={"The distribution boards on the Power page. Each board names keys of this project's FIN Live Points Mapping"
-                  + ' (and, optionally, FIN Historical Endpoints and a meter); FIN point IDs stay in those mappings.'
-                  + ' Not set: the built-in boards (MCC 1, MCC 2, …) where this project maps their keys.'}
+                hint="The boards on Energy › Consumption. Name each board and choose its FIN point; charts read the same point's history when FIN keeps it."
                 hasValue={!!settings.finPowerBoards?.length}
-                unsetText="No boards set for this project: the built-in boards are shown where this project maps their keys."
+                unsetText="No boards for this project yet. Add them here. The sample boards stay until you do."
                 error={boardsError ?? undefined}
                 onLoad={() => { update('finPowerBoards', undefined); setBoardsRev(r => r + 1) }}
               >
                 <PowerBoardsEditor
                   key={`${currentProject.projectId}-boards-${boardsRev}`}
                   value={settings.finPowerBoards}
-                  liveKeys={boardKeys.live}
-                  historyKeys={boardKeys.history}
+                  points={finPoints}
                   onChange={boards => update('finPowerBoards', boards)}
+                />
+              </MappingSection>
+
+              <MappingSection
+                title="Meters"
+                hint="The meters on Energy › Anomalies, in this order. From FIN offers equipment that matches a Meter Profile prefix or has voltage, current and energy points. A meter's energy point gives its chart when FIN keeps its history."
+                hasValue={!!settings.finMeters?.length}
+                unsetText="No meters set. Anomalies lists every meter FIN reports. It leads with the meters named in Power Boards (Meter), or with all of them when no board names one."
+                onLoad={() => { update('finMeters', undefined); setMetersRev(r => r + 1) }}
+              >
+                <div className="ds-field">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={settings.anomalyAllMeters === true} style={{ width: 'auto' }}
+                      onChange={e => update('anomalyAllMeters', e.target.checked || undefined)} />
+                    Show every meter (PMU measurement)
+                  </label>
+                  <p className="ds-hint">Off: the page leads with the main meters, those ticked Main meter below and those Power Boards name in Meter, as on Marsa Al Arab. With no main meter it shows every meter. The meter list on the right shows them all either way.</p>
+                </div>
+                <MetersEditor
+                  key={`${currentProject.projectId}-meters-${metersRev}`}
+                  value={settings.finMeters}
+                  points={finPoints}
+                  prefix={typeof mappings.finMeterProfile.value?.prefix === 'string' && mappings.finMeterProfile.value.prefix.trim() ? mappings.finMeterProfile.value.prefix : 'PMU'}
+                  onChange={meters => update('finMeters', meters)}
                 />
               </MappingSection>
             </div>

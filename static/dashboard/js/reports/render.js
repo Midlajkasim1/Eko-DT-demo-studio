@@ -81,7 +81,8 @@ window.EKO_RV = (function(){
         return `<div class="rpflbl">${esc(c.t(w.labelKey))}</div><dl class="rpkv">${w.rows.map(r => `<dt>${esc(r[0])}</dt><dd>${esc(or(r[1]))}</dd>`).join('')}</dl>${w.basis ? basisHtml(E, c, w.basis) : ''}`; }
       case 'status.leak':  return `<p class="rpmiss ${w.ready ? 'rpok' : ''}">${esc(c.t(w.ready ? 'rpLeak.ready' : 'rpLeak.pending', w.params))}</p>`;
       case 'period.energy':return w.available ? `<div class="rpfigs">${w.figures.map(f => figCard(E, c, f)).join('')}</div>` : '';
-      case 'text':         return `<div class="rpflbl">${esc(c.t(w.labelKey))}</div><p class="rpmiss">${esc(c.t(w.textKey))}</p>`;
+      case 'text':         return w.lines ? `<div class="rpflbl">${esc(c.t(w.labelKey))}</div>${w.lines.map(l => `<p class="rptext">${esc(l)}</p>`).join('')}`   /* E15: written text (a handover) */
+                                          : `<div class="rpflbl">${esc(c.t(w.labelKey))}</div><p class="rpmiss">${esc(c.t(w.textKey))}</p>`;
       default: return '';
     }
   }

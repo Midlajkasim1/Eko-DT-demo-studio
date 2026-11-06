@@ -202,6 +202,7 @@ export interface ProjectMeta {
 /**
  * One named thing and the model element it is drawn as.
  * Equipment links omit `kind`. Space links set `kind: 'space'` and use `equip` as the heatmap name.
+ * CCTV links set `kind: 'cctv'` and the camera's space in `room`.
  * Keyed on the IFC GlobalId, which a revised model keeps.
  */
 export interface AssetLink {
@@ -216,7 +217,13 @@ export interface AssetLink {
   /** The element's name when it was linked */
   element?: string
   /** Absent on equipment links saved before spaces existed */
-  kind?: 'equip' | 'space'
+  kind?: 'equip' | 'space' | 'cctv'
+  /** IFC GlobalId of the saved space a CCTV camera is in */
+  room?: string
+  /** Storey of a space */
+  level?: string
+  /** A camera's demo clip (V1–V7) or 'none'; absent: the clip in order */
+  clip?: string
 }
 
 /** Everything the project list renders, so opening it never parses project.json */
@@ -271,6 +278,42 @@ export interface HeatmapSetup {
    * Marsa has no space links, so its rooms are never filled. A real FIN reading is kept.
    */
   sampleSpaces?: boolean
+  /** People drawn on the occupancy tab. Absent is 80. Capped at 400. */
+  people?: number
+  /** How fast those people walk. 1 is a stroll. Absent is 1. */
+  speed?: number
+  /**
+   * People stand still except in rooms whose name matches walkRooms.
+   * Absent is on. Set false and everyone walks, still inside their own room.
+   */
+  stillRooms?: boolean
+  /**
+   * Room-name words where people walk, matched inside the room label.
+   * Absent is corridor, circulation, public area, lobby, waiting, and lounge.
+   * An empty list means nobody walks while stillRooms is on.
+   */
+  walkRooms?: string[]
+}
+
+/** One O&M or warranty PDF. `ref` is the FIN record, "@p:project:r:id". */
+export interface FinManual {
+  name: string
+  nameAr?: string
+  ref: string
+}
+
+/** Equipment that share one O&M manual and one warranty. Match words are the same ones
+ *  om-warranty.json uses: tags, codes in the asset id, and words in the type or the id. */
+export interface FinDocumentFamily {
+  id: string
+  /** The name typed in Dashboard Settings. The id stays put when this is renamed. */
+  label?: string
+  tags: string[]
+  codes: string[]
+  types: string[]
+  names: string[]
+  om?: FinManual
+  warranty?: FinManual
 }
 
 /** Per-project FIN settings live here. A field a project does not set falls back to the
@@ -280,13 +323,15 @@ export interface ProjectApiSettings {
   schemaVersion?: number
   /** IANA timezone of the site ("Asia/Dubai"): the day boundary for today's readings */
   siteTimezone?: string
-  /** Show the prototype's demo figures (Marsa Al Arab fixture) in the dashboard. Off: only FIN
-   *  readings and this project's own settings are shown. */
+  /** Show the sample data set's demo figures in the dashboard. Off: FIN readings and this project's
+   *  own settings; with the medical set, its figures stay wherever the project maps no FIN data. */
   dashboardDemo?: boolean
-  /** The sample data set the demo figures come from; absent = Marsa Al Arab. Only used with dashboardDemo. */
+  /** The sample data set: the dashboard's layout and its sample figures; absent = Marsa Al Arab. */
   dashboardSampleData?: 'medical'
   /** The dashboard's module set. 'extended' adds ESG, Maintenance, and Security and life safety; absent = standard. */
   dashboardModules?: 'extended'
+  /** 'model': every CCTV element of the loaded model; absent: only linked FIN cameras */
+  dashboardCameraSource?: 'model'
   /** Reporting basis. A cost or CO₂ figure whose rate is not set is reported as unavailable. */
   energyTariff?: number
   gasTariff?: number
@@ -296,12 +341,25 @@ export interface ProjectApiSettings {
   tariffName?: string
   /** kg CO₂ per kWh */
   co2Factor?: number
+  /** The hourly energy history also fills current load, the hourly chart, and the month totals. */
+  energyFromHourly?: boolean
+  /** Words in the FIN point name for the asset chart. Blank keeps return air and zone temp. */
+  ahuTemp?: string
+  ahuSetpoint?: string
+  fcuTemp?: string
+  fcuSetpoint?: string
+  /** Which FIN points the dashboard may write. Absent uses the standard roles and names. */
+  pointControl?: PointControlSettings
   /** Names the emission factor in the report basis, e.g. "DEWA grid 2025" */
   co2FactorName?: string
   /** The Power page's distribution boards. Absent: the built-in board keys, shown where the
    *  project maps them (Marsa Al Arab's six through config.json). Each board names Data Mapping
    *  keys, never a FIN point ID. */
   finPowerBoards?: PowerBoard[]
+  /** The meters on Energy › Anomalies. Absent: every meter FIN reports. */
+  finMeters?: MeterLink[]
+  /** PMU measurement: Anomalies leads with every meter, not only the main ones */
+  anomalyAllMeters?: boolean
   finBaseUrl?: string
   finProjectName?: string
   finDisplayName?: string
@@ -315,6 +373,9 @@ export interface ProjectApiSettings {
   finMeterProfile?: FinMeterProfile
   finSeverityBands?: FinSeverityBands
   finEquipmentClasses?: FinEquipmentClasses
+  /** O&M and warranty manuals for this project. Saved: the dashboard uses this list and does not
+   *  read om-warranty.json. Absent: that file stays the catalog for the site it belongs to. */
+  finDocuments?: FinDocumentFamily[]
   finRealtimeEndpoints?: Record<string, string>
   finRealtimeMs?: number
   weatherApiKey?: string
@@ -333,6 +394,25 @@ export interface ProjectApiSettings {
   heatmap?: HeatmapSetup
 }
 
+export type PointControlClass = 'fcu' | 'vav' | 'ahu' | 'fahu' | 'mahu'
+export type PointControlRole = 'setpoint' | 'status' | 'output' | 'choice'
+
+/** Per-project FIN write policy. A missing class keeps that equipment's standard roles.
+ *  Name fields add to the standard names; they do not replace them. */
+export interface PointControlSettings {
+  /** Absent means on. */
+  enabled?: boolean
+  equipment?: Partial<Record<PointControlClass, PointControlRole[]>>
+  /** Writable numbers that are not already named Sp or Setpoint. */
+  setpoints?: string
+  /** Writable on/off points to add, such as Occupancy. */
+  statusPoints?: string
+  /** Writable valve, damper, and speed commands to add. */
+  outputPoints?: string
+  /** Writable mode points to add. The point must have a FIN enum. */
+  choicePoints?: string
+}
+
 /** One distribution board on the Power page */
 export interface PowerBoard {
   name: string
@@ -342,6 +422,19 @@ export interface PowerBoard {
   historyKey?: string
   /** The meter that feeds it, as the meter profile names it (e.g. "PMU09") */
   meter?: string
+  /** The board's own FIN point (p:{project}:r:…), polled under liveKey */
+  point?: string
+  /** The hisRead query for that point, read under historyKey */
+  history?: string
+}
+
+export interface MeterLink {
+  name: string
+  equip: string
+  /** Its energy point, p:{project}:r:… */
+  point?: string
+  history?: string
+  main?: boolean
 }
 
 export interface ProjectModel extends ProjectModelEntry {

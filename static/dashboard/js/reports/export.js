@@ -178,5 +178,5 @@ window.EKO_RX = (function(){
     download(blob, doc.id + '.xlsx');
     return blob;
   }
-  return { pdf, printView, printHtml, removePrintView, xlsx, xlsxBlob, workbook, workbookSheets, crc32, download };
+  return { pdf, printView, printHtml, removePrintView, xlsx, xlsxBlob, workbook, workbookSheets, crc32, zipStored, download };   /* E15 port (D175): zipStored for the ESG pack */
 })();

@@ -11,7 +11,7 @@ export interface LinkIndex {
   byFold: Map<string, AssetLink>
 }
 
-/** Equipment links only. A room name must not take a machine's guid. */
+/** Equipment and CCTV links. A room name must not take a machine's guid. */
 export function indexLinks(links: AssetLink[] | undefined): LinkIndex {
   const list = (links ?? []).filter(l => l.kind !== 'space' && l.equip && isGuid(l.guid))
   return { list, byFold: new Map(list.map(l => [foldName(l.equip), l])) }
@@ -57,6 +57,7 @@ const TYPE_WORDS: Record<string, string[]> = {
   ATS: ['ATS', 'TRANSFER SWITCH'],
   FACP: ['FACP', 'FIRE ALARM'],
   FM200: ['FM200', 'FM 200'],
+  CCTV: ['CCTV', 'CAMERA', 'IFCAUDIOVISUALAPPLIANCE', 'IFCCOMMUNICATIONSAPPLIANCE'],
 }
 
 export const KNOWN_TYPES = Object.keys(TYPE_WORDS)
@@ -69,6 +70,46 @@ export interface ModelElement {
   tag: string
   category: string
   modelName: string
+  level?: string
+  elevation?: number
+}
+
+const ORDINALS = ['GROUND', 'FIRST', 'SECOND', 'THIRD', 'FOURTH', 'FIFTH', 'SIXTH', 'SEVENTH', 'EIGHTH', 'NINTH', 'TENTH']
+
+/** Floor number from a level name: basements below 0, roof 1000, NaN if none */
+export function levelRank(name: string): number {
+  const words = name.toUpperCase()
+    .replace(/([A-Z])(\d)/g, '$1 $2')
+    .replace(/(\d)([A-Z])/g, '$1 $2')
+    .split(/[^A-Z0-9]+/)
+    .filter(Boolean)
+  const has = (...w: string[]) => w.some(x => words.includes(x))
+  const num = words.find(w => /^\d+$/.test(w))
+  const n = num === undefined ? undefined : parseInt(num, 10)
+  const mezz = has('MEZZANINE', 'MEZZ') ? 0.5 : 0
+  if (has('ROOF', 'RF', 'TERRACE', 'PENTHOUSE')) return 1000
+  if (has('BASEMENT', 'CELLAR', 'BSMT', 'B')) return -(n || 1) + mezz
+  if (has('LG', 'LGF') || (has('LOWER') && has('GROUND'))) return -0.5
+  if (has('UG', 'UGF') || (has('UPPER') && has('GROUND'))) return 0.5
+  if (has('GROUND', 'GF', 'G')) return mezz
+  const ordinal = ORDINALS.findIndex(o => words.includes(o))
+  if (ordinal >= 0) return ordinal + mezz
+  if (n === undefined) return mezz || NaN
+  return n + mezz
+}
+
+/** Bottom to top: by elevation when every level has one, else by name */
+export function sortLevels<T extends { key: string; elevation?: number }>(levels: T[]): T[] {
+  const named = levels.filter(l => l.key)
+  const byElevation = named.length > 0 && named.every(l => l.elevation !== undefined)
+  const rank = (l: T) => {
+    const r = levelRank(l.key)
+    return Number.isNaN(r) ? Infinity : r
+  }
+  const out = [...named].sort((a, b) =>
+    (byElevation ? (a.elevation as number) - (b.elevation as number) : rank(a) - rank(b))
+    || a.key.localeCompare(b.key, undefined, { numeric: true }))
+  return [...out, ...levels.filter(l => !l.key)]
 }
 
 /** The FIN equipment fields the linking screen reads */
@@ -78,6 +119,11 @@ export interface LinkEquipment {
   type?: string
   bimId?: string
   finId?: string
+  cctv?: boolean
+}
+
+export function isCctv(eq: { name: string; category?: string; tags?: string[]; type?: string }): boolean {
+  return eq.category === 'cctv' || !!eq.tags?.includes('cctv') || (eq.type || '').toLowerCase() === 'cctv' || /cctv/i.test(eq.name)
 }
 
 export interface Suggestion {
@@ -167,6 +213,26 @@ export function suggest(eq: LinkEquipment, elements: PreparedElement[], limit = 
   return out.sort((a, b) => b.score - a.score).slice(0, limit)
 }
 
+/** Per FIN equipment: its own bimId, then name likeness */
+export function suggestAll(finList: LinkEquipment[], prepared: PreparedElement[], present: Set<string> | null, nameWords = false): Map<string, Suggestion[]> {
+  const out = new Map<string, Suggestion[]>()
+  const known = new Set(prepared.map(p => p.el.guid))
+  for (const eq of finList) {
+    const key = foldName(eq.name)
+    if (isGuid(eq.bimId) && !known.has(eq.bimId) && present?.has(eq.bimId)) out.set(key, [{ guid: eq.bimId, score: 1, reason: 'FIN bimId tag' }])
+    else out.set(key, prepared.length ? suggest(eq, prepared, 3, 0.5, nameWords) : [])
+  }
+  return out
+}
+
+/** "CCTV Camera_C_mbii · Fixed · 2541507" from a Revit "Family:Type:Id" name */
+export function elementLabel(el: { name?: string; objectType?: string; category?: string; guid?: string }): string {
+  const parts = (el.name || '').split(':').map(p => p.trim()).filter(Boolean)
+  return parts.join(' · ') || el.objectType || el.category || el.guid || ''
+}
+
+export const typeWords = (type: string): string[] => TYPE_WORDS[type.toUpperCase()] ?? []
+
 /** Links for every unlinked equipment whose best suggestion clears the bar, one element per equipment, best scores first */
 export function bestMatches(
   unlinked: LinkEquipment[],
@@ -207,10 +273,11 @@ function csvCells(line: string): string[] {
   return cells.map(c => c.trim())
 }
 
-const CSV_COLUMNS = ['equip', 'guid', 'type', 'finId', 'element', 'kind'] as const
+const CSV_COLUMNS = ['equip', 'guid', 'type', 'finId', 'element', 'kind', 'room', 'level', 'clip'] as const
 
 function linkFrom(rec: Record<string, unknown>, nameWords: boolean): AssetLink | string {
-  const kind = String(rec.kind ?? '').trim().toLowerCase() === 'space' ? 'space' as const : undefined
+  const kindText = String(rec.kind ?? '').trim().toLowerCase()
+  const kind = kindText === 'space' ? 'space' as const : kindText === 'cctv' ? 'cctv' as const : undefined
   const equip = String(rec.equip ?? rec.name ?? rec.id ?? '').trim()
   const guid = String(rec.guid ?? rec.bimId ?? '').trim()
   if (!equip) return kind === 'space' ? 'a space link has no heatmap name' : 'a link has no equipment name'
@@ -218,15 +285,41 @@ function linkFrom(rec: Record<string, unknown>, nameWords: boolean): AssetLink |
   const link: AssetLink = {
     equip,
     guid,
-    type: kind === 'space' ? 'SPACE' : (String(rec.type ?? '').trim() || defaultType({ name: equip }, nameWords)),
+    type: kind === 'space' ? 'SPACE' : (String(rec.type ?? '').trim() || (kind === 'cctv' ? 'CCTV' : defaultType({ name: equip }, nameWords))),
     ...(kind ? { kind } : {}),
   }
   if (rec.finId) link.finId = String(rec.finId).trim()
   if (rec.element) link.element = String(rec.element).trim()
+  if (kind === 'cctv' && isGuid(String(rec.room ?? '').trim())) link.room = String(rec.room).trim()
+  if (kind === 'space' && rec.level) link.level = String(rec.level).trim()
+  const clip = String(rec.clip ?? '').trim()
+  if (kind === 'cctv' && isClipName(clip)) link.clip = clip
   return link
 }
 
-/** A JSON list of links, the old { name: { bimId, type } } table, or CSV with an equip,guid header. kind=space marks a heatmap room. */
+export const CLIPS =['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7']
+
+/** A video file name in static/dashboard/assets/video without .mp4, or 'none' */
+export const isClipName = (s: string) => /^[\w .()-]{1,80}$/.test(s) && s.trim() === s
+
+/** The clips in the video folder; the seven demo names when the folder can't be listed */
+export async function listClips(): Promise<{ names: string[]; listed: boolean }> {
+  try {
+    const res = await fetch('/static/dashboard/assets/video/clips.json', { cache: 'no-store' })
+    const names = res.ok ? (await res.json() as unknown[]).filter((n): n is string => typeof n === 'string' && isClipName(n) && n !== 'none') : null
+    if (names) return { names, listed: true }
+  } catch { /* not served by the Studio's dev server */ }
+  return { names: CLIPS, listed: false }
+}
+
+/** CCTV_01 → V1 … CCTV_07 → V7, CCTV_08 → V1 */
+export function defaultClip(name: string): string {
+  const n = Number((name.match(/\d+/g) ?? []).pop())
+  const i = Number.isFinite(n) && n > 0 ? n - 1 : [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7)
+  return CLIPS[i % CLIPS.length]
+}
+
+/** A JSON list of links, the old { name: { bimId, type } } table, or CSV with an equip,guid header. kind=space marks a heatmap room, kind=cctv a camera. */
 export function parseLinks(text: string, nameWords = false): { links?: AssetLink[]; error?: string } {
   const trimmed = text.trim()
   if (!trimmed) return { error: 'Nothing to import.' }
@@ -268,7 +361,7 @@ export function parseLinks(text: string, nameWords = false): { links?: AssetLink
   return out.length ? { links: out } : { error: 'No links found.' }
 }
 
-/** Imported equipment replaces the same name. Imported spaces replace the same GlobalId. */
+/** Imported equipment and cameras replace the same name. Imported spaces replace the same GlobalId. */
 export function mergeLinks(current: AssetLink[], incoming: AssetLink[]): { links: AssetLink[]; added: number; replaced: number } {
   const equip = new Map(current.filter(l => l.kind !== 'space').map(l => [foldName(l.equip), l]))
   const spaces = new Map(current.filter(l => l.kind === 'space').map(l => [l.guid, l]))

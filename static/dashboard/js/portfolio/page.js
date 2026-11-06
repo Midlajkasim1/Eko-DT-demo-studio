@@ -12,7 +12,7 @@ window.EKO_PF = (function(){
   let E = null;
   const loc = E2 => E2.lang === 'ar' ? 'ar-AE' : 'en-GB';
   const fmtN = (E2, v, d) => v == null ? E2.t('emptyDash') : (Math.round(v * Math.pow(10, d)) / Math.pow(10, d)).toLocaleString(loc(E2), { maximumFractionDigits: d });
-  const mwh = (E2, kwh) => fmtN(E2, (kwh || 0) / 1000, (kwh || 0) >= 100000 ? 0 : 1);
+  const kwhTxt = (E2, kwh) => fmtN(E2, kwh || 0, (kwh || 0) >= 1000 ? 0 : 1);
   const name = (E2, s) => E2.lang === 'ar' ? (s.nameAr || s.nameEn) : s.nameEn;
 
   /* ------------------------------ cells ----------------------------------- */
@@ -37,7 +37,7 @@ window.EKO_PF = (function(){
     if(k.kind === 'eui') return `<span class="pfkpi"><b>${fmtN(E2, k.value, 1)}</b> <span class="tCap">${esc(t('pfEui'))}</span> <span class="tCap pfbasis" data-tip="${esc(t(k.basisKey))}">· ${esc(t('pfPer.' + k.period))}</span></span>`;
     if(k.kind === 'pue') return `<span class="pfkpi"><b>${fmtN(E2, k.value, 2)}</b> <span class="tCap">${esc(t('pfPue'))}</span> <span class="tCap pfbasis" data-tip="${esc(t(k.basisKey))}">· ${esc(t('pfItLoad', { v: fmtN(E2, k.itLoadKw, 0) }))}</span></span>`;
     if(k.kind === 'pueShort') return `<span class="pfkpi" data-partial="1" data-tip="${esc(t('pfPueShortTip', { m: k.months }))}"><b>${fmtN(E2, k.value, 2)}</b> <span class="tCap">${esc(t('pfPueShort', { m: k.months }))}</span></span>`;
-    return `<span class="pfkpi"><b>${k.open}</b> <span class="tCap">${esc(t('pfWoOpenShort'))}</span>${k.overdue ? ` <span class="statchip" data-sev="high">${esc(t('pfWoOverdue', { n: k.overdue }))}</span>` : ''} <span class="tCap">· ${esc(t('pfEnergyShort', { v: mwh(E2, k.energyKwh) }))} · ${esc(t('pfPer.' + k.period))}</span></span>`;
+    return `<span class="pfkpi"><b>${k.open}</b> <span class="tCap">${esc(t('pfWoOpenShort'))}</span>${k.overdue ? ` <span class="statchip" data-sev="high">${esc(t('pfWoOverdue', { n: k.overdue }))}</span>` : ''} <span class="tCap">· ${esc(t('pfEnergyShort', { v: kwhTxt(E2, k.energyKwh) }))} · ${esc(t('pfPer.' + k.period))}</span></span>`;
   }
   function kpiText(E2, s){
     const t = E2.t.bind(E2), k = s.kpi;
@@ -47,7 +47,7 @@ window.EKO_PF = (function(){
     if(k.kind === 'eui') return fmtN(E2, k.value, 1) + ' ' + t('pfEui') + ' · ' + t('pfPer.' + k.period);
     if(k.kind === 'pue') return fmtN(E2, k.value, 2) + ' ' + t('pfPue') + ' · ' + t('pfItLoad', { v: fmtN(E2, k.itLoadKw, 0) });
     if(k.kind === 'pueShort') return fmtN(E2, k.value, 2) + ' ' + t('pfPueShort', { m: k.months });
-    return k.open + ' ' + t('pfWoOpenShort') + (k.overdue ? ' · ' + t('pfWoOverdue', { n: k.overdue }) : '') + ' · ' + t('pfEnergyShort', { v: mwh(E2, k.energyKwh) }) + ' · ' + t('pfPer.' + k.period);
+    return k.open + ' ' + t('pfWoOpenShort') + (k.overdue ? ' · ' + t('pfWoOverdue', { n: k.overdue }) : '') + ' · ' + t('pfEnergyShort', { v: kwhTxt(E2, k.energyKwh) }) + ' · ' + t('pfPer.' + k.period);
   }
 
   /* --------------------------- header strip ------------------------------- */
@@ -69,13 +69,13 @@ window.EKO_PF = (function(){
     const nr = h.reporting.notReporting.length;
     const nrChip = nr ? `<button class="statchip pfnr" data-sev="stale" data-act="pfNotRep" data-tip="${esc(t('pfNotReportingTip'))}">${icon('clock', 11)} ${esc(t('pfNotReporting', { n: nr }))}</button>` : `<span class="statchip" data-tone="pos">${icon('check', 11)} ${esc(t('pfAllReporting'))}</span>`;
     const mix = t('pfSitesMix', { h: h.mix.hospitality, d: h.mix.datacentre, r: h.mix.retail });
-    const chips = kpiChip(E, 'energy', h.energy, `<b>${mwh(E, h.energy.value)}</b>`, t('pfMwh'))
+    const chips = kpiChip(E, 'energy', h.energy, `<b>${kwhTxt(E, h.energy.value)}</b>`, t('pfMwh'))
       + kpiChip(E, 'wos', Object.assign({ periodOf: 0 }, h.wos), `<b>${h.wos.value || 0}</b>`, h.overdue.value ? t('pfWoOverdue', { n: h.overdue.value }) : '')
       + kpiChip(E, 'alarms', h.alarms, `<b>${h.alarms.value || 0}</b>`, h.unacked.value ? t('pfUnackedN', { n: h.unacked.value }) : '');
     const V = h.verticals, vert = [];
     if(V.hospitality) vert.push(`<div class="pfvert"><span class="tLbl">${esc(EST().label(E, 'vertical', 'hospitality'))}</span><b>${fmtN(E, V.hospitality.value, 1)}</b><span class="tCap">${esc(t('pfEui'))}</span>${covBadge(E, 'v-hospitality', Object.assign({ periodOf: 1 }, V.hospitality))}</div>`);
     if(V.datacentre) vert.push(`<div class="pfvert"><span class="tLbl">${esc(EST().label(E, 'vertical', 'datacentre'))}</span><b>${V.datacentre.value == null ? esc(t('emptyDash')) : fmtN(E, V.datacentre.value, 2)}</b><span class="tCap">${esc(t('pfPue'))} · ${esc(t('pfItLoad', { v: fmtN(E, V.datacentreIt.value || 0, 0) }))}</span>${covBadge(E, 'v-datacentre', Object.assign({ periodOf: 1 }, V.datacentre))}</div>`);
-    if(V.retailOverdue) vert.push(`<div class="pfvert"><span class="tLbl">${esc(EST().label(E, 'vertical', 'retail'))}</span><b>${V.retailOverdue.value || 0}</b><span class="tCap">${esc(t('pfOverdueWord'))} · ${esc(t('pfEnergyPerSite', { v: mwh(E, V.retailEnergyPerSite.value) }))}</span>${covBadge(E, 'v-retail', Object.assign({ periodOf: 1 }, V.retailEnergyPerSite))}</div>`);
+    if(V.retailOverdue) vert.push(`<div class="pfvert"><span class="tLbl">${esc(EST().label(E, 'vertical', 'retail'))}</span><b>${V.retailOverdue.value || 0}</b><span class="tCap">${esc(t('pfOverdueWord'))} · ${esc(t('pfEnergyPerSite', { v: kwhTxt(E, V.retailEnergyPerSite.value) }))}</span>${covBadge(E, 'v-retail', Object.assign({ periodOf: 1 }, V.retailEnergyPerSite))}</div>`);
     const win = (doc.windows || []).map(w => `<button class="seg" data-on="${E.state.tlRange === w}" data-act="pfWindow" data-v="${w}" aria-pressed="${E.state.tlRange === w}">${esc(t(w === '6h' ? 'tlR6h' : 'tlRDay'))}</button>`).join('');
     const per = EST().period(E), pc = EST().cfg().periods;
     const perSeg = pc.ids.map(p => p === 'custom'
@@ -148,7 +148,7 @@ window.EKO_PF = (function(){
     if(!s) return `<section class="pfpage pfsite"><p class="alempty">${esc(t('dgEmpty'))}</p></section>`;
     const a = s.alarms || {}, m = s.meters, per = EST().period(E);
     const kv = (k, v, tip) => `<div class="aprow"${tip ? ` data-tip="${esc(tip)}"` : ''}><dt>${esc(k)}</dt><dd>${v}</dd></div>`;
-    const energy = EST().energyByPeriod(E, s).map(r => kv(t('pfPer.' + r.id), r.kwh == null ? `<span class="tCap">${esc(t('emptyDash'))} · ${esc(t(r.ok ? 'pfNo.' + s.state : 'pfReason.insufficientHistory', { t: agoText(E, s) }))}</span>` : `<b>${mwh(E, r.kwh)}</b> <span class="tCap">${esc(t('pfMwh'))}</span>`)).join('');
+    const energy = EST().energyByPeriod(E, s).map(r => kv(t('pfPer.' + r.id), r.kwh == null ? `<span class="tCap">${esc(t('emptyDash'))} · ${esc(t(r.ok ? 'pfNo.' + s.state : 'pfReason.insufficientHistory', { t: agoText(E, s) }))}</span>` : `<b>${kwhTxt(E, r.kwh)}</b> <span class="tCap">${esc(t('pfMwh'))}</span>`)).join('');
     return `<section class="pfpage pfsite" aria-label="${esc(name(E, s))}">
       <header class="pfhead"><div class="pfrow1"><div class="col gap4"><h1 class="pftitle">${C().icon(EST().typeOf(s.type).icon || 'home', 15)} ${esc(name(E, s))}</h1><span class="tCap">${esc(EST().label(E, 'type', s.type))} · ${esc(E.lang === 'ar' ? s.clusterAr : s.clusterEn)} · ${esc(EST().label(E, 'region', s.region))}${(s.tags || []).length ? ' · ' + esc(s.tags.join(', ')) : ''}</span></div><span class="grow"></span>${repChip(E, s)}<button class="btnG btnSm" data-act="pfGo">${C().icon('chevL', 12)} ${esc(t('pfTitle'))}</button></div>
         ${!s.open ? `<div class="pfnote" role="note">${C().icon('box', 14)}<span>${esc(t('pfNoModel'))}</span></div>` : ''}

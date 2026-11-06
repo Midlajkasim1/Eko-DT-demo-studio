@@ -280,8 +280,15 @@
     return order.map(function (k) { return merged[k]; });
   }
 
-  function alarmDetailFromTable(body) {
-    var texts = [];
+  // 16°C, 800ppm, 250Pa: a number FIN wrote with its unit. Not a fault sentence.
+  var MEAS = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?(?:[°%][A-Za-z0-9/%°³².]*|[A-Za-z][A-Za-z0-9/%°³².]*)?$/;
+
+  function foldLabel(text) {
+    return String(text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function alarmDetailFromTable(body, message) {
+    var sentences = [];
     var numbers = [];
     String(body || '').split('\n').forEach(function (line) {
       line = line.trim();
@@ -293,30 +300,51 @@
       if (raw.charAt(0) === '"' && raw.charAt(raw.length - 1) === '"') raw = raw.slice(1, -1);
       raw = decodeZinc(raw).trim();
       if (!raw || raw === 'T' || raw === 'F' || raw === 'true' || raw === 'false' || raw === 'M') return;
-      var n = Number(raw);
-      if (raw !== '' && isFinite(n) && /^-?\d+(?:\.\d+)?$/.test(raw)) numbers.push([name, n]);
-      else texts.push(raw);
+      if (MEAS.test(raw)) {
+        var shown = raw;
+        var n = Number(raw);
+        if (raw !== '' && isFinite(n) && /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(raw)) shown = trunc2(n);
+        numbers.push([name, shown]);
+        return;
+      }
+      if (/normal\.?$/i.test(raw)) return;
+      if (raw.indexOf(' ') < 0 && raw.toLowerCase().indexOf('fault') < 0) return;
+      sentences.push([name, raw]);
     });
-    var fault = texts.filter(function (t) { return !/normal\.?$/i.test(t.trim()); });
-    if (fault.length) return clipDecimals(fault[fault.length - 1]);
-    if (numbers.length) return clipDecimals(numbers[0][0] + ' ' + trunc2(numbers[0][1]));
-    return texts.length ? clipDecimals(texts[texts.length - 1]) : '';
+    if (sentences.length) {
+      var want = foldLabel(message);
+      if (want) {
+        var hit = sentences.filter(function (pair) {
+          var name = foldLabel(pair[0]);
+          return name && want.indexOf(name) >= 0;
+        });
+        if (hit.length) {
+          hit.sort(function (a, b) { return foldLabel(a[0]).length - foldLabel(b[0]).length; });
+          return clipDecimals(hit[hit.length - 1][1]);
+        }
+      }
+      return clipDecimals(sentences[sentences.length - 1][1]);
+    }
+    if (numbers.length) return clipDecimals(numbers[0][0] + ' ' + numbers[0][1]);
+    return '';
   }
 
   function attachAlarmDetails(text, rows) {
     if (!text || !rows || !rows.length) return;
-    var details = {};
+    var bodies = {};
     String(text).split(/(?=^@)/m).forEach(function (chunk) {
       if (chunk.charAt(0) !== '@') return;
       var idTok = chunk.split(' ')[0].trim();
       var found = chunk.match(/name,sourceRef,value\s*\n([\s\S]*?)\n\s*>>/);
       if (!found || !idTok) return;
-      var detail = alarmDetailFromTable(found[1]);
-      if (detail) details[idTok] = detail;
+      bodies[idTok] = found[1];
     });
     rows.forEach(function (row) {
       var val = safeGet(row.id, 'val');
-      if (val && details[val]) row.detail = details[val];
+      var body = val && bodies[val];
+      if (!body) return;
+      var detail = alarmDetailFromTable(body, row.message || '');
+      if (detail) row.detail = detail;
     });
   }
 
@@ -334,6 +362,192 @@
       if (!nav || nav === 'N/A') nav = String(p.dis || 'N/A');
     }
     return decodeZinc(nav);
+  }
+
+  // Same allow-list as backend/config.json point_control. A project's pointControl adds names and can turn a role off. The backend checks the write again.
+  var POINT_CONTROL = {
+    enabled: true,
+    writeLevel: 8,
+    equipment: {
+      fcu: ['setpoint', 'status', 'choice'],
+      vav: ['setpoint', 'status', 'choice'],
+      ahu: ['setpoint', 'status', 'output', 'choice'],
+      mahu: ['setpoint', 'status', 'output', 'choice'],
+      fahu: ['setpoint', 'status', 'output', 'choice']
+    },
+    status: ['startstop', 'runcmd', 'onoff', 'fancmd', 'fancommand', 'safancmd', 'rafancmd', 'supplyfancmd', 'exhaustfancmd', 'sfvfdcmd', 'efvfdcmd', 'hrwcmd', 'sensiblecmd', 'enablecmd', 'fanenablecmd', 'status', 'effectiveoccupancy'],
+    output: ['coolingvalvecmd', 'coolingcoil', 'oadamper', 'madamper', 'eadamper', 'sfvfdspdcmd', 'efvfdspdcmd', 'hrwvfdspdcmd', 'sensiblevfdspdcmd', 'sfvfd', 'rfvfd', 'safanvfd', 'rafanvfd', 'supplyfanspeedcmd', 'exhaustfanspeedcmd'],
+    choice: ['fanspeedmode', 'fanspeed'],
+    ranges: {
+      '°C': { min: 16, max: 30, step: 0.5 },
+      '%': { min: 0, max: 100, step: 1 },
+      '%RH': { min: 30, max: 70, step: 1 },
+      ppm: { min: 400, max: 1500, step: 50 },
+      Pa: { min: 0, max: 1000, step: 5 },
+      kPa: { min: 0, max: 1000, step: 1 },
+      Hz: { min: 0, max: 60, step: 0.5 }
+    }
+  };
+  var CLASS_RE = /^(MAHU|FAHU|AHU|FCU|VAV)(?=[^A-Z]|$)/;
+  var LIFE_RE = /fire|smoke|life|emergency/i;
+  var MEAS_RE = /^(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(°C|°F|%RH|ppm|Pa|kPa|Hz|%)$/;
+
+  var GENERIC_SP = { sp: 1, setpoint: 1, setpt: 1, stpt: 1 };
+  var CONTROL_ROLES = { setpoint: 1, status: 1, output: 1, choice: 1 };
+  var CONTROL_CLASSES = ['fcu', 'vav', 'ahu', 'mahu', 'fahu'];
+
+  function foldName(name) {
+    return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+  function nameList(value) {
+    return String(value || '').split(/[,;\n]+/).map(function (s) { return s.trim(); }).filter(Boolean).slice(0, 40);
+  }
+  function extraHit(folded, words) {
+    for (var i = 0; i < (words || []).length; i++) {
+      var w = foldName(words[i]);
+      if (w.length < 4 || GENERIC_SP[w]) continue;
+      if (folded.indexOf(w) >= 0) return true;
+    }
+    return false;
+  }
+  function isSetpoint(name, point, extra) {
+    if (point && point.sp === true) return true;
+    var folded = foldName(name);
+    if (folded.slice(-8) === 'setpoint' || folded.slice(-5) === 'setpt' || folded.slice(-4) === 'stpt' || folded.slice(-2) === 'sp') return true;
+    return extraHit(folded, extra);
+  }
+  function canonUnit(unit) {
+    var key = String(unit || '').trim().replace(/ /g, '').replace(/º/g, '°').replace(/˚/g, '°');
+    var low = key.toLowerCase();
+    if (key === '°C' || key === '°c' || low === 'c' || low === 'degc' || low === 'celsius' || low === 'celcius') return '°C';
+    if (key === '°F' || key === '°f' || low === 'f' || low === 'degf' || low === 'fahrenheit') return '°F';
+    if (key === '%' || low === 'percent' || low === 'pct') return '%';
+    if (low === '%rh' || low === 'rh') return '%RH';
+    if (low === 'ppm') return 'ppm';
+    if (low === 'pa') return 'Pa';
+    if (low === 'kpa') return 'kPa';
+    if (low === 'hz') return 'Hz';
+    return key;
+  }
+  function controlPolicy() {
+    var inj = window.INJECTED_PROJECT_CONFIG && window.INJECTED_PROJECT_CONFIG.pointControl;
+    if (!inj || typeof inj !== 'object') return POINT_CONTROL;
+    var equipment = {};
+    CONTROL_CLASSES.forEach(function (cls) {
+      var custom = inj.equipment && inj.equipment[cls];
+      if (Array.isArray(custom)) {
+        var kept = [];
+        custom.forEach(function (role) {
+          var name = String(role).toLowerCase();
+          if (CONTROL_ROLES[name] && kept.indexOf(name) < 0) kept.push(name);
+        });
+        equipment[cls] = kept;
+      } else {
+        equipment[cls] = (POINT_CONTROL.equipment[cls] || []).slice();
+      }
+    });
+    return {
+      enabled: inj.enabled === false ? false : POINT_CONTROL.enabled,
+      writeLevel: POINT_CONTROL.writeLevel,
+      equipment: equipment,
+      status: POINT_CONTROL.status,
+      output: POINT_CONTROL.output,
+      choice: POINT_CONTROL.choice,
+      setpointExtra: nameList(inj.setpoints),
+      statusExtra: nameList(inj.statusPoints),
+      outputExtra: nameList(inj.outputPoints),
+      choiceExtra: nameList(inj.choicePoints),
+      ranges: POINT_CONTROL.ranges
+    };
+  }
+  function namedPoint(folded, exact, extra) {
+    return exact.indexOf(folded) >= 0 || extraHit(folded, extra);
+  }
+  function numOf(value) {
+    if (typeof value === 'boolean' || value == null) return null;
+    if (typeof value === 'number') return isFinite(value) ? value : null;
+    var m = String(value).match(/-?\d+(?:\.\d+)?/);
+    return m ? parseFloat(m[0]) : null;
+  }
+  function enumWords(point) {
+    var words = typeof point.enum === 'string' ? point.enum.split(',').map(function (w) { return w.trim(); }) : [];
+    return words.length >= 2 && words.every(Boolean) ? words : [];
+  }
+  function pointKindOf(point) {
+    if (typeof point.pointKind === 'string' && point.pointKind) return point.pointKind.toLowerCase();
+    if (gluedUnit(point.curVal) || gluedUnit(point.currentValue)) return 'number';
+    return typeof point.kind === 'string' ? point.kind.toLowerCase() : '';
+  }
+  function gluedUnit(value) {
+    if (value && typeof value === 'object' && value.unit) return String(value.unit);
+    var m = String(value || '').replace(/ /g, '').match(MEAS_RE);
+    return m ? m[2] : '';
+  }
+  function unitOf(point, role) {
+    var unit = canonUnit(point.unit);
+    if (unit) return unit;
+    var found = gluedUnit(point.curVal) || gluedUnit(point.currentValue);
+    if (found) return canonUnit(found);
+    var folded = foldName(point.navName);
+    if (role === 'output') return /damper|coil|valve/.test(folded) ? '%' : '';
+    if (folded.indexOf('temp') >= 0) return '°C';
+    if (folded.indexOf('co2') >= 0) return 'ppm';
+    if (folded.indexOf('hum') >= 0) return '%RH';
+    if (folded.indexOf('pressure') >= 0) return 'Pa';
+    return '';
+  }
+  function equipmentClass(name, tags, policy) {
+    var allowed = policy.equipment;
+    var list = tags || [];
+    var order = ['mahu', 'fahu', 'vav', 'fcu', 'ahu'];
+    for (var i = 0; i < order.length; i++) {
+      if (allowed[order[i]] && list.indexOf(order[i]) >= 0) return order[i];
+    }
+    var match = String(name || '').toUpperCase().match(CLASS_RE);
+    var cls = match ? match[1].toLowerCase() : '';
+    return allowed[cls] ? cls : '';
+  }
+  function pointRole(point, roles, policy) {
+    var name = String(point.navName || '');
+    if (!point.writable || LIFE_RE.test(name)) return '';
+    var folded = foldName(name);
+    var kind = pointKindOf(point);
+    if (roles.indexOf('status') >= 0 && kind === 'bool' && namedPoint(folded, policy.status, policy.statusExtra)) return 'status';
+    if (roles.indexOf('choice') >= 0 && kind === 'str' && namedPoint(folded, policy.choice, policy.choiceExtra) && enumWords(point).length) return 'choice';
+    if (roles.indexOf('setpoint') >= 0 && kind === 'number' && isSetpoint(name, point, policy.setpointExtra)) return 'setpoint';
+    if (roles.indexOf('output') >= 0 && kind === 'number' && namedPoint(folded, policy.output, policy.outputExtra)) return 'output';
+    return '';
+  }
+  function controlFor(point, eqClass, policy) {
+    if (!eqClass || !policy.enabled) return null;
+    var roles = policy.equipment[eqClass] || [];
+    var role = pointRole(point, roles, policy);
+    if (!role) return null;
+    var level = policy.writeLevel;
+    var manual = numOf(point.writeLevel) === level;
+    if (role === 'status') {
+      var words = enumWords(point);
+      if (words.length !== 2) words = ['Off', 'On'];
+      return { role: 'status', options: [{ value: false, label: words[0] }, { value: true, label: words[1] }], level: level, manual: manual };
+    }
+    if (role === 'choice') {
+      return { role: 'choice', options: enumWords(point).map(function (w) { return { value: w, label: w }; }), level: level, manual: manual };
+    }
+    var unit = canonUnit(unitOf(point, role));
+    var preset = policy.ranges[unit] || {};
+    var ownLow = numOf(point.minVal), ownHigh = numOf(point.maxVal);
+    var siteLow = numOf(preset.min), siteHigh = numOf(preset.max);
+    var own = ownLow != null && ownHigh != null && ownLow < ownHigh;
+    var low, high;
+    if (siteLow != null && siteHigh != null) {
+      low = siteLow; high = siteHigh;
+      if (own && Math.max(ownLow, siteLow) < Math.min(ownHigh, siteHigh)) {
+        low = Math.max(ownLow, siteLow); high = Math.min(ownHigh, siteHigh);
+      }
+    } else if (own) {
+      low = ownLow; high = ownHigh;
+    } else return null;
+    return { role: 'setpoint', unit: unit, min: low, max: high, step: numOf(preset.step) || 1, level: level, manual: manual };
   }
 
   function buildRealtime(pointsText, equipText, alarmsText) {
@@ -365,7 +579,7 @@
         var isRule = navLower.indexOf('rule') === 0;
         if (!isRule) {
           if (navLower.indexOf('metadata') >= 0 || navLower.indexOf('[metadata_block]') >= 0) return;
-          if (navLower === 'start/stop' || navLower === 'start_stop' || navLower === 'startstop') return;
+          if ((navLower === 'start/stop' || navLower === 'start_stop' || navLower === 'startstop') && p.writable !== true) return;
         }
         var val = p.curVal;
         var isHis = p.his === true;
@@ -400,12 +614,22 @@
           // currentValue stays On/Off for the 3D schematics
           bool: state,
           text: boolText(p, state),
-          alarmPoint: p.alarmPoint === true
+          alarmPoint: p.alarmPoint === true,
+          writable: p.writable === true,
+          pointKind: typeof p.kind === 'string' ? p.kind : null,
+          sp: p.sp === true,
+          enum: typeof p.enum === 'string' ? p.enum : null,
+          minVal: p.minVal,
+          maxVal: p.maxVal,
+          writeLevel: p.writeLevel
         });
       });
       var floor = safeGet(equip.floorRef, 'dis') || 'Unknown Floor';
       var bucket = String(navName).toLowerCase().indexOf('cctv') >= 0 ? 'cctv' : 'hvac';
       var tags = Object.keys(equip).filter(function (k) { return equip[k] === true && k !== 'equip' && k !== 'inAlarm'; });
+      var policy = controlPolicy();
+      var eqClass = equipmentClass(navName, tags, policy);
+      formatted.forEach(function (pt) { pt.control = controlFor(pt, eqClass, policy); });
       var sysRaw = equip.system;
       if (sysRaw && typeof sysRaw === 'object') sysRaw = sysRaw.dis || sysRaw.val;
       var row = {
@@ -547,11 +771,20 @@
     return summary;
   }
 
-  function extractMeters(floors, profile) {
+  /* A meter: its name starts with a profile prefix ("PMU, EM"), Settings names it, or FIN tags it an electricity meter */
+  function isMeter(eq, prefixes, named) {
+    var upper = String(eq.name || '').toUpperCase();
+    var tags = eq.tags || [];
+    return prefixes.some(function (p) { return upper.indexOf(p) === 0; }) || named.indexOf(upper) >= 0
+      || tags.indexOf('elecMeter') >= 0 || (tags.indexOf('meter') >= 0 && tags.indexOf('elec') >= 0);
+  }
+
+  function extractMeters(floors, profile, names) {
     profile = profile || {};
-    var prefix = String(profile.prefix || '').toUpperCase();
+    var prefixes = String(profile.prefix || '').split(/[,;]/).map(function (p) { return p.trim().toUpperCase(); }).filter(Boolean);
     var pointMap = profile.point_map || {};
-    if (!prefix || !Object.keys(pointMap).length) return {};
+    var named = (names || []).map(function (n) { return String(n).toUpperCase(); });
+    if (!Object.keys(pointMap).length) return {};
     var meters = {};
     Object.keys(floors || {}).forEach(function (floor) {
       var data = floors[floor];
@@ -560,7 +793,7 @@
         if (!Array.isArray(items)) return;
         items.forEach(function (eq) {
           var name = String(eq.name || '');
-          if (name.toUpperCase().indexOf(prefix) !== 0) return;
+          if (!isMeter(eq, prefixes, named)) return;
           var metrics = {};
           Object.keys(pointMap).forEach(function (key) { metrics[key] = null; });
           (eq.points || []).forEach(function (pt) {
@@ -886,9 +1119,11 @@
       powerEndpoints: filled(raw.powerEndpoints) ? raw.powerEndpoints : {},
       workorderExpr: raw.workorderExpr || DEFAULT_WO,
       meterProfile: filled(raw.meterProfile) ? raw.meterProfile : DEFAULT_METER,
+      meterNames: Array.isArray(raw.meterNames) ? raw.meterNames : [],
       severityBands: filled(raw.severityBands) ? raw.severityBands : DEFAULT_BANDS,
       equipmentClasses: filled(raw.equipmentClasses) ? raw.equipmentClasses : DEFAULT_CLASSES,
-      realtimeEndpoints: filled(raw.realtimeEndpoints) ? raw.realtimeEndpoints : DEFAULT_RT
+      realtimeEndpoints: filled(raw.realtimeEndpoints) ? raw.realtimeEndpoints : DEFAULT_RT,
+      documents: Array.isArray(raw.documents) ? raw.documents : undefined
     };
   }
 
@@ -946,7 +1181,7 @@
     return {
       equipment: equipment,
       alarms: flattenAlarms(built.alarms, cfg.severityBands),
-      meters: extractMeters(built.floors, cfg.meterProfile),
+      meters: extractMeters(built.floors, cfg.meterProfile, cfg.meterNames),
       workorders: this.workorderPayload
     };
   };
@@ -992,11 +1227,13 @@
       return finText(evalPath(cfg.project, 'readById(@' + fillProject(cfg.livePoints[key], cfg.project) + ')'));
     });
     if (values.some(unauth)) return { unauthorized: true };
-    var live = { timestamp: nowIso(), unit: 'kWh', fdd: this.fdd, facilityServices: this.facility };
+    var live = { timestamp: nowIso(), fdd: this.fdd, facilityServices: this.facility, units: {} };
     keys.forEach(function (key, i) {
-      live[key] = typeof values[i] === 'string' ? parseLiveValue(values[i]) : null;
+      var text = typeof values[i] === 'string' ? values[i] : '';
+      live[key] = text ? parseLiveValue(text) : null;
+      var unit = text.match(/unit:"([^"]+)"/);
+      if (unit) live.units[key] = unit[1].replace(/ Dubai/g, '').trim();
     });
-    if (live.hourly_energy != null && live.total_power == null) live.total_power = live.hourly_energy;
     live.carbon_emission = live.carbon != null ? live.carbon : null;
     live.avg_temp = this.sensor.temp;
     live.avg_hum = this.sensor.humidity;
@@ -1016,12 +1253,13 @@
     });
     if (texts.some(unauth)) return { unauthorized: true };
     var history = {};
+    var units = {};
     keys.forEach(function (key, i) {
-      history[key] = aggregateHistory(parseHistory(typeof texts[i] === 'string' ? texts[i] : '').rows);
+      var parsed = parseHistory(typeof texts[i] === 'string' ? texts[i] : '');
+      history[key] = aggregateHistory(parsed.rows);
+      if (parsed.unit) units[key] = parsed.unit;
     });
-    if (history.Hourly_Energy_Consumption_his && !history.Total_Power_Consumption_his) {
-      history.Total_Power_Consumption_his = history.Hourly_Energy_Consumption_his;
-    }
+    if (Object.keys(units).length) history._units = units;
     return history;
   };
 
@@ -1100,22 +1338,8 @@
     return { days: days, retained: daysList.length > 0, byDay: daysList, last24: last24 };
   };
 
-  Session.prototype.documents = async function () {
-    if (this._docs !== undefined) return this._docs;
-    var raw = null;
-    var urls = ['om-warranty.json', '/backend/om-warranty.json'];
-    for (var i = 0; i < urls.length; i++) {
-      try {
-        var res = await fetch(urls[i], { cache: 'no-store' });
-        if (!res.ok) continue;
-        var json = await res.json();
-        if (json && Array.isArray(json.families)) { raw = json; break; }
-      } catch (e) { /* catalog is optional */ }
-    }
-    if (!raw) return null;
-    var project = String(this.cfg.project || '').trim();
-    if (!project) return null;
-    this._docs = {
+  function catalogFrom(raw, project) {
+    return {
       families: raw.families.filter(function (fam) { return fam && typeof fam === 'object'; }).map(function (fam) {
         var item = {
           id: String(fam.id || ''),
@@ -1139,6 +1363,31 @@
         return item;
       })
     };
+  }
+
+  Session.prototype.documents = async function () {
+    var live = typeof window !== 'undefined' && window.INJECTED_PROJECT_CONFIG && window.INJECTED_PROJECT_CONFIG.fin;
+    var own = live && Object.prototype.hasOwnProperty.call(live, 'documents')
+      ? (Array.isArray(live.documents) ? live.documents : null)
+      : (this.cfg && Array.isArray(this.cfg.documents) ? this.cfg.documents : null);
+    var project = String(this.cfg.project || '').trim();
+    if (Array.isArray(own)) {
+      if (!project) return null;
+      return catalogFrom({ families: own }, project);
+    }
+    if (this._docs !== undefined) return this._docs;
+    var raw = null;
+    var urls = ['om-warranty.json', '/backend/om-warranty.json'];
+    for (var i = 0; i < urls.length; i++) {
+      try {
+        var res = await fetch(urls[i], { cache: 'no-store' });
+        if (!res.ok) continue;
+        var json = await res.json();
+        if (json && Array.isArray(json.families)) { raw = json; break; }
+      } catch (e) { /* catalog is optional */ }
+    }
+    if (!raw || !project) return null;
+    this._docs = catalogFrom(raw, project);
     return this._docs;
   };
 

@@ -70,7 +70,7 @@ window.EKO_V = (function(){
     let list = E.visAlarms().filter(a => (isFinite(+a.x) && isFinite(+a.y)) || a.bimId || guidOf(a.asset));
     if (E.state.module === 'systems' && E.state.sub) {
       const grp = ((E.data.systems && E.data.systems.groups) || []).find(g => g.id === E.state.sub);
-      if (grp && grp.sysKey) list = list.filter(a => grp.sysKey.includes(a.sys));
+      if (grp && grp.sysKey) list = list.filter(a => E.alarmInGroup(a, grp));
     }
     if (E.state.module === 'utilities') {
       const sub = E.state.sub;
@@ -332,7 +332,7 @@ window.EKO_V = (function(){
 
   /* Corner caption (the marker toggle left the canvas in D70: it is the eye
      control in the alarm surfaces). */
-  const caption = E => `<div id="vpcaption">${C().esc((E.lang==='ar'?E.data.nameAr:E.data.nameEn).toUpperCase())} · ${C().esc(E.t('capLiveModel'))}</div>`;
+  const caption = E => `<div id="vpcaption">${C().esc(E.lang==='ar'?E.data.nameAr:E.data.nameEn)} · ${C().esc(E.t('cap3dModel'))}</div>`;   /* E17: "Demo Medical Centre · 3D model"; "LIVE MODEL" contradicted the Demo data badge */
 
   /* A moment on the app's one clock (the browser's): "HH:MM" today, the
      weekday within the week ("Tue 14:00"), the date beyond ("13 Sep 14:00"). */
@@ -362,18 +362,31 @@ window.EKO_V = (function(){
     const cur = E.state.histAge;
     const H = 36e5, end = Date.now(), start = end - range * H;
     const live = E.data.timeline24;
-    const hourly = live && Array.isArray(live.kw)
+    const liveHas = !!(live && Array.isArray(live.kw) && live.kw.some(v => v != null));
+    const fromLoad = (E.data.load24hMw || []).map((mw, i, a) => ({ t: Math.floor(end / H) * H - (a.length - 1 - i) * H, v: mw * 1000 }));
+    /* A live site with no history yet draws no stand-in. A sample site whose clock series is empty uses the engine's hourly load. */
+    const hourly = liveHas
       ? live.kw.map((v, i) => ({ t: live.start + i * live.stepMs, v }))
-      : window.DASHBOARD_OVERLAY ? []          /* live mode, history not in yet: no stand-in curve */
-      : (E.data.load24hMw || []).map((mw, i, a) => ({ t: Math.floor(end / H) * H - (a.length - 1 - i) * H, v: mw * 1000 }));
+      : (window.DASHBOARD_OVERLAY && !E.sim) ? [] : fromLoad;
     /* each hour drawn at its middle (never past now); hours wholly before the window are left out */
     const pts = hourly.filter(p => p.t + H > start)
       .map(p => ({ x: (Math.max(start, Math.min(p.t + H / 2, end)) - start) / (end - start), v: p.v }));
     const vals = pts.filter(p => p.v != null).map(p => p.v);
     /* today's peak (the highest hour of Peak_Demand_his): a point above the
-       curve when its hour is in the window, the scale widened to hold it */
-    const peak = vals.length && live && live.peak && live.peak.v != null ? live.peak : null;
-    const peakIn = !!peak && peak.t + H > start && peak.t <= end;
+       curve when its hour is in the window, the scale widened to hold it.
+       A sample site names the peak hour the engine recorded (metrics.peakTodayAt). */
+    let peak = liveHas && live.peak && live.peak.v != null ? live.peak : null;
+    if(!peak && E.sim){
+      const mt = E.data.metrics || {};
+      const pkMs = E.fxMs ? E.fxMs(mt.peakTodayAt) : null;
+      if(mt.peakTodayMw != null && pkMs != null) peak = { v: mt.peakTodayMw * 1000, t: pkMs, instant: true };
+      else {
+        let best = null;
+        hourly.forEach(p => { if(p.v != null && (!best || p.v > best.v)) best = p; });
+        if(best) peak = best;
+      }
+    }
+    const peakIn = !!peak && (peak.instant ? (peak.t >= start && peak.t <= end) : (peak.t + H > start && peak.t <= end));
     const lo = vals.length ? Math.min(...vals) : 0, hi = vals.length ? Math.max(...vals, peakIn ? peak.v : -Infinity) : 0;
     const Y = v => hi > lo ? 24 - (v - lo) / (hi - lo) * 22 : 13;
     let line = '', pen = false;                        /* an unreported hour breaks the line */
@@ -381,15 +394,16 @@ window.EKO_V = (function(){
       line += (pen ? 'L' : 'M') + (p.x * 480).toFixed(1) + ',' + Y(p.v).toFixed(1); pen = true; });
 
     const b = E.data.basis || {};
+    const noAed = !!(window.EKO_PERSONA && !window.EKO_PERSONA.money(E));
     const MODES = {
-      kwh: { lbl: 'kW', rate: 1 },
-      aed: b.aedPerKwh > 0 && b.tariffId ? { lbl: 'AED', rate: b.aedPerKwh, prov: b.tariffStatus === 'provisional',
+      kwh: { lbl: t('tlSeg.kwh'), rate: 1 },
+      aed: !noAed && b.aedPerKwh > 0 && b.tariffId ? { lbl: t('tlSeg.aed'), rate: b.aedPerKwh, prov: b.tariffStatus === 'provisional',
         basis: t('basisTariff', { r: fmt(b.aedPerKwh, 2), id: [b.tariffId, b.tariffVersion].filter(Boolean).join(' ') }) } : null,
-      co2: b.co2KgPerKwh > 0 && b.co2FactorId ? { lbl: 'CO2', rate: b.co2KgPerKwh, prov: b.co2FactorStatus === 'provisional',
+      co2: b.co2KgPerKwh > 0 && b.co2FactorId ? { lbl: t('tlSeg.co2'), rate: b.co2KgPerKwh, prov: b.co2FactorStatus === 'provisional',
         basis: t('basisEmission', { r: fmt(b.co2KgPerKwh, 2), id: b.co2FactorId }) } : null
     };
     const mk = MODES[E.state.tlMetric] ? E.state.tlMetric : 'kwh', M = MODES[mk];
-    const unit = t('tlUnit.' + mk), sc = v => fmt(v * M.rate);
+    const unit = t('tlUnit.' + mk), sc = v => fmt(v * M.rate), sc0 = v => fmt(v * M.rate, 0);
 
     /* the axis: the clock hours inside the window at their true positions,
        every 6 h on Day and every 2 h on 6 h */
@@ -423,10 +437,13 @@ window.EKO_V = (function(){
        record it went through), then the curve's range, or "No meter reading"
        when the window has none; today's peak joins it on a second line */
     const capL = t('tlHourly') + (M.basis ? ' · ' + M.basis + (M.prov ? ' · ' + t('basisProv') : '') : '');
-    const capR = vals.length ? t('tlScale', { lo: sc(Math.min(...vals)), hi: sc(Math.max(...vals)), u: unit }) : t('tlNoReading');
+    const capR = vals.length ? t('tlScale', { lo: sc0(Math.min(...vals)), hi: sc0(Math.max(...vals)), u: unit }) : t('tlNoReading');
     const hh = ms => String(new Date(ms).getHours()).padStart(2, '0') + ':00';
-    const capP = peak ? t('tlPeak', { v: sc(peak.v), u: unit, from: hh(peak.t), to: hh(peak.t + H) }) : '';
-    const peakDot = peakIn ? `<span class="tlpeak tipU" style="left:${((Math.max(start, Math.min(peak.t + H / 2, end)) - start) / (end - start) * 100).toFixed(2)}%;top:${(4 + Y(peak.v) / 26 * 24).toFixed(1)}px" data-tip="${esc(capP)}" aria-label="${esc(capP)}"></span>` : '';
+    const capP = peak ? (E.sim
+      ? t('tlPeakHour', { v: sc0(peak.v), u: unit, h: hh(peak.t) })
+      : t('tlPeak', { v: sc(peak.v), u: unit, from: hh(peak.t), to: hh(peak.t + H) })) : '';
+    const peakAt = peak ? (peak.instant ? peak.t : Math.max(start, Math.min(peak.t + H / 2, end))) : 0;
+    const peakDot = peakIn ? `<span class="tlpeak tipU" style="left:${((peakAt - start) / (end - start) * 100).toFixed(2)}%;top:${(4 + Y(peak.v) / 26 * 24).toFixed(1)}px" data-tip="${esc(capP)}" aria-label="${esc(capP)}"></span>` : '';
     const cap = `<span class="tlcap"><span class="tlcapL">${esc(capL)}</span><span class="tlcapR">${esc(capR)}</span>${capP ? `<span class="tlcapP">${esc(capP)}</span>` : ''}</span>`;
     let curVal = '';                                   /* in history: that hour's value when it has one */
     if(cur != null){ const ct = end - cur * H, hp = hourly.find(p => ct >= p.t && ct < p.t + H);
@@ -468,12 +485,24 @@ window.EKO_V = (function(){
     </div>`;
   }
 
+  /* The loaded Studio model. 3D is the orbit camera. Plan looks down on that
+     same model. Furniture hides furnishing on it. Neither one is a simulation. */
+  function planSwitch(E, config){
+    if(((E.data.viewer || {}).engine) !== 'host') return '';
+    const t = E.t.bind(E), m = E.state.e3dMode === 'plan' ? 'plan' : '3d', furn = E.state.e3dFurn !== false, marks = !E.state.secMarksOff;
+    const b = (v, k, on) => `<button class="seg" data-act="e3dMode" data-v="${v}" data-on="${on}" aria-pressed="${on}">${C().esc(t(k))}</button>`;
+    return `<div class="e3dsw" role="group" aria-label="${C().esc(t('e3d.aria'))}">${b('3d', 'e3d.3d', m === '3d')}${b('plan', 'e3d.plan', m === 'plan')}`
+      + `<button class="seg" data-act="e3dFurn" data-on="${furn}" aria-pressed="${furn}">${C().esc(t('e3d.furn'))}</button>`
+      + (config && config.markToggle ? `<button class="seg" data-act="secMarksShow" data-on="${marks}" aria-pressed="${marks}">${C().esc(t('e3d.marks'))}</button>` : '')
+      + `</div>`;
+  }
   /* Viewer surface. summaryHtml (the #ovp overlay) renders INSIDE vpmain,
      exactly as the reference layers it. */
   function viewer(E, config, summaryHtml){
     const t = E.t.bind(E);
     return `<main id="vpmain" data-vst="${E.state.dock.style}" data-tl="${config.timeline?1:0}">
       <div id="enginehost"></div>
+      ${planSwitch(E, config)}
       <div class="v3tint" aria-hidden="true"></div>
       <div class="v3glow" aria-hidden="true"></div>
       ${E.state.locFocus && E.stacked() ? `<button class="btnG btnSm vpback" data-act="locBack">${C().icon('chevL', 14)} ${C().esc(t('backToAssets'))}</button>` : ''}

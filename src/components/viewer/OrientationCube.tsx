@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
-import { resetCameraToHome } from '@/lib/cameraUtils'
+import { azimuthDragSign, resetCameraToHome, tiltIfVertical } from '@/lib/cameraUtils'
 import * as THREE from 'three'
 
 interface OrientationCubeProps {
@@ -106,8 +106,7 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
         : closer
           ? Math.max(distV, distH, size.y, 8) * 1.35
           : Math.max(size.x, size.y, size.z, 8) * 0.7
-      /* Keep world Y-up. A true vertical look locks orbit and mouse rotates the wrong way. */
-      if (topOrBottom) dir.set(dir.x, dir.y, dir.z + (dir.y >= 0 ? 0.14 : -0.14)).normalize()
+      if (topOrBottom) tiltIfVertical(dir)
       cam.up.set(0, 1, 0)
       const controls = engine.world.camera.controls as { setLookAt: Function; updateCameraUp?: Function }
       controls.updateCameraUp?.()
@@ -193,8 +192,13 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
       const v = face && FACE_VIEWS[face]
       if (v) snapTo(v[0], v[1], !!detail.closer, detail.spaceIds)
     }
+    const onCancel = () => { lookSeq.current++ }
     window.addEventListener('eko-look-face', onLook)
-    return () => window.removeEventListener('eko-look-face', onLook)
+    window.addEventListener('eko-look-cancel', onCancel)
+    return () => {
+      window.removeEventListener('eko-look-face', onLook)
+      window.removeEventListener('eko-look-cancel', onCancel)
+    }
   }, [snapTo])
 
   /** Follow the camera, and only while it is actually moving. */
@@ -206,10 +210,10 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
       const cube = cubeRef.current
       const cam = engineRef.current?.world?.camera?.three as THREE.PerspectiveCamera | undefined
       if (!cube || !cam) return
-      const euler = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ')
-      const xDeg = THREE.MathUtils.radToDeg(euler.x)
-      const yDeg = -THREE.MathUtils.radToDeg(euler.y)
-      cube.style.transform = `rotateX(${xDeg.toFixed(2)}deg) rotateY(${yDeg.toFixed(2)}deg)`
+      // The view's rotation in the cube's axes (CSS y points down), roll included for a camera past a pole
+      const e = new THREE.Matrix4().makeRotationFromQuaternion(cam.quaternion.clone().invert()).elements
+      const n = (v: number) => v.toFixed(5)
+      cube.style.transform = `matrix3d(${n(e[0])},${n(-e[1])},${n(e[2])},0,${n(-e[4])},${n(e[5])},${n(-e[6])},0,${n(e[8])},${n(-e[9])},${n(e[10])},0,0,0,0,1)`
     }
     const wait = () => {
       if (stopped) return
@@ -233,6 +237,9 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return
     dragStartRef.current = { x: e.clientX, y: e.clientY }
+    // Read once and kept for the whole drag, as on the model
+    const azimuth = azimuthDragSign((engineRef.current?.world?.camera?.controls as { polarAngle?: number } | undefined)?.polarAngle ?? NaN)
+    let started = false
 
     const onMove = (ev: PointerEvent) => {
       if (!dragStartRef.current) return
@@ -240,11 +247,15 @@ export function OrientationCube({ engineRef, dashboardVisible }: OrientationCube
       const dy = ev.clientY - dragStartRef.current.y
       if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
         setIsDragging(true)
+        if (!started) {
+          started = true
+          lookSeq.current++
+        }
         const engine = engineRef.current
         if (engine?.world?.camera?.controls) {
           const controls = engine.world.camera.controls as any
           if (typeof controls.rotate === 'function') {
-            controls.rotate(-dx * 0.008, -dy * 0.008, false)
+            controls.rotate(azimuth * -dx * 0.008, -dy * 0.008, false)
           }
         }
         dragStartRef.current = { x: ev.clientX, y: ev.clientY }
@@ -468,7 +479,8 @@ function CompassRing({ engineRef }: { engineRef: React.MutableRefObject<Fragment
       const cam = engineRef.current?.world?.camera?.three as THREE.PerspectiveCamera | undefined
       if (!cam || !needleRef.current) return
       const euler = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ')
-      const deg = THREE.MathUtils.radToDeg(euler.y)
+      // A camera turned over a pole reads as rolled half a turn
+      const deg = THREE.MathUtils.radToDeg(euler.y + (Math.abs(euler.z) > Math.PI / 2 ? Math.PI : 0))
       needleRef.current.style.transform = `rotate(${-deg.toFixed(1)}deg)`
       needleRef.current.style.transformOrigin = '18px 18px'
     }

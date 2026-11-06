@@ -22,7 +22,7 @@ function ekoGauge(val,min,max,ramp){
     const p=at(f,TR),v=min+(max-min)*f;
     return{t:String(Math.round(v*100)/100),
       css:'position:absolute;left:'+(p[0]/124*100).toFixed(2)+'%;top:'+(p[1]/78*100).toFixed(2)
-        +'%;transform:translate(-50%,-50%);font-family:JetBrains Mono,monospace;font-size:9px;'
+        +'%;transform:translate(-50%,-50%);font-family:JetBrains Mono,monospace;font-size:11.5px;'
         +'font-weight:600;color:var(--t2);pointer-events:none;white-space:nowrap'}});
   const fr=Math.max(0,Math.min(1,(val-min)/((max-min)||1))),p=at(fr,NR);
   const arc=(a,b)=>{const q=at(a,R),w=at(b,R);

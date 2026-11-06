@@ -51,8 +51,8 @@
     function backtest(E){
       const key = midnight(E.nowMs()); if(btCache && btCache.key === key) return btCache.v;
       const actual = [], forecast = [];
-      for(let i = 92; i >= 1; i--){ const tr = trendAt(E, i); actual.push(+day(E, i).total.toFixed(3)); forecast.push(+fcDay(E, i, tr).total.toFixed(3)); }   /* each day forecast the day before, from the 7 days before it */
-      btCache = { key, v: { demo: true, unit: 'MWh', days: 92, actual, forecast } }; return btCache.v;
+      for(let i = 92; i >= 1; i--){ const tr = trendAt(E, i); actual.push(+(day(E, i).total * 1000).toFixed(0)); forecast.push(+(fcDay(E, i, tr).total * 1000).toFixed(0)); }   /* each day forecast the day before, from the 7 days before it */
+      btCache = { key, v: { demo: true, unit: 'kWh', days: 92, actual, forecast } }; return btCache.v;
     }
     function mtd(E){
       const now = new Date(E.nowMs()), dom = now.getDate(), act = {}, des = {}, daily = [];

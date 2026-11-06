@@ -28,9 +28,13 @@
       powerEndpoints: fin.endpoints || fin.powerEndpoints || raw.power_endpoints || {},
       workorderExpr: fin.workorderExpr || raw.workorder_expr || '',
       meterProfile: fin.meterProfile || raw.meter_profile || null,
+      meterNames: Array.isArray(fin.meterNames) ? fin.meterNames : [],
       severityBands: fin.severityBands || raw.severity_bands || null,
       equipmentClasses: fin.equipmentClasses || raw.equipment_classes || null,
       realtimeEndpoints: fin.realtimeEndpoints || raw.realtime_endpoints || null,
+      documents: Array.isArray(fin.documents) ? fin.documents
+        : (Array.isArray(raw.documents) ? raw.documents
+          : (raw.documents && Array.isArray(raw.documents.families) ? raw.documents.families : undefined)),
       // The Eko-DT project this dashboard shows. Only the Studio and the exported viewer know it.
       projectId: raw.projectId || '',
     };
@@ -44,6 +48,7 @@
     });
     if (site.realtimeMs) next.realtimeMs = site.realtimeMs;
     if (!next.project && site.project) next.project = site.project;
+    if (!Array.isArray(next.documents) && Array.isArray(site.documents)) next.documents = site.documents;
     return next;
   }
 
@@ -158,6 +163,7 @@
     connected: false,
     power: null,
     powerHistory: null,
+    historyUnits: null,
     equipment: null,
     alarms: null,
     meters: null,
@@ -196,49 +202,145 @@
   // Consumers read power_history off the live payload, so it is spliced back in
   // here rather than re-sent with every 5 s poll
   function withHistory(live) {
-    return state.powerHistory ? { ...live, power_history: state.powerHistory } : live;
+    if (!state.powerHistory) return live;
+    var units = Object.assign({}, live && live.units, state.historyUnits);
+    return Object.assign({}, live, { power_history: state.powerHistory, units: units });
   }
 
   // Every poll checks, after its await, that this poller was not stopped meanwhile: a stopped
   // poller (the previous project's dashboard) must not hand its late answers to the next one.
+  let liveBusy = false;
+  let alarmBusy = false;
+  let slowBusy = false;
+  let cachedBusy = false;
+
   async function pollLive() {
+    if (liveBusy) return;
+    liveBusy = true;
     const generation = state.generation;
-    const data = await state.provider.getLiveValues();
+    try {
+      const data = await state.provider.getLiveValues();
+      if (generation !== state.generation) return;
+      if (data && data.otherProject) { retrySoon(generation); return; }
+      if (usable(data) && data.timestamp) {
+        state.power = withHistory(data);
+        emit('power', state.power);
+      }
+      setConnected(usable(data));
+    } finally {
+      liveBusy = false;
+    }
+  }
+
+  async function pollAlarms() {
+    if (alarmBusy) return;
+    alarmBusy = true;
+    const generation = state.generation;
+    try {
+      const alarms = await state.provider.getAlarms();
+      if (generation !== state.generation) return;
+      if (alarms && alarms.otherProject) { retrySoon(generation); return; }
+      if (usable(alarms) && alarms.timestamp) { state.alarms = alarms; emit('alarms', alarms); }
+    } finally {
+      alarmBusy = false;
+    }
+  }
+
+  function takeOne(generation, data, apply) {
     if (generation !== state.generation) return;
     if (data && data.otherProject) { retrySoon(generation); return; }
-    if (usable(data)) {
-      state.power = withHistory(data);
-      emit('power', state.power);
+    if (usable(data)) apply(data);
+  }
+
+  // The backend's cached reads; alarm history is a FIN query on every call, so it waits for the slower cycle
+  async function pollCached() {
+    if (cachedBusy) return;
+    cachedBusy = true;
+    const generation = state.generation;
+    const provider = state.provider;
+    const jobs = [
+      provider.getEquipment().then(function (data) {
+        takeOne(generation, data, function (equipment) {
+          // An answer without a timestamp is the backend before its first FIN read
+          if (!equipment.timestamp && state.equipment) return;
+          state.equipment = equipment;
+          emit('equipment', equipment);
+        });
+      }),
+      provider.getMeters().then(function (data) {
+        takeOne(generation, data, function (meters) { state.meters = meters; emit('meters', meters); });
+      }),
+      provider.getPowerHistory().then(function (history) {
+        takeOne(generation, history, function (data) {
+          if (!data || !Object.keys(data).filter(function (k) { return k !== '_units'; }).length) return;
+          state.historyUnits = data._units || null;
+          var series = Object.assign({}, data);
+          delete series._units;
+          state.powerHistory = series;
+          if (state.power) {
+            state.power = withHistory(state.power);
+            emit('power', state.power);
+          }
+        });
+      }),
+      provider.getWorkOrders().then(function (data) {
+        takeOne(generation, data, function (workorders) { state.workorders = workorders; emit('workorders', workorders); });
+      }),
+    ];
+    try {
+      await Promise.all(jobs);
+    } finally {
+      cachedBusy = false;
     }
-    setConnected(usable(data));
   }
 
   async function pollRealtime() {
+    await Promise.all([pollCached(), pollSlow()]);
+  }
+
+  async function pollSlow() {
+    if (slowBusy) return;
+    slowBusy = true;
     const generation = state.generation;
-    const [equipment, alarms, meters, history, documents, workorders, alarmHistory] = await Promise.all([
-      state.provider.getEquipment(),
-      state.provider.getAlarms(),
-      state.provider.getMeters(),
-      state.provider.getPowerHistory(),
-      state.provider.getDocuments(),
-      state.provider.getWorkOrders(),
-      state.provider.getAlarmHistory(2),
-    ]);
-    if (generation !== state.generation) return;
-    if ([equipment, alarms, meters, history, documents, workorders, alarmHistory].some(function (d) { return d && d.otherProject; })) retrySoon(generation);
-    if (usable(history)) {
-      state.powerHistory = history;
-      if (state.power) {
-        state.power = withHistory(state.power);
-        emit('power', state.power);
-      }
+    const provider = state.provider;
+    const jobs = [
+      provider.getDocuments().then(function (data) {
+        takeOne(generation, data, function (documents) { state.documents = documents; emit('documents', documents); });
+      }),
+      provider.getAlarmHistory(2).then(function (data) {
+        takeOne(generation, data, function (alarmHistory) { state.alarmHistory = alarmHistory; emit('alarmHistory', alarmHistory); });
+      }),
+    ];
+    try {
+      await Promise.all(jobs);
+    } finally {
+      slowBusy = false;
     }
-    if (usable(equipment)) { state.equipment = equipment; emit('equipment', equipment); }
-    if (usable(alarms)) { state.alarms = alarms; emit('alarms', alarms); }
-    if (usable(meters)) { state.meters = meters; emit('meters', meters); }
-    if (usable(documents)) { state.documents = documents; emit('documents', documents); }
-    if (usable(workorders)) { state.workorders = workorders; emit('workorders', workorders); }
-    if (usable(alarmHistory)) { state.alarmHistory = alarmHistory; emit('alarmHistory', alarmHistory); }
+  }
+
+  let firstFill = null;
+  function armFirstFill(generation) {
+    if (firstFill) clearInterval(firstFill);
+    let tries = 0;
+    // A backend that just started or switched project needs FIN's first full pass; direct mode reads FIN on each try
+    const maxTries = state.config && state.config.directMode ? 12 : 90;
+    firstFill = setInterval(function () {
+      if (generation !== state.generation || ++tries > maxTries) {
+        clearInterval(firstFill);
+        firstFill = null;
+        return;
+      }
+      const ready = state.power && state.power.timestamp && state.alarms && state.alarms.timestamp
+        && state.equipment && state.equipment.timestamp && state.powerHistory;
+      if (ready) {
+        clearInterval(firstFill);
+        firstFill = null;
+        return;
+      }
+      if (!state.power || !state.power.timestamp) pollLive();
+      if (!state.alarms || !state.alarms.timestamp) pollAlarms();
+      if (!state.equipment || !state.equipment.timestamp || !state.powerHistory) pollCached();
+    }, 1000);
   }
 
   // The backend polls FIN only while a dashboard holds this id. A closed tab stops
@@ -288,10 +390,12 @@
     if (generation !== state.generation) return;
     state.provider = state.config && state.config.directMode ? new DirectProvider(state.config) : new BackendProvider(state.config && state.config.projectId);
     holdWatch();
-    await Promise.all([pollRealtime(), pollLive()]);
+    armFirstFill(generation);
+    await Promise.all([pollRealtime(), pollLive(), pollAlarms()]);
     // stop() during either await would otherwise be undone by the timers below
     if (generation !== state.generation) return;
     state.timers.push(setInterval(pollLive, state.config ? state.config.liveMs : 5000));
+    state.timers.push(setInterval(pollAlarms, 15000));
     state.timers.push(setInterval(pollRealtime, state.config ? state.config.realtimeMs : 30000));
   }
 
@@ -299,6 +403,8 @@
     state.generation++;
     state.timers.forEach(clearInterval);
     state.timers = [];
+    state.historyUnits = null;
+    if (firstFill) { clearInterval(firstFill); firstFill = null; }
     if (catchUp) { clearTimeout(catchUp); catchUp = null; }
     releaseWatch();
   }

@@ -23,6 +23,8 @@
      Without an injected project (the standalone prototype) everything stays as it was. */
   var injected = window.INJECTED_PROJECT_CONFIG || null;
   var realMode = !!(injected && injected.site) && injected.demo !== true;
+  // a sample data set with demo figures off: FIN where it reports, the sample everywhere else
+  var sampleFill = realMode && !!injected.sampleData;
   /* Set only by a project's own saved setting (DashboardOverlay injects it); absent is off */
   var hospitalHvac = !!(injected && injected.hospitalHvac === true);
   var fixtureSite = (function () {
@@ -41,7 +43,7 @@
       var row = (window.EKO_DATA.portfolio || []).find(function (p) { return p.key === site.key; });
       if (row) { row.nameEn = name; row.nameAr = name; }
     }
-    if (realMode) clearFixtureFigures(site);
+    if (realMode && !sampleFill) clearFixtureFigures(site);
     if (realMode) applyReportingBasis(site, injected.basis || {});
     if (realMode) clearFixtureServices(site);
   })();
@@ -54,10 +56,15 @@
   function clearFixtureServices(site) {
     site.user = Object.assign({}, site.user, { name: '', nameAr: '' });
     site.integrations = [{ name: 'FIN Framework' + (siteInfo().finProject ? ' · ' + siteInfo().finProject : ''), proto: '', st: 'Connecting', hb: '', pts: '' }];
-    site.features = Object.assign({}, site.features, { cmms: 'none', llm: 'none', control: 'off' });
     var D = window.EKO_DATA || {};
-    if (Array.isArray(D.portfolio)) D.portfolio = D.portfolio.filter(function (p) { return p.key === site.key; });
+    // the top bar reads the 'marsa' row, which a sample data set's site takes over
+    if (Array.isArray(D.portfolio)) D.portfolio = D.portfolio.filter(function (p) { return p.key === site.key || p.key === 'marsa'; });
     if (D.estate && Array.isArray(D.estate.sites)) D.estate.sites = [];
+    if (sampleFill) {
+      site.features = Object.assign({}, site.features, { control: 'off' });
+      return;
+    }
+    site.features = Object.assign({}, site.features, { cmms: 'none', llm: 'none', control: 'off' });
     // adapters are chosen when the app starts, which may already have happened
     if (window.EKO && window.EKO_CMMS) window.EKO_CMMS.init(window.EKO);
     if (window.EKO_LLM && window.EKO_LLM.use) window.EKO_LLM.use('none');
@@ -74,7 +81,7 @@
 
   /* REAL mode: every sample figure FIN does not replace is cleared, for every project (Marsa's too,
      whose fixture figures are not FIN readings either). Lists start empty and fill from FIN;
-     modules with no FIN source at all (anomalies, forecast, benchmark) are hidden. */
+     modules with no FIN source at all (forecast, benchmark) are hidden. */
   function clearFixtureFigures(site) {
     if (site.metrics) { site.metrics.contractedKw = null; site.metrics.baselineKw = null; }
     site.load24hMw = null;
@@ -94,7 +101,7 @@
     if (site.bench) { site.bench.rows = []; site.bench.siteWhm2 = null; }
     site.entitlements = site.entitlements || {};
     site.entitlements.modules = Object.assign({}, site.entitlements.modules,
-      { 'energy.anom': 'hidden', 'energy.fcst': 'hidden', 'energy.bench': 'hidden' });
+      { 'energy.fcst': 'hidden', 'energy.bench': 'hidden' });
   }
 
   /* REAL mode: costs and CO2 use only the rates saved for this project (Dashboard Settings → FIN
@@ -105,15 +112,22 @@
     var rate = b.energyTariff == null ? null : b.energyTariff;
     var factor = b.co2Factor == null ? null : b.co2Factor;
     basis.currency = b.currency || 'AED';
-    basis.aedPerKwh = rate;
-    basis.tariffId = rate == null ? null : (b.tariffName || 'Project tariff');
-    basis.tariffVersion = '';
-    basis.tariffStatus = rate == null ? 'missing' : 'configured';
-    basis.co2KgPerKwh = factor;
-    basis.co2FactorId = factor == null ? null : (b.co2FactorName || 'Project factor');
-    basis.co2FactorStatus = factor == null ? 'missing' : 'configured';
-    basis.gasTariffStatus = b.gasTariff == null ? 'missing' : 'configured';
-    if (site.gas) site.gas.tariffAedM3 = b.gasTariff == null ? null : b.gasTariff;
+    // with sampleFill, a rate the project did not set keeps the sample's
+    if (rate != null || !sampleFill) {
+      basis.aedPerKwh = rate;
+      basis.tariffId = rate == null ? null : (b.tariffName || 'Project tariff');
+      basis.tariffVersion = '';
+      basis.tariffStatus = rate == null ? 'missing' : 'configured';
+    }
+    if (factor != null || !sampleFill) {
+      basis.co2KgPerKwh = factor;
+      basis.co2FactorId = factor == null ? null : (b.co2FactorName || 'Project factor');
+      basis.co2FactorStatus = factor == null ? 'missing' : 'configured';
+    }
+    if (b.gasTariff != null || !sampleFill) {
+      basis.gasTariffStatus = b.gasTariff == null ? 'missing' : 'configured';
+      if (site.gas) site.gas.tariffAedM3 = b.gasTariff == null ? null : b.gasTariff;
+    }
     var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     Object.defineProperty(basis, 'asOf', { enumerable: true, configurable: true, get: function () {
       var n = siteNow(); return String(n.h).padStart(2, '0') + ':' + String(n.min).padStart(2, '0'); } });
@@ -343,8 +357,9 @@
     return { en: s, ar: s, tone: tone };
   }
 
-  function toMw(v) {
-    return v > 50 ? v / 1000 : v;
+  function pointUnit(p, key) {
+    var u = p && p.units && p.units[key];
+    return String(u || '').replace(/\s+/g, '').toLowerCase();
   }
 
   /* Distribution boards: Eko-DT's board keys, as listed in Data Mapping (a live key and an hourly
@@ -370,6 +385,16 @@
         pmu: b.meter ? String(b.meter) : null, hue: HUES[i % HUES.length] };
     });
   })();
+  /* The project's own meters, read when they are applied: a settings save reloads this file, and the
+     list must be the one just injected, not a copy taken before the project settings existed */
+  function configuredMeters() {
+    var cfg = window.INJECTED_PROJECT_CONFIG;
+    var list = cfg && Array.isArray(cfg.meters) ? cfg.meters : null;
+    if (!list || !list.length) return null;
+    return list.filter(function (m) { return m && m.name; }).map(function (m) {
+      return { name: String(m.name), equip: String(m.equip || ""), his: m.his ? String(m.his) : null, main: m.main === true };
+    });
+  }
   /* Whose board ↔ meter links to trust: the project's configured ones, else Marsa Al Arab's own */
   var boardMeterLinks = !!CONFIGURED_BOARDS || fixtureSite;
   /* Configured boards are listed from the start, readings unknown ("--") until FIN answers for this
@@ -385,6 +410,15 @@
       .forEach(function (k) { pw[k] = []; });
     pw.pmuFlats = {};
   })();
+  (function seedConfiguredMeters() {
+    var meters = configuredMeters();
+    var pw = window.EKO_DATA && window.EKO_DATA.marsa && window.EKO_DATA.marsa.power;
+    if (!meters || !pw) return;
+    pw.pmus = meters.map(function (m) {
+      return { id: m.name, db: m.equip || m.name, kw: null, a: null, hz: null, kwh: null, v: null, pf: null, fin: false, main: m.main, boardMeter: null };
+    });
+    pw.anomIds = meters.map(function (m) { return m.name; });
+  })();
   /* The boards to show: the configured ones; else the built-in ones this project maps (its live
      key is served, or its history endpoint is) */
   function mappedBoards(p) {
@@ -394,24 +428,128 @@
   }
   var lastBoardKwh = {};
 
+  function summaryRow(site, key) {
+    return (site.summary || []).find(function (r) { return r && r.key === key; });
+  }
+
+  /* The backend sends only the keys this project maps, so a key present is a FIN reading, null or not */
+  function mapsKey(obj, key) {
+    return !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+  }
+  function historyHas(p, key) {
+    return mapsKey(p.power_history, key);
+  }
+
+  /* sampleFill: a reading the project does not map keeps its sample value; a mapped one shows FIN's, or "--" when empty.
+     Returns the step that puts this back after applyPower has written. */
+  function holdSample(site, p) {
+    var pw = site.power || {}, el = site.energyLanding;
+    var boardsLive = mappedBoards(p).length > 0;
+    var hourlyChart = !!((historyHas(p, 'Hourly_Energy_Consumption_his') || mapsKey(p, 'current_month')) && (!injected || injected.energyFromHourly !== false));
+    var todayLive = boardsLive || historyHas(p, 'Hourly_Energy_Consumption_his');
+    var waterLive = historyHas(p, 'Total_Water_Consumption_his');
+    var metersLive = (configuredMeters() || []).some(function (m) { return m.his && historyHas(p, m.his); });
+    var held = [], blank = [];
+    function hold(obj, keys, live) {
+      if (!obj || live) return;
+      keys.forEach(function (k) { held.push([obj, k, Object.prototype.hasOwnProperty.call(obj, k), obj[k]]); });
+    }
+    // fields applyPower writes only when FIN has a value
+    function own(src, obj, keys) {
+      if (!obj) return;
+      var live = src.filter(function (k) { return mapsKey(p, k); });
+      if (!live.length) return hold(obj, keys, false);
+      if (live.every(function (k) { return asNum(p[k]) == null; })) keys.forEach(function (k) { blank.push([obj, k, obj[k]]); });
+    }
+    own(['hourly_energy'], site.metrics, ['loadNowMw']);
+    own(['hourly_energy', 'current_month'], site.metrics, ['loadNowKw']);
+    own(['hourly_energy', 'current_month'], el, ['currentKw']);
+    own(['peak_demand'], site.metrics, ['peakTodayKw', 'peakTodayMw']);
+    own(['peak_demand'], pw.subview, ['peakKw']);
+    own(['carbon'], el, ['carbonKgH']);
+    own(['iaq_index'], site.metrics, ['iaq']);
+    own(['iaq_index'], site.spaces, ['ieq']);
+    own(['comfort_compliance'], site.metrics, ['comfortIndex']);
+    own(['comfort_compliance'], site.spaces, ['comfortPct']);
+    own(['total_water'], site.metrics, ['waterTodayM3']);
+    own(['total_gas'], site.metrics, ['gasTodayM3']);
+    own(['current_month'], el, ['mtdKwh']);
+    own(['energy_performance'], el, ['performancePct']);
+    own(['after_hours_deviation', 'energy_performance'], el, ['overnightDeviationPct']);
+    own(['kpi_after_hours_ratio'], el, ['overnightWordEn', 'overnightWordAr']);
+    hold(el, ['overnightTone'], mapsKey(p, 'kpi_after_hours_ratio'));
+    hold(site.metrics, ['energyTodayKwh', 'energyTodayMwh'], todayLive);
+    hold(summaryRow(site, 'energy'), ['spark', 'sparkCompare', 'deltaEn', 'deltaAr'], todayLive);
+    hold(pw.bva && pw.bva.ranges, ['today'], todayLive);
+    hold(pw, ['boards', 'zones', 'zonesAr', 'zoneHues', 'zoneHourly', 'zoneLast24', 'zoneWeekly', 'zoneMonthly', 'zoneWTD',
+      'zoneMTD', 'zoneYesterday', 'zonePrevWeek', 'zonePrevMonth', 'pmuFlats', 'weekRange', 'trendX'], boardsLive || hourlyChart || metersLive);
+    hold(site, ['timeline24'], boardsLive);
+    hold(pw, ['peakLast24', 'peakWeekly', 'peakMonthly', 'peakSeries', 'peakAvgKw'], historyHas(p, 'Peak_Demand_his'));
+    hold(site.water, ['todayM3', 'avgDrawM3Day', 'sparkToday', 'hourly', 'todayH', 'weekly', 'monthly'], waterLive);
+    hold(summaryRow(site, 'water'), ['spark', 'deltaEn', 'deltaAr'], waterLive);
+    hold(summaryRow(site, 'gas'), ['spark', 'deltaEn', 'deltaAr'], historyHas(p, 'Total_Gas_Consumption_his'));
+    return function restore() {
+      held.forEach(function (h) { if (h[2]) h[0][h[1]] = h[3]; else delete h[0][h[1]]; });
+      // still the sample's value: FIN wrote nothing for it
+      blank.forEach(function (b) { if (b[0][b[1]] === b[2]) b[0][b[1]] = null; });
+    };
+  }
+
+  function showConfiguredMeters() {
+    var meters = configuredMeters();
+    var pw = window.EKO_DATA && window.EKO_DATA.marsa && window.EKO_DATA.marsa.power;
+    if (!meters || !pw) return;
+    pw.pmus = meters.map(function (m) {
+      var prev = (pw.pmus || []).find(function (u) { return u && u.id === m.name; });
+      return prev || { id: m.name, db: m.equip || m.name, kw: null, a: null, hz: null, kwh: null, v: null, pf: null, fin: false, main: m.main, boardMeter: null };
+    });
+    pw.anomIds = meters.map(function (m) { return m.name; });
+  }
+
   function applyPower(p) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !p || !site.metrics) return;
+    showConfiguredMeters();
     var m = site.metrics;
     var el = site.energyLanding;
     var changed = false;
+    var restoreSample = sampleFill ? holdSample(site, p) : null;
     function set(obj, key, val) {
       if (!obj || val == null) return;
       if (obj[key] === val) return;
       obj[key] = val;
       changed = true;
     }
-    var loadKw = asNum(p.hourly_energy != null ? p.hourly_energy : p.total_power);
-    if (loadKw != null) { set(m, "loadNowMw", trunc1(toMw(loadKw))); set(el, "currentKw", trunc1(loadKw)); }
+    if (mapsKey(p, 'current_month')) {
+      if (site.power) { site.power.energyFromFin = true; site.power.prevMonthKwh = null; }
+      if (el) el.mtdKwh = null;
+      if (!mapsKey(p, 'hourly_energy')) {
+        var energyNow = asNum(p.current_month);
+        if (energyNow != null) {
+          if (pointUnit(p, 'current_month') === 'mwh') energyNow = energyNow * 1000;
+          set(el, 'currentKw', trunc1(energyNow));
+          set(el, 'loadUnit', 'kW');
+          set(m, 'loadNowKw', trunc1(energyNow));
+        }
+      }
+    }
+    var load = mapsKey(p, 'hourly_energy') ? asNum(p.hourly_energy) : null;
+    if (load != null) {
+      var loadMw = pointUnit(p, 'hourly_energy') === 'mw';
+      var loadKw = loadMw ? load * 1000 : load;
+      set(m, 'loadNowMw', trunc1(loadMw ? load : load / 1000));
+      set(m, 'loadNowKw', trunc1(loadKw));
+      set(el, 'currentKw', trunc1(loadKw));
+      set(el, 'loadUnit', loadMw ? 'MW' : 'kW');
+      var fac = summaryRow(site, 'facility');
+      if (fac) { fac.d = 1; fac.u = loadMw ? 'MW' : 'kW'; fac.metric = loadMw ? 'loadNowMw' : 'loadNowKw'; }
+    }
     var peak = asNum(p.peak_demand);
     if (peak != null && peak > 0) {
-      set(m, "peakTodayKw", trunc1(peak));
-      set(m, "peakTodayMw", trunc1(peak / 1000));
+      var peakMw = pointUnit(p, 'peak_demand') === 'mw';
+      set(m, 'peakTodayKw', trunc1(peakMw ? peak * 1000 : peak));
+      set(m, 'peakTodayMw', trunc1(peakMw ? peak : peak / 1000));
+      set(el, 'peakUnit', peakMw ? 'MW' : 'kW');
     } else {
       m.peakTodayKw = null;
       m.peakTodayMw = null;
@@ -452,8 +590,7 @@
         set(site.landing.gas, "headAr", trunc1(gas) + " م³ اليوم");
       }
     }
-    var mtd = asNum(p.current_month);
-    if (mtd != null) set(el, "mtdKwh", trunc1(mtd));
+    if (mapsKey(p, 'current_month') && site.power) site.power.energyFromFin = true;
     var perf = asNum(p.energy_performance);
     if (perf != null && perf >= 0 && perf <= 500) {
       set(el, "performancePct", trunc1(perf));
@@ -638,11 +775,10 @@
       }
 
       var enSpark = extractDaily("Hourly_Energy_Consumption_his");
-      if (!enSpark.length) enSpark = extractDaily("Total_Power_Consumption_his");
       var wtSpark = extractDaily("Total_Water_Consumption_his");
-      if (site.summary) { applySparkAndDelta(site.summary[1], wtSpark); changed = true; }
+      if (site.summary) { applySparkAndDelta(summaryRow(site, "water"), wtSpark); changed = true; }
       var gsSpark = extractDaily("Total_Gas_Consumption_his");
-      if (site.summary) { applySparkAndDelta(site.summary[2], gsSpark); changed = true; }
+      if (site.summary) { applySparkAndDelta(summaryRow(site, "gas"), gsSpark); changed = true; }
 
       if (el && enSpark.length > 0) {
         set(el, "perfSpark", enSpark);
@@ -770,26 +906,30 @@
       /* FIN nav name is Hourly_Energy_Consumption. Each sample is that hour's
          kWh. Energy today is midnight through the current hour, Dubai time.
          Yesterday uses the same hours so the percent and the spark match. */
-      var hourlyFlat = flattenHist(
-        p.power_history.Hourly_Energy_Consumption_his || p.power_history.Total_Power_Consumption_his
-      );
+      var hourlyFlat = flattenHist(p.power_history.Hourly_Energy_Consumption_his);
       var nowP = nowParts();
       var yestP = shiftDay(nowP.y, nowP.m, nowP.d, -1);
       var todayHours = hoursThrough(hourlyFlat, nowP.y, nowP.m, nowP.d, nowP.h);
       var yestHours = hoursThrough(hourlyFlat, yestP.y, yestP.m, yestP.d, nowP.h);
       var todayKwh = sumKnown(todayHours);
       var yestKwh = sumKnown(yestHours);
+      var energyMwh = pointUnit(p, 'Hourly_Energy_Consumption_his') === 'mwh';
       if (todayKwh != null && todayKwh > 0) {
-        set(m, "energyTodayKwh", trunc1(todayKwh));
-        set(m, "energyTodayMwh", todayKwh / 1000);
+        set(m, "energyTodayKwh", trunc1(energyMwh ? todayKwh * 1000 : todayKwh));
+        set(m, "energyTodayMwh", trunc1(energyMwh ? todayKwh : todayKwh / 1000));
       } else {
         m.energyTodayKwh = null;
         m.energyTodayMwh = null;
       }
       // real mode's basis.asOf is already the live site clock (a getter, applyReportingBasis)
       if (site.basis && !realMode) site.basis.asOf = String(nowP.h).padStart(2, "0") + ":00";
-      if (site.summary && site.summary[0]) {
-        var energyRow = site.summary[0];
+      var energyRow = summaryRow(site, "energy");
+      if (energyRow && historyHas(p, 'Hourly_Energy_Consumption_his')) {
+        energyRow.d = 1;
+        energyRow.u = energyMwh ? 'MWh' : 'kWh';
+        energyRow.metric = energyMwh ? 'energyTodayMwh' : 'energyTodayKwh';
+      }
+      if (energyRow) {
         energyRow.spark = todayHours;
         energyRow.sparkCompare = yestHours;
         if (todayKwh != null && yestKwh != null && yestKwh > 0) {
@@ -814,6 +954,44 @@
           baseline: yestHours.map(function (v) { return v == null ? null : v; })
         };
         changed = true;
+      }
+
+      if (historyHas(p, 'Hourly_Energy_Consumption_his') && (!injected || injected.energyFromHourly !== false)) {
+        var kwhScale = energyMwh ? 1000 : 1;
+        function sumMonth(y, mo) {
+          var s = 0, n = 0;
+          hourlyFlat.forEach(function (pt) {
+            if (pt.y === y && pt.m === mo && pt.val != null && isFinite(pt.val)) { s += pt.val; n++; }
+          });
+          return n ? s * kwhScale : null;
+        }
+        var lastHour = null, hi;
+        for (hi = todayHours.length - 1; hi >= 0; hi--) {
+          if (todayHours[hi] != null && isFinite(todayHours[hi])) { lastHour = todayHours[hi] * kwhScale; break; }
+        }
+        var liveNow = mapsKey(p, 'current_month') ? asNum(p.current_month) : null;
+        if (liveNow != null) liveNow = energyMwh ? liveNow * 1000 : liveNow;
+        var currentNow = liveNow != null ? liveNow : lastHour;
+        if (!mapsKey(p, 'hourly_energy') && currentNow != null) {
+          set(el, 'currentKw', trunc1(currentNow));
+          set(el, 'loadUnit', 'kW');
+          set(m, 'loadNowKw', trunc1(currentNow));
+          var facRow = summaryRow(site, 'facility');
+          if (facRow) { facRow.d = 1; facRow.u = 'kW'; facRow.metric = 'loadNowKw'; facRow.capEn = null; facRow.capAr = null; facRow.notConfigured = false; }
+        }
+        if (!mapsKey(p, 'current_month') || !injected || injected.energyMonthOwn !== true) {
+          var monthSum = sumMonth(nowP.y, nowP.m);
+          if (monthSum != null) {
+            set(el, 'mtdKwh', trunc1(monthSum));
+            set(el, 'mtdMwh', trunc1(monthSum / 1000));
+            set(el, 'mtdUnit', 'kWh');
+          }
+        }
+        var prevM = nowP.m - 1, prevY = nowP.y;
+        if (prevM < 0) { prevM = 11; prevY -= 1; }
+        var prevSum = sumMonth(prevY, prevM);
+        if (prevSum != null && site.power) set(site.power, 'prevMonthKwh', trunc1(prevSum));
+        if (site.power) site.power.energyFromFin = true;
       }
 
       function todayHourly(flat) {
@@ -995,6 +1173,13 @@
       }
 
       var boardList = mappedBoards(p);
+      var fromHourly = !!(hourlyFlat && hourlyFlat.length && !boardList.length && (!injected || injected.energyFromHourly !== false) && historyHas(p, 'Hourly_Energy_Consumption_his'));
+      if (fromHourly) {
+        var buildingFlat = hourlyFlat.map(function (pt) {
+          return { y: pt.y, m: pt.m, d: pt.d, h: pt.h, val: pt.val * (energyMwh ? 1000 : 1) };
+        });
+        boardList = [{ name: 'Building', hue: '#4EA3E8', his: 'Hourly_Energy_Consumption_his', live: 'hourly_energy', pmu: null }];
+      }
       /* Demo figures (or the standalone prototype) with no board mapped: the sample boards stay */
       var ZONE_FIELDS = ["zones", "zonesAr", "zoneHues", "zoneHourly", "zoneLast24", "zoneWeekly", "zoneMonthly",
         "zoneWTD", "zoneMTD", "zoneYesterday", "zonePrevWeek", "zonePrevMonth", "pmuFlats"];
@@ -1004,11 +1189,14 @@
         ZONE_FIELDS.forEach(function (k) { if (k in site.power) sampleBoards[k] = site.power[k]; });
       }
       if (site.power) {
-        var flats = boardList.map(function (b) { return flattenHist(p.power_history[b.his]); });
+        var flats = fromHourly ? [buildingFlat] : boardList.map(function (b) { return flattenHist(p.power_history[b.his]); });
         site.power.pmuFlats = {};
         if (boardMeterLinks) {
           boardList.forEach(function (b, i) { if (b.pmu) site.power.pmuFlats[meterKey(b.pmu)] = flats[i]; });
         }
+        (configuredMeters() || []).forEach(function (m) {
+          if (m.his && historyHas(p, m.his)) site.power.pmuFlats[m.name] = hourlyUse(flattenHist(p.power_history[m.his]));
+        });
         var peakFlat = flattenHist(p.power_history.Peak_Demand_his);
         var allFlats = flats.concat([peakFlat]);
         site.power.zones = boardList.map(function (b) { return b.name; });
@@ -1107,6 +1295,7 @@
         changed = true;
         var peakToday = todayHourly(peakFlat);
         site.power.peakSeries = align(peakToday, todayLen);
+        if (peakFlat.length || mapsKey(p, 'peak_demand')) site.power.peakFromFin = true;
         if (peakToday.length) {
           var pkSum = 0;
           peakToday.forEach(function (v) { pkSum += v; });
@@ -1303,8 +1492,9 @@
       }
       if (Array.isArray(site.power.pmus)) {
         site.power.pmus.forEach(function (row) {
-          if (row && lastBoardKwh[row.id] != null) {
-            var next = trunc1(lastBoardKwh[row.id]);
+          var link = row && (row.boardMeter || row.id);
+          if (row && lastBoardKwh[link] != null) {
+            var next = trunc1(lastBoardKwh[link]);
             if (row.kwh !== next) { row.kwh = next; changed = true; }
           }
         });
@@ -1353,6 +1543,16 @@
       }
       if (el && el.currentKw != null) sv.loadNowKw = el.currentKw;
     }
+    if (restoreSample) restoreSample();
+    function clearMock(row) {
+      if (!row) return;
+      row.notConfigured = false;
+      row.capEn = null;
+      row.capAr = null;
+    }
+    if (mapsKey(p, 'hourly_energy')) clearMock(summaryRow(site, 'facility'));
+    if (mapsKey(p, 'total_water') || historyHas(p, 'Total_Water_Consumption_his')) clearMock(summaryRow(site, 'water'));
+    if (mapsKey(p, 'total_gas') || historyHas(p, 'Total_Gas_Consumption_his')) clearMock(summaryRow(site, 'gas'));
     countUtilityAndEmsMeters(site, site.assets);
     if (changed) paint();
   }
@@ -1402,9 +1602,11 @@
   function applyMeters(meters) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !meters || !site.power) return;
-    /* /pmu-live lists the meters the project's own meter profile matched (its prefix and point
-       aliases), so every one is shown. Marsa Al Arab's are keyed by PMU number, which its board
-       names and history follow; another site's meter keeps its own name. */
+    // FIN reports no meter: demo figures and sample data keep the sample's meters until it does
+    if (!Object.keys(meters).length && !configuredMeters() && (!realMode || sampleFill)) return;
+    /* /pmu-live lists the meters the project's own meter profile matched (its prefixes, FIN's meter
+       tags and the meters named in Settings), so every one is shown. Marsa Al Arab's are keyed by
+       PMU number, which its board names and history follow; another site's meter keeps its own name. */
     var byKey = {};
     Object.keys(meters).forEach(function (name) {
       var k = meterKey(name);
@@ -1416,35 +1618,94 @@
         if (k && !byKey[k]) byKey[k] = { name: a.id, row: {} };
       });
     }
-    function rowOf(meta, live) {
+    var boards = meterBoards();
+    function rowOf(id, equip, live) {
       var r = live && live.row;
-      var db = meta.db;
+      var board = boards.find(function (b) { return sameMeter(id, b.pmu) || (equip && sameMeter(equip, b.pmu)); });
+      var link = board ? meterKey(board.pmu) : null;
+      var db = board ? board.name : null;
       if (!db && live && live.name) db = live.name.replace(/^PMU\d+[_\- ]*/i, "").replace(/_/g, " ").trim();
       return {
-        id: meta.id,
-        db: db || meta.id,
+        id: id,
+        db: db || id,
         kw: r ? asNum(r.active_power) : null,
         a: r ? asNum(r.current) : null,
         hz: r ? asNum(r.frequency) : null,
-        kwh: lastBoardKwh[meta.id] != null ? lastBoardKwh[meta.id] : (r ? asNum(r.total_energy) : null),
+        kwh: link && lastBoardKwh[link] != null ? lastBoardKwh[link] : (r ? asNum(r.total_energy) : null),
         v: r ? asNum(r.voltage) : null,
-        pf: null
+        pf: null,
+        fin: !!live,
+        boardMeter: link
       };
     }
-    /* each meter's board name: the project's configured boards, else Marsa Al Arab's own */
-    var canonDb = {};
-    if (CONFIGURED_BOARDS) CONFIGURED_BOARDS.forEach(function (b) { if (b.pmu) canonDb[meterKey(b.pmu)] = b.name; });
-    else if (fixtureSite) PMU_CANON.forEach(function (m) { canonDb[m.id] = m.db; });
     var ids = Object.keys(byKey);
     ids.sort(function (a, b) {
       return (parseInt(a.replace(/\D/g, ""), 10) || 0) - (parseInt(b.replace(/\D/g, ""), 10) || 0) || (a < b ? -1 : a > b ? 1 : 0);
     });
-    // no meter reported: the known meters are listed (readings "--"); a site that knows none lists none
-    if (!ids.length) ids = Object.keys(canonDb);
-    site.power.pmus = ids.map(function (id) {
-      return rowOf({ id: id, db: canonDb[id] }, byKey[id]);
-    });
+    // no meter reported: the boards' meters are listed (readings "--"); a site that names none lists none
+    if (!ids.length) ids = boards.map(function (b) { return meterKey(b.pmu); });
+    var chosen = configuredMeters();
+    if (chosen) {
+      var byName = {};
+      Object.keys(byKey).forEach(function (k) { byName[byKey[k].name.toUpperCase()] = byKey[k]; });
+      site.power.pmus = chosen.map(function (m) {
+        var row = rowOf(m.name, m.equip, byKey[meterKey(m.equip)] || byName[(m.equip || m.name).toUpperCase()]);
+        row.main = m.main;
+        var flat = m.his && site.power.pmuFlats && site.power.pmuFlats[m.name];
+        if (row.kwh == null && flat && flat.length) row.kwh = trunc1(flat[flat.length - 1].val);
+        return row;
+      });
+    } else {
+      site.power.pmus = ids.map(function (id) { return rowOf(id, null, byKey[id]); });
+    }
+    site.power.anomIds = featuredMeters(site.power.pmus, boards);
     paint();
+  }
+
+  /* configured boards, else Marsa Al Arab's own */
+  function meterBoards() {
+    var list = CONFIGURED_BOARDS || (fixtureSite ? PMU_CANON.map(function (m) { return { name: m.db, pmu: m.id }; }) : []);
+    return list.filter(function (b) { return b && b.pmu; });
+  }
+
+  /* A board's Meter names a meter by its whole name or its leading part (PMU01 for PMU01_MSB_1) */
+  function sameMeter(id, text) {
+    var a = String(id || "").toUpperCase(), b = String(meterKey(String(text || "").trim())).toUpperCase();
+    if (!a || !b) return false;
+    return a === b || (a.indexOf(b) === 0 && /[^A-Z0-9]/.test(a.charAt(b.length)));
+  }
+
+  /* The meters Anomalies leads with: every one for PMU measurement; else the main ones (ticked Main, then those boards name); else all */
+  function featuredMeters(pmus, boards) {
+    var all = pmus.map(function (u) { return u.id; });
+    if (injected && injected.anomalyAllMeters === true) return all;
+    var main = pmus.filter(function (u) { return u.main; }).map(function (u) { return u.id; });
+    boards.forEach(function (b) {
+      pmus.forEach(function (u) { if (u.boardMeter === meterKey(b.pmu) && main.indexOf(u.id) < 0) main.push(u.id); });
+    });
+    return main.length ? main : all;
+  }
+
+  /* A running total becomes the energy used each hour; an hourly reading is returned as is */
+  function hourlyUse(flat) {
+    var pts = (flat || []).slice().sort(function (a, b) {
+      return Date.UTC(a.y, a.m, a.d, a.h) - Date.UTC(b.y, b.m, b.d, b.h);
+    });
+    if (pts.length < 3) return pts;
+    var drops = 0;
+    for (var i = 1; i < pts.length; i++) if (pts[i].val < pts[i - 1].val) drops++;
+    // a rare drop is the meter resetting, not an hourly reading
+    if (drops > Math.max(1, pts.length * 0.01)) return pts;
+    var steps = [];
+    for (var j = 1; j < pts.length; j++) {
+      var gap = (Date.UTC(pts[j].y, pts[j].m, pts[j].d, pts[j].h) - Date.UTC(pts[j - 1].y, pts[j - 1].m, pts[j - 1].d, pts[j - 1].h)) / 36e5;
+      var used = pts[j].val - pts[j - 1].val;
+      if (gap === 1 && used >= 0) steps.push({ y: pts[j].y, m: pts[j].m, d: pts[j].d, h: pts[j].h, val: used });
+    }
+    var sorted = steps.map(function (p) { return p.val; }).sort(function (a, b) { return a - b; });
+    var typical = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+    // a bad reading in the total makes one hour jump back up by the whole total
+    return typical > 0 ? steps.filter(function (p) { return p.val <= typical * 50; }) : steps;
   }
 
 
@@ -1453,8 +1714,8 @@
   var HIST_RETRY_MS = 60000;   // a failed history read is tried again after this long
   /* none: no historized point to trend; loading; failed: FIN or the backend did not answer; empty: answered, no samples; ok */
   function histStateOf(primary, cached) {
-    if (!primary || !primary.actHis) return "none";
-    if (cached && cached.compareV === 2) return (cached.compare.hist.length || cached.compare.days.length) ? "ok" : "empty";
+    if (!primary || (!primary.actHis && !primary.spHis)) return "none";
+    if (cached && cached.compareV === 3) return (cached.compare.hist.length || cached.compare.days.length) ? "ok" : "empty";
     if (cached && cached.failedAt) return "failed";
     return "loading";
   }
@@ -1472,8 +1733,36 @@
     var n = parseFloat(m[0]);
     return isFinite(n) ? n : null;
   }
-  function isSpName(k) {
-    return k.indexOf("set") !== -1 || /sp$/.test(k);
+  function isSpName(k, point) {
+    return (point && point.sp === true) || k.indexOf("set") !== -1 || /sp$/.test(k);
+  }
+  function nameWords(text) {
+    return String(text || "").split(/[,;/]+/).map(foldPtName).filter(Boolean);
+  }
+  function matchesWords(k, words) {
+    return words.some(function (w) { return w && k.indexOf(w) !== -1; });
+  }
+  // "sp" is a suffix, not a substring: "spacetemp" contains "sp" and is not a setpoint.
+  function genericSpWord(w) {
+    return w === "sp" || w === "setpoint" || w === "setpt" || w === "stpt";
+  }
+  function equipPointWords() {
+    var cfg = (injected && injected.equipPoints) || {};
+    return {
+      ahuTemp: nameWords(cfg.ahuTemp),
+      ahuSp: nameWords(cfg.ahuSetpoint),
+      fcuTemp: nameWords(cfg.fcuTemp),
+      fcuSp: nameWords(cfg.fcuSetpoint)
+    };
+  }
+  function spTest(words, tempWords) {
+    return function (k, point) {
+      var specific = [];
+      for (var i = 0; i < words.length; i++) if (!genericSpWord(words[i])) specific.push(words[i]);
+      if (specific.length && matchesWords(k, specific)) return true;
+      var family = tempWords.length ? matchesWords(k, tempWords) : false;
+      return family && isSpName(k, point);
+    };
   }
   function findPt(points, test) {
     for (var i = 0; i < (points || []).length; i++) {
@@ -1486,7 +1775,7 @@
     var s = findPt(points, spTest);
     var av = ptNumVal(a);
     var sv = ptNumVal(s);
-    if (av == null && sv == null && !(a && a.his && a.id)) return null;
+    if (av == null && sv == null && !(a && a.his && a.id) && !(s && s.his && s.id)) return null;
     return {
       key: key,
       actual: av,
@@ -1500,42 +1789,52 @@
       spHis: !!(s && s.his && s.id)
     };
   }
-  function comparePairs(eq) {
-    var points = eq.points || [];
-    var id = String(eq.name || "").toUpperCase();
-    var type = String(eq.type || "").toUpperCase();
-    var kind = "gen";
-    if (id.indexOf("FAHU") === 0 || type.indexOf("FAHU") !== -1) kind = "fahu";
-    else if (id.indexOf("AHU") === 0 || type.indexOf("AHU") !== -1) kind = "ahu";
-    else if (id.indexOf("FCU") === 0 || type.indexOf("FCU") !== -1) kind = "fcu";
+  function equipKind(name, finType) {
+    var id = String(name || "").toUpperCase();
+    var type = String(finType || "").toUpperCase();
+    if (id.indexOf("FAHU") === 0 || type.indexOf("FAHU") !== -1) return "fahu";
+    if (id.indexOf("MAHU") === 0 || type.indexOf("MAHU") !== -1) return "mahu";
+    if (id.indexOf("AHU") === 0 || type.indexOf("AHU") !== -1) return "ahu";
+    if (id.indexOf("VAV") === 0 || type.indexOf("VAV") !== -1) return "vav";
+    if (id.indexOf("FCU") === 0 || type.indexOf("FCU") !== -1) return "fcu";
     // The type as a whole word inside the name ("HOSPITAL_AHU_01"), for a unit FIN gives no type. Only a project that
     // turned the Hospital HVAC graphics on: every other project classifies by the prefix and FIN type alone, as before.
-    else if (hospitalHvac) {
-      var word = (" " + id.replace(/[^A-Z0-9]+/g, " ") + " ").match(/ (FAHU|AHU|FCU) /);
-      if (word) kind = word[1].toLowerCase();
+    if (hospitalHvac) {
+      var word = (" " + id.replace(/[^A-Z0-9]+/g, " ") + " ").match(/ (FAHU|MAHU|AHU|VAV|FCU) /);
+      if (word) return word[1].toLowerCase();
     }
+    return "gen";
+  }
+  function comparePairs(eq) {
+    var points = eq.points || [];
+    var kind = equipKind(eq.name, eq.type);
+    var names = equipPointWords();
     var specs = [];
-    if (kind === "fcu") {
+    var zoneTemps = names.fcuTemp.length ? [names.fcuTemp] : [["zonetemp"], ["spacetemp"], ["roomtemp"]];
+    var zoneSpecs = zoneTemps.map(function (fcuTemp) {
+      return makePair(points, "apCmpZone", function (k, point) { return matchesWords(k, fcuTemp) && !isSpName(k, point); }, spTest(names.fcuSp, fcuTemp));
+    });
+    if (kind === "fcu" || kind === "vav") {
+      specs = zoneSpecs;
+    } else if (kind === "ahu" && names.ahuTemp.length) {
       specs = [
-        makePair(points, "apCmpZone", function (k) { return k.indexOf("zonetemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("zonetemp") !== -1 && isSpName(k); })
+        makePair(points, "apCmpSA", function (k, point) { return matchesWords(k, names.ahuTemp) && !isSpName(k, point); }, spTest(names.ahuSp, names.ahuTemp))
       ];
     } else if (kind === "ahu") {
       specs = [
-        makePair(points, "apCmpRA", function (k) { return k.indexOf("ratemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("ratemp") !== -1 && isSpName(k); }),
-        makePair(points, "apCmpSA", function (k) { return k.indexOf("satemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("satemp") !== -1 && isSpName(k); }),
-        makePair(points, "apCmpRAHum", function (k) { return k.indexOf("rahum") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("rahum") !== -1 && isSpName(k); }),
-        makePair(points, "apCmpRACO2", function (k) { return (k.indexOf("raco2") !== -1 || k === "raco2" || (k.indexOf("co2") !== -1 && k.indexOf("ra") !== -1)) && !isSpName(k); }, function (k) { return k.indexOf("co2") !== -1 && isSpName(k); })
+        makePair(points, "apCmpSA", function (k, point) { return (k.indexOf("satemp") !== -1 || k.indexOf("supplyairtemp") !== -1) && !isSpName(k, point); }, spTest(names.ahuSp, ["satemp", "supplyairtemp"])),
+        makePair(points, "apCmpRA", function (k, point) { return (k.indexOf("ratemp") !== -1 || k.indexOf("returnairtemp") !== -1) && !isSpName(k, point); }, spTest([], ["ratemp", "returnairtemp"])),
+        makePair(points, "apCmpRAHum", function (k, point) { return k.indexOf("rahum") !== -1 && !isSpName(k, point); }, function (k, point) { return k.indexOf("rahum") !== -1 && isSpName(k, point); }),
+        makePair(points, "apCmpRACO2", function (k, point) { return (k.indexOf("raco2") !== -1 || k === "raco2" || (k.indexOf("co2") !== -1 && k.indexOf("ra") !== -1)) && !isSpName(k, point); }, function (k, point) { return k.indexOf("co2") !== -1 && isSpName(k, point); })
       ];
-    } else if (kind === "fahu") {
-      specs = [
-        makePair(points, "apCmpFA", function (k) { return k.indexOf("fatemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("fatemp") !== -1 && isSpName(k); }),
-        makePair(points, "apCmpRA", function (k) { return k.indexOf("ratemp") !== -1 && k.indexOf("sensible") === -1 && !isSpName(k); }, function (k) { return k.indexOf("ratemp") !== -1 && k.indexOf("sensible") === -1 && isSpName(k); }),
-        makePair(points, "apCmpSA", function (k) { return k.indexOf("satemp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("satemp") !== -1 && isSpName(k); }),
-        makePair(points, "apCmpOffCoil", function (k) { return (k.indexOf("offcoil") !== -1 || (k.indexOf("off") !== -1 && k.indexOf("temp") !== -1 && k.indexOf("hum") === -1 && k.indexOf("sensible") === -1)) && !isSpName(k); }, function (k) { return (k.indexOf("offcoil") !== -1 || k.indexOf("offtemp") !== -1) && isSpName(k); })
-      ];
+    } else if (kind === "fahu" || kind === "mahu") {
+      var airTemps = names.ahuTemp.length ? [names.ahuTemp] : [["satemp", "supplyairtemp"], ["freshairtemp"], ["ratemp", "returnairtemp"]];
+      specs = airTemps.map(function (words) {
+        return makePair(points, "apCmpSA", function (k, point) { return matchesWords(k, words) && !isSpName(k, point); }, spTest(names.ahuSp, words));
+      });
     } else {
       specs = [
-        makePair(points, "apCmpTemp", function (k) { return k.indexOf("temp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("temp") !== -1 && isSpName(k); })
+        makePair(points, "apCmpTemp", function (k, point) { return k.indexOf("temp") !== -1 && !isSpName(k, point); }, function (k, point) { return k.indexOf("temp") !== -1 && isSpName(k, point); })
       ];
     }
     return specs.filter(Boolean);
@@ -1571,6 +1870,64 @@
     rows.sort(function (a, b) { return a.t - b.t; });
     return rows;
   }
+  function blankHours() {
+    var hours = [];
+    for (var h = 0; h < 24; h++) hours.push(null);
+    return hours;
+  }
+  function hourNum(v) {
+    return v != null && v !== "" && isFinite(v) ? +v : null;
+  }
+  // An hour that logged only one side keeps the other's last sample, so both bars stay on the chart.
+  function alignCompare(actAll, spAll, liveA, liveB) {
+    var byT = {};
+    function row(t) {
+      if (!byT[t]) byT[t] = { t: +t, a: blankHours(), b: blankHours(), aAvg: null, bAvg: null, label: "" };
+      return byT[t];
+    }
+    function pad(hours) {
+      var out = (hours || []).slice();
+      while (out.length < 24) out.push(null);
+      return out;
+    }
+    (actAll || []).forEach(function (d) {
+      var r = row(d.t);
+      r.a = pad(d.hours);
+      r.aAvg = d.avg;
+      r.label = d.label;
+    });
+    (spAll || []).forEach(function (d) {
+      var r = row(d.t);
+      r.b = pad(d.hours);
+      r.bAvg = d.avg;
+      if (!r.label) r.label = d.label;
+    });
+    var days = Object.keys(byT).map(function (k) { return byT[k]; }).sort(function (a, b) { return a.t - b.t; });
+    var now = new Date();
+    var today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    var anyB = false;
+    var anyA = false;
+    days.forEach(function (d) {
+      for (var h = 0; h < 24; h++) {
+        if (hourNum(d.a[h]) != null) anyA = true;
+        if (hourNum(d.b[h]) != null) anyB = true;
+      }
+    });
+    var lastA = null, lastB = null;
+    days.forEach(function (d) {
+      for (var h = 0; h < 24; h++) {
+        var rawA = hourNum(d.a[h]);
+        var rawB = hourNum(d.b[h]);
+        if (rawA != null) lastA = rawA;
+        if (rawB != null) lastB = rawB;
+        var fillA = lastA != null ? lastA : (!anyA && d.t === today ? hourNum(liveA) : null);
+        var fillB = lastB != null ? lastB : (!anyB && d.t === today ? hourNum(liveB) : null);
+        if (rawA != null && rawB == null && fillB != null) d.b[h] = fillB;
+        if (rawB != null && rawA == null && fillA != null) d.a[h] = fillA;
+      }
+    });
+    return days;
+  }
   function applyEquipment(payload) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     var list = payload && payload.equipment;
@@ -1578,6 +1935,10 @@
     if (Object.prototype.hasOwnProperty.call(payload, 'workOrderError')) {
       site.workOrderError = payload.workOrderError || '';
       site.workOrderState = payload.workOrderState || '';
+    }
+    if (sampleFill && !list.length) {
+      applyHeat(list);
+      return;
     }
 
     // Build fresh asset list from FIN live data
@@ -1646,10 +2007,10 @@
         inAlarm: !!eq.inAlarm,
         alarms: alarmIds,
         floor: eq.floor || "Unknown",
-        zone: "General",
-        zoneAr: "عام",
-        typeEn: (eq.type || "equipment").toUpperCase(),
-        typeAr: (eq.type || "معدات").toUpperCase(),
+        zone: "",
+        zoneAr: "",
+        typeEn: (eq.type && eq.type !== "other" ? eq.type : "equipment").toUpperCase(),
+        typeAr: (eq.type && eq.type !== "other" ? eq.type : "معدات").toUpperCase(),
         level: eq.floor || "Level",
         levelAr: eq.floor || "الطابق",
         equipId: normEquipId(eq.equipId),
@@ -1672,12 +2033,12 @@
 
       var pairs = comparePairs(eq);
       var cached = historyCache[eq.name];
-      var primary = pairs.filter(function (p) { return p.actHis; })[0] || pairs[0];
+      var primary = pairs.filter(function (p) { return p.actHis || p.spHis; })[0] || pairs[0];
       assetData.compare = {
         pairs: pairs,
         histState: histStateOf(primary, cached),
-        days: (cached && cached.compareV === 2 && cached.compare && cached.compare.days) || [],
-        hist: (cached && cached.compareV === 2 && cached.compare && cached.compare.hist) || [],
+        days: (cached && cached.compareV === 3 && cached.compare && cached.compare.days) || [],
+        hist: (cached && cached.compareV === 3 && cached.compare && cached.compare.hist) || [],
         unit: (cached && cached.compare && cached.compare.unit) || ((pairs[0] && pairs[0].unit) || ""),
         actName: (cached && cached.compare && cached.compare.actName) || (pairs[0] && pairs[0].actName) || "",
         spName: (cached && cached.compare && cached.compare.spName) || (pairs[0] && pairs[0].spName) || ""
@@ -1688,10 +2049,16 @@
       }
 
       var retry = !!(cached && cached.failedAt && Date.now() - cached.failedAt >= HIST_RETRY_MS);
-      if (primary && primary.actHis && window.DashboardData && window.DashboardData.getPointHistory && (!cached || retry)) {
+      var ready = !!(cached && cached.compareV === 3 && cached.compare);
+      var otherPoint = !!(ready && primary && (cached.compare.actName !== (primary.actName || "") || cached.compare.spName !== (primary.spName || "")));
+      var wantHist = !!(primary && (primary.actHis || primary.spHis) && (primary.actId || primary.spId));
+      var holdOff = !!(cached && cached.failedAt && !retry);
+      if (wantHist && window.DashboardData && window.DashboardData.getPointHistory && !(cached && cached.fetching) && !holdOff && (!ready || retry || otherPoint)) {
         historyCache[eq.name] = { fetching: true };
-        var actP = window.DashboardData.getPointHistory(primary.actId, HIST_DAYS);
-        var spP = (primary.spHis && primary.spId)
+        var actP = primary.actId
+          ? window.DashboardData.getPointHistory(primary.actId, HIST_DAYS)
+          : Promise.resolve(null);
+        var spP = primary.spId
           ? window.DashboardData.getPointHistory(primary.spId, HIST_DAYS)
           : Promise.resolve(null);
         var failed = function () {
@@ -1704,31 +2071,31 @@
         };
         Promise.all([actP, spP]).then(function (both) {
           if (!current()) return;
-          if (!histUsable(both[0])) return failed();   // no answer is not "no history"
-          var actAll = histDaily(both[0] && both[0].history);
-          var spAll = histDaily(both[1] && both[1].history);
-          var actDays = actAll.slice(-7);
-          var spByT = {};
-          spAll.forEach(function (d) { spByT[d.t] = d; });
-          var days = actDays.map(function (d) {
-            return { label: d.label, actual: d.avg, sp: spByT[d.t] ? spByT[d.t].avg : undefined };
+          var actOk = histUsable(both[0]);
+          var spOk = histUsable(both[1]);
+          if (!actOk && !spOk) return failed();
+          var actAll = actOk ? histDaily(both[0].history) : [];
+          var spAll = spOk ? histDaily(both[1].history) : [];
+          var aligned = alignCompare(actAll, spAll, primary.actual, primary.sp);
+          var tail = aligned.slice(-7);
+          var days = tail.map(function (d) {
+            return { label: d.label, actual: d.aAvg, sp: d.bAvg != null ? d.bAvg : undefined };
           });
-          var hist = actAll.map(function (d) {
-            var sp = spByT[d.t];
-            return { t: d.t, a: d.hours, b: sp ? sp.hours : null, aAvg: d.avg, bAvg: sp ? sp.avg : null };
+          var hist = aligned.map(function (d) {
+            return { t: d.t, a: d.a, b: d.b, aAvg: d.aAvg, bAvg: d.bAvg };
           });
-          var vals = actDays.map(function (d) { return d.avg; });
+          var vals = tail.map(function (d) { return d.aAvg != null ? d.aAvg : d.bAvg; }).filter(function (v) { return v != null && isFinite(v); });
           var spark7 = assetData.spark7;
           if (vals.length) {
             var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals), range = mx - mn || 1;
             spark7 = vals.map(function (v) { return (v - mn) / range; });
           }
           var packed = {
-            compareV: 2,
+            compareV: 3,
             compare: {
               days: days,
               hist: hist,
-              unit: (both[0] && both[0].unit) || primary.unit || "",
+              unit: (actOk && both[0].unit) || (spOk && both[1].unit) || primary.unit || "",
               actName: primary.actName || "",
               spName: primary.spName || ""
             },
@@ -1764,6 +2131,9 @@
 
     site.assets = newAssets;
     site.registerTotal = newAssets.length;
+    finAssets = true;
+    // FIN's equipment is the register now, not the sample model's item list
+    if (sampleFill) delete site.register;
 
     if (site.landing && site.landing.reg) {
       site.landing.reg.headEn = newAssets.length + " assets";
@@ -1807,6 +2177,19 @@
             c.capAr = healthPct >= 95 ? 'سليم' : healthPct >= 80 ? 'مقبول' : 'حرج';
             c.tone = healthPct >= 95 ? 'ok' : 'warn';
           }
+          if (/AIR HANDLING/i.test(c.labelEn || '')) {
+            var ahusLive = list.filter(function (a) { return equipKind(a.id, a.typeEn) === 'ahu'; });
+            if (ahusLive.length) {
+              var ahuAlarm = ahusLive.filter(function (a) { return a.st === 'alarm'; }).length;
+              c.v = ahusLive.length + ' / ' + ahusLive.length;
+              c.capEn = 'Total: ' + ahusLive.length + (ahuAlarm ? '' : ', all running');
+              c.capAr = 'الإجمالي: ' + ahusLive.length + (ahuAlarm ? '' : '، كلها تعمل');
+              c.chipEn = ahuAlarm ? ahuAlarm + ' with an alarm' : '';
+              c.chipAr = ahuAlarm ? ahuAlarm + ' عليها إنذار' : '';
+              c.tone = ahuAlarm ? 'warn' : 'ok';
+              c.wash = ahuAlarm ? 'warn' : '';
+            }
+          }
           if (/EQUIPMENT|METERS/i.test(c.labelEn || '')) {
             if (total > 0) {
               c.v = active + ' / ' + total;
@@ -1833,6 +2216,7 @@
   }
 
   var woState = { byId: {} };
+  var finAssets = false;
 
   function normEquipId(value) {
     if (value == null || value === '') return '';
@@ -1863,6 +2247,8 @@
   function stampWorkOrders() {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !Array.isArray(site.assets)) return;
+    // the sample's own assets keep their sample work orders
+    if (sampleFill && !finAssets) return;
     site.assets.forEach(function (asset) {
       var equipId = normEquipId(asset.equipId);
       asset.equipId = equipId;
@@ -2314,6 +2700,7 @@
     if (!site || !site.heat || !Array.isArray(list)) return;
     var zones = [];
     var linkedSpaces = readSpaceLinks();
+    if (sampleFill && !linkedSpaces.length && !list.some(function (eq) { return eq && sensorKey(eq.name); })) return;
     if (!linkedSpaces.length) {
       for (var i = 1; i <= 4; i++) zones.push(blankZone('IAQ' + String(i).padStart(2, '0')));
       for (var j = 1; j <= 7; j++) zones.push(blankZone('IS' + String(j).padStart(2, '0')));
@@ -2392,6 +2779,9 @@
     Object.keys(seen).forEach(function (f) { if (f && order.indexOf(f) < 0) floors.push(f); });
     site.heat.zones = zones;
     site.heat.floors = floors;
+    var spaceNames = {};
+    linkedSpaces.forEach(function (l) { if (l && l.guid) spaceNames[l.guid] = l.name || ''; });
+    site.heat.spaceNames = spaceNames;
     zones.forEach(function (z) { ensureHistory(z.tempId); ensureHistory(z.rhId); ensureHistory(z.co2Id); });
     applyShown();
   }

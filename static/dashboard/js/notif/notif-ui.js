@@ -109,6 +109,8 @@ window.EKO_NF = (function(){
       case 'controlTab':  if(p.asset){ openAsset(p.asset, 'control'); return; } break;
       case 'staleAssets': E.go('assets-register', 'assets', 'reg'); E.set({ regStF: 'stale' }); return;
       case 'security':    if(window.EKO_CTL){ window.EKO_CTL.ACTS.ctlSecurity(); return; } break;
+      case 'brief':       if(window.EKO_BRIEF){ window.EKO_BRIEF.open(p.win || 'shift'); return; } break;   /* E15: the scheduled Brief opens itself */
+      case 'handover':    if(window.EKO_HO){ window.EKO_HO.openFrom(n.source && n.source.id); return; } break;   /* E15 */
       case 'module':      E.go(p.pageId || 'marsa-overview', p.moduleId || 'overview', null); return;
       case 'report': {   /* D90: the immutable document itself */
         const doc = p.id && window.EKO_R ? window.EKO_R.store.get(p.id) : null;

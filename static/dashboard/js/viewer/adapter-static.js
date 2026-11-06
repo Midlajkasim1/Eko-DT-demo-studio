@@ -125,6 +125,8 @@
           host.addEventListener('pointerup', lift);
           host.addEventListener('pointercancel', lift);
           host.addEventListener('wheel', e => {
+            /* the overview peek is a card in the scrolling page; zooming it ate the page scroll */
+            if(host.closest('.mpeek')) return;
             e.preventDefault();
             if(zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.12 : 0.89)) apply(false);
           }, { passive: false });

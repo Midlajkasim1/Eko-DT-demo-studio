@@ -5,9 +5,11 @@ import topLevelAwait from 'vite-plugin-top-level-await'
 import path from 'path'
 import fs from 'fs'
 
-// wasm is studio-only. models/ and mapassets/ are project data that both exporters write
-// from the project folder, so anything under dist/ is a dev fixture. map/regions ships
-// with the exported viewer so location maps keep their bundled satellite renders.
+// wasm is studio-only. models/ and mapassets/ at the export root are project data that
+// both exporters write from the project folder, so anything under dist/ is a dev fixture.
+// map/regions ships with the exported viewer so location maps keep their satellite renders.
+// The Medical Centre demo is under static/dashboard/models/hospital/ and must ship too,
+// or a packaged backend has no building for the evacuation page.
 const EXPORT_SKIP = ['wasm/', 'models/', 'mapassets/']
 const skipFromExport = (rel: string) => EXPORT_SKIP.some(prefix => rel.startsWith(prefix))
 
@@ -179,6 +181,8 @@ const MIME_TYPES: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
+  '.mp4': 'video/mp4',
+  '.glb': 'model/gltf-binary',
 }
 
 function staticFolderPlugin() {
@@ -190,6 +194,15 @@ function staticFolderPlugin() {
         const rawUrl: string = req.url || ''
         const urlPath = rawUrl.split('?')[0]
 
+        if (urlPath === '/dashboard/assets/video/clips.json') {
+          const dir = path.join(staticPath, 'dashboard', 'assets', 'video')
+          const names = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => /\.mp4$/i.test(f)).map(f => f.slice(0, -4)) : []
+          names.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+          res.setHeader('Content-Type', 'application/json; charset=utf-8')
+          res.setHeader('Cache-Control', 'no-store')
+          res.end(JSON.stringify(names))
+          return
+        }
         const filePath = path.join(staticPath, urlPath)
         // Prevent path traversal out of static/
         if (!filePath.startsWith(staticPath)) {

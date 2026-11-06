@@ -344,7 +344,7 @@ window.EKO_CTL = (function(){
         <div class="row gap8 mbs12">
           <button class="btnP grow" data-act="${setup?'ctlSetupGo':'ctlVerify'}" ${setup&&!((s.pinVal||'').length===6&&(s.pin2Val||'').length===6)?'disabled':''}>${esc(E.t(setup?'setupBtn':'verifyBtn'))}</button>
           <button class="btnG" data-act="ctlDlgClose">${esc(E.t('cancelW'))}</button></div>
-        <p class="ctlfoot">${esc(E.t('pinFoot'))}${setup?'':' '+esc(E.t('forgotNote',{u:'S. Khan'}))}</p></div>`;
+        <p class="ctlfoot">${esc(E.t('pinFoot'))}${setup?'':' '+esc(E.t('forgotNote',{u:'the shift engineer'}))}</p></div>`;
     }
     if(s.dlg === 'security'){
       out += securityDlg(E, s);
@@ -421,7 +421,7 @@ window.EKO_CTL = (function(){
         <div class="row gap8 wrap">
           ${svc.hasPin() ? `<button class="btnG btnSm" data-act="ctlSecChangePin">${esc(E.t('changePinBtn'))}</button>` : ''}
           <button class="btnG btnSm" data-act="ctlAdminReset" data-on="${s.adminConfirm?1:0}">${esc(E.t(s.adminConfirm ? 'adminResetConfirm' : 'adminResetBtn'))}</button></div>
-        <p class="ctlfoot bare mbs8">${esc(E.t('forgotNote',{u:'S. Khan'}))}</p>`;
+        <p class="ctlfoot bare mbs8">${esc(E.t('forgotNote',{u:'the shift engineer'}))}</p>`;
     }
     const tbl = rows.length ? `<div class="audwrap"><table class="audt"><thead><tr>
         <th>${esc(E.t('audColTime'))}</th><th>${esc(E.t('audColUser'))}</th><th>${esc(E.t('audColWhat'))}</th>
@@ -564,7 +564,7 @@ window.EKO_CTL = (function(){
       svc.clearPin(); svc.setGuard({});
       doLock(E, 'pin reset');
       /* audit carries BOTH ids: the admin actor and the target user */
-      audit.unshift({ ts: nowTxt(), user: 'S. Khan', role: 'admin',
+      audit.unshift({ ts: nowTxt(), user: 'the shift engineer', role: 'admin',
         site: 'Marsa Al Arab', source: 'EKO',
         targetUser: (E.data.user||{}).name,
         pinEvent: 'pin_reset_by_admin', result: 'cleared for ' + (E.data.user||{}).name });

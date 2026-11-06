@@ -13,7 +13,7 @@ window.EKO_NOTIF = (function(){
   'use strict';
   const TT = () => window.EKO_NOTIF_TYPES;
   const SELF_CONFIRM = ['alarm.ack_recorded', 'wo.accepted', 'wo.rejected', 'report.ready'];   /* D90: the report you asked for is ready */
-  const ME = 'Arman Y.';
+  const ME = 'the FM technician';
 
   /* Whose notifications these are. The dashboard's own rule (data-map.js realMode): a project the
      Studio or an exported viewer injects is REAL unless it turns Demo figures on; no injected
@@ -184,8 +184,8 @@ window.EKO_NOTIF = (function(){
     if(!SITE){ console.warn('[notif] no open project: not recorded:', evt && evt.type); return null; }
     const def = TT().byType[evt.type];
     if(!def){ console.error('[notif] unknown type refused:', evt.type); return null; }
-    if(evt.actorId === ME && !SELF_CONFIRM.includes(evt.type)){
-      /* never notify a user about their own action */
+    if(evt.actorId === ME && !SELF_CONFIRM.includes(evt.type) && !(evt.targetUsers || []).some(u => u !== evt.actorId)){
+      /* never notify a user about their own action; one addressed to others (the site, a person named) is recorded */
       return null;
     }
     if(!prefOn(evt.type)) return null;      /* stage 4: prefs honoured here */
@@ -326,14 +326,14 @@ window.EKO_NOTIF = (function(){
     S(1560, { type: 'digest.morning', actorId: 'system',
       siteId: 'marsa', params: { site: 'marsa', alarms: 12, wos: 9, delta: '+4%' } });
     S(1500, { type: 'wo.assigned', actorId: 'system', groupKey: 'wo:WO-2287',
-      params: { wo: 'WO-2287', asset: 'CH-2', user: 'S. Khan' },
+      params: { wo: 'WO-2287', asset: 'CH-2', user: 'the shift engineer' },
       source: { kind: 'workOrder', id: 'WO-2287' },
       externalRef: { system: 'hexagon', number: 'WO-2287' } });
-    S(1380, { type: 'wo.started', actorId: 'S. Khan', groupKey: 'wo:WO-2287',
-      params: { wo: 'WO-2287', asset: 'CH-2', user: 'S. Khan' },
+    S(1380, { type: 'wo.started', actorId: 'the shift engineer', groupKey: 'wo:WO-2287',
+      params: { wo: 'WO-2287', asset: 'CH-2', user: 'the shift engineer' },
       source: { kind: 'workOrder', id: 'WO-2287' } });
-    S(1300, { type: 'admin.setpoint_changed', actorId: 'S. Khan',
-      params: { user: 'S. Khan', point: 'Temp setpoint', asset: 'AHU-A2-RF-01',
+    S(1300, { type: 'admin.setpoint_changed', actorId: 'the shift engineer',
+      params: { user: 'the shift engineer', point: 'Temp setpoint', asset: 'AHU-A2-RF-01',
                 value: '22.0 °C', expiry: 'expires in 3 days' },
       source: { kind: 'asset', id: 'AHU-A2-RF-01' } });
     S(1250, { type: 'report.ready', actorId: 'system',
@@ -350,16 +350,16 @@ window.EKO_NOTIF = (function(){
     S(220, { type: 'alarm.ack_recorded', actorId: ME,
       params: { alarm: 'al-vav', asset: 'VAV-L11-W' },
       source: { kind: 'alarm', id: 'al-vav' } });
-    S(150, { type: 'shift.handover', actorId: 'M. Haddad',
-      params: { user: 'M. Haddad', n: 4 }, source: { kind: 'user', id: 'mhaddad' } });
+    S(150, { type: 'shift.handover', actorId: 'the duty engineer',
+      params: { user: 'the duty engineer', n: 4 }, source: { kind: 'user', id: 'duty-engineer' } });
     S(95, { type: 'int.connector_restored', actorId: 'system',
       params: { connector: 'Hexagon EAM', dur: '18m' },
       source: { kind: 'integration', id: 'hexagon' } });
-    S(60, { type: 'mention.comment', actorId: 'S. Khan',
-      params: { user: 'S. Khan', asset: 'CH-2', excerpt: B('can you check the approach trend before Thursday?', 'هل يمكنك مراجعة اتجاه التقارب قبل الخميس؟') },
+    S(60, { type: 'mention.comment', actorId: 'the shift engineer',
+      params: { user: 'the shift engineer', asset: 'CH-2', excerpt: B('can you check the approach trend before Thursday?', 'هل يمكنك مراجعة اتجاه التقارب قبل الخميس؟') },
       source: { kind: 'asset', id: 'CH-2' } });
-    S(24, { type: 'wo.completed', actorId: 'S. Khan', groupKey: 'wo:WO-2287',
-      params: { wo: 'WO-2287', asset: 'CH-2', user: 'S. Khan' },
+    S(24, { type: 'wo.completed', actorId: 'the shift engineer', groupKey: 'wo:WO-2287',
+      params: { wo: 'WO-2287', asset: 'CH-2', user: 'the shift engineer' },
       source: { kind: 'workOrder', id: 'WO-2287' },
       actions: [ { labelKey: 'na.viewWo', kind: 'primary', target: 'workOrder' } ] });
     S(700, { type: 'admin.module_unlocked', actorId: 'system', siteId: 'kz-dxb2',
@@ -379,7 +379,7 @@ window.EKO_NOTIF = (function(){
       source: { kind: 'workOrder', id: 'WO-2341' },
       externalRef: { system: 'hexagon', number: 'WO-2341' } },
     { type: 'wo.assigned', actorId: 'system', groupKey: 'wo:WO-2341',
-      params: { wo: 'WO-2341', asset: 'CH-2', user: 'S. Khan' },
+      params: { wo: 'WO-2341', asset: 'CH-2', user: 'the shift engineer' },
       source: { kind: 'workOrder', id: 'WO-2341' } },
     { type: 'int.connector_down', actorId: 'system',
       params: { connector: 'BMS poll', time: 'now' },
@@ -388,8 +388,8 @@ window.EKO_NOTIF = (function(){
     { type: 'int.connector_restored', actorId: 'system',
       params: { connector: 'BMS poll', dur: '2m' },
       source: { kind: 'integration', id: 'bms-poll' } },
-    { type: 'wo.completed', actorId: 'S. Khan', groupKey: 'wo:WO-2341',
-      params: { wo: 'WO-2341', asset: 'CH-2', user: 'S. Khan' },
+    { type: 'wo.completed', actorId: 'the shift engineer', groupKey: 'wo:WO-2341',
+      params: { wo: 'WO-2341', asset: 'CH-2', user: 'the shift engineer' },
       source: { kind: 'workOrder', id: 'WO-2341' } }
   ];
   let streamTimer = null, streamIdx = 0;

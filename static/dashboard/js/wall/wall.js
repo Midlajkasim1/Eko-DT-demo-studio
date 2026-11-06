@@ -336,7 +336,7 @@ window.EKO_WALL = (function(){
       /* D120: hierarchy — the two operational figures (sites reporting, active alarms) lead at hero size; the four others are secondary */
       tiles.push({ key: 'rep', size: 'hero', label: t('wall.sitesReporting'), value: fmtW(f.states.reporting), unit: t('wall.ofN', { n: fmtW(f.sitesTotal) }), ring: f.sitesTotal ? f.states.reporting / f.sitesTotal * 100 : 0, tone: f.notReporting ? 'stale' : 'ok', cap: t('pfPer.now') });
       tiles.push({ key: 'alarms', size: 'hero', label: t('pfKpi.alarms'), value: fmtW(h.alarms.value), cap: cov(h.alarms) });
-      tiles.push({ key: 'energy', size: 'sec', label: t('pfKpi.energy'), value: fmtW((h.energy.value || 0) / 1000), unit: t('pfMwh'), cap: t('pfPer.' + h.period) + ' · ' + cov(h.energy) });
+      tiles.push({ key: 'energy', size: 'sec', label: t('pfKpi.energy'), value: fmtW(h.energy.value || 0, 0), unit: t('pfMwh'), cap: t('pfPer.' + h.period) + ' · ' + cov(h.energy) });
       tiles.push({ key: 'wos', size: 'sec', label: t('pfKpi.wos'), value: fmtW(h.wos.value), cap: cov(h.wos) });
       tiles.push({ key: 'overdue', size: 'sec', label: t('pfOverdueWord'), value: fmtW(h.overdue.value), tone: h.overdue.value ? 'warn' : 'ok', cap: cov(h.overdue) });
       const R2 = R(), comp = R2.ratio(f.sites, { num: s => s.pmDone, den: s => s.pmDue, denKey: 'sites', needs: 'records', state: s => s.state });

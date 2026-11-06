@@ -19,6 +19,7 @@ window.EKO_PERSONA = (function(){
   'use strict';
   const C = () => window.EKO_C, O = () => window.EKO_OPS;
   const esc = s => C().esc(s), fmt = (v, d) => C().fmt(v, d);
+  const ek = v => fmt(typeof v === 'number' && isFinite(v) ? v * 1000 : v, 0);
   const LIST = ['operator', 'executive', 'engineer', 'security', 'fm'];
   const ROLE = { operator: 'technician', executive: 'executive', engineer: 'engineer', security: 'security', fm: 'manager' };
   const OF_ROLE = { technician: 'operator', executive: 'executive', engineer: 'engineer', security: 'security', manager: 'fm' };
@@ -73,7 +74,7 @@ window.EKO_PERSONA = (function(){
     const t = E.t.bind(E), out = [];
     bySev(alarmsOpen(E)).filter(a => a.sev === 'critical' || a.sev === 'high').slice(0, 2).forEach(a => out.push({ key: 'al:' + a.id, sev: a.sev, what: a.asset + t('cu.lblSep') + plain(E, a), why: t('per.risk.alarm.' + a.sev), act: { act: 'openAsset', data: { asset: a.asset }, label: t('per.act.open') } }));
     const F = forecast(E);
-    if(F && F.next && F.budgetNext && F.next.v > F.budgetNext) out.push({ key: 'budget', sev: 'medium', short: t('per.s.budget', { m: mon(E, E.nowMs(), 1) }), what: t('per.risk.budget', { m: mon(E, E.nowMs(), 1), f: fmt(F.next.v, 0), d: fmt(F.next.v - F.budgetNext, 0), b: fmt(F.budgetNext, 0) }),
+    if(F && F.next && F.budgetNext && F.next.v > F.budgetNext) out.push({ key: 'budget', sev: 'medium', short: t('per.s.budget', { m: mon(E, E.nowMs(), 1) }), what: t('per.risk.budget', { m: mon(E, E.nowMs(), 1), f: ek(F.next.v), d: ek(F.next.v - F.budgetNext), b: ek(F.budgetNext) }),
       why: money(E) && tariff(E) ? t('per.risk.budgetAed', { aed: fmt((F.next.v - F.budgetNext) * 1000 * tariff(E), 0) }) : t('per.risk.budgetWhy'), act: { act: 'goSub', data: { page: 'fcst', mod: 'energy', sub: 'fcst' }, label: t('per.act.forecast') } });
     predictions(E).slice(0, 1).forEach(p => out.push({ key: 'pv:' + p.asset, sev: 'medium', what: p.asset + t('cu.lblSep') + t('per.risk.pred', { point: p.point, n: Math.round(p.days) }), why: t('per.risk.predWhy'), act: { act: 'openAsset', data: { asset: p.asset }, label: t('per.act.open') } }));
     return out.slice(0, 3);
@@ -105,7 +106,7 @@ window.EKO_PERSONA = (function(){
     if(p === 'executive'){ const F = forecast(E), r = risks(E)[0];
       if(!F || !F.monthEnd) return t('per.hl.execNone');
       const over = F.monthEnd.v - F.budgetMonth, aed = money(E) && tariff(E) ? t('per.hl.execAed', { aed: fmt(Math.abs(over) * 1000 * tariff(E), 0) }) : '';
-      return t(over > 0 ? 'per.hl.exec' : 'per.hl.execUnder', { m: mon(E, E.nowMs()), f: fmt(F.monthEnd.v, 0), d: fmt(Math.abs(over), 0), b: fmt(F.budgetMonth, 0), aed }) + (r ? ' ' + t('per.hl.execRisk', { r: r.what }) : ''); }
+      return t(over > 0 ? 'per.hl.exec' : 'per.hl.execUnder', { m: mon(E, E.nowMs()), f: ek(F.monthEnd.v), d: ek(Math.abs(over)), b: ek(F.budgetMonth), aed }) + (r ? ' ' + t('per.hl.execRisk', { r: r.what }) : ''); }
     if(p === 'engineer'){ const ahus = (E.data.assets || []).filter(a => a.sys === 'ahu' && /^AHU/.test(a.id)), al = bySev(alarmsOpen(E).filter(a => HVAC.includes(sysOfAsset(E, a.asset))));
       const R = window.EKO_EP && E.data.energyModel ? (() => { try{ return window.EKO_EP.rows(E); }catch(e){ return []; } })() : [], w = R[0];
       const eo = alarmsOpen(E).filter(a => !a.ack && ENG.includes(sysOfAsset(E, a.asset)));
@@ -194,8 +195,8 @@ window.EKO_PERSONA = (function(){
     const chWo = (backlog(E).find(w => W && w.asset === W.chiller && w.type === 'cm') || {}).id || '';
     let line = t('per.hl.execNone');
     if(M){ const ch = Math.round(M.parts.chiller), fixed = M.v - M.parts.chiller, left = fixed - M.b;
-      line = M.gap > 0 ? t('x14.line', { m: mName, d: fmt(M.gap, 0), c: fmt(ch, 0) }) + ' ' + t(left > 0.5 ? 'x14.lineFix' : 'x14.lineFixUnder', { wo: chWo ? ' (' + chWo + ')' : '', m: mName, f: fmt(fixed, 0), l: fmt(Math.abs(left), 0) })
-        : t('x14.lineUnder', { m: mName, d: fmt(-M.gap, 0), b: fmt(M.b, 0) }); }
+      line = M.gap > 0 ? t('x14.line', { m: mName, d: ek(M.gap), c: ek(ch) }) + ' ' + t(left > 0.5 ? 'x14.lineFix' : 'x14.lineFixUnder', { wo: chWo ? ' (' + chWo + ')' : '', m: mName, f: ek(fixed), l: ek(Math.abs(left)) })
+        : t('x14.lineUnder', { m: mName, d: ek(-M.gap), b: ek(M.b) }); }
     return { W, M, mName, line };
   }
   function execPage(E){
@@ -205,26 +206,26 @@ window.EKO_PERSONA = (function(){
         <div class="x14tl">${esc(lbl)}</div><div class="x14tv tMono">${esc(v)}${u ? ` <span>${esc(u)}</span>` : ''}</div><div class="x14tc"${tone ? ` data-tone="${tone}"` : ''}>${esc(cap)}</div></div>`;
     const tiles = [];
     if(M){
-      tiles.push(tile(t('x14.energy', { m: mName }), fmt(M.v, 0), 'MWh', t(M.gap > 0 ? 'x14.energyOver' : 'x14.energyUnder', { b: fmt(M.b, 0), d: fmt(Math.abs(M.gap), 0) }), M.gap > 0 ? 'warn' : 'ok', ['fcst', 'energy', 'fcst']));
+      tiles.push(tile(t('x14.energy', { m: mName }), ek(M.v), 'kWh', t(M.gap > 0 ? 'x14.energyOver' : 'x14.energyUnder', { b: ek(M.b), d: ek(Math.abs(M.gap)) }), M.gap > 0 ? 'warn' : 'ok', ['fcst', 'energy', 'fcst']));
       if(aed) tiles.push(tile(t('x14.cost', { m: mName }), fmt(M.v * 1000 * tariff(E), 0), 'AED', M.gap > 0 ? t('x14.costOver', { d: fmt(M.gap * 1000 * tariff(E), 0), c: fmt(Math.max(0, M.parts.chiller) * 1000 * tariff(E), 0) }) : t('x14.costUnder'), M.gap > 0 ? 'warn' : 'ok', ['fcst', 'energy', 'fcst']));
     }
     if(F && F.peakKw) tiles.push(tile(t('x14.peak'), fmt(F.peakKw, 0), 'kW', F.contractKw ? t('x14.peakCap', { c: fmt(F.contractKw, 0) }) : t('x14.peakCapNo'), F.contractKw && F.peakKw > F.contractKw * 0.95 ? 'warn' : '', ['power', 'energy', 'power']));
     const over = backlog(E).filter(w => w.dueH < 0).sort((a, b) => a.dueH - b.dueH);
     const lcf = x => !x || E.lang === 'ar' ? (x || '') : x.charAt(0).toLowerCase() + x.slice(1);
     tiles.push(tile(t('x14.overdue'), String(over.length), '', over[0] ? t('x14.overdueCap', { w: lcf(L(E, over[0].taskEn, over[0].taskAr)), id: over[0].id }) : t('x14.overdueNone'), over.length ? 'warn' : 'ok', ['mnt', 'maintenance']));
-    /* why the month is over budget: the gap split by cause, in whole MWh that add up to the gap */
+    /* why the month is over budget: the gap split by cause, in whole kWh that add up to the gap */
     let why = '';
     if(M && M.gap > 0){
       const K = ['chiller', 'faults', 'weather', 'growth', 'target', 'rest'], COL = { chiller: 'var(--crit)', faults: 'var(--warn)', weather: 'var(--info)', growth: 'var(--acc)', target: 'var(--t3)', rest: 'var(--s3)' };
       const LB = { chiller: t('ep.why.chiller', { a: W.chiller }), faults: t('ep.why.faults', { a: W.valve }), weather: t('ep.why.weather'), growth: t('ep.why.growth'), target: t('ep.why.target', { p: W.pct }), rest: t('ep.why.rest') };
-      const r = {}; K.slice(0, 5).forEach(k => { r[k] = Math.round(M.parts[k]); }); r.rest = Math.round(M.gap) - K.slice(0, 5).reduce((s, k) => s + r[k], 0);
+      const r = {}; K.slice(0, 5).forEach(k => { r[k] = Math.round(M.parts[k] * 1000); }); r.rest = Math.round(M.gap * 1000) - K.slice(0, 5).reduce((s, k) => s + r[k], 0);
       const pos = K.filter(k => r[k] > 0), tot = pos.reduce((s, k) => s + r[k], 0) || 1;
-      const segs = pos.map(k => `<div class="x14seg" style="width:${(r[k] / tot * 100).toFixed(1)}%;background:${COL[k]}" title="${esc(LB[k] + ': ' + r[k] + ' MWh')}">${r[k] / tot >= 0.06 ? esc(String(r[k])) : ''}</div>`).join('');
-      const legend = K.filter(k => r[k] !== 0).map(k => `<span><i style="background:${COL[k]}"></i><b class="tMonoS">${esc((r[k] < 0 ? '−' : '') + fmt(Math.abs(r[k]), 0))} MWh</b> ${esc(LB[k].charAt(0).toLowerCase() + LB[k].slice(1))}</span>`).join('');
+      const segs = pos.map(k => `<div class="x14seg" style="width:${(r[k] / tot * 100).toFixed(1)}%;background:${COL[k]}" title="${esc(LB[k] + ': ' + fmt(r[k], 0) + ' kWh')}">${r[k] / tot >= 0.06 ? esc(fmt(r[k], 0)) : ''}</div>`).join('');
+      const legend = K.filter(k => r[k] !== 0).map(k => `<span><i style="background:${COL[k]}"></i><b class="tMonoS">${esc((r[k] < 0 ? '−' : '') + fmt(Math.abs(r[k]), 0))} kWh</b> ${esc(LB[k].charAt(0).toLowerCase() + LB[k].slice(1))}</span>`).join('');
       const basis = [window.EKO_EP.budgetRule(E), aed && C().tariffBasis(E) ? t('x14.costBasis', { b: C().tariffBasis(E).text }) : ''].filter(Boolean).join(' ');
       why = `<section class="x14why"><div class="x14h"><span>${esc(t('x14.whyT', { m: mName }))}</span><button class="e14sitebtn x14more" data-act="goSub" data-page="fcst" data-mod="energy" data-sub="fcst">${esc(t('per.x.openFcst'))}</button></div><div class="x14bar" role="img" aria-label="${esc(t('ep.why.barAria', { m: mName }))}">${segs}</div>
         <div class="x14leg">${legend}</div><div class="x14foot">${esc(basis)}</div></section>`;
-    } else why = `<section class="x14why"><div class="x14h">${esc(t('per.x.energyT'))}</div><p class="tCap">${esc(M ? t('x14.lineUnder', { m: mName, d: fmt(Math.abs(M.gap || 0), 0), b: fmt(M.b || 0, 0) }) : t('per.x.noFcst'))}</p></section>`;
+    } else why = `<section class="x14why"><div class="x14h">${esc(t('per.x.energyT'))}</div><p class="tCap">${esc(M ? t('x14.lineUnder', { m: mName, d: ek(Math.abs(M.gap || 0)), b: ek(M.b || 0) }) : t('per.x.noFcst'))}</p></section>`;
     /* the top risks today: care or safety, compliance, cost */
     const cats = [];
     const al = bySev(alarmsOpen(E)).filter(a => a.sev === 'critical' || a.sev === 'high')[0];
@@ -234,7 +235,7 @@ window.EKO_PERSONA = (function(){
     const c = compliance(E), bad = c.rows.filter(x => x.tone === 'warn').sort((a, b) => b.rank - a.rank)[0];
     if(bad) cats.push({ k: 'comp', txt: bad.k + t('cu.lblSep') + bad.v, go: { act: 'goSub', data: { page: bad.go[0], mod: bad.go[1], sub: bad.go[2] || '' } } });
     if(F && F.peakAt && F.contractKw && F.peakKw > F.contractKw * 0.9) cats.push({ k: 'cost', txt: t('x14.riskPeak', { d: new Date(F.peakAt).getDate() + ' ' + E.ph(['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][new Date(F.peakAt).getMonth()]), kw: fmt(F.peak15 || F.peakKw, 0), c: fmt(F.contractKw, 0) }), go: { act: 'goSub', data: { page: 'power', mod: 'energy', sub: 'power' } } });
-    else if(M && M.gap > 0) cats.push({ k: 'cost', txt: t('x14.riskBudget', { m: mName, d: fmt(M.gap, 0) }), go: { act: 'goSub', data: { page: 'fcst', mod: 'energy', sub: 'fcst' } } });
+    else if(M && M.gap > 0) cats.push({ k: 'cost', txt: t('x14.riskBudget', { m: mName, d: ek(M.gap) }), go: { act: 'goSub', data: { page: 'fcst', mod: 'energy', sub: 'fcst' } } });
     const risk = x => `<button class="x14risk" data-act="${esc(x.go.act)}"${Object.keys(x.go.data).map(k => ` data-${k}="${esc(x.go.data[k])}"`).join('')}><b>${esc(t('x14.cat.' + x.k))}</b> ${esc(x.txt)}</button>`;
     return `<div class="pwarea x14page" data-frame="off" data-pg="exec">
       <section class="x14line"><span class="x14k">${esc(t('x14.oneLine'))}</span><p>${esc(line)}</p></section>

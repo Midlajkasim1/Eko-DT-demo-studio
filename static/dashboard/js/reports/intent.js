@@ -18,14 +18,14 @@ window.EKO_RI = (function(){
     { id:'executive-monthly',   re:/\bexecutive\b|\bmonthly\b|\bboard pack\b|تنفيذي|شهري/i },
     { id:'pm-compliance',       re:/\bpm\b|preventive|maintenance|compliance|صيانة|امتثال/i },
     { id:'shift-handover',      re:/\bshift\b|handover|hand-over|تسليم|وردية|مناوبة/i },
-    { id:'morning-brief',       re:/\bmorning\b|\bbrief\b|صباح|موجز/i },
+    { id:'morning-report',      re:/\bmorning\b|صباح/i },   /* D139: "brief" / موجز name the Brief, never a report */
     { id:'utilities-water-gas', re:/\bwater\b|\bgas\b|utilit|\bleak\b|\btank\b|مياه|غاز|مرافق|تسرب|خزان/i },
     { id:'energy-performance',  re:/\benergy\b|\bpower\b|electric|\bkwh\b|\bload\b|\bcarbon\b|طاقة|كهرباء|حمل|كربون/i },
     { id:'alarm-summary',       re:/\balarms?\b|\balerts?\b|\bfaults?\b|تنبيه|إنذار|أعطال|تنبيهات/i }
   ];
   const ALARM_RE = /\balarms?\b|\balerts?\b|تنبيه|تنبيهات|إنذار/i;
   const ASSET_RE = /\b([A-Z]{2,5}-[A-Z0-9]+(?:-[A-Z0-9]+)*)\b/;
-  const REPORT_RE = /\breport\b|\bbrief\b|\bhandover\b|\bsummary\b|تقرير|موجز|ملخص/i;
+  const REPORT_RE = /\breport\b|\bhandover\b|\bsummary\b|تقرير|ملخص/i;
 
   function parsePeriod(t){
     let m;
@@ -77,7 +77,7 @@ window.EKO_RI = (function(){
     if(mod === 'systems') return { templateId:'alarm-summary', period:tl, params:{}, why:'route' };
     if(mod === 'assets') return { templateId:'pm-compliance', period:{ kind:'month' }, params:{}, why:'route' };
     if(s.pageId === 'notifications') return { templateId:'shift-handover', period:{ kind:'last', h:12 }, params:{}, why:'route' };
-    return { templateId:'morning-brief', period:tl, params:{}, why:'route' };
+    return { templateId:'morning-report', period:tl, params:{}, why:'route' };
   }
   /* "Energy performance · Marsa Al Arab · today · include alarms" */
   function summary(E, intent){

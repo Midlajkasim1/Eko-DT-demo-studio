@@ -20,6 +20,8 @@ window.EKO_SURF = (function(){
 
   /* kinds: dialog (stack, keeps parent) | overlay | menu | flyout */
   const DEFS = [
+    { id:'handover', kind:'dialog',  isOpen:()=>E.state.dlg==='handover', close:()=>{ E.state.dlg=null; } },   /* E15: over the Brief, which stays open beneath it */
+    { id:'brief',    kind:'overlay', isOpen:()=>!!(window.EKO_BRIEF&&window.EKO_BRIEF.isOpen(E)), close:why=>{ window.EKO_BRIEF.collapse(why); } },   /* E15: the Brief collapses to its top-bar button */
     { id:'doc',      kind:'dialog',  isOpen:()=>!!document.getElementById('docov'),             close:()=>{ const o=document.getElementById('docov'); if(o) o.remove(); } },
     { id:'wmax',     kind:'dialog',  isOpen:()=>!!document.getElementById('wmaxov'),            close:()=>{ const o=document.getElementById('wmaxov'); if(o) o.remove(); } },
     { id:'big',      kind:'dialog',  isOpen:()=>!!(CTL()&&CTL().big&&CTL().big(E)),              close:()=>CTL().closeBig(E) },
@@ -28,6 +30,11 @@ window.EKO_SURF = (function(){
     { id:'prefs',    kind:'dialog',  isOpen:()=>!!(NF()&&NF().st(E).prefs),                     close:()=>{ NF().st(E).prefs=false; } },
     { id:'help',     kind:'dialog',  isOpen:()=>E.state.dlg==='help',                           close:()=>{ E.state.dlg=null; } },
     { id:'teaser',   kind:'dialog',  isOpen:()=>E.state.dlg==='teaser',                         close:()=>{ E.state.dlg=null; } },
+    /* E15 port: the ESG, security and operations dialogs and the ESG factor popover close like every other surface (Escape, click-away, a route change) */
+    { id:'esg',      kind:'dialog',  isOpen:()=>E.state.dlg==='esg',                            close:()=>{ E.state.dlg=null; E.state.esgDlg=null; } },
+    { id:'sec',      kind:'dialog',  isOpen:()=>E.state.dlg==='sec',                            close:()=>{ E.state.dlg=null; E.state.secDlg=null; } },
+    { id:'ops',      kind:'dialog',  isOpen:()=>E.state.dlg==='ops',                            close:()=>{ E.state.dlg=null; E.state.opsDrill=null; } },
+    { id:'esgfp',    kind:'overlay', isOpen:()=>E.state.dlg==='esgfp',                          close:()=>{ E.state.dlg=null; E.state.esgFp=null; } },
     { id:'ai',       kind:'overlay', sticky:true, isOpen:()=>!!(window.EKO_AI&&window.EKO_AI.isOpen()), close:()=>{ window.EKO_AI.close(); } },   /* D132: the conversation panel; the page stays usable beside it; sticky = navigation keeps it (R4 exception) */
     { id:'alerts',   kind:'overlay', isOpen:()=>E.state.dlg==='alerts',                         close:()=>{ E.state.dlg=null; } },
     { id:'report',   kind:'overlay', isOpen:()=>E.state.dlg==='report',                         close:()=>{ E.state.dlg=null; } },
@@ -54,7 +61,7 @@ window.EKO_SURF = (function(){
 
   let last = new Set(), order = [], lastClick = null, openers = {}, pendingFocus = null, pendingEnter = null;
   /* where each surface's first focusable control lives (D121) */
-  const ROOTS = { mkpop:'.mkpop', conn:'.connpop', settings:'.dlgsettings', signout:'.dlgsignout', menu:'.accmenu', display:'.dispmenu', switcher:'.dlg[role="menu"]', more:'.dlg', notif:'.nfpanel, .nfpop', alerts:'.dlg', report:'.dlg', help:'.dlghelp', wallcfg:'.wcfg', pfcov:'.dlg', rpconfirm:'.dlg', teaser:'.dlg', ai:'#aipanel', prefs:'.dlg' };
+  const ROOTS = { mkpop:'.mkpop', conn:'.connpop', settings:'.dlgsettings', signout:'.dlgsignout', menu:'.accmenu', display:'.dispmenu', switcher:'.dlg[role="menu"]', more:'.dlg', notif:'.nfpanel, .nfpop', alerts:'.dlg', report:'.dlg', help:'.dlghelp', wallcfg:'.wcfg', pfcov:'.dlg', rpconfirm:'.dlg', teaser:'.dlg', ai:'#aipanel', prefs:'.dlg', esg:'.esgdlg', sec:'.secdlg', ops:'.opsdlg', esgfp:'.esgfpop' };
   function enterSurface(id){
     const sel = ROOTS[id]; if(!sel) return;
     const root = [...document.querySelectorAll(sel)].find(x => x.getClientRects().length); if(!root) return;   /* fixed-positioned surfaces have no offsetParent */
@@ -142,6 +149,7 @@ window.EKO_SURF = (function(){
       if(E.state.dock.tool === 'select' && E.dropSelection) E.dropSelection();
       E.state.dock.tool = null; E.set({}); return 'tool'; }
     if(E.state.locFocus && E.locExit){ E.locExit(); return 'locate'; }     /* Locate-in-3D focus: a mode too */
+    if(E.state.secLocated && window.EKO_SEC){ window.EKO_SEC.ACTS.secLocatedBack(); return 'locate'; }
     if(E.state.modelFs){ E.set({ modelFs:false }); return 'model'; }       /* D94: a mode, not a surface */
     if(PAGES.includes(E.state.pageId)){ back(); return 'back'; }
     if(E.state.histAge != null){ E.set({ histAge:null }); return 'live'; }   /* a mode, not a surface */

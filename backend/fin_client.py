@@ -286,10 +286,20 @@ def _split_zinc_csv(line: str) -> list[str]:
     return parts
 
 
-def _alarm_detail_from_table(body: str) -> str:
-    """One technical line from a nested name,sourceRef,value block."""
-    texts: list[str] = []
-    numbers: list[tuple[str, float]] = []
+# 16°C, 800ppm, 250Pa: a number FIN wrote with its unit. Not a fault sentence.
+_MEAS = re.compile(
+    r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?(?:[°%][A-Za-z0-9/%°³².]*|[A-Za-z][A-Za-z0-9/%°³².]*)?"
+)
+
+
+def _fold_label(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(text or "").lower())
+
+
+def _alarm_detail_from_table(body: str, message: str = "") -> str:
+    """The fault sentence for this alarm. A setpoint such as 16°C is a measurement."""
+    sentences: list[tuple[str, str]] = []
+    numbers: list[tuple[str, str]] = []
     for line in body.splitlines():
         line = line.strip()
         if not line or line.startswith("ver:") or line.startswith("name,"):
@@ -304,24 +314,38 @@ def _alarm_detail_from_table(body: str) -> str:
         raw = decode_zinc_unicode(raw).strip()
         if raw in ("", "T", "F", "true", "false", "M"):
             continue
-        try:
-            numbers.append((name, float(raw)))
-        except ValueError:
-            texts.append(raw)
-    fault = [t for t in texts if not t.lower().rstrip(".").endswith("normal")]
-    if fault:
-        return clip_decimals(fault[-1])
+        if _MEAS.fullmatch(raw):
+            shown = raw
+            try:
+                shown = trunc2(float(raw))
+            except ValueError:
+                pass
+            numbers.append((name, shown))
+            continue
+        if raw.lower().rstrip(".").endswith("normal"):
+            continue
+        if " " not in raw and "fault" not in raw.lower():
+            continue
+        sentences.append((name, raw))
+    if sentences:
+        want = _fold_label(message)
+        if want:
+            hit = [pair for pair in sentences if _fold_label(pair[0]) and _fold_label(pair[0]) in want]
+            if hit:
+                hit.sort(key=lambda pair: len(_fold_label(pair[0])))
+                return clip_decimals(hit[-1][1])
+        return clip_decimals(sentences[-1][1])
     if numbers:
-        name, val = numbers[0]
-        return clip_decimals(f"{name} {trunc2(val)}")
-    return clip_decimals(texts[-1]) if texts else ""
+        name, shown = numbers[0]
+        return clip_decimals(f"{name} {shown}")
+    return ""
 
 
 def attach_alarm_details(text: str, rows: list[dict]) -> None:
     """Stamp each alarm row with the diagnostic sentence from its metadata block."""
     if not text or not rows:
         return
-    details: dict[str, str] = {}
+    bodies: dict[str, str] = {}
     for chunk in re.split(r"(?m)^(?=@)", text):
         if not chunk.startswith("@"):
             continue
@@ -329,14 +353,23 @@ def attach_alarm_details(text: str, rows: list[dict]) -> None:
         found = re.search(r"name,sourceRef,value\s*\n(.*?)\n\s*>>", chunk, re.S)
         if not found or not id_tok:
             continue
-        detail = _alarm_detail_from_table(found.group(1))
-        if detail:
-            details[id_tok] = detail
+        bodies[id_tok] = found.group(1)
     for row in rows:
         ref = row.get("id")
         val = ref.get("val") if isinstance(ref, dict) else None
-        if val and details.get(val):
-            row["detail"] = details[val]
+        body = bodies.get(val) if val else None
+        if not body:
+            continue
+        detail = _alarm_detail_from_table(body, str(row.get("message") or ""))
+        if detail:
+            row["detail"] = detail
+
+
+def zinc_unit(text: Optional[str]) -> str:
+    if not text:
+        return ""
+    match = re.search(r'unit:"([^"]+)"', text)
+    return match.group(1).replace(" Dubai", "").strip() if match else ""
 
 
 def parse_custom_response(text: str) -> dict:
@@ -355,10 +388,8 @@ def parse_custom_response(text: str) -> dict:
                     cur_val = float(match.group(1))
                 except ValueError:
                     pass
-        if 'unit:"' in line:
-            match = re.search(r'unit:"([^"]+)"', line)
-            if match:
-                unit = match.group(1).replace(' Dubai', '')
+    if not unit:
+        unit = zinc_unit(text)
 
     data_start = -1
     for i, line in enumerate(lines):
@@ -762,6 +793,16 @@ class FinScramClient:
         parts.append(''.join(current).strip())
         return parts
 
+    async def refresh_alarms(self, endpoint: str) -> list[dict]:
+        """Read only the alarm list, so it is not waiting on equipment or history."""
+        text = await self.fetch_api(self._resolve_endpoint(endpoint), is_text=True)
+        alarms = await asyncio.to_thread(parse_zinc_csv, text or "")
+        await asyncio.to_thread(attach_alarm_details, text or "", alarms)
+        self.last_alarm_rows = alarms
+        first = (text or "").lstrip("\ufeff").lstrip().split("\n", 1)[0]
+        self.last_alarm_read_ok = first.startswith("ver:") and not re.search(r"\berr\b", first)
+        return alarms
+
     async def fetch_realtime_data(self, endpoints: dict[str, str]) -> dict:
         """Fetch realtime points, equipment, and alarms. Returns floor-wise structure."""
         resolved = {k: self._resolve_endpoint(v) for k, v in endpoints.items()}
@@ -915,32 +956,38 @@ class FinScramClient:
         return floor_wise
 
     async def fetch_live_point(self, point_id_template: str):
-        """Fetch a single live point value by ID template."""
+        """Fetch a single live point: its value, and the unit FIN names."""
         point_id = point_id_template.replace("{project}", self.project_name)
         endpoint = f"/api/{self.project_name}/eval?expr=readById(@{point_id})"
         text = await self.fetch_api(endpoint, is_text=True)
-        return self._parse_zinc_value(text)
+        return self._parse_zinc_value(text), zinc_unit(text)
 
-    async def fetch_power_histories(self, endpoints: dict[str, str]) -> dict:
+    async def fetch_power_histories(self, endpoints: dict[str, str]) -> tuple[dict, dict[str, str]]:
         """Fetch all power history endpoints and aggregate."""
         in_flight = asyncio.Semaphore(8)
 
-        async def fetch_one(endpoint_template: str) -> dict:
+        async def fetch_one(endpoint_template: str) -> tuple[dict, str]:
             async with in_flight:
                 text = await self.fetch_api(
                     self._resolve_endpoint(endpoint_template), is_text=True
                 )
-            return await asyncio.to_thread(
-                lambda: aggregate_and_restructure(parse_custom_response(text)["rows"])
-            )
+            parsed = await asyncio.to_thread(parse_custom_response, text)
+            nested = await asyncio.to_thread(aggregate_and_restructure, parsed["rows"])
+            return nested, parsed.get("unit") or ""
 
         usable = {
             k: v
             for k, v in endpoints.items()
             if not str(k).startswith("_") and isinstance(v, str) and v.startswith("/")
         }
-        histories = await asyncio.gather(*(fetch_one(t) for t in usable.values()))
-        return dict(zip(usable, histories))
+        pairs = await asyncio.gather(*(fetch_one(t) for t in usable.values()))
+        histories: dict = {}
+        units: dict[str, str] = {}
+        for key, (nested, unit) in zip(usable, pairs):
+            histories[key] = nested
+            if unit:
+                units[key] = unit
+        return histories, units
 
     async def write_point(self, point_id: str, level: int, value: Optional[str], who: str) -> tuple[bool, str]:
         """Haystack pointWrite at one priority level; value is a Zinc literal, None releases the level.

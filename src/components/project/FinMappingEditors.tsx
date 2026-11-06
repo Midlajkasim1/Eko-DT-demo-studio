@@ -11,8 +11,6 @@ import {
   type ValueKind,
 } from '@/lib/mappingRows'
 import { STATUS_LABEL, type BlockResult, type ItemResult, type MappingStatus } from '@/lib/mappingValidation'
-import { powerBoardRows, powerBoardsFromRows, type PowerBoardRow } from '@/lib/finSettings'
-import type { PowerBoard } from '@/types'
 
 /** What an editor reports upward: the object to save (undefined = not set) or a problem */
 export interface EditorState {
@@ -207,7 +205,7 @@ export function KeyValueEditor({ value, kind, onChange, results, suggestions, su
             autoFocus
             placeholder={kind === 'list'
               ? 'Paste JSON, e.g. { "system_tags": ["ahu", "fcu"] }\nor one KEY=a, b, c per line'
-              : 'Paste JSON, e.g. { "total_power": "point-001" }\nor one KEY=VALUE per line'}
+              : 'Paste JSON, e.g. { "hourly_energy": "point-001" }\nor one KEY=VALUE per line'}
             value={importText}
             onChange={e => setImportText(e.target.value)}
             style={{ ...inputStyle, width: '100%' }}
@@ -254,12 +252,12 @@ export function MeterProfileEditor({ value, onChange, results, suggestedKeys }: 
   return (
     <div>
       <div className="ds-field">
-        <label>Meter name prefix</label>
+        <label>Meter name prefixes</label>
         <div style={{ display: 'flex', gap: '8px' }}>
           <input
             type="text"
             value={prefix}
-            placeholder="e.g. PMU"
+            placeholder="e.g. PMU, EM, MSB"
             onChange={e => { setPrefix(e.target.value); emit(e.target.value, map) }}
           />
           {results?.prefix && <StatusBadge status={results.prefix.status} detail={results.prefix.detail} />}
@@ -316,63 +314,6 @@ export function SeverityEditor({ value, onChange }: MeterProfileEditorProps) {
         <label>Warning</label>
         <input type="text" inputMode="numeric" value={warning}
           onChange={e => { setWarning(e.target.value); emit(order, critical, e.target.value) }} />
-      </div>
-    </div>
-  )
-}
-
-interface PowerBoardsEditorProps {
-  value: PowerBoard[] | undefined
-  /** The Data Mapping keys a board may name (see boardKeyOptions), offered as choices */
-  liveKeys: string[]
-  historyKeys: string[]
-  onChange: (boards: PowerBoard[] | undefined) => void
-}
-
-/** One distribution board per row: a name and the Data Mapping keys that feed it. A key is chosen
- *  from the project's mapping, never a FIN point ID. Remount (change `key`) to load a new value. */
-export function PowerBoardsEditor({ value, liveKeys, historyKeys, onChange }: PowerBoardsEditorProps) {
-  const liveId = useId()
-  const hisId = useId()
-  const [rows, setRows] = useState<(PowerBoardRow & { id: number })[]>(() => powerBoardRows(value).map(r => ({ ...r, id: newRowId() })))
-  const commit = (next: (PowerBoardRow & { id: number })[]) => {
-    setRows(next)
-    onChange(powerBoardsFromRows(next))
-  }
-  const edit = (id: number, patch: Partial<PowerBoardRow>) => commit(rows.map(r => (r.id === id ? { ...r, ...patch } : r)))
-  const field = (row: PowerBoardRow & { id: number }, k: keyof PowerBoardRow, label: string, placeholder: string, list?: string, flex = '1') => (
-    <input type="text" aria-label={label} placeholder={placeholder} value={row[k]} list={list}
-      onChange={e => edit(row.id, { [k]: e.target.value })} style={{ ...inputStyle, flex }} />
-  )
-  return (
-    <div data-testid="power-boards-editor">
-      <datalist id={liveId}>{liveKeys.map(k => <option key={k} value={k} />)}</datalist>
-      <datalist id={hisId}>{historyKeys.map(k => <option key={k} value={k} />)}</datalist>
-      {rows.length === 0 && <p className="ds-hint" style={{ margin: '0 0 8px' }}>No boards yet. Add one below.</p>}
-      {rows.length > 0 && (
-        <div className="ds-hint" style={{ display: 'flex', gap: '8px', margin: '0 0 4px' }}>
-          <span style={{ flex: 1 }}>Board name</span><span style={{ flex: 1 }}>Live key</span>
-          <span style={{ flex: 1 }}>History key (optional)</span><span style={{ flex: '0 0 18%' }}>Meter (optional)</span>
-          <span style={{ width: '38px' }} />
-        </div>
-      )}
-      {rows.map((row, i) => (
-        <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
-          {field(row, 'name', 'Board name', 'e.g. MCC 1')}
-          {field(row, 'liveKey', 'Live key', 'a live points key', liveId)}
-          {field(row, 'historyKey', 'History key', 'a historical endpoint key', hisId)}
-          {field(row, 'meter', 'Meter', 'e.g. PMU09', undefined, '0 0 18%')}
-          <button type="button" className="ds-btn ds-btn-secondary" style={smallBtn} title="Delete this board"
-            aria-label={`Delete board ${i + 1}`} onClick={() => commit(rows.filter(r => r.id !== row.id))}>
-            ✕
-          </button>
-        </div>
-      ))}
-      <div style={{ display: 'flex', gap: '8px', margin: '10px 0' }}>
-        <button type="button" className="ds-btn ds-btn-secondary" style={smallBtn}
-          onClick={() => commit([...rows, { id: newRowId(), name: '', liveKey: '', historyKey: '', meter: '' }])}>
-          + Add board
-        </button>
       </div>
     </div>
   )

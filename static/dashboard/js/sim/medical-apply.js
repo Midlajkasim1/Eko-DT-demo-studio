@@ -36,15 +36,15 @@
     const h = e.hour(now, false), hd = e.hour(now, true), d0 = e.day(0);
     let peak = { kw: 0, at: e.today0 }; for(let ms = e.today0; ms <= now; ms += HOUR){ const x = e.hour(ms, false); if(x.total > peak.kw) peak = { kw: x.total, at: ms }; }   /* E7: the peak hour's average, at the start of its hour */
     let rest = 0; const end = e.dayStart(1); for(let ms = now; ms < end; ms += HOUR) rest += e.hour(ms, false).total * Math.min(1, (end - ms) / HOUR) / 1000;
-    d.metrics = Object.assign({}, d.metrics, { facilityLoadMw: +(h.total / 1000).toFixed(3), loadNowMw: +(h.total / 1000).toFixed(3), energyTodayMwh: +d0.total.toFixed(2),
+    d.metrics = Object.assign({}, d.metrics, { facilityLoadMw: +(h.total / 1000).toFixed(3), loadNowMw: +(h.total / 1000).toFixed(3), loadNowKw: Math.round(h.total), energyTodayKwh: Math.round(d0.total * 1000), energyTodayMwh: +d0.total.toFixed(2),
       peakTodayMw: +(peak.kw / 1000).toFixed(3), peakTodayAt: iso(peak.at), todayForecastEodMwh: +(d0.total + rest).toFixed(1), baselineKw: Math.round(hd.total),
       loadAboveBaselinePct: +((h.total / hd.total - 1) * 100).toFixed(1) });
     const l24 = []; for(let k = 23; k >= 0; k--) l24.push(+(e.hour(now - k * HOUR, false).total / 1000).toFixed(3)); d.load24hMw = l24;
     const days7 = []; for(let k = -6; k <= 0; k++) days7.push(+e.day(k).total.toFixed(1));
-    (d.meters || []).forEach(m => { if(m.domain === 'energy'){ m.last = Math.round(d0.total * 1000); m.lastAt = hhmm(now); if(m.sparkUnit === 'MWh/d') m.spark7 = days7.slice(); } });
+    (d.meters || []).forEach(m => { if(m.domain === 'energy'){ m.last = Math.round(d0.total * 1000); m.lastAt = hhmm(now); if(m.sparkUnit === 'MWh/d' || m.sparkUnit === 'kWh/d'){ m.sparkUnit = 'kWh/d'; m.spark7 = days7.map(v => Math.round(v * 1000)); } } });
     (d.summary || []).forEach(s => { if(s.key === 'energy'){ const sp = []; for(let k = 11; k >= 0; k--) sp.push(Math.round(e.hour(now - k * 2 * HOUR, false).total / 1000 * 2 * 10) / 10); s.spark = sp;
       const typ = e.day(-7).total * d0.part; s.deltaEn = (d0.total >= typ ? '+' : '') + Math.round((d0.total / typ - 1) * 100) + '% vs typical'; s.deltaAr = '‎' + s.deltaEn.replace(' vs typical', ' مقابل المعتاد'); } });
-    if(d.power){ (d.power.pmus || []).forEach(p => { p.kw = Math.round(h.total); p.kwh = Math.round(d0.total * 1000); });
+    if(d.power){ (d.power.pmus || []).forEach(p => { if(p.fin) return; p.kw = Math.round(h.total); p.kwh = Math.round(d0.total * 1000); });
       if(d.power.subview){ d.power.subview.loadNowKw = Math.round(h.total); d.power.subview.baselineKw = Math.round(hd.total); } }
     if(d.energyLanding){ d.energyLanding.currentKw = Math.round(h.total); d.energyLanding.baselineKw = Math.round(hd.total); }
     /* the energy model reads the engine's days (js/energy-model.js) */
@@ -140,7 +140,7 @@
         const gapCool = (M.actual.cool - M.design.cool) / M.design.cool * 100;
         (L.modules || []).forEach(m => { if(m.pageId === 'power'){ m.headEn = Math.round(h.total) + ' kW now'; m.headAr = Math.round(h.total) + ' ك.و الآن'; }
           if(m.pageId === 'bench'){ m.headEn = 'cooling ' + Math.round(gapCool) + '% above design'; m.headAr = 'التبريد أعلى من التصميم بنسبة ' + Math.round(gapCool) + '%'; }
-          if(m.pageId === 'fcst'){ m.headEn = 'next month about ' + Math.round(FC.next.v) + ' MWh'; m.headAr = 'الشهر القادم نحو ' + Math.round(FC.next.v) + ' م.و.س'; } }); }
+          if(m.pageId === 'fcst'){ const kwh = Math.round(FC.next.v * 1000).toLocaleString('en-US'); m.headEn = 'next month about ' + kwh + ' kWh'; m.headAr = 'الشهر القادم نحو ' + kwh + ' ك.و.س'; } }); }
       if(d.power){ const hc = d.power.heroCharts || {}, sv = d.power.subview || {};
         if(hc.current){ hc.current.value = +(h.total / (sv.scaleMaxKw || 1100) * 100).toFixed(1); hc.current.noteEn = Math.round(hd.total) + ' kW baseline'; hc.current.noteAr = 'خط الأساس ' + Math.round(hd.total) + ' ك.و'; }
         if(hc.month){ hc.month.spark = []; for(let k = -6; k <= 0; k++) hc.month.spark.push(+(e.day(k).total / 24 / Math.max(e.day(k).part, 1e-6)).toFixed(2)); }
@@ -225,18 +225,18 @@
       for(let ms = q0; ms <= now; ms += Q) q.push(+(e.hour(ms, false).total * (1 + V(EL.quarterScatter) * e.N('q15' + Math.floor(ms / Q))) / 1000).toFixed(3));
       pw.peakSeriesMw = q; const n = q.length - 1; pw.peakSeriesLabels = [0, Math.round(n / 3), Math.round(2 * n / 3), n].map(i => hm(q0 + i * Q));
       if(pw.heroCharts && pw.heroCharts.current){ pw.heroCharts.current.value = +(h.total / sv.scaleMaxKw * 100).toFixed(1); }
-      (pw.pmus || []).forEach(p => { p.pf = pf; p.v = +(vv * (1 + 0.002 * e.N('pv' + Math.floor(now / HOUR)))).toFixed(1); p.a = Math.round(h.total * 1000 / (Math.sqrt(3) * p.v * pf)); p.hz = 50; });
+      (pw.pmus || []).forEach(p => { if(p.fin) return; p.pf = pf; p.v = +(vv * (1 + 0.002 * e.N('pv' + Math.floor(now / HOUR)))).toFixed(1); p.a = Math.round(h.total * 1000 / (Math.sqrt(3) * p.v * pf)); p.hz = 50; });
       /* the budget charts: today by hour, this week and this month by day, against the 4-week baseline */
       if(pw.bva && pw.bva.ranges){ const R = pw.bva.ranges, hk = ms => e.hour(ms, false).total;
         const td = { a: [], b: [], l: [] };
         for(let k = 0; k <= hNow; k++){ const ms = y0 + k * HOUR, f = Math.min(1, (now - ms) / HOUR); td.a.push(Math.round(hk(ms) * f)); td.b.push(Math.round(wk4(j => hk(ms + j * DAY), 0) * f)); td.l.push(String(k).padStart(2, '0')); }
         R.today = Object.assign({}, R.today, { labels: td.l, actual: td.a, baseline: td.b });
         const dt = k => e.day(k).total, wd = (new Date(now).getDay() + 6) % 7, wk = { a: [], b: [], l: [] };   /* the week from Monday */
-        for(let k = -wd; k <= 0; k++){ const part = e.day(k).part; wk.a.push(Math.round(dt(k))); wk.b.push(Math.round(wk4(dt, k) * part)); wk.l.push(DK[new Date(e.dayStart(k)).getDay()]); }
-        R.week = Object.assign({}, R.week, { labelKeys: true, labels: wk.l, actual: wk.a, baseline: wk.b });
+        for(let k = -wd; k <= 0; k++){ const part = e.day(k).part; wk.a.push(Math.round(dt(k) * 1000)); wk.b.push(Math.round(wk4(dt, k) * part * 1000)); wk.l.push(DK[new Date(e.dayStart(k)).getDay()]); }
+        R.week = Object.assign({}, R.week, { unit: 'kWh', labelKeys: true, labels: wk.l, actual: wk.a, baseline: wk.b });
         const mo = { a: [], b: [], l: [] };
-        for(let k = -(dom - 1); k <= 0; k++){ const part = e.day(k).part; mo.a.push(Math.round(dt(k))); mo.b.push(Math.round(wk4(dt, k) * part)); mo.l.push(String(new Date(e.dayStart(k)).getDate())); }
-        R.month = Object.assign({}, R.month, { labels: mo.l, actual: mo.a, baseline: mo.b }); }
+        for(let k = -(dom - 1); k <= 0; k++){ const part = e.day(k).part; mo.a.push(Math.round(dt(k) * 1000)); mo.b.push(Math.round(wk4(dt, k) * part * 1000)); mo.l.push(String(new Date(e.dayStart(k)).getDate())); }
+        R.month = Object.assign({}, R.month, { unit: 'kWh', labels: mo.l, actual: mo.a, baseline: mo.b }); }
     }
     /* the energy cards: the chiller below its curve, the AHU-1 filter, the power factor; waste this month against the design model */
     const L = d.energyLanding;
@@ -265,7 +265,7 @@
     { const hv = G.find(g => g.id === 'hvac');
       if(hv && (hv.sysKey || []).some(k => k !== 'HVAC') && !G.some(g => g.id === 'medgas')){
         const ox = (hv.cards || []).filter(c => /OXYGEN/.test(c.labelEn || ''));
-        hv.sysKey = ['HVAC']; hv.cards = (hv.cards || []).filter(c => !/OXYGEN/.test(c.labelEn || ''));
+        hv.sysKey = ['HVAC', 'Mechanical']; hv.cards = (hv.cards || []).filter(c => !/OXYGEN/.test(c.labelEn || ''));
         G.splice(G.indexOf(hv) + 1, 0, { id: 'medgas', hue: '#6D8FBE', sysKey: ['Medical gas', 'Refrigeration'], labelEn: 'Medical gas and cold chain', labelAr: 'الغازات الطبية وسلسلة التبريد',
           cards: [{ kind: 'stat', labelEn: 'OVERALL HEALTH', labelAr: 'الحالة العامة', v: '100', u: '%', capEn: '', capAr: '', tone: 'ok' }].concat(ox.map(c => Object.assign({}, c, { subOnly: false })),
             [{ kind: 'stat', labelEn: 'MEDICATION FRIDGE', labelAr: 'ثلاجة الأدوية', v: '', u: '°C', capEn: '', capAr: '', tone: 'ok', fridge: true }]) }); } }
@@ -281,10 +281,21 @@
     const imb = V(EL.imbalancePct), imbNow = Math.round(imb[0] + (imb[1] - imb[0]) * e.U('imb' + Math.floor(now / HOUR))), o2 = F.o2Dip, genLate = V(cfg.power.lastRunAgoD) > 30;
     G.forEach(g => { const H = health(g.sysKey || []);
       (g.cards || []).forEach(c => { const L2 = c.labelEn || '';
-        if(/OVERALL HEALTH/.test(L2)){ c.v = H.pct.toFixed(1); c.tone = H.pct >= 95 ? 'ok' : H.pct >= 85 ? 'warn' : 'crit';
-          c.capEn = H.bad ? H.bad + ' of ' + H.n + ' assets with an alarm' : 'All ' + H.n + ' assets without an alarm'; c.capAr = H.bad ? H.bad + ' من ' + H.n + ' أصول عليها إنذار' : 'كل الأصول الـ' + H.n + ' بلا إنذار'; }
-        else if(/AIR HANDLING/.test(L2)){ c.v = ahus.length + ' / ' + ahus.length; c.capEn = 'Total: ' + ahus.length + ', all running'; c.capAr = 'الإجمالي: ' + ahus.length + '، كلها تعمل';
-          c.chipEn = ahuBad ? ahuBad + ' with an alarm' : ''; c.chipAr = ahuBad ? ahuBad + ' عليها إنذار' : ''; c.tone = ahuBad ? 'warn' : 'ok'; c.wash = ahuBad ? 'warn' : ''; }
+        if(/OVERALL HEALTH/.test(L2)){
+          const tags = { hvac: ['HVAC', 'Mechanical'], electrical: ['Electrical', 'EMS'], life: ['Life safety'], security: ['Security'], medgas: ['Medical gas', 'Refrigeration'] };
+          const live = (d.alarms || []).filter(a => String(a.id || '').indexOf('fin-') === 0 && (tags[g.id] || g.sysKey || []).indexOf(a.sys) >= 0);
+          if(live.length){ c.v = String(live.length); c.u = ''; c.capEn = 'Live alarms'; c.capAr = 'إنذارات مباشرة'; c.tone = live.some(a => a.sev === 'critical') ? 'crit' : 'warn'; }
+          else { c.v = H.pct.toFixed(1); c.tone = H.pct >= 95 ? 'ok' : H.pct >= 85 ? 'warn' : 'crit';
+            c.capEn = H.bad ? H.bad + ' of ' + H.n + ' assets with an alarm' : 'All ' + H.n + ' assets without an alarm'; c.capAr = H.bad ? H.bad + ' من ' + H.n + ' أصول عليها إنذار' : 'كل الأصول الـ' + H.n + ' بلا إنذار'; } }
+        else if(/AIR HANDLING/.test(L2)){
+          const ahuNum = s => { const m = String(s || '').toUpperCase().match(/AHU[-_ ]?0*(\d+)/); return m ? m[1] : ''; };
+          const real = (d.assets || []).filter(a => ahuNum(a.id));
+          const list = real.length ? real : ahus;
+          const liveKeys = new Set();
+          (d.alarms || []).forEach(a => { const k = ahuNum(a.locEn) || ahuNum(a.asset) || ahuNum(a.plainEn); if(k) liveKeys.add(k); });
+          const badN = liveKeys.size || ahuBad;
+          c.v = list.length + ' / ' + list.length; c.capEn = 'Total: ' + list.length + ', all running'; c.capAr = 'الإجمالي: ' + list.length + '، كلها تعمل';
+          c.chipEn = badN ? badN + ' with an alarm' : ''; c.chipAr = badN ? badN + ' عليها إنذار' : ''; c.tone = badN ? 'warn' : 'ok'; c.wash = badN ? 'warn' : ''; }
         else if(/HUMIDITY BAND/.test(L2)){ c.val = inRh.length; c.max = rh.length; c.u = '/ ' + rh.length; const off = rh.length - inRh.length;
           c.wordEn = off ? (off === 1 ? 'One room outside the band' : off + ' rooms outside the band') : 'All rooms in band'; c.wordAr = off ? (off === 1 ? 'غرفة واحدة خارج النطاق' : off + ' غرف خارج النطاق') : 'كل الغرف ضمن النطاق'; c.tone = off ? 'warn' : 'ok'; }
         else if(/OXYGEN/.test(L2)){ c.val = o2.dipBar; const lo = o2.dipBar < o2.limitBar; c.wordEn = lo ? 'Below low alarm' : 'Normal'; c.wordAr = lo ? 'دون الإنذار المنخفض' : 'طبيعي'; c.tone = lo ? 'crit' : 'ok'; }

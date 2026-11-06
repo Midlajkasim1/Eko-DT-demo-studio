@@ -18,9 +18,11 @@
   };
   const sevLabel = (E, r) => { const c = sevCounts(E, r);
     if (c.total) return ['critical','high','medium'].filter(s => c[s]).map(s => c[s] + ' ' + sevWord(E, s)).join(', ');
+    if (r.st === 'nc') return E.t('reg13.nc');
     return r.st === 'stale' ? E.t('chipStale', { h:r.staleH }) : r.st === 'alarm' ? E.t('chipAlarm', { sev:E.t('ribHigh') }) : E.t('stNormal');
   };
   const sevCell = (E, r) => { const c = sevCounts(E, r);
+    if (r.st === 'nc' && !c.total) return `<span class="tCap dgnc">${esc(E.t('reg13.nc'))}</span>`;
     if (c.total) return `<span class="regsevs">${['critical','high','medium'].filter(s => c[s]).map(s => `<span class="statchip" data-sev="${s}">${c[s]} ${esc(sevWord(E, s))}</span>`).join('')}</span>`;
     if (r.st === 'stale') return `<span class="statchip" data-sev="stale">${esc(E.t('chipStale', { h:r.staleH }))}</span>`;
     if (r.st === 'alarm') return `<span class="statchip" data-sev="high">${esc(E.t('chipAlarm', { sev:E.t('ribHigh') }))}</span>`;
@@ -32,11 +34,18 @@
   const fmtDate = (E, d) => d ? d.toLocaleDateString(ar(E) ? 'ar-AE' : 'en-GB', { day:'numeric', month:'short', year:'numeric' }) : E.t('emptyDash');
   const tagsOf = (E, r) => (r.tags || []).concat(((E.state.tags || {})[r.id] || []));
   const fam = (E, id) => { const f = (E.data.families || []).find(x => x.id === id); return f ? (ar(E) ? f.ar : f.en) : id; };
+  /* The register is every maintainable item in the model. Connected rows stay the asset objects. An item that is not connected is a plain row. */
+  const regCache = new WeakMap();
+  const regRows = E => { const d = E.data, R0 = d.register; if(!R0) return d.assets || []; if(regCache.has(R0)) return regCache.get(R0);
+    const conn = new Set((d.assets || []).map(a => a.id)), T = R0.types || {};
+    const out = (d.assets || []).map(a => a).concat((R0.rows || []).filter(r => !r[4] && !conn.has(r[1])).map(r => { const ty = T[r[2]] || [r[2], r[2], ''];
+      return { id: r[1], gid: r[0], typeEn: ty[0], typeAr: ty[1], sys: ty[2], floor: r[3], st: 'nc', reg: true, alarms: [], wos: 0 }; }));
+    regCache.set(R0, out); return out; };
   /* D101: trend sparkline of the asset's primary point (7 daily fixture values), row menu, inline expansion */
   const HUE = { hvac:'var(--domEnergy)', vent:'var(--domEnergy)', pumps:'var(--domEnergy)', elec:'var(--domEnergy)', light:'var(--domEnergy)' };
   const pAr = (E, x) => E.ph(x);
   const fmt1 = (E, v) => (Math.round(v * 10) / 10).toLocaleString(ar(E) ? 'ar-AE' : 'en-GB');
-  const trendReason = (E, r) => r.st === 'stale' ? 'dgNoTrend.stale' : (r.trendKind === 'state' ? 'dgNoTrend.state' : 'dgNoTrend.none');
+  const trendReason = (E, r) => r.st === 'nc' ? 'reg13.noTrendNc' : r.st === 'stale' ? 'dgNoTrend.stale' : (r.trendKind === 'state' ? 'dgNoTrend.state' : 'dgNoTrend.none');
   const trendOk = r => r.trend7 && Array.isArray(r.trend7.vals) && r.trend7.vals.length >= 2;
   const trendText = (E, r) => { if(!trendOk(r)) return E.t('emptyDash') + ' · ' + E.t(trendReason(E, r)); const v = r.trend7.vals; return E.t('dgTrendTip', { point:pAr(E, r.trend7.point), lo:fmt1(E, Math.min(...v)), hi:fmt1(E, Math.max(...v)), u:r.trend7.unit || '' }).trim(); };
   const trendCell = (E, r) => { if(!trendOk(r)) return `<span class="dgnotrend" data-tip="${esc(E.t(trendReason(E, r)))}" aria-label="${esc(E.t(trendReason(E, r)))}" role="img">${C().icon('nohist', 14)}</span>`;
@@ -59,14 +68,14 @@
     const liveParams = (r.params || []).filter(p => isFdd(p[0]) && !isBool(p[2]));
     const analog = analogParams.length ? `<dl class="dgxl">${analogParams.map(p => `<div class="aprow"><dt>${esc(pAr(E, p[0]))}</dt><dd>${esc(p[2])}</dd></div>`).join('')}</dl>` : '';
     const live = liveParams.length ? `<dl class="dgxl">${liveParams.map(p => `<div class="aprow"><dt>${esc(pAr(E, p[0]))}${p[1] ? `<span class="apsrc">${esc(pAr(E, p[1]))}</span>` : ''}</dt><dd>${esc(p[2])}</dd></div>`).join('')}</dl>` : `<p class="tCap">${esc(t('emptyDash'))}</p>`;
-    const al = als.length ? als.map(a => `<div class="alref"><div class="alrefh"><span class="statchip" data-sev="${a.sev}">${esc(t('rib' + a.sev[0].toUpperCase() + a.sev.slice(1)).toLowerCase())}</span><span class="alrefage tMonoS msA">${esc(a.age)}</span></div>
+    const al = als.length ? als.map(a => `<div class="alref"><div class="alrefh"><span class="statchip" data-sev="${a.sev}">${esc(t('rib' + a.sev[0].toUpperCase() + a.sev.slice(1)).toLowerCase())}</span><span class="alrefage tMonoS msA">${esc(a.ageH != null ? E.fmtAge(a.ageH) : (a.age || ''))}</span></div>
       <div class="alreft">${esc(E.alarmLines(a).main)}</div>${E.alarmLines(a).sub ? `<div class="alreftech">${esc(E.alarmLines(a).sub)}</div>` : ''}${a.ack ? `<div class="alrefack">${esc(t('ackShort', { time:a.ack.time, who:a.ack.who }))}</div>` : ''}</div>`).join('') : `<p class="tCap">${esc(t('apNoAlarms'))}</p>`;
     return `<div class="dgxg"><section><h4 class="tLbl">${esc(t('apAnalytics'))}</h4>${analog || `<p class="tCap">${esc(t('emptyDash'))}</p>`}</section><section><h4 class="tLbl">${esc(t('apAlarms'))}</h4>${live}${al}</section></div>`; };
 
   const assets = E => ({
-    id:'assets', titleKey:'regTitle', exportName:'asset-register', rowKey:'id', rowAct:{ act:'openAsset', attr:'asset', tab:'alarms' }, searchKeys:['id', 'type'],
+    id:'assets', titleKey:'regTitle', exportName:'asset-register', rowKey:'id', rowAct:{ act:'openAsset', attr:'asset', tab:'alarms' }, searchKeys:['id', 'type', 'zone'],
     isSelectedRow:(E2, r) => E2.state.assetSel === r.id,
-    rows: E2 => E2.data.assets,
+    rows: E2 => regRows(E2), pageSize: 50,
     /* The Eko Hospital roof schematic (layouts/hospital-roof.js, opened by roofOpen in the content area): not an asset, so no record, nothing in
        E.data.assets to count, sort or export. One pinned row, only for a project whose Hospital graphics are on (the Studio sets hospitalHvac
        for the ekoHospital FIN project). */
@@ -84,7 +93,11 @@
       /* Empty until the equipment poll. Throwing here aborts the refresh, so live readings never land. */
       const regTotal = E2.data.registerTotal;
       const totalTxt = regTotal == null ? E2.t('emptyDash') : regTotal.toLocaleString('en-US');
-      return `<div class="dghead"><span class="modtitle">${esc(E2.t('modAssets'))}</span><span class="alcardt">${esc(E2.t('regHead'))}</span><span class="alcardm"> ${esc(E2.t('regConnected', { n, total:totalTxt }))} <button class="statlink" data-act="dgQuick" data-k="st" data-v="stale">${esc(E2.t('regStaleN', { n:E2.data.assets.filter(r => r.st === 'stale').length }))}</button></span></div>`;
+      const assets = E2.data.assets || [];
+      const meta = E2.data.register
+        ? E2.t('reg13.head', { c: assets.length, m: totalTxt, x: assets.filter(a => !a.gid).length })
+        : E2.t('regConnected', { n, total: totalTxt });
+      return `<div class="dghead"><span class="modtitle">${esc(E2.t('modAssets'))}</span><span class="alcardt">${esc(E2.t('regHead'))}</span><span class="alcardm"> ${esc(meta)} <button class="statlink" data-act="dgQuick" data-k="st" data-v="stale">${esc(E2.t('regStaleN', { n: assets.filter(r => r.st === 'stale').length }))}</button></span></div>`;
     },
     consume(E2, s){   /* entries from other pages (Overview by-system row, alert chips) become grid filters */
       if(E2.state.regSysF){ s.filters.sys = { in:[E2.state.regSysF] }; E2.state.regSysF = null; s.dirty = true; }
@@ -95,18 +108,19 @@
       { key:'id', labelKey:'dgc.id', type:'text', width:116, mono:true, def:true, grp:'identity', mob:'title', get:(E2, r) => r.id, text:(E2, r) => r.id },
       { key:'st', labelKey:'dgc.status', type:'enum', width:210, def:true, grp:'condition', mob:'chip', get:(E2, r) => sevCounts(E2, r).total || r.st === 'alarm' ? 'alarm' : r.st, text:(E2, r) => sevLabel(E2, r),
         cell:(E2, r) => sevCell(E2, r),
-        enumOpts:E2 => [{ v:'alarm', label:E2.t('dgv.alarm') }, { v:'stale', label:E2.t('dgst.stale') }, { v:'ok', label:E2.t('stNormal') }],
-        sortVal:(E2, r) => { const c = sevCounts(E2, r); return c.critical ? 0 : c.high ? 1 : c.medium ? 2 : r.st === 'stale' ? 3 : 4; } },
+        enumOpts:E2 => [{ v:'alarm', label:E2.t('dgv.alarm') }, { v:'stale', label:E2.t('dgst.stale') }, { v:'ok', label:E2.t('stNormal') }, { v:'nc', label:E2.t('reg13.nc') }],
+        sortVal:(E2, r) => { const c = sevCounts(E2, r); return c.critical ? 0 : c.high ? 1 : c.medium ? 2 : r.st === 'stale' ? 3 : r.st === 'nc' ? 5 : 4; } },
       { key:'trend', labelKey:'dgc.trend', type:'text', width:132, def:true, grp:'condition', noFilter:true, get:(E2, r) => trendText(E2, r), text:(E2, r) => trendText(E2, r), cell:(E2, r) => trendCell(E2, r), sortVal:(E2, r) => { const d = trendDelta(r); return d == null ? null : -d; } },
       { key:'sev', labelKey:'dgc.sev', type:'enum', width:150, def:false, grp:'condition', get:(E2, r) => { const w = worst(E2, r); return w ? w.sev : ''; }, text:(E2, r) => { const w = worst(E2, r); return w ? E2.t('rpSev.' + w.sev) : E2.t('emptyDash'); },
         enumOpts:E2 => ['critical', 'high', 'medium'].map(v => ({ v, label:E2.t('rpSev.' + v) })), sortVal:(E2, r) => { const w = worst(E2, r); return w ? ({ critical:0, high:1, medium:2 }[w.sev]) : 9; } },
-      { key:'floor', labelKey:'dgc.floor', type:'enum', width:94, def:true, grp:'identity', mob:'line2', get:(E2, r) => r.floor, text:(E2, r) => r.floor, enumOpts:E2 => [...new Set(E2.data.assets.map(r => r.floor))].map(v => ({ v, label:v })) },
-      { key:'wos', labelKey:'dgc.wos', type:'num', width:158, def:true, grp:'maintenance', mono:true, act:'workorder', get:(E2, r) => r.wos || 0, text:(E2, r) => r.wos ? String(r.wos) : E2.t('emptyDash') },
-      { key:'wost', labelKey:'dgc.wost', type:'enum', width:124, def:true, grp:'maintenance', act:'workorder', get:(E2, r) => r.wost || '', text:(E2, r) => r.wost ? E2.t('wo' + r.wost[0].toUpperCase() + r.wost.slice(1)) : E2.t('emptyDash'),
-        cell:(E2, r) => r.wost ? `<span class="row gap6"><span class="wodot" data-st="${r.wost}"></span>${esc(E2.t('wo' + r.wost[0].toUpperCase() + r.wost.slice(1)))}</span>` : `<span class="tCap">${esc(E2.t('emptyDash'))}</span>`,
+      { key:'floor', labelKey:'dgc.floor', type:'enum', width:94, def:true, grp:'identity', mob:'line2', get:(E2, r) => r.floor, text:(E2, r) => r.floor, enumOpts:E2 => [...new Set(regRows(E2).map(r => r.floor))].sort().map(v => ({ v, label:v })) },
+      { key:'zone', labelKey:'dgc.zone', type:'text', width:132, def:true, grp:'identity', mob:'line2', get:(E2, r) => ar(E2) ? (r.zoneAr || r.zone) : r.zone, text:(E2, r) => r.reg ? E2.t('reg13.noZone') : (ar(E2) ? (r.zoneAr || r.zone || E2.t('emptyDash')) : (r.zone || E2.t('emptyDash'))) },
+      { key:'wos', labelKey:'dgc.wos', type:'num', width:158, def:true, grp:'maintenance', mono:true, act:'workorder', get:(E2, r) => r.wos || 0, text:(E2, r) => String(r.wos || 0) },
+      { key:'wost', labelKey:'dgc.wost', type:'enum', width:124, def:true, grp:'maintenance', act:'workorder', get:(E2, r) => r.wost || '', text:(E2, r) => r.wost ? E2.t('wo' + r.wost[0].toUpperCase() + r.wost.slice(1)) : E2.t('reg13.noWo'),
+        cell:(E2, r) => r.wost ? `<span class="row gap6"><span class="wodot" data-st="${r.wost}"></span>${esc(E2.t('wo' + r.wost[0].toUpperCase() + r.wost.slice(1)))}</span>` : `<span class="tCap">${esc(E2.t('reg13.noWo'))}</span>`,
         enumOpts:E2 => ['over', 'due', 'sched', 'pend', 'asgn', 'prog', 'done'].map(v => ({ v, label:E2.t('wo' + v[0].toUpperCase() + v.slice(1)) })) },
       { key:'hasWo', labelKey:'dgc.hasWo', type:'bool', width:196, def:false, grp:'maintenance', get:(E2, r) => !!(r.wos && r.wost && r.wost !== 'done'), text:(E2, r) => E2.t((r.wos && r.wost && r.wost !== 'done') ? 'dgf.yes' : 'dgf.no') },
-      { key:'type', labelKey:'dgc.type', type:'enum', width:170, def:false, grp:'identity', mob:'line2', get:(E2, r) => r.typeEn, text:(E2, r) => ar(E2) ? (r.typeAr || r.typeEn) : r.typeEn, enumOpts:E2 => [...new Set(E2.data.assets.map(r => r.typeEn))].map(v => ({ v, label:(ar(E2) ? (E2.data.assets.find(r => r.typeEn === v).typeAr || v) : v) })) },
+      { key:'type', labelKey:'dgc.type', type:'enum', width:170, def:false, grp:'identity', mob:'line2', get:(E2, r) => r.typeEn, text:(E2, r) => ar(E2) ? (r.typeAr || r.typeEn) : r.typeEn, enumOpts:E2 => [...new Set(regRows(E2).map(r => r.typeEn))].map(v => ({ v, label:(ar(E2) ? ((regRows(E2).find(r => r.typeEn === v) || {}).typeAr || v) : v) })) },
       { key:'sys', labelKey:'dgc.sys', type:'enum', width:150, def:false, grp:'identity', get:(E2, r) => r.sys || '', text:(E2, r) => r.sys ? fam(E2, r.sys) : E2.t('emptyDash'), enumOpts:E2 => (E2.data.families || []).map(f => ({ v:f.id, label:ar(E2) ? f.ar : f.en })) },
       { key:'crit', labelKey:'dgc.crit', type:'enum', width:140, def:false, grp:'condition', get:(E2, r) => r.crit || '', text:(E2, r) => r.crit ? E2.t('dgCrit.' + r.crit) : E2.t('emptyDash'), enumOpts:E2 => ['A', 'B', 'C'].map(v => ({ v, label:E2.t('dgCrit.' + v) })) },
       { key:'last', labelKey:'dgc.last', type:'text', width:200, def:false, grp:'condition', get:(E2, r) => r.params && r.params[0] ? r.params[0][0] + ' · ' + r.params[0][2] : '', text:(E2, r) => r.params && r.params[0] ? r.params[0][0] + ' · ' + r.params[0][2] : E2.t('emptyDash') },
@@ -117,7 +131,7 @@
         cell:(E2, r) => tagsOf(E2, r).length ? tagsOf(E2, r).map(x => `<span class="chip dgtag">${esc(x)}</span>`).join(' ') : `<span class="tCap">${esc(E2.t('emptyDash'))}</span>` }
     ],
     views:[
-      { id:'all', nameKey:'dgv.all', cols:['id', 'st', 'trend', 'floor', 'wos', 'wost'], sort:[{ key:'st', dir:'asc' }], filters:{}, density:'standard' },
+      { id:'all', nameKey:'dgv.all', cols:['id', 'st', 'trend', 'floor', 'zone', 'wos', 'wost'], sort:[{ key:'st', dir:'asc' }], filters:{}, density:'standard' },
       { id:'alarm', nameKey:'dgv.alarm', cols:['id', 'st', 'sev', 'sys', 'floor', 'wost'], sort:[{ key:'sev', dir:'asc' }], filters:{ st:{ in:['alarm'] } }, density:'standard' },
       { id:'wo', nameKey:'dgv.wo', cols:['id', 'wost', 'wos', 'st', 'floor', 'svc'], sort:[{ key:'wos', dir:'desc' }], filters:{ hasWo:{ is:true } }, group:'wost', density:'compact' }
     ],

@@ -131,9 +131,15 @@ class FakeFinClient:
             return 200, 'ver:"3.0"\nid,curVal\n@' + pid + ',1\n'
         return 404, ""
 
+    async def refresh_alarms(self, endpoint):
+        """Only the alarm list, as FinClient.refresh_alarms reads it."""
+        self.last_alarm_rows = [dict(ALARM_ROW)]
+        self.last_alarm_read_ok = True
+        return self.last_alarm_rows
+
     async def fetch_live_point(self, point_id_template):
         tail = point_id_template.rsplit(":", 1)[-1]
-        return float(tail) if tail.replace(".", "", 1).isdigit() else None
+        return (float(tail) if tail.replace(".", "", 1).isdigit() else None), ""
 
     async def fetch_power_histories(self, endpoints):
-        return {name: {} for name in endpoints}
+        return {name: {} for name in endpoints}, {}
