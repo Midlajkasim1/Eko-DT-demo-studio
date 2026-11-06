@@ -31,6 +31,7 @@ import { validateMappings, type ValidationResponse } from '@/lib/mappingValidati
 import { FinPointMapping } from '@/components/project/FinPointMapping'
 import { FinDocumentsEditor } from '@/components/project/FinDocumentsEditor'
 import { PowerBoardsEditor } from '@/components/project/FinPowerBoards'
+import { PointControlEditor } from '@/components/project/PointControlEditor'
 import { MetersEditor } from '@/components/project/FinMeters'
 import { importMappingCsv, mappingCsv, pointListCsv, pointViews } from '@/lib/finMappingCatalog'
 import type { HeatmapSetup, ProjectApiSettings } from '@/types'
@@ -810,6 +811,8 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                   <input type="text" value={settings.fcuSetpoint || ''} placeholder="sp" onChange={e => update('fcuSetpoint', e.target.value || undefined)} />
                 </div>
               </div>
+
+              <PointControlEditor value={settings.pointControl} onChange={next => update('pointControl', next)} />
 
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Energy history</h3>
               <div className="ds-field">

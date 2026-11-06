@@ -348,6 +348,8 @@ export interface ProjectApiSettings {
   ahuSetpoint?: string
   fcuTemp?: string
   fcuSetpoint?: string
+  /** Which FIN points the dashboard may write. Absent uses the standard roles and names. */
+  pointControl?: PointControlSettings
   /** Names the emission factor in the report basis, e.g. "DEWA grid 2025" */
   co2FactorName?: string
   /** The Power page's distribution boards. Absent: the built-in board keys, shown where the
@@ -390,6 +392,25 @@ export interface ProjectApiSettings {
   floorsConfig?: Array<{ id: string, label: string, name: string }>
   /** Heatmap camera, floor, and which models fade. Absent keeps the Marsa heatmap. */
   heatmap?: HeatmapSetup
+}
+
+export type PointControlClass = 'fcu' | 'vav' | 'ahu' | 'fahu' | 'mahu'
+export type PointControlRole = 'setpoint' | 'status' | 'output' | 'choice'
+
+/** Per-project FIN write policy. A missing class keeps that equipment's standard roles.
+ *  Name fields add to the standard names; they do not replace them. */
+export interface PointControlSettings {
+  /** Absent means on. */
+  enabled?: boolean
+  equipment?: Partial<Record<PointControlClass, PointControlRole[]>>
+  /** Writable numbers that are not already named Sp or Setpoint. */
+  setpoints?: string
+  /** Writable on/off points to add, such as Occupancy. */
+  statusPoints?: string
+  /** Writable valve, damper, and speed commands to add. */
+  outputPoints?: string
+  /** Writable mode points to add. The point must have a FIN enum. */
+  choicePoints?: string
 }
 
 /** One distribution board on the Power page */

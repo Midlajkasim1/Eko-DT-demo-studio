@@ -242,6 +242,7 @@ export function dashboardProjectInfo(meta: { projectId: string; name: string; ap
       fcuTemp: s.fcuTemp || '',
       fcuSetpoint: s.fcuSetpoint || '',
     },
+    pointControl: s.pointControl && typeof s.pointControl === 'object' ? s.pointControl : null,
     energyMonthOwn: pointRefOf(s.finLivePoints?.current_month || '') != null
       && pointRefOf(s.finEndpoints?.Hourly_Energy_Consumption_his || '') != null
       && pointRefOf(s.finLivePoints?.current_month || '') !== pointRefOf(s.finEndpoints?.Hourly_Energy_Consumption_his || ''),
@@ -351,5 +352,6 @@ export function toBackendSettings(settings: ProjectApiSettings | undefined): Pro
     out.finEndpoints = { ...(out.finEndpoints || {}), Hourly_Energy_Consumption_his: historyExpression(energyRef) }
   }
   if (Array.isArray(s.finDocuments)) out.finDocuments = s.finDocuments
+  if (s.pointControl && typeof s.pointControl === 'object') out.pointControl = s.pointControl
   return out
 }

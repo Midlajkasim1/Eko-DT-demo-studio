@@ -45,7 +45,7 @@ from fin_client import (
     safe_get,
 )
 from fdd_recommendations import recommend as fdd_recommend
-from point_control import control_for, encode_value, equipment_class, number_of
+from point_control import control_for, encode_value, equipment_class, merge_point_control, number_of
 from workorders import error_payload, live_payload, norm_id, orders_by_equipment
 import notifications
 
@@ -137,6 +137,9 @@ def project_overrides(settings: Optional[dict]) -> dict:
     # A saved list, including an empty one, replaces om-warranty.json. Absent keeps the file.
     if isinstance(settings.get("finDocuments"), list):
         out["document_families"] = clean_document_families(settings.get("finDocuments"))
+    # Roles and extra names only. The site's ranges and write level are not taken from the project.
+    if isinstance(settings.get("pointControl"), dict):
+        out["point_control"] = merge_point_control(BASE_CONFIG.get("point_control") or {}, settings.get("pointControl"))
     return out
 
 
@@ -2281,7 +2284,8 @@ async def write_point(req: PointWriteRequest):
     if req.action not in ("set", "auto"):
         raise HTTPException(status_code=400, detail="action is set or auto")
     eq, point = _controlled_point(point_id)
-    control = point.get("control")
+    policy = CONFIG.get("point_control") or {}
+    control = control_for(point, equipment_class(str(eq.get("name") or ""), eq.get("tags") or [], policy), policy)
     if not control:
         raise HTTPException(status_code=403, detail=f"{point.get('navName')} on {eq.get('name')} cannot be changed from the dashboard.")
     try:

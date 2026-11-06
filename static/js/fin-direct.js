@@ -364,7 +364,7 @@
     return decodeZinc(nav);
   }
 
-  // Same allow-list as backend/config.json point_control. The backend checks it again on write.
+  // Same allow-list as backend/config.json point_control. A project's pointControl adds names and can turn a role off. The backend checks the write again.
   var POINT_CONTROL = {
     enabled: true,
     writeLevel: 8,
@@ -392,8 +392,76 @@
   var LIFE_RE = /fire|smoke|life|emergency/i;
   var MEAS_RE = /^(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(°C|°F|%RH|ppm|Pa|kPa|Hz|%)$/;
 
+  var GENERIC_SP = { sp: 1, setpoint: 1, setpt: 1, stpt: 1 };
+  var CONTROL_ROLES = { setpoint: 1, status: 1, output: 1, choice: 1 };
+  var CONTROL_CLASSES = ['fcu', 'vav', 'ahu', 'mahu', 'fahu'];
+
   function foldName(name) {
     return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+  function nameList(value) {
+    return String(value || '').split(/[,;\n]+/).map(function (s) { return s.trim(); }).filter(Boolean).slice(0, 40);
+  }
+  function extraHit(folded, words) {
+    for (var i = 0; i < (words || []).length; i++) {
+      var w = foldName(words[i]);
+      if (w.length < 4 || GENERIC_SP[w]) continue;
+      if (folded.indexOf(w) >= 0) return true;
+    }
+    return false;
+  }
+  function isSetpoint(name, point, extra) {
+    if (point && point.sp === true) return true;
+    var folded = foldName(name);
+    if (folded.slice(-8) === 'setpoint' || folded.slice(-5) === 'setpt' || folded.slice(-4) === 'stpt' || folded.slice(-2) === 'sp') return true;
+    return extraHit(folded, extra);
+  }
+  function canonUnit(unit) {
+    var key = String(unit || '').trim().replace(/ /g, '').replace(/º/g, '°').replace(/˚/g, '°');
+    var low = key.toLowerCase();
+    if (key === '°C' || key === '°c' || low === 'c' || low === 'degc' || low === 'celsius' || low === 'celcius') return '°C';
+    if (key === '°F' || key === '°f' || low === 'f' || low === 'degf' || low === 'fahrenheit') return '°F';
+    if (key === '%' || low === 'percent' || low === 'pct') return '%';
+    if (low === '%rh' || low === 'rh') return '%RH';
+    if (low === 'ppm') return 'ppm';
+    if (low === 'pa') return 'Pa';
+    if (low === 'kpa') return 'kPa';
+    if (low === 'hz') return 'Hz';
+    return key;
+  }
+  function controlPolicy() {
+    var inj = window.INJECTED_PROJECT_CONFIG && window.INJECTED_PROJECT_CONFIG.pointControl;
+    if (!inj || typeof inj !== 'object') return POINT_CONTROL;
+    var equipment = {};
+    CONTROL_CLASSES.forEach(function (cls) {
+      var custom = inj.equipment && inj.equipment[cls];
+      if (Array.isArray(custom)) {
+        var kept = [];
+        custom.forEach(function (role) {
+          var name = String(role).toLowerCase();
+          if (CONTROL_ROLES[name] && kept.indexOf(name) < 0) kept.push(name);
+        });
+        equipment[cls] = kept;
+      } else {
+        equipment[cls] = (POINT_CONTROL.equipment[cls] || []).slice();
+      }
+    });
+    return {
+      enabled: inj.enabled === false ? false : POINT_CONTROL.enabled,
+      writeLevel: POINT_CONTROL.writeLevel,
+      equipment: equipment,
+      status: POINT_CONTROL.status,
+      output: POINT_CONTROL.output,
+      choice: POINT_CONTROL.choice,
+      setpointExtra: nameList(inj.setpoints),
+      statusExtra: nameList(inj.statusPoints),
+      outputExtra: nameList(inj.outputPoints),
+      choiceExtra: nameList(inj.choicePoints),
+      ranges: POINT_CONTROL.ranges
+    };
+  }
+  function namedPoint(folded, exact, extra) {
+    return exact.indexOf(folded) >= 0 || extraHit(folded, extra);
   }
   function numOf(value) {
     if (typeof value === 'boolean' || value == null) return null;
@@ -406,9 +474,9 @@
     return words.length >= 2 && words.every(Boolean) ? words : [];
   }
   function pointKindOf(point) {
-    if (typeof point.pointKind === 'string' && point.pointKind) return point.pointKind;
-    if (gluedUnit(point.curVal) || gluedUnit(point.currentValue)) return 'Number';
-    return typeof point.kind === 'string' ? point.kind : '';
+    if (typeof point.pointKind === 'string' && point.pointKind) return point.pointKind.toLowerCase();
+    if (gluedUnit(point.curVal) || gluedUnit(point.currentValue)) return 'number';
+    return typeof point.kind === 'string' ? point.kind.toLowerCase() : '';
   }
   function gluedUnit(value) {
     if (value && typeof value === 'object' && value.unit) return String(value.unit);
@@ -416,10 +484,10 @@
     return m ? m[2] : '';
   }
   function unitOf(point, role) {
-    var unit = String(point.unit || '').trim();
+    var unit = canonUnit(point.unit);
     if (unit) return unit;
     var found = gluedUnit(point.curVal) || gluedUnit(point.currentValue);
-    if (found) return found;
+    if (found) return canonUnit(found);
     var folded = foldName(point.navName);
     if (role === 'output') return /damper|coil|valve/.test(folded) ? '%' : '';
     if (folded.indexOf('temp') >= 0) return '°C';
@@ -428,8 +496,8 @@
     if (folded.indexOf('pressure') >= 0) return 'Pa';
     return '';
   }
-  function equipmentClass(name, tags) {
-    var allowed = POINT_CONTROL.equipment;
+  function equipmentClass(name, tags, policy) {
+    var allowed = policy.equipment;
     var list = tags || [];
     var order = ['mahu', 'fahu', 'vav', 'fcu', 'ahu'];
     for (var i = 0; i < order.length; i++) {
@@ -439,23 +507,23 @@
     var cls = match ? match[1].toLowerCase() : '';
     return allowed[cls] ? cls : '';
   }
-  function pointRole(point, roles) {
+  function pointRole(point, roles, policy) {
     var name = String(point.navName || '');
     if (!point.writable || LIFE_RE.test(name)) return '';
     var folded = foldName(name);
     var kind = pointKindOf(point);
-    if (roles.indexOf('status') >= 0 && kind === 'Bool' && POINT_CONTROL.status.indexOf(folded) >= 0) return 'status';
-    if (roles.indexOf('choice') >= 0 && kind === 'Str' && POINT_CONTROL.choice.indexOf(folded) >= 0 && enumWords(point).length) return 'choice';
-    if (roles.indexOf('setpoint') >= 0 && kind === 'Number' && (point.sp || folded.slice(-2) === 'sp')) return 'setpoint';
-    if (roles.indexOf('output') >= 0 && kind === 'Number' && POINT_CONTROL.output.indexOf(folded) >= 0) return 'output';
+    if (roles.indexOf('status') >= 0 && kind === 'bool' && namedPoint(folded, policy.status, policy.statusExtra)) return 'status';
+    if (roles.indexOf('choice') >= 0 && kind === 'str' && namedPoint(folded, policy.choice, policy.choiceExtra) && enumWords(point).length) return 'choice';
+    if (roles.indexOf('setpoint') >= 0 && kind === 'number' && isSetpoint(name, point, policy.setpointExtra)) return 'setpoint';
+    if (roles.indexOf('output') >= 0 && kind === 'number' && namedPoint(folded, policy.output, policy.outputExtra)) return 'output';
     return '';
   }
-  function controlFor(point, eqClass) {
-    if (!eqClass || !POINT_CONTROL.enabled) return null;
-    var roles = POINT_CONTROL.equipment[eqClass] || [];
-    var role = pointRole(point, roles);
+  function controlFor(point, eqClass, policy) {
+    if (!eqClass || !policy.enabled) return null;
+    var roles = policy.equipment[eqClass] || [];
+    var role = pointRole(point, roles, policy);
     if (!role) return null;
-    var level = POINT_CONTROL.writeLevel;
+    var level = policy.writeLevel;
     var manual = numOf(point.writeLevel) === level;
     if (role === 'status') {
       var words = enumWords(point);
@@ -465,8 +533,8 @@
     if (role === 'choice') {
       return { role: 'choice', options: enumWords(point).map(function (w) { return { value: w, label: w }; }), level: level, manual: manual };
     }
-    var unit = unitOf(point, role);
-    var preset = POINT_CONTROL.ranges[unit] || {};
+    var unit = canonUnit(unitOf(point, role));
+    var preset = policy.ranges[unit] || {};
     var ownLow = numOf(point.minVal), ownHigh = numOf(point.maxVal);
     var siteLow = numOf(preset.min), siteHigh = numOf(preset.max);
     var own = ownLow != null && ownHigh != null && ownLow < ownHigh;
@@ -559,8 +627,9 @@
       var floor = safeGet(equip.floorRef, 'dis') || 'Unknown Floor';
       var bucket = String(navName).toLowerCase().indexOf('cctv') >= 0 ? 'cctv' : 'hvac';
       var tags = Object.keys(equip).filter(function (k) { return equip[k] === true && k !== 'equip' && k !== 'inAlarm'; });
-      var eqClass = equipmentClass(navName, tags);
-      formatted.forEach(function (pt) { pt.control = controlFor(pt, eqClass); });
+      var policy = controlPolicy();
+      var eqClass = equipmentClass(navName, tags, policy);
+      formatted.forEach(function (pt) { pt.control = controlFor(pt, eqClass, policy); });
       var sysRaw = equip.system;
       if (sysRaw && typeof sysRaw === 'object') sysRaw = sysRaw.dis || sysRaw.val;
       var row = {
