@@ -97,7 +97,7 @@
     return ids;
   }
 
-  let roofHost = null;   /* the kept element of the Hospital roof graphic view (openRoofView) */
+  let roofHost = null;   /* the kept element of the Hospital roof schematic view (openRoofView) */
   const E = window.EKO = {
     data: window.EKO_DATA.marsa,
     nav: window.EKO_LAYOUTS.nav,
@@ -106,7 +106,7 @@
     lang: ls.get('eko-lang') || 'en',
     state: {
       pageId: 'marsa-overview', module: 'overview', sub: null,
-      roofView: false,   /* the Hospital roof graphic is showing in the content area instead of the page (openRoofView) */
+      roofView: false,   /* the Hospital roof schematic is showing in the content area instead of the page (openRoofView) */
       rolePreview: ss.get('eko-role-preview') || null,     /* D105: demo-only role preview, session-scoped */
       disclose: {},                                        /* D105: per-user progressive-disclosure overrides (loaded per role) */
       themeMode: ls.get('eko-theme-mode') || 'auto',
@@ -287,7 +287,7 @@
       if(gate){ this.set({ born:'dlg', teaserKey: gate, dlg:'teaser', mobMore:false }); return; }
       if(pageId !== this.state.pageId) this.state._prev = { pageId: this.state.pageId, module: this.state.module, sub: this.state.sub };
       this.state.locFocus = null;   /* any navigation (the logo, a module, search, Back) ends Locate-in-3D focus */
-      if(this.state.roofView) closeRoofView();   /* ...and the Hospital roof graphic, which stands in the content area */
+      if(this.state.roofView) closeRoofView();   /* ...and the Hospital roof schematic, which stands in the content area */
       if(window.EKO_SURF) window.EKO_SURF.closeAll();          /* R4 (D67) */
       const targetModule = module ?? this.state.module;
       const targetSub = sub ?? null;
@@ -878,7 +878,8 @@
     $('ekonav').innerHTML = navRail();
     if(E.state.roofView && roofHost){
       const m = $('mount');
-      if(m.firstElementChild !== roofHost || m.childElementCount !== 1) m.replaceChildren(roofHost);   /* only when it is not already there: moving an iframe reloads it */
+      if(m.firstElementChild !== roofHost || m.childElementCount !== 1) m.replaceChildren(roofHost);   /* only when it is not already there: moving it restarts what is turning */
+      window.EKO_ROOF.update(roofHost, E);
     } else $('mount').innerHTML = (stacked ? pagehead() : '') + P.renderPage(E);
     const fresh = document.getElementById('enginehost');
     if(fresh && keptHost) fresh.replaceWith(keptHost);
@@ -1130,33 +1131,11 @@
     armFrame();
     ov.querySelector('.docx').focus();
   }
-  /* The Hospital roof graphic: the client's FIN screen in an iframe that fills the main content area (#mount) in place of the dashboard page,
-     with a Back to Dashboard button. It is not a dialog: no overlay, no backdrop. Nothing is rewritten, proxied or signed in here: the frame is
-     FIN's own page, with whatever FIN session the browser holds. With no FIN server to point at (not connected), it says so and loads nothing.
-     The browser does not tell a page whether FIN refused the frame or sent it to a sign-in page, so the loading note only says the frame has
-     loaded, never that the graphic is showing.
-     render() rebuilds #mount on every state change and live data changes state every few seconds, so the view's element is KEPT (roofHost) and
-     put back as it is: an iframe that is removed and re-inserted reloads, which would restart the FIN page on every data update. */
-  function openRoofView(url, frameTitle){
-    let src = null;
-    try { if (typeof url === 'string' && /^https?:$/.test(new URL(url).protocol)) src = url; } catch (e) {}
-    const title = E.t('roofTitle');
-    roofHost = document.createElement('section');
-    roofHost.className = 'roofview';
-    roofHost.setAttribute('aria-label', title);
-    roofHost.innerHTML = `<div class="roofbar">
-        <button type="button" class="btnG btnSm roofback" data-act="roofBack">${C.esc(E.t('roofBack'))}</button>
-        <h2 class="roofttl">${C.esc(title)}</h2>
-      </div>
-      <div class="roofstage">${src
-        ? `<iframe class="roofframe" title="${C.esc(frameTitle || 'Hospital Roof Graphic')}"></iframe>
-           <div class="roofload" role="status"><span class="wospin" aria-hidden="true"></span><span>${C.esc(E.t('roofLoading'))}</span></div>`
-        : `<div class="roofnone" role="alert"><b>${C.esc(E.t('roofNoFin'))}</b><p>${C.esc(E.t('roofNoFinWhy'))}</p></div>`}
-      </div>`;
-    const frame = roofHost.querySelector('.roofframe');
-    const host = roofHost;
-    if (frame) frame.addEventListener('load', () => { const n = host.querySelector('.roofload'); if (n) n.remove(); }, { once: true });
-    if (frame) frame.src = src;
+  /* The Hospital roof schematic (layouts/hospital-roof.js) fills the main content area (#mount) in place of the dashboard page, with a Back to
+     Dashboard button. It is not a dialog: no overlay, no backdrop. render() rebuilds #mount on every state change and live data changes state every
+     few seconds, so the view's element is KEPT (roofHost), put back as it is, and only its values are updated: what is turning keeps turning. */
+  function openRoofView(){
+    roofHost = window.EKO_ROOF.create(E);
     if (window.EKO_SURF) window.EKO_SURF.closeAll();
     E.set({ roofView: true, assetSel: null, dlg: null, mobMore: false });
   }
@@ -1239,9 +1218,9 @@
       } catch (e) { return; }
       openFramePopup({ title: el.dataset.title || 'PDF', src: url, download, tab: url });
     },
-    /* The Eko Hospital roof graphic (the client's own FIN screen), listed in the Assets register for that project only. It opens in the main
-       content area (not a popup) with a Back to Dashboard button. The URL is the Studio's: the connected FIN server + the client's route, read now. */
-    roofOpen(){ const g = (window.INJECTED_PROJECT_CONFIG || {}).roofGraphic; openRoofView(g && g.url, g && g.title); },
+    /* The Eko Hospital roof schematic, listed in the Assets register for that project only. It opens in the main content area (not a popup) with a
+       Back to Dashboard button, and reads the same live FIN equipment feed as every asset panel. */
+    roofOpen(){ openRoofView(); },
     roofBack(){ closeRoofView(); E.set({}); },
     docClose(){ const ov = document.getElementById('docov'); if (ov) ov.remove(); },
     /* Asset panel wide mode: a real state toggle (not a snapshot) so the

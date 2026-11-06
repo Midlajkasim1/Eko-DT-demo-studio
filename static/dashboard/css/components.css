@@ -6018,20 +6018,13 @@
   background:var(--s1)
 }
 
-.dashboard-native-container .roofbody {
-  flex:1;
-  min-height:0;
-  display:flex;
-  background:#e9ecf0
-}
-
 .dashboard-native-container .roofview {
   flex:1 1 auto;
   min-width:0;
   min-height:0;
   display:flex;
   flex-direction:column;
-  background:#fff
+  background:#f3f4f5
 }
 
 .dashboard-native-container #mount > .roofview {
@@ -6041,8 +6034,9 @@
 .dashboard-native-container .roofbar {
   flex:none;
   display:flex;
+  flex-wrap:wrap;
   align-items:center;
-  gap:14px;
+  gap:6px 14px;
   padding:8px 14px;
   background:var(--s1);
   border-block-end:1px solid var(--bd2)
@@ -6054,52 +6048,362 @@
   color:var(--t1)
 }
 
+.dashboard-native-container .roofmeta {
+  margin-inline-start:auto;
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px 14px;
+  font-size:12px;
+  color:var(--t2)
+}
+
+.dashboard-native-container .roofleg {
+  display:inline-flex;
+  align-items:center;
+  gap:6px
+}
+
+.dashboard-native-container .roofleg::before {
+  content:"";
+  width:18px;
+  height:5px;
+  border-radius:1px;
+  background:#39b83f
+}
+
+.dashboard-native-container .roofleg[data-loop="chw"]::before {
+  background:#1c8ae6
+}
+
+.dashboard-native-container .roofleg[data-loop="hw"]::before {
+  background:#e0232b
+}
+
+.dashboard-native-container .roofstatus {
+  padding:2px 8px;
+  border-radius:3px;
+  font-weight:600;
+  color:#fff;
+  background:#6b7280
+}
+
+.dashboard-native-container .roofstatus[data-st="live"] {
+  background:#0b249b
+}
+
 .dashboard-native-container .roofstage {
   position:relative;
   flex:1;
   min-height:0;
+  overflow:auto;
   display:flex;
-  flex-direction:column;
-  background:#fff
+  background:#e7e9ea
 }
 
-.dashboard-native-container .roofframe {
-  flex:1 1 850px;
-  min-height:0;
+.dashboard-native-container .roofsvg {
+  flex:1 1 auto;
   width:100%;
-  height:850px;
-  border:0;
-  display:block
+  height:100%;
+  min-width:0;
+  min-height:0;
+  display:block;
+  direction:ltr;
+  user-select:none;
+  /* the dashboard's own unhinted webfont: Arial Bold at this size makes an S read as an 8 on a 1x screen */
+  text-rendering:geometricPrecision
 }
 
-.dashboard-native-container .roofload {
-  position:absolute;
-  inset:0;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:10px;
-  color:#4b5563;
-  background:#fff;
-  pointer-events:none
+@media (max-width:860px) {
+  /* the drawing keeps a readable size on a phone and pans inside the stage: never a page scroll */
+  .dashboard-native-container .roofsvg {
+    flex:none;
+    width:860px;
+    height:456px
+  }
 }
 
-.dashboard-native-container .roofnone {
-  margin:auto;
-  max-width:460px;
-  padding:20px;
-  text-align:center;
-  color:#4b5563;
-  background:#fff
+.dashboard-native-container .rf-flowline {
+  stroke-dasharray:16 22;
+  opacity:.72
 }
 
-.dashboard-native-container .roofnone b {
-  color:#111827
+.dashboard-native-container .rf-pipe[data-flow="on"] .rf-flowline {
+  opacity:.95;
+  animation:rf-flow 1.1s linear infinite
 }
 
-.dashboard-native-container .roofnone p {
-  margin:10px 0 0;
-  line-height:1.5
+@keyframes rf-flow {
+  to { stroke-dashoffset:-38 }
+}
+
+/* What moves: every animation below runs only while FIN says so. data-run is set by EKO_ROOF.update from the machine's own status. */
+.dashboard-native-container .rf-rot {
+  transform-box:fill-box;
+  transform-origin:center;
+  animation:rf-spin 1.4s linear infinite;
+  animation-play-state:paused
+}
+
+.dashboard-native-container .rf-rot[data-run="running"] {
+  animation-play-state:running
+}
+
+@keyframes rf-spin {
+  to { transform:rotate(360deg) }
+}
+
+.dashboard-native-container .rf-flame,
+.dashboard-native-container .rf-smoke,
+.dashboard-native-container .rf-vapor {
+  display:none
+}
+
+.dashboard-native-container .rf-flame[data-run="running"],
+.dashboard-native-container .rf-smoke[data-run="running"],
+.dashboard-native-container .rf-vapor[data-run="running"] {
+  display:inline
+}
+
+.dashboard-native-container .rf-flame path {
+  transform-box:fill-box;
+  transform-origin:bottom;
+  animation:rf-flick .9s ease-in-out infinite alternate
+}
+
+@keyframes rf-flick {
+  from { transform:scaleY(.68); opacity:.86 }
+  to { transform:scaleY(1.08); opacity:1 }
+}
+
+.dashboard-native-container .rf-smoke circle {
+  animation:rf-rise 2.6s ease-out infinite
+}
+
+.dashboard-native-container .rf-smoke circle:nth-child(2) {
+  animation-delay:-.9s
+}
+
+.dashboard-native-container .rf-smoke circle:nth-child(3) {
+  animation-delay:-1.7s
+}
+
+@keyframes rf-rise {
+  from { transform:translateY(18px); opacity:.2 }
+  35% { opacity:.9 }
+  to { transform:translateY(-22px); opacity:0 }
+}
+
+.dashboard-native-container .rf-vapor {
+  opacity:.28
+}
+
+.dashboard-native-container .rf-bars rect {
+  fill:#2c4a36;
+  transform-box:fill-box;
+  transform-origin:bottom
+}
+
+.dashboard-native-container .rf-bars[data-run="running"] rect {
+  fill:#35e06c;
+  animation:rf-bar 1.5s steps(5) infinite alternate
+}
+
+@keyframes rf-bar {
+  from { transform:scaleY(.55) }
+  to { transform:scaleY(1.1) }
+}
+
+.dashboard-native-container .rf-needle {
+  transform-box:fill-box;
+  transform-origin:center
+}
+
+.dashboard-native-container .rf-needle[data-run="running"] {
+  animation:rf-sway 2.4s ease-in-out infinite alternate
+}
+
+@keyframes rf-sway {
+  from { transform:rotate(-16deg) }
+  to { transform:rotate(26deg) }
+}
+
+.dashboard-native-container .rf-lamp {
+  fill:#55585c
+}
+
+.dashboard-native-container .rf-lamp[data-run="running"] {
+  fill:var(--on,#8b8f93)
+}
+
+.dashboard-native-container .rf-lamp[data-run="fault"],
+.dashboard-native-container .rf-lamp-stop[data-run="stopped"] {
+  fill:#e1251b
+}
+
+.dashboard-native-container .rf-lamp-blink[data-run="running"] {
+  animation:rf-blink 1.2s steps(2) infinite
+}
+
+@keyframes rf-blink {
+  to { opacity:.25 }
+}
+
+.dashboard-native-container .rf-eqtext {
+  fill:#f4f5f6;
+  font-family:var(--fB),sans-serif;
+  font-weight:700;
+  text-anchor:middle
+}
+
+.dashboard-native-container .rf-eq[data-act] {
+  cursor:pointer
+}
+
+.dashboard-native-container .rf-eq[data-act]:hover {
+  filter:brightness(1.08)
+}
+
+.dashboard-native-container .rf-eq:focus-visible {
+  outline:2px solid var(--acc);
+  outline-offset:2px
+}
+
+.dashboard-native-container .rf-bcw {
+  fill:#4c9fe2
+}
+
+.dashboard-native-container .rf-bhw {
+  fill:#e8574a
+}
+
+.dashboard-native-container .rf-bldg {
+  fill:#0a2358;
+  font:700 11px var(--fB),sans-serif;
+  letter-spacing:.2px;
+  text-anchor:middle
+}
+
+.dashboard-native-container .rf-snow {
+  fill:none;
+  stroke:#eef8ff;
+  stroke-width:2.4;
+  stroke-linecap:round
+}
+
+.dashboard-native-container .rf-drop {
+  fill:#fbd2bd;
+  fill-rule:evenodd
+}
+
+.dashboard-native-container .rf-flowname {
+  fill:#4b5563;
+  font:600 10.5px var(--fB),sans-serif;
+  text-anchor:start
+}
+
+.dashboard-native-container .rf-tagcap {
+  fill:#e4e6e8;
+  stroke:#cdd0d3;
+  stroke-width:.6
+}
+
+.dashboard-native-container .rf-tagicon {
+  fill:none;
+  stroke:#37518f;
+  stroke-width:1.2
+}
+
+.dashboard-native-container .rf-tagicon circle {
+  fill:#e4e6e8
+}
+
+.dashboard-native-container .rf-tagname {
+  fill:#14171a;
+  font:700 10px var(--fB),sans-serif;
+  text-anchor:start
+}
+
+/* A value band says what state its reading is in before its text does: only a live one is blue with the green edge. */
+.dashboard-native-container .rf-tagval {
+  fill:#6b7280
+}
+
+.dashboard-native-container .rf-tagedge {
+  fill:#4b5563
+}
+
+.dashboard-native-container .rf-tag[data-st="live"] .rf-tagval {
+  fill:#0b249b
+}
+
+.dashboard-native-container .rf-tag[data-st="live"] .rf-tagedge {
+  fill:#45c24b
+}
+
+.dashboard-native-container .rf-tag[data-st="disconnected"] .rf-tagval {
+  fill:#374151
+}
+
+.dashboard-native-container .rf-tag[data-st="stale"] .rf-tagval {
+  fill:#b45309
+}
+
+.dashboard-native-container .rf-tag[data-st="not-reporting"] .rf-tagval {
+  fill:#4e6a7d
+}
+
+.dashboard-native-container .rf-tag[data-st="invalid"] .rf-tagval {
+  fill:#7c2d92
+}
+
+.dashboard-native-container .rf-tag[data-hot][data-on] .rf-tagval,
+.dashboard-native-container .rf-tag[data-st="fault"] .rf-tagval {
+  fill:#c4141c
+}
+
+.dashboard-native-container .rf-tag[data-hot][data-on] .rf-tagedge,
+.dashboard-native-container .rf-tag[data-st="fault"] .rf-tagedge {
+  fill:#8d0d13
+}
+
+.dashboard-native-container .rf-tagtxt {
+  fill:#fff;
+  font:700 14px var(--fB),sans-serif;
+  letter-spacing:.3px;
+  text-anchor:middle
+}
+
+/* a word for a state is longer than a reading, and must fit the narrowest tag */
+.dashboard-native-container .rf-tag:not([data-st="live"]) .rf-tagtxt {
+  font-size:12px
+}
+
+/* the LIVE mark says only what is true: FIN connected and at least one reading live */
+.dashboard-native-container .rf-live[data-on="0"] {
+  display:none
+}
+
+.dashboard-native-container .rf-live circle {
+  fill:#d7141c
+}
+
+.dashboard-native-container .rf-live text {
+  fill:#1f2328;
+  font:700 12px var(--fB),sans-serif;
+  letter-spacing:.6px
+}
+
+@media (prefers-reduced-motion:reduce) {
+  .dashboard-native-container .rf-rot,
+  .dashboard-native-container .rf-flame path,
+  .dashboard-native-container .rf-smoke circle,
+  .dashboard-native-container .rf-bars rect,
+  .dashboard-native-container .rf-needle,
+  .dashboard-native-container .rf-lamp,
+  .dashboard-native-container .rf-pipe[data-flow="on"] .rf-flowline {
+    animation:none !important
+  }
 }
 
 .dashboard-native-container .docframe {
