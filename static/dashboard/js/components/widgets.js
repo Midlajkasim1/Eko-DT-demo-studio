@@ -1287,9 +1287,10 @@ window.EKO_C = (function(){
     const groups = [];
     for (let h = 0; h < 24; h++) groups.push({ label: h % 3 ? '' : hh(h), tip: `${dayName(day)} ${hh(h)}:00`, a: day.a ? day.a[h] : null, b: day.b ? day.b[h] : null });
     const bars = window.ekoCompareBars(groups, { unit: cmp.unit, fmt: v => fmt(v, 1), actLbl: t('apCmpActual'), spLbl: t('apCmpSp'), keep: true, dense: true });
-    const avgs = hist.map(d => d.aAvg).filter(v => v != null && isFinite(v));
+    const dayAvg = d => d.aAvg != null && isFinite(d.aAvg) ? d.aAvg : d.bAvg;
+    const avgs = hist.map(dayAvg).filter(v => v != null && isFinite(v));
     const lo = Math.min.apply(null, avgs), span = (Math.max.apply(null, avgs) - lo) || 1;
-    const cells = hist.map((d, k) => `<i data-on="${k === i ? 1 : 0}" style="height:${d.aAvg == null ? 0 : (25 + (d.aAvg - lo) / span * 75).toFixed(1)}%"></i>`).join('');
+    const cells = hist.map((d, k) => `<i data-on="${k === i ? 1 : 0}" style="height:${dayAvg(d) == null || !isFinite(dayAvg(d)) ? 0 : (25 + (dayAvg(d) - lo) / span * 75).toFixed(1)}%"></i>`).join('');
     const step = (v, dis, lbl, ic) => `<button class="iconbtn icon26" data-act="apHistStep" data-v="${v}" aria-label="${esc(lbl)}"${dis ? ' disabled' : ''}>${icon(ic, 14)}</button>`;
     const cap = `${esc(E.ph(cmp.actName || t('apCmpActual')))} · ${esc(t('apHistHourly'))}${cmp.unit ? ` · ${esc(cmp.unit)}` : ''}`;
     return `<p class="tCap">${cap}</p>

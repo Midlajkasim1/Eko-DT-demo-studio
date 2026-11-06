@@ -1710,8 +1710,8 @@
   var HIST_RETRY_MS = 60000;   // a failed history read is tried again after this long
   /* none: no historized point to trend; loading; failed: FIN or the backend did not answer; empty: answered, no samples; ok */
   function histStateOf(primary, cached) {
-    if (!primary || !primary.actHis) return "none";
-    if (cached && cached.compareV === 2) return (cached.compare.hist.length || cached.compare.days.length) ? "ok" : "empty";
+    if (!primary || (!primary.actHis && !primary.spHis)) return "none";
+    if (cached && cached.compareV === 3) return (cached.compare.hist.length || cached.compare.days.length) ? "ok" : "empty";
     if (cached && cached.failedAt) return "failed";
     return "loading";
   }
@@ -1729,14 +1729,18 @@
     var n = parseFloat(m[0]);
     return isFinite(n) ? n : null;
   }
-  function isSpName(k) {
-    return k.indexOf("set") !== -1 || /sp$/.test(k);
+  function isSpName(k, point) {
+    return (point && point.sp === true) || k.indexOf("set") !== -1 || /sp$/.test(k);
   }
   function nameWords(text) {
     return String(text || "").split(/[,;/]+/).map(foldPtName).filter(Boolean);
   }
   function matchesWords(k, words) {
     return words.some(function (w) { return w && k.indexOf(w) !== -1; });
+  }
+  // "sp" is a suffix, not a substring: "spacetemp" contains "sp" and is not a setpoint.
+  function genericSpWord(w) {
+    return w === "sp" || w === "setpoint" || w === "setpt" || w === "stpt";
   }
   function equipPointWords() {
     var cfg = (injected && injected.equipPoints) || {};
@@ -1748,9 +1752,12 @@
     };
   }
   function spTest(words, tempWords) {
-    return function (k) {
-      if (words.length && matchesWords(k, words)) return true;
-      return tempWords.length ? matchesWords(k, tempWords) && isSpName(k) : false;
+    return function (k, point) {
+      var specific = [];
+      for (var i = 0; i < words.length; i++) if (!genericSpWord(words[i])) specific.push(words[i]);
+      if (specific.length && matchesWords(k, specific)) return true;
+      var family = tempWords.length ? matchesWords(k, tempWords) : false;
+      return family && isSpName(k, point);
     };
   }
   function findPt(points, test) {
@@ -1764,7 +1771,7 @@
     var s = findPt(points, spTest);
     var av = ptNumVal(a);
     var sv = ptNumVal(s);
-    if (av == null && sv == null && !(a && a.his && a.id)) return null;
+    if (av == null && sv == null && !(a && a.his && a.id) && !(s && s.his && s.id)) return null;
     return {
       key: key,
       actual: av,
@@ -1801,29 +1808,29 @@
     var specs = [];
     var zoneTemps = names.fcuTemp.length ? [names.fcuTemp] : [["zonetemp"], ["spacetemp"], ["roomtemp"]];
     var zoneSpecs = zoneTemps.map(function (fcuTemp) {
-      return makePair(points, "apCmpZone", function (k) { return matchesWords(k, fcuTemp) && !isSpName(k); }, spTest(names.fcuSp, fcuTemp));
+      return makePair(points, "apCmpZone", function (k, point) { return matchesWords(k, fcuTemp) && !isSpName(k, point); }, spTest(names.fcuSp, fcuTemp));
     });
     if (kind === "fcu" || kind === "vav") {
       specs = zoneSpecs;
     } else if (kind === "ahu" && names.ahuTemp.length) {
       specs = [
-        makePair(points, "apCmpSA", function (k) { return matchesWords(k, names.ahuTemp) && !isSpName(k); }, spTest(names.ahuSp, names.ahuTemp))
+        makePair(points, "apCmpSA", function (k, point) { return matchesWords(k, names.ahuTemp) && !isSpName(k, point); }, spTest(names.ahuSp, names.ahuTemp))
       ];
     } else if (kind === "ahu") {
       specs = [
-        makePair(points, "apCmpSA", function (k) { return (k.indexOf("satemp") !== -1 || k.indexOf("supplyairtemp") !== -1) && !isSpName(k); }, function (k) { return (k.indexOf("satemp") !== -1 || k.indexOf("supplyairtemp") !== -1) && isSpName(k); }),
-        makePair(points, "apCmpRA", function (k) { return (k.indexOf("ratemp") !== -1 || k.indexOf("returnairtemp") !== -1) && !isSpName(k); }, function (k) { return (k.indexOf("ratemp") !== -1 || k.indexOf("returnairtemp") !== -1) && isSpName(k); }),
-        makePair(points, "apCmpRAHum", function (k) { return k.indexOf("rahum") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("rahum") !== -1 && isSpName(k); }),
-        makePair(points, "apCmpRACO2", function (k) { return (k.indexOf("raco2") !== -1 || k === "raco2" || (k.indexOf("co2") !== -1 && k.indexOf("ra") !== -1)) && !isSpName(k); }, function (k) { return k.indexOf("co2") !== -1 && isSpName(k); })
+        makePair(points, "apCmpSA", function (k, point) { return (k.indexOf("satemp") !== -1 || k.indexOf("supplyairtemp") !== -1) && !isSpName(k, point); }, spTest(names.ahuSp, ["satemp", "supplyairtemp"])),
+        makePair(points, "apCmpRA", function (k, point) { return (k.indexOf("ratemp") !== -1 || k.indexOf("returnairtemp") !== -1) && !isSpName(k, point); }, spTest([], ["ratemp", "returnairtemp"])),
+        makePair(points, "apCmpRAHum", function (k, point) { return k.indexOf("rahum") !== -1 && !isSpName(k, point); }, function (k, point) { return k.indexOf("rahum") !== -1 && isSpName(k, point); }),
+        makePair(points, "apCmpRACO2", function (k, point) { return (k.indexOf("raco2") !== -1 || k === "raco2" || (k.indexOf("co2") !== -1 && k.indexOf("ra") !== -1)) && !isSpName(k, point); }, function (k, point) { return k.indexOf("co2") !== -1 && isSpName(k, point); })
       ];
     } else if (kind === "fahu" || kind === "mahu") {
       var airTemps = names.ahuTemp.length ? [names.ahuTemp] : [["satemp", "supplyairtemp"], ["freshairtemp"], ["ratemp", "returnairtemp"]];
       specs = airTemps.map(function (words) {
-        return makePair(points, "apCmpSA", function (k) { return matchesWords(k, words) && !isSpName(k); }, spTest(names.ahuSp, words));
+        return makePair(points, "apCmpSA", function (k, point) { return matchesWords(k, words) && !isSpName(k, point); }, spTest(names.ahuSp, words));
       });
     } else {
       specs = [
-        makePair(points, "apCmpTemp", function (k) { return k.indexOf("temp") !== -1 && !isSpName(k); }, function (k) { return k.indexOf("temp") !== -1 && isSpName(k); })
+        makePair(points, "apCmpTemp", function (k, point) { return k.indexOf("temp") !== -1 && !isSpName(k, point); }, function (k, point) { return k.indexOf("temp") !== -1 && isSpName(k, point); })
       ];
     }
     return specs.filter(Boolean);
@@ -1858,6 +1865,64 @@
     });
     rows.sort(function (a, b) { return a.t - b.t; });
     return rows;
+  }
+  function blankHours() {
+    var hours = [];
+    for (var h = 0; h < 24; h++) hours.push(null);
+    return hours;
+  }
+  function hourNum(v) {
+    return v != null && v !== "" && isFinite(v) ? +v : null;
+  }
+  // An hour that logged only one side keeps the other's last sample, so both bars stay on the chart.
+  function alignCompare(actAll, spAll, liveA, liveB) {
+    var byT = {};
+    function row(t) {
+      if (!byT[t]) byT[t] = { t: +t, a: blankHours(), b: blankHours(), aAvg: null, bAvg: null, label: "" };
+      return byT[t];
+    }
+    function pad(hours) {
+      var out = (hours || []).slice();
+      while (out.length < 24) out.push(null);
+      return out;
+    }
+    (actAll || []).forEach(function (d) {
+      var r = row(d.t);
+      r.a = pad(d.hours);
+      r.aAvg = d.avg;
+      r.label = d.label;
+    });
+    (spAll || []).forEach(function (d) {
+      var r = row(d.t);
+      r.b = pad(d.hours);
+      r.bAvg = d.avg;
+      if (!r.label) r.label = d.label;
+    });
+    var days = Object.keys(byT).map(function (k) { return byT[k]; }).sort(function (a, b) { return a.t - b.t; });
+    var now = new Date();
+    var today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    var anyB = false;
+    var anyA = false;
+    days.forEach(function (d) {
+      for (var h = 0; h < 24; h++) {
+        if (hourNum(d.a[h]) != null) anyA = true;
+        if (hourNum(d.b[h]) != null) anyB = true;
+      }
+    });
+    var lastA = null, lastB = null;
+    days.forEach(function (d) {
+      for (var h = 0; h < 24; h++) {
+        var rawA = hourNum(d.a[h]);
+        var rawB = hourNum(d.b[h]);
+        if (rawA != null) lastA = rawA;
+        if (rawB != null) lastB = rawB;
+        var fillA = lastA != null ? lastA : (!anyA && d.t === today ? hourNum(liveA) : null);
+        var fillB = lastB != null ? lastB : (!anyB && d.t === today ? hourNum(liveB) : null);
+        if (rawA != null && rawB == null && fillB != null) d.b[h] = fillB;
+        if (rawB != null && rawA == null && fillA != null) d.a[h] = fillA;
+      }
+    });
+    return days;
   }
   function applyEquipment(payload) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
@@ -1964,12 +2029,12 @@
 
       var pairs = comparePairs(eq);
       var cached = historyCache[eq.name];
-      var primary = pairs.filter(function (p) { return p.actHis; })[0] || pairs[0];
+      var primary = pairs.filter(function (p) { return p.actHis || p.spHis; })[0] || pairs[0];
       assetData.compare = {
         pairs: pairs,
         histState: histStateOf(primary, cached),
-        days: (cached && cached.compareV === 2 && cached.compare && cached.compare.days) || [],
-        hist: (cached && cached.compareV === 2 && cached.compare && cached.compare.hist) || [],
+        days: (cached && cached.compareV === 3 && cached.compare && cached.compare.days) || [],
+        hist: (cached && cached.compareV === 3 && cached.compare && cached.compare.hist) || [],
         unit: (cached && cached.compare && cached.compare.unit) || ((pairs[0] && pairs[0].unit) || ""),
         actName: (cached && cached.compare && cached.compare.actName) || (pairs[0] && pairs[0].actName) || "",
         spName: (cached && cached.compare && cached.compare.spName) || (pairs[0] && pairs[0].spName) || ""
@@ -1980,11 +2045,16 @@
       }
 
       var retry = !!(cached && cached.failedAt && Date.now() - cached.failedAt >= HIST_RETRY_MS);
-      var otherPoint = !!(cached && cached.compare && primary && cached.compare.actName !== primary.actName);
-      if (primary && primary.actHis && window.DashboardData && window.DashboardData.getPointHistory && (!cached || retry || otherPoint)) {
+      var ready = !!(cached && cached.compareV === 3 && cached.compare);
+      var otherPoint = !!(ready && primary && (cached.compare.actName !== (primary.actName || "") || cached.compare.spName !== (primary.spName || "")));
+      var wantHist = !!(primary && (primary.actHis || primary.spHis) && (primary.actId || primary.spId));
+      var holdOff = !!(cached && cached.failedAt && !retry);
+      if (wantHist && window.DashboardData && window.DashboardData.getPointHistory && !(cached && cached.fetching) && !holdOff && (!ready || retry || otherPoint)) {
         historyCache[eq.name] = { fetching: true };
-        var actP = window.DashboardData.getPointHistory(primary.actId, HIST_DAYS);
-        var spP = (primary.spHis && primary.spId)
+        var actP = primary.actId
+          ? window.DashboardData.getPointHistory(primary.actId, HIST_DAYS)
+          : Promise.resolve(null);
+        var spP = primary.spId
           ? window.DashboardData.getPointHistory(primary.spId, HIST_DAYS)
           : Promise.resolve(null);
         var failed = function () {
@@ -1997,31 +2067,31 @@
         };
         Promise.all([actP, spP]).then(function (both) {
           if (!current()) return;
-          if (!histUsable(both[0])) return failed();   // no answer is not "no history"
-          var actAll = histDaily(both[0] && both[0].history);
-          var spAll = histDaily(both[1] && both[1].history);
-          var actDays = actAll.slice(-7);
-          var spByT = {};
-          spAll.forEach(function (d) { spByT[d.t] = d; });
-          var days = actDays.map(function (d) {
-            return { label: d.label, actual: d.avg, sp: spByT[d.t] ? spByT[d.t].avg : undefined };
+          var actOk = histUsable(both[0]);
+          var spOk = histUsable(both[1]);
+          if (!actOk && !spOk) return failed();
+          var actAll = actOk ? histDaily(both[0].history) : [];
+          var spAll = spOk ? histDaily(both[1].history) : [];
+          var aligned = alignCompare(actAll, spAll, primary.actual, primary.sp);
+          var tail = aligned.slice(-7);
+          var days = tail.map(function (d) {
+            return { label: d.label, actual: d.aAvg, sp: d.bAvg != null ? d.bAvg : undefined };
           });
-          var hist = actAll.map(function (d) {
-            var sp = spByT[d.t];
-            return { t: d.t, a: d.hours, b: sp ? sp.hours : null, aAvg: d.avg, bAvg: sp ? sp.avg : null };
+          var hist = aligned.map(function (d) {
+            return { t: d.t, a: d.a, b: d.b, aAvg: d.aAvg, bAvg: d.bAvg };
           });
-          var vals = actDays.map(function (d) { return d.avg; });
+          var vals = tail.map(function (d) { return d.aAvg != null ? d.aAvg : d.bAvg; }).filter(function (v) { return v != null && isFinite(v); });
           var spark7 = assetData.spark7;
           if (vals.length) {
             var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals), range = mx - mn || 1;
             spark7 = vals.map(function (v) { return (v - mn) / range; });
           }
           var packed = {
-            compareV: 2,
+            compareV: 3,
             compare: {
               days: days,
               hist: hist,
-              unit: (both[0] && both[0].unit) || primary.unit || "",
+              unit: (actOk && both[0].unit) || (spOk && both[1].unit) || primary.unit || "",
               actName: primary.actName || "",
               spName: primary.spName || ""
             },
