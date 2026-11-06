@@ -1402,6 +1402,9 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     let heatSeq = 0
     let heatBusy = false
     let heatAgain = false
+    let crowdPlacedSig = ''
+    let crowdJob = 0
+    let crowdJobBusy = 0
     let heatReq: { zones: { bimId?: string; bimIds?: string[]; gid?: string; nameEn?: string; tempC?: number | null; rh?: number | null; co2?: number | null }[]; mode?: string } | null = null
     /* Colour sits in the room and is tested against the building, so a ceiling does not hide it from an angled view. */
     let heatInsideWalls = false
@@ -1584,7 +1587,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       depthTest: true,
       toneMapped: false,
     })
-    const clearCrowd = () => {
+    const wipeCrowd = () => {
       if (crowdMesh) {
         overlay.remove(crowdMesh)
         crowdMesh.geometry.dispose()
@@ -1598,6 +1601,13 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
       crowd = []
     }
+    const clearCrowd = () => {
+      wipeCrowd()
+      crowdPlacedSig = ''
+      crowdJob++
+      crowdJobBusy = 0
+    }
+    const crowdWanted = () => heatModeNow === 'occ' && (window as any).EKO?.state?.pageId === 'heatmap'
     const occSpeed = () => {
       const n = useProjectStore.getState().currentProject?.apiSettings?.heatmap?.speed
       const s = n == null || !Number.isFinite(Number(n)) ? 1 : Number(n)
@@ -1688,16 +1698,23 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     /* Each zone gets the dashboard's count for it (same weight on the same key), shared among its rooms in view.
        Sharing all the people among every room rounded each room to none once a zone linked many rooms. */
-    const placeCrowd = async (floorIds: string[], zones: { key: string; ids: string[] }[], people: number) => {
+    const placeCrowd = async (floorIds: string[], zones: { key: string; ids: string[] }[], people: number, key: string) => {
       const seq = heatSeq
-      clearCrowd()
+      if (!crowdWanted()) { clearCrowd(); return }
+      if (crowdPlacedSig === key && (crowdMesh || crowdJobBusy)) return
+      const job = ++crowdJob
+      crowdJobBusy = job
+      crowdPlacedSig = key
+      wipeCrowd()
+      const mine = () => job === crowdJob && crowdWanted() && seq === heatSeq
+      try {
       const inView = new Set<string>()
       for (const floorId of floorIds) {
         const set = floorRooms.get(floorId)?.guids
         if (!set) continue
         for (const g of set) if (located.has(g)) inView.add(g)
       }
-      if (!inView.size || people <= 0) return
+      if (!inView.size || people <= 0 || !mine()) { if (crowdJobBusy === job) crowdJobBusy = 0; return }
       const zoneWeights = zones.map(z => occWeight(z.key))
       const zoneSum = zoneWeights.reduce((n, w) => n + w, 0) || 1
       const plan: { id: string; count: number }[] = []
@@ -1713,14 +1730,14 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         exact.map((v, i) => [v - counts[i], i] as const).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { counts[i]++; left-- } })
         rooms.forEach((id, i) => { if (counts[i]) plan.push({ id, count: counts[i] }) })
       })
-      if (!plan.length) return
+      if (!plan.length) { if (crowdJobBusy === job) crowdJobBusy = 0; return }
       const spots = plan.flatMap(sp => {
         const entry = located.get(sp.id)
         return entry?.localBox ? [{ ...sp, entry }] : []
       })
-      if (!spots.length) return
+      if (!spots.length) { if (crowdJobBusy === job) crowdJobBusy = 0; return }
       await solidsFor(spots.map(sp => ({ guid: sp.id, model: sp.entry.model, localId: sp.entry.localId, box: sp.entry.localBox })))
-      if (seq !== heatSeq) return
+      if (!mine()) { if (crowdJobBusy === job) crowdJobBusy = 0; return }
       type Ready = { count: number; walks: boolean; y: number; minX: number; maxX: number; minZ: number; maxZ: number; foot: CrowdFoot | null; area: number }
       const ready: Ready[] = []
       for (const sp of spots) {
@@ -1745,7 +1762,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       /* A storey-sized space is the floor plate, not a room. People there covered the site. */
       const kept = typical > 0 ? ready.filter(r => r.area > 0.5 && r.area <= typical * 16) : ready.filter(r => r.area > 0.5)
       const total = kept.reduce((n, r) => n + r.count, 0)
-      if (!total) return
+      if (!total) { if (crowdJobBusy === job) crowdJobBusy = 0; return }
       const geo = new THREE.SphereGeometry(0.22, 6, 6)
       const mat = new THREE.MeshBasicMaterial({ color: 0xffffff })
       const mesh = new THREE.InstancedMesh(geo, mat, total)
@@ -1794,12 +1811,27 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       mesh.instanceMatrix.needsUpdate = true
       glow.instanceMatrix.needsUpdate = true
       if (glow.instanceColor) glow.instanceColor.needsUpdate = true
+      if (!mine()) {
+        wipeCrowd()
+        mesh.geometry.dispose()
+        ;(mesh.material as THREE.Material).dispose()
+        glow.geometry.dispose()
+        if (crowdJobBusy === job) crowdJobBusy = 0
+        return
+      }
       overlay.add(mesh)
       overlay.add(glow)
       crowdMesh = mesh
       crowdGlowMesh = glow
+      } finally {
+        if (crowdJobBusy === job) crowdJobBusy = 0
+      }
     }
     stepCrowd = () => {
+      if (!crowdWanted()) {
+        if (crowdMesh || crowdGlowMesh || crowd.length) clearCrowd()
+        return
+      }
       if (!crowdMesh || !crowd.length) return
       const step = 0.016 * occSpeed()
       // A person keeps about 10 px across, so a whole floor seen from above still shows them; up close they stay life size
@@ -1807,6 +1839,17 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const viewH = engine.world?.renderer?.three?.domElement?.clientHeight || 800
       const viewW = engine.world?.renderer?.three?.domElement?.clientWidth || 1200
       const perPx = cam?.isPerspectiveCamera ? 2 * Math.tan((cam.fov * Math.PI) / 360) / viewH : 0
+      const crowdNear = new Map<string, number[]>()
+      for (let n = 0; n < crowd.length; n++) {
+        const q = crowd[n]
+        const cx = Math.floor(q.x / 4), cz = Math.floor(q.z / 4)
+        for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+          const bin = `${cx + dx}:${cz + dz}`
+          const list = crowdNear.get(bin)
+          if (list) list.push(n)
+          else crowdNear.set(bin, [n])
+        }
+      }
       for (let i = 0; i < crowd.length; i++) {
         const p = crowd[i]
         /* Ordinary rooms stand still. A ticked name walks, and only on that room's floor. */
@@ -1832,9 +1875,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           p.z = nz
         }
         let near = 0
-        for (let j = 0; j < crowd.length; j++) {
-          const dx = crowd[j].x - p.x
-          const dz = crowd[j].z - p.z
+        const list = crowdNear.get(`${Math.floor(p.x / 4)}:${Math.floor(p.z / 4)}`)
+        if (list) for (let k = 0; k < list.length; k++) {
+          const o = crowd[list[k]]
+          const dx = o.x - p.x
+          const dz = o.z - p.z
           if (dx * dx + dz * dz < 16) near++
         }
         /* Neighbours within 4 m, the medical twin's bands */
@@ -1873,6 +1918,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       heatBusy = false
       heatAgain = false
       heatReq = null
+      heatModeNow = 'temp'
       spaceHeatActive = false
       heatInsideWalls = false
       syncHeatClip()
@@ -2021,11 +2067,13 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     const applySpaceHeat = async (zones: { bimId?: string; bimIds?: string[]; gid?: string; nameEn?: string; tempC?: number | null; rh?: number | null; co2?: number | null }[], mode?: string) => {
       heatReq = { zones, mode }
+      const md = mode === 'comfort' || mode === 'hum' || mode === 'occ' ? mode : 'temp'
+      heatModeNow = md
+      /* People belong to Occupancy only. Clear them before any early return so another tab cannot keep the crowd. */
+      if (md !== 'occ') clearCrowd()
       /* Locating every room shares the worker that is still parsing the next file. */
       if (useLoadingProgressStore.getState().sessionActive) return
-      const md = mode === 'comfort' || mode === 'hum' || mode === 'occ' ? mode : 'temp'
       spaceHeatActive = true
-      heatModeNow = md
       applySpacesGate()
       const inside = heatInsideOf()
       heatInsideWalls = inside
@@ -2065,8 +2113,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const missingNow = ready.filter(id => !heatFloorSheets.get(id)?.done)
         if (ready.length && !missingNow.length) {
           showHeatFloors(new Set(ready))
-          if (md === 'occ') await placeCrowd(ready, crowdZones, occPeople())
-          else clearCrowd()
+          if (md === 'occ') await placeCrowd(ready, crowdZones, occPeople(), valueSig + '@' + ready.join(','))
           syncGhost()
           const wakeNow = engine.world?.renderer as { needsUpdate?: boolean } | undefined
           if (wakeNow) wakeNow.needsUpdate = true
@@ -2095,9 +2142,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       showHeatFloors(show)
       const missing = order.filter(id => !heatFloorSheets.get(id)?.done)
       const wake = engine.world?.renderer as { needsUpdate?: boolean } | undefined
-      if (md !== 'occ') clearCrowd()
       if (!missing.length) {
-        if (md === 'occ') await placeCrowd(order, crowdZones, occPeople())
+        if (md === 'occ') await placeCrowd(order, crowdZones, occPeople(), valueSig + '@' + order.join(','))
         syncGhost()
         if (wake) wake.needsUpdate = true
         return
@@ -2122,12 +2168,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         /* Occupancy colours the people, not the room, the same way the medical twin does. */
         if (md === 'occ') {
           for (const id of guids) kept.guids.add(id)
-          if (seq === heatSeq) {
-            kept.done = true
-            await placeCrowd(order, crowdZones, occPeople())
-            syncGhost()
-            if (wake) wake.needsUpdate = true
-          }
+          if (seq === heatSeq) kept.done = true
           continue
         }
         type Room = { model: any; geoms: THREE.BufferGeometry[]; x: number; y: number; z: number; hx: number; hy: number; hz: number; t: number; guid: string; area: number }
@@ -2202,6 +2243,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         syncGhost()
         if (wake) wake.needsUpdate = true
         if (seq === heatSeq) kept.done = true
+      }
+      if (seq === heatSeq && md === 'occ') {
+        await placeCrowd(order, crowdZones, occPeople(), valueSig + '@' + order.join(','))
+        syncGhost()
+        if (wake) wake.needsUpdate = true
       }
       return
       } finally {
@@ -2483,7 +2529,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       miniMap.capture()
       // Fans in the shown equipment and the occupancy crowd move only while frames are drawn
       const spinning = !!(active && ghost?.group.visible)
-      if (spinning || (crowdMesh && crowd.length)) {
+      if (spinning || (crowdMesh && crowd.some(p => !p.still))) {
         const wake = engine.world?.renderer as { needsUpdate?: boolean } | undefined
         if (wake) wake.needsUpdate = true
       }
