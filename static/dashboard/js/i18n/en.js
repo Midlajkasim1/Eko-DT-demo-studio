@@ -600,6 +600,9 @@ window.EKO_I18N.en = {
   "roofLoopCw": "Condenser water",
   "roofLoopChw": "Chilled water",
   "roofLoopHw": "Hot water",
+  "roofOn": "ON",
+  "roofOff": "OFF",
+  "roofNoValue": "--",
   "roofLiveBadge": "LIVE",
 
   "roofLive": "{n} of {total} readings live",

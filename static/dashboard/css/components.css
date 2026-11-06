@@ -6123,12 +6123,18 @@
   }
 }
 
+/* The dashes that run along the pipes are the one thing here redrawn on every frame, so they sit in their own layer (will-change): only that layer is
+   repainted, never the machines or the pipes under it. They move only while their pipe's flow is On. */
+.dashboard-native-container .rf-flows {
+  will-change:transform
+}
+
 .dashboard-native-container .rf-flowline {
   stroke-dasharray:16 22;
   opacity:.72
 }
 
-.dashboard-native-container .rf-pipe[data-flow="on"] .rf-flowline {
+.dashboard-native-container .rf-flowline[data-flow="on"] {
   opacity:.95;
   animation:rf-flow 1.1s linear infinite
 }
@@ -6261,7 +6267,8 @@
 }
 
 .dashboard-native-container .rf-eq[data-act]:hover {
-  filter:brightness(1.08)
+  /* not a filter: a filter re-draws the whole machine, rotors and all, on every frame while the pointer is over it */
+  opacity:.9
 }
 
 .dashboard-native-container .rf-eq:focus-visible {
@@ -6401,7 +6408,7 @@
   .dashboard-native-container .rf-bars rect,
   .dashboard-native-container .rf-needle,
   .dashboard-native-container .rf-lamp,
-  .dashboard-native-container .rf-pipe[data-flow="on"] .rf-flowline {
+  .dashboard-native-container .rf-flowline[data-flow="on"] {
     animation:none !important
   }
 }

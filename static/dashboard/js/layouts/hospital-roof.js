@@ -39,8 +39,8 @@
 
   /* kind decides what a valid value is. temp: number -50..200 · pct: number 0..100 · num: any number · status: run status text · text: any text */
   var ITEMS = [
-    { id: 'ctEnter',  slot: 'coolingTower',   cap: 'CWENTERINGTEMP', names: ['cwenteringtemp', 'cwentertemp', 'cdwenteringtemp', 'condenteringtemp'],   kind: 'temp' },
-    { id: 'ctLeave',  slot: 'coolingTower',   cap: 'CWLEAVINGTEMP',  names: ['cwleavingtemp', 'cwleavetemp', 'cdwleavingtemp', 'condleavingtemp'],    kind: 'temp' },
+    { id: 'ctEnter',  slot: 'coolingTower',   cap: 'CWENTERINGTEMP', names: ['chwenteringtemp', 'cwenteringtemp', 'cwentertemp', 'cdwenteringtemp', 'condenteringtemp'],   kind: 'temp' },
+    { id: 'ctLeave',  slot: 'coolingTower',   cap: 'CWLEAVINGTEMP',  names: ['chwleavingtemp', 'cwleavingtemp', 'cwleavetemp', 'cdwleavingtemp', 'condleavingtemp'],    kind: 'temp' },
     { id: 'ctSpeed',  slot: 'coolingTower',   cap: 'FANSPEED',       names: ['fanspeed'],                        kind: 'pct' },
     { id: 'ctRun',    slot: 'coolingTower',   cap: 'FANRUNSTATUS',   names: ['fanrunstatus'],                    kind: 'status', trip: 'ctTrip' },
     { id: 'ctTrip',   slot: 'coolingTower',   cap: 'FANTRIP',        names: ['fantrip'],                         kind: 'text' },
@@ -80,7 +80,9 @@
     { id: 'boiler',  run: 'blRun' }
   ];
   var BY_ID = {};
-  ITEMS.forEach(function (i) { BY_ID[i.id] = i; });
+  /* A point name is compared with the zero padding of its numbers dropped, so FIN's PUMP01SPEED is the screen's PUMP1SPEED. Still the whole name: PUMP10SPEED is another point. */
+  function pointKey(name) { return fold(name).replace(/([a-z])0+(\d)/g, '$1$2'); }
+  ITEMS.forEach(function (i) { BY_ID[i.id] = i; i.keys = i.names.map(pointKey); });
 
   /* ── reading a value (pure: no DOM) ── */
   function clean(v) {
@@ -92,6 +94,7 @@
   var RANGE = { temp: [-50, 200], pct: [0, 100] };
   var ON = /^(on|run|running|started|start|true|active|yes|1)$/i;
   var OFF = /^(off|stop|stopped|false|inactive|no|0)$/i;
+  var FLAG_ON = /^(true|1|on)$/i, FLAG_OFF = /^(false|0|off)$/i;
   var FAULT = /^(fault|faulted|trip|tripped|alarm|fail|failed)$/i;
   var HEALTHY = /^(normal|ok|off|clear|cleared|none|false|inactive|no|0)$/i;
   function statusOf(raw) {
@@ -119,17 +122,18 @@
     return { id: slot.id, assets: found };
   }
 
-  /* One point's reading: { state, text, num, status, equip, pointName }. state: live · no-equip · no-point · ambiguous · disconnected · stale · not-reporting · invalid */
+  /* One point's reading: { state, text, num, status, flag, equip, pointName }. state: live · no-equip · no-point · ambiguous · disconnected · stale · not-reporting · invalid */
   function readItem(item, slot, connected) {
-    var out = { id: item.id, state: 'no-equip', text: null, num: null, status: null, equip: null, pointName: null };
+    var out = { id: item.id, state: 'no-equip', text: null, num: null, status: null, flag: null, equip: null, pointName: null };
     /* with FIN gone the feed is empty or old, so a machine missing from it says nothing about the mapping: that is Offline, not Unmapped */
     if (connected === false) out.state = 'disconnected';
     if (!slot || !slot.assets.length) return out;
     var hits = [];
     slot.assets.forEach(function (a) {
-      for (var n = 0; n < item.names.length; n++) {
-        var p = (a.points || []).filter(function (x) { return x && fold(x.navName) === item.names[n]; })[0];
-        if (p) { hits.push({ asset: a, point: p }); return; }
+      var keys = (a.points || []).map(function (x) { return x ? pointKey(x.navName) : null; });
+      for (var n = 0; n < item.keys.length; n++) {
+        var at = keys.indexOf(item.keys[n]);
+        if (at !== -1) { hits.push({ asset: a, point: a.points[at] }); return; }
       }
     });
     if (!hits.length) { if (connected !== false) out.state = 'no-point'; return out; }
@@ -149,7 +153,11 @@
       out.state = 'live'; out.num = n2; out.text = m[1] + (unit ? ' ' + unit : '');
       return out;
     }
-    if (item.kind === 'status') out.status = typeof p.bool === 'boolean' ? (p.bool ? 'on' : 'off') : statusOf(raw);
+    if (item.kind === 'status') {
+      out.status = typeof p.bool === 'boolean' ? (p.bool ? 'on' : 'off') : statusOf(raw);
+      /* only a boolean is shown as On / Off; FIN's enum words (Running, Tripped...) stay FIN's, and a value that is neither is not guessed to be Off */
+      out.flag = FLAG_ON.test(raw) ? 'on' : FLAG_OFF.test(raw) ? 'off' : null;
+    }
     out.state = 'live'; out.text = raw;
     return out;
   }
@@ -169,11 +177,28 @@
     return 'unknown';
   }
 
+  /* One FIN equipment is one machine. A name that fits two machines at once ("CHW CW Pump") would feed both of them the same values, so it is given to neither:
+     they say Unmapped, and the tooltip says why, until the name or the `equip` pin settles it. A pinned `equip` is the user's own word and is left alone. */
+  function unshare(slots) {
+    var seen = [], twice = [];
+    SLOTS.forEach(function (s) {
+      if (s.equip) return;
+      slots[s.id].assets.forEach(function (a) {
+        if (seen.indexOf(a) === -1) seen.push(a); else if (twice.indexOf(a) === -1) twice.push(a);
+      });
+    });
+    if (!twice.length) return;
+    SLOTS.forEach(function (s) {
+      if (!s.equip) slots[s.id].assets = slots[s.id].assets.filter(function (a) { return twice.indexOf(a) === -1; });
+    });
+  }
+
   /* Everything the drawing shows, from the live assets. `opts.connected === false`: FIN is not connected, so nothing is read as live. */
   function model(assets, opts) {
     var connected = !(opts && opts.connected === false);
     var slots = {};
     SLOTS.forEach(function (s) { slots[s.id] = resolveSlot(s, assets); });
+    unshare(slots);
     var reads = {};
     ITEMS.forEach(function (it) { reads[it.id] = readItem(it, slots[it.slot], connected); });
     var parts = {};
@@ -328,8 +353,20 @@
     }
     return out;
   }
+  /* A pipe is drawn in three layers so that what moves can be drawn on its own: the pipe's body (still), the light dashes that run along it (the only thing
+     that animates, in its own composited layer: they are redrawn every frame, and must not drag the machines and the pipes' bodies along with them),
+     and the couplings and flow arrows over both (still). */
   function pipeSvg(pipe) {
-    var col = PIPE_COLOURS[pipe.loop], d = pathOf(pipe.pts), joints = '', arrows = '';
+    var col = PIPE_COLOURS[pipe.loop], d = pathOf(pipe.pts);
+    return '<g class="rf-pipe" data-pipe="' + pipe.id + '" data-loop="' + pipe.loop + '" data-flow="unknown">' +
+      '<path d="' + d + '" stroke="' + col[0] + '" stroke-width="13.4"/>' +
+      '<path d="' + d + '" stroke="' + col[1] + '" stroke-width="10.2"/></g>';
+  }
+  function flowSvg(pipe) {
+    return '<path class="rf-flowline" data-flowof="' + pipe.id + '" data-flow="unknown" d="' + pathOf(pipe.pts) + '" stroke="' + PIPE_COLOURS[pipe.loop][2] + '" stroke-width="3.6"/>';
+  }
+  function fitSvg(pipe) {
+    var col = PIPE_COLOURS[pipe.loop], joints = '', arrows = '';
     legsOf(pipe.pts).forEach(function (l) {
       if (l.len >= 44) [19, l.len - 19].forEach(function (at) {
         var x = l.a[0] + l.dx * at, y = l.a[1] + l.dy * at;
@@ -342,10 +379,7 @@
           ' L' + (mx - l.dx * s + l.dy * s).toFixed(1) + ' ' + (my - l.dy * s + l.dx * s).toFixed(1) + 'Z" fill="#fff" stroke="' + col[0] + '" stroke-width="1.2"/>';
       }
     });
-    return '<g class="rf-pipe" data-pipe="' + pipe.id + '" data-loop="' + pipe.loop + '" data-flow="unknown">' +
-      '<path d="' + d + '" stroke="' + col[0] + '" stroke-width="13.4"/>' +
-      '<path d="' + d + '" stroke="' + col[1] + '" stroke-width="10.2"/>' +
-      '<path class="rf-flowline" d="' + d + '" stroke="' + col[2] + '" stroke-width="3.6"/>' + joints + arrows + '</g>';
+    return joints + arrows;
   }
   /* where lines meet: a fitting over the edges of the pipes it joins */
   function teeSvg(t, loop) {
@@ -395,6 +429,8 @@
     return '<svg class="roofsvg" xmlns="http://www.w3.org/2000/svg" viewBox="' + VIEW.x + ' ' + VIEW.y + ' ' + VIEW.w + ' ' + VIEW.h + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="' + esc(tr(E, 'roofTitle')) + '" dir="ltr">' +
       ART_LIB.defs() +
       '<g class="rf-pipes" fill="none" stroke-linecap="butt" stroke-linejoin="round">' + PIPES.map(pipeSvg).join('') + '</g>' +
+      '<g class="rf-flows" fill="none" stroke-linecap="butt" stroke-linejoin="round">' + PIPES.map(flowSvg).join('') + '</g>' +
+      '<g class="rf-fits" fill="none" stroke-linecap="butt" stroke-linejoin="round">' + PIPES.map(fitSvg).join('') + '</g>' +
       teeSvg(TEES.cwIn, 'cw') + teeSvg(TEES.cwOut, 'cw') + teeSvg(TEES.chwIn, 'chw') + teeSvg(TEES.chwOut, 'chw') +
       '<g class="rf-bldgs"><rect class="rf-bcw" x="' + B.chilled.x + '" y="' + B.chilled.y + '" width="' + B.chilled.w + '" height="' + B.chilled.h + '"/><rect class="rf-bhw" x="' + B.hot.x + '" y="' + B.hot.y + '" width="' + B.hot.w + '" height="' + B.hot.h + '"/>' +
       snowflake(bcx, B.chilled.y + 30) + droplet(hcx, B.hot.y + 30) +
@@ -433,34 +469,58 @@
     if (r.state === 'no-point' || r.state === 'ambiguous') return label + ' · ' + tr(E, 'roofWhy.' + r.state, { point: it.cap });
     return label + ' · ' + tr(E, 'roofWhy.' + r.state) + (r.equip ? ' · FIN: ' + r.equip + ' / ' + r.pointName : '');
   }
+  /* What a tag says. A boolean status is On / Off; FIN's own enum word stays; a status with no value is "--". The reading itself (r.text) is never changed. */
+  function shown(E, it, r, w) {
+    if (r.state === 'live') return r.flag ? tr(E, r.flag === 'on' ? 'roofOn' : 'roofOff') : fit(r.text, w);
+    if (r.state === 'not-reporting' && it.kind === 'status') return tr(E, 'roofNoValue');
+    return fit(tr(E, 'roofSt.' + r.state), w);
+  }
+  /* The drawing is built once, so its moving parts are looked up once: an update is then only reads and writes of what changed. */
+  var REFS = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function refsOf(host) {
+    var r = REFS && REFS.get(host);
+    if (r) return r;
+    r = { tags: {}, pipes: {}, parts: {}, eqs: {}, live: host.querySelector('.rf-live'), status: host.querySelector('.roofstatus') };
+    TAGS.forEach(function (t) {
+      var g = host.querySelector('[data-tag="' + t.id + '"]');
+      if (g) r.tags[t.id] = { g: g, txt: g.querySelector('.rf-tagtxt'), title: g.querySelector('title') };
+    });
+    PARTS.concat({ id: 'btu' }).forEach(function (p) {
+      r.parts[p.id] = [].slice.call(host.querySelectorAll('[data-part="' + p.id + '"]')).map(function (el) { return { el: el, rot: el.classList.contains('rf-rot') }; });
+    });
+    PIPES.forEach(function (pipe) { r.pipes[pipe.id] = [host.querySelector('[data-pipe="' + pipe.id + '"]'), host.querySelector('[data-flowof="' + pipe.id + '"]')]; });
+    SLOTS.forEach(function (s) {
+      var g = host.querySelector('.rf-eq[data-slot="' + s.id + '"]');
+      r.eqs[s.id] = { g: g, title: g && g.querySelector('title') };
+    });
+    if (REFS) REFS.set(host, r);
+    return r;
+  }
   function update(host, E) {
     if (!host) return null;
-    var m = model(liveAssets(E), { connected: isConnected() });
+    var m = model(liveAssets(E), { connected: isConnected() }), refs = refsOf(host);
     TAGS.forEach(function (t) {
-      var it = BY_ID[t.id], r = m.reads[t.id], g = host.querySelector('[data-tag="' + t.id + '"]');
-      if (!g) return;
+      var it = BY_ID[t.id], r = m.reads[t.id], ref = refs.tags[t.id];
+      if (!ref) return;
       var st = r.state, part = it.kind === 'status' && PARTS.filter(function (p) { return p.run === t.id; })[0];
       var fault = st === 'live' && part && m.parts[part.id] === 'fault';
-      setAttr(g, 'data-st', fault ? 'fault' : st);
-      setAttr(g, 'data-on', st === 'live' && r.status === 'on' ? '1' : null);
-      setText(g.querySelector('.rf-tagtxt'), fit(st === 'live' ? r.text : tr(E, 'roofSt.' + st), t.w));
-      setText(g.querySelector('title'), tagTitle(E, it, r));
+      setAttr(ref.g, 'data-st', fault ? 'fault' : st);
+      setAttr(ref.g, 'data-on', st === 'live' && r.status === 'on' ? '1' : null);
+      setText(ref.txt, shown(E, it, r, t.w));
+      setText(ref.title, tagTitle(E, it, r));
     });
     PARTS.concat({ id: 'btu' }).forEach(function (p) {
       var run = m.parts[p.id], speed = p.speed && m.reads[p.speed];
-      host.querySelectorAll('[data-part="' + p.id + '"]').forEach(function (el) {
-        setAttr(el, 'data-run', run);
-        if (!el.classList.contains('rf-rot')) return;
-        /* drawn turning at about the speed FIN reports; no reported speed, one steady pace */
-        var dur = speed && speed.state === 'live' && speed.num > 0 ? (.5 + (100 - speed.num) / 100 * 2.5).toFixed(2) + 's' : '';
-        if (el.style.animationDuration !== dur) el.style.animationDuration = dur;
+      /* drawn turning at about the speed FIN reports; no reported speed, one steady pace */
+      var dur = speed && speed.state === 'live' && speed.num > 0 ? (.5 + (100 - speed.num) / 100 * 2.5).toFixed(2) + 's' : '';
+      refs.parts[p.id].forEach(function (ref) {
+        setAttr(ref.el, 'data-run', run);
+        if (ref.rot && ref.el.style.animationDuration !== dur) ref.el.style.animationDuration = dur;
       });
     });
-    PIPES.forEach(function (pipe) {
-      setAttr(host.querySelector('[data-pipe="' + pipe.id + '"]'), 'data-flow', m.flows[pipe.flow]);
-    });
+    PIPES.forEach(function (pipe) { refs.pipes[pipe.id].forEach(function (el) { setAttr(el, 'data-flow', m.flows[pipe.flow]); }); });
     SLOTS.forEach(function (s) {
-      var g = host.querySelector('.rf-eq[data-slot="' + s.id + '"]'), id = m.open[s.id];
+      var ref = refs.eqs[s.id], g = ref.g, id = m.open[s.id];
       setAttr(g, 'data-act', id ? 'openAsset' : null);
       setAttr(g, 'data-asset', id);
       setAttr(g, 'data-tab', id ? 'alarms' : null);
@@ -468,13 +528,12 @@
       setAttr(g, 'tabindex', id ? '0' : null);
       var hints = (HINTS[s.id] || []).map(function (k) { return m.reads[k]; }).filter(function (r) { return r.state === 'live'; })
         .map(function (r) { return r.pointName + ' ' + r.text; });
-      setText(g && g.querySelector('title'), [tr(E, 'roofEq.' + s.id)].concat(hints).join(' · '));
+      setText(ref.title, [tr(E, 'roofEq.' + s.id)].concat(hints).join(' · '));
     });
-    setAttr(host.querySelector('.rf-live'), 'data-on', m.connected && m.live ? '1' : '0');
-    var status = host.querySelector('.roofstatus');
-    if (status) {
-      setAttr(status, 'data-st', !m.connected ? 'off' : m.live ? 'live' : 'none');
-      setText(status, !m.connected ? tr(E, 'roofNotConnected') : tr(E, 'roofLive', { n: String(m.live), total: String(m.total) }));
+    setAttr(refs.live, 'data-on', m.connected && m.live ? '1' : '0');
+    if (refs.status) {
+      setAttr(refs.status, 'data-st', !m.connected ? 'off' : m.live ? 'live' : 'none');
+      setText(refs.status, !m.connected ? tr(E, 'roofNotConnected') : tr(E, 'roofLive', { n: String(m.live), total: String(m.total) }));
     }
     return m;
   }

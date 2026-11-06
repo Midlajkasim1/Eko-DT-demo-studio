@@ -1357,7 +1357,11 @@
     if (changed) paint();
   }
 
+  /* One FIN push can change several things (the equipment, the integration's point count, its heartbeat): each asks for a repaint, and every
+     repaint rebuilds the whole shell. While a push is being applied they are collected and the dashboard is painted once, as the push ends. */
+  var paintHeld = 0, paintAsked = false;
   function paint() {
+    if (paintHeld) { paintAsked = true; return; }
     var E = window.EKO;
     if (E && typeof E.set === 'function') E.set({});
   }
@@ -2430,6 +2434,8 @@
 window.addEventListener('dashboard-data', function onData(e) {
     if (!current()) { window.removeEventListener('dashboard-data', onData); return; }
     var d = e.detail || {};
+    paintHeld++;
+    try {
     if (d.type === 'alarms') applyAlarms(d.data);
     if (d.type === 'power') applyPower(d.data);
     if (d.type === 'meters') applyMeters(d.data);
@@ -2442,6 +2448,10 @@ window.addEventListener('dashboard-data', function onData(e) {
     if (d.type === 'equipment' && d.data && Array.isArray(d.data.equipment)) {
       var pts = d.data.equipment.reduce(function (n, eq) { return n + ((eq && eq.points) || []).length; }, 0);
       finIntegration({ pts: pts + (pts === 1 ? ' point' : ' points'), hb: hhmm() });
+    }
+    } finally {
+      paintHeld--;
+      if (!paintHeld && paintAsked) { paintAsked = false; paint(); }
     }
   });
 

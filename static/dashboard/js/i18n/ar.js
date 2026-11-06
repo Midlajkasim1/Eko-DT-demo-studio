@@ -653,6 +653,9 @@ window.EKO_I18N.ar = {
   "roofLoopCw": "مياه المكثف",
   "roofLoopChw": "مياه مبردة",
   "roofLoopHw": "مياه ساخنة",
+  "roofOn": "تشغيل",
+  "roofOff": "إيقاف",
+  "roofNoValue": "--",
   "roofLiveBadge": "مباشر",
 
   "roofLive": "{n} من {total} قراءة مباشرة",
