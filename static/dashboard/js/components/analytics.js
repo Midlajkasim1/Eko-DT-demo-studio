@@ -850,7 +850,7 @@ window.EKO_A = (function(){
     const co2Mean = co2s.length ? co2s.reduce((n, v) => n + v, 0) / co2s.length : null;
     const zn = z => ar ? (z.nameAr || z.nameEn) : z.nameEn;
     const roomsOn = showingRooms(s);
-    const roomList = roomsOn ? (d.rooms || []).map(r => ({ ...r, nameEn: r.name, bimId: r.guid, gid: r.guid })) : [];
+    const roomList = roomsOn ? (d.rooms || []) : [];
     const rankRows = rank.length ? rank.map((z, i) =>
       `<button class="hmrank selrow" data-on="${s.hmSel===z.nameEn}" data-act="hmSel" data-v="${esc(z.nameEn)}">
         <span class="tMonoS cT3">${i+1}</span><span class="grow taS">${esc(zn(z))}</span>
@@ -865,13 +865,8 @@ window.EKO_A = (function(){
         <span class="grow taS">${esc(g.key || E.t('hmNoLevel'))}</span>
         <span class="tMonoS cT3">${g.rooms.length}</span></button>`;
       if(!on) return head;
-      const body = g.rooms.map(r =>
-        `<button class="hmrank hmroom" data-on="${s.hmSel===r.guid}" data-act="hmSel" data-v="${esc(r.guid)}">
-          <span class="grow taS">${esc(r.name)}</span>
-          ${r.sensor && r.sensor !== r.name ? `<span class="tMonoS cT3">${esc(r.sensor)}</span>` : ''}
-          <span class="hmrbar"><span style="width:${heatBar(r, mode, roomList).toFixed(0)}%;background:${heatCell(mode, heatValue(r, mode, roomList), mode==='occ'?occOf(r, roomList).ratio:null)}"></span></span>
-          <span class="tMonoS">${esc(heatText(r, mode, roomList))}</span></button>`).join('');
-      return head + body;
+      /* The spacer holds the scroll height. fillHeatRooms draws only the rows on screen. */
+      return head + `<div class="hmwin" data-level="${esc(g.key)}" style="height:${g.rooms.length * 32}px"></div>`;
     }).join('') : `<p class="alempty">${esc(E.t('hmNoRooms'))}</p>`;
     const tglRow = (lbl, key, on) =>
       `<div class="hmtgl"><span class="grow">${esc(lbl)}</span>
@@ -880,7 +875,7 @@ window.EKO_A = (function(){
     const sel = zones.find(z => z.nameEn === s.hmSel);
     const roomShaped = roomSel ? { ...roomSel, nameEn: roomSel.name, bimId: roomSel.guid, gid: roomSel.guid } : null;
     const selBody = roomShaped
-      ? `<div class="aprow"><dt>${esc(roomShaped.name)}</dt><dd>${esc(heatText(roomShaped, mode, roomList.length ? roomList : [roomShaped]))}</dd></div>
+      ? `<div class="aprow"><dt>${esc(roomShaped.name)}</dt><dd>${esc(heatText(roomShaped, mode, [roomShaped]))}</dd></div>
          <div class="aprow"><dt>${esc(E.t('hmRoomLevel'))}</dt><dd>${esc(roomSel.level || E.t('hmNoLevel'))}</dd></div>
          <div class="aprow"><dt>${esc(E.t('hmRoomSensor'))}</dt><dd>${esc(roomSel.sensor || '—')}</dd></div>`
       : sel
@@ -923,6 +918,40 @@ window.EKO_A = (function(){
       <div class="alfoot">${esc(foot)}</div></div>`);
   }
 
+  /* Open levels are a spacer. This writes the rows that intersect the scrollport, and nothing else. */
+  function fillHeatRooms(E){
+    if(!E || !showingRooms(E.state)) return;
+    const boxes = document.querySelectorAll('.hmwin');
+    if(!boxes.length) return;
+    const d = E.data.heat || {}, s = E.state, mode = heatMode(s);
+    const groups = new Map(roomGroups(d.rooms || []).map(g => [g.key, g.rooms]));
+    const rowH = 32;
+    boxes.forEach(win => {
+      const scroller = win.closest('.hmrooms');
+      const rooms = groups.get(win.dataset.level || '') || [];
+      const n = rooms.length;
+      if(!scroller || !n){ win.innerHTML = ''; return; }
+      const viewH = scroller.clientHeight || 520;
+      const winTop = win.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      const rel = scroller.scrollTop - winTop;
+      const from = Math.max(0, Math.floor(rel / rowH) - 6);
+      const to = Math.min(n, Math.ceil((rel + viewH) / rowH) + 6);
+      const slice = rooms.slice(from, to);
+      const sig = mode + ':' + (s.hmSel || '') + ':' + from + ':' + to + ':' + slice.map(r => heatText(r, mode, [r])).join(',');
+      if(win.dataset.sig === sig) return;
+      win.dataset.sig = sig;
+      win.innerHTML = slice.map((r, i) => {
+        const shaped = { ...r, nameEn: r.name, bimId: r.guid, gid: r.guid };
+        const band = [shaped];
+        return `<button class="hmrank hmroom" style="top:${(from + i) * rowH}px" data-on="${s.hmSel===r.guid}" data-act="hmSel" data-v="${esc(r.guid)}">
+          <span class="grow taS">${esc(r.name)}</span>
+          ${r.sensor && r.sensor !== r.name ? `<span class="tMonoS cT3">${esc(r.sensor)}</span>` : ''}
+          <span class="hmrbar"><span style="width:${heatBar(shaped, mode, band).toFixed(0)}%;background:${heatCell(mode, heatValue(shaped, mode, band), mode==='occ'?occOf(shaped, band).ratio:null)}"></span></span>
+          <span class="tMonoS">${esc(heatText(shaped, mode, band))}</span></button>`;
+      }).join('');
+    });
+  }
+
   function heatOverlay(E, pinFn){
     const d = E.data.heat, s = E.state;
     const mode = heatMode(s);
@@ -959,7 +988,11 @@ window.EKO_A = (function(){
        a dashboard refresh does not hide them for a frame (that blink reads
        as flicker). The blur is left off: sampling the 3D canvas shimmers. */
     const projected = tiles.indexOf('left:') !== -1;
-    return `<div class="hmlayer"${projected ? ' data-proj="1"' : ''}>${tiles}</div>
+    const flown = s.hmRoomView && (d.rooms || []).find(r => r.guid === s.hmRoomView.guid);
+    const locBar = flown
+      ? `<div class="secloc hmroomloc" role="status"><span>${esc(E.t('sec.located', { c: flown.name || flown.guid }))}</span><button class="btnG btnSm" data-act="hmRoomBack">${icon('chevL', 12)} ${esc(E.t('back'))}</button></div>`
+      : '';
+    return `${locBar}<div class="hmlayer"${projected ? ' data-proj="1"' : ''}>${tiles}</div>
       <div class="heatbar mzglass">
         ${mode === 'occ'
           ? `<span class="hmocc">${[['hmOccLow', '#3b82f6'], ['hmOccNormal', '#22c55e'], ['hmOccHigh', '#eab308'], ['hmOccCritical', '#ef4444']]
@@ -976,5 +1009,5 @@ window.EKO_A = (function(){
 
   return { systemsSummary, systemsPanel, benchPage, anomPage, fcstPage,
            waterPage, gasPage, spacesSummary, assetsSummary, modRowsPanel,
-           heatPanel, heatOverlay, widget, heroTile, chrome, sysPage, lockedSummary, fcstFit, fcstFitTiles };
+           heatPanel, heatOverlay, fillHeatRooms, widget, heroTile, chrome, sysPage, lockedSummary, fcstFit, fcstFitTiles };
 })();

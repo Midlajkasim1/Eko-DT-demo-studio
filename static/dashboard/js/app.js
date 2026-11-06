@@ -158,7 +158,7 @@
       regQ: '', regStF: null, regSysF: null, regSevF: null, regSort: null, regSortDir: 'asc',
       markersOn: ss.get('eko-mk') !== '0', eqLabelsOn: ss.get('eko-eql') !== '0', showAcked: true, tlMetric: 'kwh', tlRange: 'day',   /* D70: per session */
       hmMode: 'temp', hmFloor: 'All', hmSel: null, hmRange: 'today', hmPlay: false, hmStep: null, hmStepLabel: '', hmOutline: false,
-      hmList: 'sensors', hmOpen: {},
+      hmList: 'sensors', hmOpen: {}, hmRoomView: null,
       hmLayers: { sensors: false, labels: true, values: true },
       woRaised: {}, dlg: null, palQ: '', palSel: 0,
       mobMore: false,
@@ -374,6 +374,9 @@
         if (look) this.state._heatViewed = true;
         applyHeatView(this, look);
       } else if (leavingHeat) {
+        this.state.hmRoomView = null;
+        this.state.hmSel = null;
+        if (this.engine && this.engine.highlightGid) this.engine.highlightGid(null);
         if (this.state.dock) { this.state.dock.level = 'ALL'; this.state.dock.floorAlone = false; this.state.dock.layer = 'all'; this.state.dock.layerContext = false; }
         if (this.engine && this.engine.isolateLevel) this.engine.isolateLevel('ALL', true);
         if (this.engine && this.engine.setLayerVisibility) this.engine.setLayerVisibility('all');
@@ -971,7 +974,7 @@
      scroller to the top (the alarms panel jumped when the account menu
      opened). Positions are captured before the rebuild and restored after,
      matched by selector and order. */
-  const SCROLLERS = ['#modcontent', '.ovpad', '.apbody', '.nflist', '.regscroll', '.dgscroll', '.dlg', '.aclist', '.vplist', '#ekonav', '.rpwrap', '.rphub', '.pagepad', '.pwarea', '.scrollY', '.pmurows'];
+  const SCROLLERS = ['#modcontent', '.ovpad', '.apbody', '.nflist', '.regscroll', '.dgscroll', '.dlg', '.aclist', '.vplist', '#ekonav', '.rpwrap', '.rphub', '.pagepad', '.pwarea', '.scrollY', '.pmurows', '.hmrooms'];
   /* The model tree's host sits outside the markup render() rebuilds. render() puts it back in the panel,
      and keepTree() carries its scroll position and focus across the rebuild. */
   let treeScrollTop = 0;
@@ -1146,7 +1149,8 @@
     if(window.EKO_SHEET && window.EKO_SHEET.sync) window.EKO_SHEET.sync();
     adoptTree();
     restoreScroll();                                             /* D86: after layout so flex overflow does not snap to top */
-    requestAnimationFrame(() => { restoreScroll(); requestAnimationFrame(restoreScroll); });
+    if(window.EKO_A && window.EKO_A.fillHeatRooms) window.EKO_A.fillHeatRooms(E);
+    requestAnimationFrame(() => { restoreScroll(); if(window.EKO_A && window.EKO_A.fillHeatRooms) window.EKO_A.fillHeatRooms(E); requestAnimationFrame(() => { restoreScroll(); if(window.EKO_A && window.EKO_A.fillHeatRooms) window.EKO_A.fillHeatRooms(E); }); });
     if(E.state.sumScrollBack != null){   /* closing the tree: the summary comes back where it was */
       const back = E.state.sumScrollBack, pad = document.querySelector('#ovp:not([data-tree]) .ovpad');
       E.state.sumScrollBack = null;
@@ -1276,6 +1280,9 @@
     E.state.dock.floorAlone = false;   /* Reset goes back to how the viewer opens: the floor filter is cumulative again */
     E.state.dock.layerContext = E.state.pageId === 'heatmap' || !!mepLayer;   /* the layers Reset restores are views, not picks */
     if(E.state.pageId === 'heatmap'){
+      E.state.hmRoomView = null;
+      E.state.hmSel = null;
+      if(E.engine && E.engine.highlightGid) E.engine.highlightGid(null);
       applyHeatView(E, true);
     } else if(E.engine.resetView){
       E.engine.resetView();
@@ -1371,6 +1378,14 @@
     E.set({ roofView: true, assetSel: null, dlg: null, mobMore: false });
   }
   function closeRoofView(){ roofHost = null; E.state.roofView = false; }
+  /* The first room click keeps the heatmap camera. Back, Escape, and leaving Rooms restore it. */
+  function endRoomFly(patch){
+    const view = E.state.hmRoomView && E.state.hmRoomView.view;
+    if(E.engine && E.engine.highlightGid) E.engine.highlightGid(null);
+    E.set(Object.assign({ hmSel: null, hmRoomView: null }, patch || {}));
+    const ok = view && E.engine && E.engine.flyToViewpoint && E.engine.flyToViewpoint(view);
+    if(!ok && E.state.pageId === 'heatmap') applyHeatView(E, true);
+  }
   const ACTS = {
     goMod(el){ const m = E.nav.modules.find(x=>x.id===el.dataset.mod);
       if(!E.state.exp[m.id]) E.state.born = 'nsub:'+m.id;
@@ -1834,14 +1849,37 @@
       E._hmTimer = setInterval(run, 1000);
     },
     hmFloor(el){ E.set({ hmFloor: el.dataset.v }); },
-    hmList(el){ E.set({ hmList: el.dataset.v === 'rooms' ? 'rooms' : 'sensors', hmSel: null }); },
+    hmList(el){
+      const next = el.dataset.v === 'rooms' ? 'rooms' : 'sensors';
+      if(next !== 'rooms' && E.state.hmRoomView){ endRoomFly({ hmList: next }); return; }
+      E.set({ hmList: next, hmSel: null });
+    },
     hmLevel(el){
       const key = el.dataset.v || '';
       const open = { ...(E.state.hmOpen || {}) };
       open[key] = !open[key];
       E.set({ hmOpen: open });
     },
-    hmSel(el){ E.set({ hmSel: E.state.hmSel === el.dataset.v ? null : el.dataset.v }); },
+    hmSel(el){
+      const v = el.dataset.v || '';
+      const room = ((E.data.heat && E.data.heat.rooms) || []).find(r => r.guid === v);
+      if(room){
+        if(E.state.hmRoomView && E.state.hmRoomView.guid === v) return;
+        const eng = E.engine;
+        const kept = E.state.hmRoomView && E.state.hmRoomView.view;
+        const view = kept || (eng && eng.saveViewpoint ? eng.saveViewpoint() : null);
+        E.set({ hmSel: v, hmRoomView: { guid: v, view: view } });
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          if(!E.state.hmRoomView || E.state.hmRoomView.guid !== v || !eng) return;
+          if(eng.flyToGid) eng.flyToGid(v);
+          if(eng.highlightGid) eng.highlightGid(v);
+        }));
+        return;
+      }
+      if(E.state.hmRoomView){ endRoomFly({ hmSel: E.state.hmSel === v ? null : v }); return; }
+      E.set({ hmSel: E.state.hmSel === v ? null : v });
+    },
+    hmRoomBack(){ endRoomFly(); },
     hmOutline(){ E.set({ hmOutline: !E.state.hmOutline }); },
     hmStill(){
       const heat = (window.INJECTED_PROJECT_CONFIG || {}).heatmap || {};
@@ -1862,6 +1900,7 @@
     E.state.dlg = null; if(window.EKO_BRIEF) window.EKO_BRIEF.reset(); E.set({}); };
   E.runAct = (name, data) => { const f = ACTS[name]; if(f) f({ dataset: data || {}, value: (data || {}).v }); };   /* E15: an action by name (js/e14.js) */
   E.locExit = ACTS.locBack;   /* Escape leaves Locate-in-3D focus the way Back to Assets does (surfaces.js) */
+  E.hmRoomBack = ACTS.hmRoomBack;
 
   /* E15 port: the click and change handlers of the ported ESG, Security, Evacuation, Maintenance and scenario modules, looked up
      after ours in the pack's order (a name already in ACTS or an earlier module keeps winning) */
@@ -1921,6 +1960,13 @@
     const stf = ev.target.closest('[data-act="regStF"]');
     if(stf){ E.state.regStF = E.state.regStF === stf.dataset.v ? null : stf.dataset.v; render(); }
   });
+  let hmRoomFrame = 0;
+  document.addEventListener('scroll', ev => {
+    const t = ev.target;
+    if(!t || !t.classList || !t.classList.contains('hmrooms') || window.EKO !== E) return;
+    if(hmRoomFrame) return;
+    hmRoomFrame = requestAnimationFrame(() => { hmRoomFrame = 0; if(window.EKO_A && window.EKO_A.fillHeatRooms) window.EKO_A.fillHeatRooms(E); });
+  }, true);
   document.addEventListener('keydown', ev => {
     if (window.EKO !== E) return;
     if(E.state.wall){ if(window.EKO_WALL) window.EKO_WALL.onKey(ev); return; }   /* D108: Escape exits; any other key only raises the exit hint */

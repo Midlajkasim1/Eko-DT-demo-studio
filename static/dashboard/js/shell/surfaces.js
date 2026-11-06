@@ -150,6 +150,7 @@ window.EKO_SURF = (function(){
       E.state.dock.tool = null; E.set({}); return 'tool'; }
     if(E.state.locFocus && E.locExit){ E.locExit(); return 'locate'; }     /* Locate-in-3D focus: a mode too */
     if(E.state.secLocated && window.EKO_SEC){ window.EKO_SEC.ACTS.secLocatedBack(); return 'locate'; }
+    if(E.state.hmRoomView && E.hmRoomBack){ E.hmRoomBack(); return 'locate'; }
     if(E.state.modelFs){ E.set({ modelFs:false }); return 'model'; }       /* D94: a mode, not a surface */
     if(PAGES.includes(E.state.pageId)){ back(); return 'back'; }
     if(E.state.histAge != null){ E.set({ histAge:null }); return 'live'; }   /* a mode, not a surface */

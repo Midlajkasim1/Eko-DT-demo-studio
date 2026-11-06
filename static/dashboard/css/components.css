@@ -3786,6 +3786,24 @@
   overflow:auto
 }
 
+.dashboard-native-container .hmwin {
+  position:relative
+}
+
+.dashboard-native-container .hmwin .hmroom {
+  position:absolute;
+  inset-inline:0;
+  height:32px;
+  white-space:nowrap
+}
+
+.dashboard-native-container .hmwin .hmroom .grow {
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+
 .dashboard-native-container .hmrbar {
   flex:0 0 64px;
   height:5px;
