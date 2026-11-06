@@ -444,7 +444,7 @@ async def realtime_loop():
     interval = CONFIG.get("polling", {}).get("realtime_ms", 30000) / 1000
 
     while client and client.is_authenticated:
-        if not _dashboard_open():
+        if not _polling_wanted():
             return
         try:
             realtime = await client.fetch_realtime_data(rt_endpoints)
@@ -491,7 +491,7 @@ async def alarm_loop():
     if not isinstance(alarm_ep, str) or not alarm_ep.startswith("/"):
         return
     while client and client.is_authenticated:
-        if not _dashboard_open():
+        if not _polling_wanted():
             return
         try:
             await client.refresh_alarms(alarm_ep)
@@ -523,7 +523,7 @@ async def live_loop():
     interval = CONFIG.get("polling", {}).get("live_ms", 5000) / 1000
 
     while client and client.is_authenticated:
-        if not _dashboard_open():
+        if not _polling_wanted():
             return
         try:
             values = await asyncio.gather(
@@ -984,6 +984,9 @@ def _start_polling():
 # loops stop when the last one leaves, or when its refresh goes quiet (a closed tab).
 watchers: dict[str, float] = {}
 WATCH_STALE_S = 20
+# Sign-in starts the loops for one pass, so the dashboard that opens next finds FIN data already read
+SIGN_IN_READ_S = 2
+sign_in_read_until = 0.0
 
 
 def _prune_watchers() -> int:
@@ -994,8 +997,14 @@ def _prune_watchers() -> int:
     return len(watchers)
 
 
-def _dashboard_open() -> bool:
-    return _prune_watchers() > 0
+def _polling_wanted() -> bool:
+    return _prune_watchers() > 0 or time.monotonic() < sign_in_read_until
+
+
+def _read_after_sign_in():
+    global sign_in_read_until
+    sign_in_read_until = time.monotonic() + SIGN_IN_READ_S
+    _ensure_polling()
 
 
 def _polling_alive() -> bool:
@@ -1004,7 +1013,7 @@ def _polling_alive() -> bool:
 
 def _ensure_polling():
     """Start the FIN loops when a dashboard is open, and stop them when none is."""
-    if _dashboard_open() and client and client.is_authenticated and PROJECT_NAME:
+    if _polling_wanted() and client and client.is_authenticated and PROJECT_NAME:
         if not _polling_alive():
             _start_polling()
     elif _polling_alive():
@@ -1015,12 +1024,12 @@ async def _sleep_while_watched(seconds: float) -> bool:
     """Sleep in short steps so a closed dashboard stops the loop without waiting out the interval."""
     left = seconds
     while left > 0:
-        if not _dashboard_open():
+        if not _polling_wanted():
             return False
         chunk = 1.0 if left > 1 else left
         await asyncio.sleep(chunk)
         left -= chunk
-    return _dashboard_open()
+    return _polling_wanted()
 
 
 def _reset_caches():
@@ -1139,6 +1148,12 @@ class ValidateMappingRequest(BaseModel):
 # What the last sign-in / project switch found. FIN does not return a project name, so
 # `source` records where the name in use came from.
 PROJECT_CHECK: dict = {"validated": None, "source": None}
+# The Studio project and settings the last sign-in or switch applied
+APPLIED_SWITCH: Optional[str] = None
+
+
+def _switch_key(settings: Optional[dict], project_id: Optional[str]) -> str:
+    return json.dumps([project_id or None, settings or {}], sort_keys=True, default=str)
 
 
 def _is_error_grid(text: str) -> bool:
@@ -1306,8 +1321,9 @@ async def _install_login(req, request: Request, response: Response, candidate, m
                          server_url: str, project: str):
     """FIN accepted the sign-in: only now does anything shared change. Runs under _fin_lock, so no other sign-in, project
     switch or sign-out changes the client, the project or the polling while this one is part way through."""
-    global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK, TYPED_NAME, STANDARD_VERIFIED, POLL_OWNER
+    global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK, TYPED_NAME, STANDARD_VERIFIED, POLL_OWNER, APPLIED_SWITCH
     STANDARD_VERIFIED = None   # a new session proves the standard site again (below), or not at all
+    APPLIED_SWITCH = None
     if managed:
         # its own mappings until the signed-in session proves it reads config.json's site (below)
         apply_studio_settings(req.settings, req.project_id, standard=False)
@@ -1330,9 +1346,14 @@ async def _install_login(req, request: Request, response: Response, candidate, m
         if managed and await _serves_standard_site(client):
             apply_studio_settings(req.settings, req.project_id, standard=True)
             FIN_SERVER_URL, PROJECT_NAME = server_url, project   # the session's, not config.json's
-        _ensure_polling()   # a dashboard already open keeps its feed; sign-in alone does not start one
+        if PROJECT_CHECK["validated"] is True:
+            _read_after_sign_in()
+        else:
+            _ensure_polling()
     else:
         PROJECT_CHECK = {"validated": None, "source": name_source}
+    if managed:
+        APPLIED_SWITCH = _switch_key(req.settings, req.project_id)
     _open_session(request, response, req.username, candidate.project_name or "")   # this sign-in's own project
 
     return {
@@ -1354,6 +1375,9 @@ async def set_project_settings(req: ProjectSettingsRequest, request: Request):
     _require_user(request)
     async with _fin_lock():
         _require_client()   # a sign-out while this waited for its turn
+        # A page reload sends the project it already has: its polling and the data read so far stay
+        if APPLIED_SWITCH == _switch_key(req.settings, req.project_id) and PROJECT_CHECK["validated"] is True:
+            return _same_project(req, request)
         # The old polling stops first: a poll still running while the project changes would read the new project's name
         # for the old project's answer, and record its alarms and notifications under the wrong project
         _cancel_polling()
@@ -1365,8 +1389,24 @@ async def set_project_settings(req: ProjectSettingsRequest, request: Request):
             raise
 
 
+def _same_project(req: ProjectSettingsRequest, request: Request) -> dict:
+    _ensure_polling()
+    mine, _ = _session_of(request)
+    if mine and mine["user_id"] == POLL_OWNER:
+        mine["site"] = client.project_name or ""
+    wanted_url = str(req.settings.get("finBaseUrl") or "").strip().rstrip("/")
+    return {
+        "status": "success",
+        "project": PROJECT_NAME,
+        "reconnect_required": bool(wanted_url) and wanted_url != client.base_url,
+        "project_validated": PROJECT_CHECK["validated"],
+        "project_source": PROJECT_CHECK["source"],
+    }
+
+
 async def _switch_project(req: ProjectSettingsRequest, request: Request):
-    global FIN_SERVER_URL, PROJECT_CHECK, PROJECT_NAME, TYPED_NAME
+    global FIN_SERVER_URL, PROJECT_CHECK, PROJECT_NAME, TYPED_NAME, APPLIED_SWITCH
+    APPLIED_SWITCH = None
 
     # A project without its own FIN Project Name is unconfigured, except for the name typed at
     # sign-in for this same project. Never the config.json default, never another project's name.
@@ -1398,6 +1438,7 @@ async def _switch_project(req: ProjectSettingsRequest, request: Request):
     _reset_caches()
     if PROJECT_NAME:
         _ensure_polling()
+    APPLIED_SWITCH = _switch_key(req.settings, req.project_id)
     # The switch was validated with the polling session's FIN credentials: only their owner's own
     # user session moves to the new site. Anyone else's stays on the site they signed in for.
     mine, _ = _session_of(request)
@@ -2422,7 +2463,7 @@ async def fin_unwatch(req: WatchRequest, request: Request):
     wid = (req.id or "").strip()
     if wid:
         watchers.pop(wid, None)
-    _ensure_polling()
+    # Not cancelled: a reload's next watch keeps the read in progress, and without one the loops end after it
     return {"polling": _polling_alive()}
 
 
@@ -2430,7 +2471,7 @@ async def fin_unwatch(req: WatchRequest, request: Request):
 async def logout(request: Request, response: Response):
     """End this browser's user session. The shared FIN session closes only when no other user is
     still signed in. The server process stays up so the operator can sign in again."""
-    global client, PROJECT_CHECK, STANDARD_VERIFIED, POLL_OWNER
+    global client, PROJECT_CHECK, STANDARD_VERIFIED, POLL_OWNER, APPLIED_SWITCH
     _close_session(request, response)
     async with _fin_lock():   # not while a sign-in or a project switch is part way through changing the shared connection
         _drop_expired()
@@ -2438,6 +2479,7 @@ async def logout(request: Request, response: Response):
             return {"status": "signed_out", "fin": "connected for other users"}
         POLL_OWNER = None
         STANDARD_VERIFIED = None
+        APPLIED_SWITCH = None
         watchers.clear()
         _cancel_polling()
         # Drop the reference before the await so a second sign-out does not close the same client twice.

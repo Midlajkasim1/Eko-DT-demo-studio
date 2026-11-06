@@ -211,7 +211,8 @@
   // poller (the previous project's dashboard) must not hand its late answers to the next one.
   let liveBusy = false;
   let alarmBusy = false;
-  let realtimeBusy = false;
+  let slowBusy = false;
+  let cachedBusy = false;
 
   async function pollLive() {
     if (liveBusy) return;
@@ -251,14 +252,20 @@
     if (usable(data)) apply(data);
   }
 
-  async function pollRealtime() {
-    if (realtimeBusy) return;
-    realtimeBusy = true;
+  // The backend's cached reads; alarm history is a FIN query on every call, so it waits for the slower cycle
+  async function pollCached() {
+    if (cachedBusy) return;
+    cachedBusy = true;
     const generation = state.generation;
     const provider = state.provider;
     const jobs = [
       provider.getEquipment().then(function (data) {
-        takeOne(generation, data, function (equipment) { state.equipment = equipment; emit('equipment', equipment); });
+        takeOne(generation, data, function (equipment) {
+          // An answer without a timestamp is the backend before its first FIN read
+          if (!equipment.timestamp && state.equipment) return;
+          state.equipment = equipment;
+          emit('equipment', equipment);
+        });
       }),
       provider.getMeters().then(function (data) {
         takeOne(generation, data, function (meters) { state.meters = meters; emit('meters', meters); });
@@ -276,11 +283,29 @@
           }
         });
       }),
-      provider.getDocuments().then(function (data) {
-        takeOne(generation, data, function (documents) { state.documents = documents; emit('documents', documents); });
-      }),
       provider.getWorkOrders().then(function (data) {
         takeOne(generation, data, function (workorders) { state.workorders = workorders; emit('workorders', workorders); });
+      }),
+    ];
+    try {
+      await Promise.all(jobs);
+    } finally {
+      cachedBusy = false;
+    }
+  }
+
+  async function pollRealtime() {
+    await Promise.all([pollCached(), pollSlow()]);
+  }
+
+  async function pollSlow() {
+    if (slowBusy) return;
+    slowBusy = true;
+    const generation = state.generation;
+    const provider = state.provider;
+    const jobs = [
+      provider.getDocuments().then(function (data) {
+        takeOne(generation, data, function (documents) { state.documents = documents; emit('documents', documents); });
       }),
       provider.getAlarmHistory(2).then(function (data) {
         takeOne(generation, data, function (alarmHistory) { state.alarmHistory = alarmHistory; emit('alarmHistory', alarmHistory); });
@@ -289,7 +314,7 @@
     try {
       await Promise.all(jobs);
     } finally {
-      realtimeBusy = false;
+      slowBusy = false;
     }
   }
 
@@ -297,14 +322,16 @@
   function armFirstFill(generation) {
     if (firstFill) clearInterval(firstFill);
     let tries = 0;
+    // A backend that just started or switched project needs FIN's first full pass; direct mode reads FIN on each try
+    const maxTries = state.config && state.config.directMode ? 12 : 90;
     firstFill = setInterval(function () {
-      if (generation !== state.generation || ++tries > 12) {
+      if (generation !== state.generation || ++tries > maxTries) {
         clearInterval(firstFill);
         firstFill = null;
         return;
       }
       const ready = state.power && state.power.timestamp && state.alarms && state.alarms.timestamp
-        && state.equipment && state.powerHistory;
+        && state.equipment && state.equipment.timestamp && state.powerHistory;
       if (ready) {
         clearInterval(firstFill);
         firstFill = null;
@@ -312,7 +339,7 @@
       }
       if (!state.power || !state.power.timestamp) pollLive();
       if (!state.alarms || !state.alarms.timestamp) pollAlarms();
-      if (!state.equipment || !state.powerHistory) pollRealtime();
+      if (!state.equipment || !state.equipment.timestamp || !state.powerHistory) pollCached();
     }, 1000);
   }
 
