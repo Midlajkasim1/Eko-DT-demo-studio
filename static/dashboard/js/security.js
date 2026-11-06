@@ -148,14 +148,16 @@ window.EKO_SEC = (function(){
         <span class="alcardm">${esc(t('sec.evMeta', { n: ev.length }))}</span></div>${body}
         <div class="alfoot">${esc(t('sec.evFoot'))}</div></div>`);
   }
-  /* the markers of the security landing: cameras, doors and fire devices that carry a position */
+  /* the markers of the security landing: cameras, doors and fire devices that carry a position.
+     A card reader is access equipment, not a marker on this model. */
+  const cardReader = c => /^CR[-_]/.test(String(c.id || '')) || /card reader/i.test(c.en || '') || /قارئ البطاقات|قارئ بطاقات/.test(c.ar || '');
   function markers(E2){
     use(E2);
     const d = D(); if(!d) return '';
     const sel = E.state.secSel;
     const pts = [];
     cams().forEach(c => { if(c.gid || (isFinite(+c.x) && isFinite(+c.y) && c.x !== undefined)) pts.push({ id: c.id, gid: c.gid, x: +c.x || 0, y: +c.y || 0, k: 'cam', bad: c.online === false, tip: c.id + ' · ' + L(c.en, c.ar) }); });
-    doors().forEach(c => { if(isFinite(+c.x) && isFinite(+c.y) && c.x !== undefined) pts.push({ id: c.id, x: +c.x, y: +c.y, k: 'door', bad: accessEvents().some(e => e.door === c.id && FLAG.includes(e.kind) && e.open !== false), tip: c.id + ' · ' + L(c.en, c.ar) }); });
+    doors().forEach(c => { if(cardReader(c) || !(isFinite(+c.x) && isFinite(+c.y) && c.x !== undefined)) return; pts.push({ id: c.id, x: +c.x, y: +c.y, k: 'door', bad: accessEvents().some(e => e.door === c.id && FLAG.includes(e.kind) && e.open !== false), tip: c.id + ' · ' + L(c.en, c.ar) }); });
     /* D180: fire devices in alarm (the demo scenario) are marked; a site with many devices shows only what needs a look:
        flagged doors, offline cameras, the selection, and every camera only with the view cones on */
     fireEvents().filter(e => e.active !== false && e.kind !== 'fault' && isFinite(+e.x) && e.x !== undefined).forEach(e => pts.push({ id: e.device, ev: e.id, x: +e.x, y: +e.y, k: 'fire', bad: true, tip: L(e.en, e.ar) }));
