@@ -2643,7 +2643,15 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       isAlarmed,
       listMapped: () => links().list.map(m => ({ id: m.equip, bimId: m.guid })),
       spaceLinks: () => indexSpaceLinks(useProjectStore.getState().currentProject?.assetLinks),
-      listLevels: () => levels.map(l => ({ id: l.id, name: l.name })),
+      listLevels: () => levels.map(l => ({ id: l.id, name: l.name, rank: l.rank })),
+      /* The toolbar name for a storey string: "Level 1" and "LEVEL 1" are both First floor. */
+      floorOf: (raw: string) => {
+        const text = String(raw || '').trim()
+        if (!text) return null
+        const known = floorCatalog.get(text)
+        const floor = known || floorKey(text)
+        return floor ? { id: floor.id, name: floor.name, rank: floor.rank } : null
+      },
       captureCamera: () => {
         const cam = engine.world?.camera?.controls as { getPosition?: (out: THREE.Vector3) => void; getTarget?: (out: THREE.Vector3) => void } | undefined
         if (!cam?.getPosition || !cam?.getTarget) return null

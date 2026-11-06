@@ -811,27 +811,36 @@ window.EKO_A = (function(){
     if(panel === 'rooms') return true;
     return panel === 'both' && s.hmList === 'rooms';
   }
-  function levelKeyRank(name){
-    const s = String(name || '').toUpperCase();
-    if(!s) return 10000;
-    if(/ROOF|\bRF\b/.test(s)) return 9000;
-    if(/BASEMENT|\bBF\b/.test(s)) return -100;
-    if(/GROUND|\bGF\b/.test(s)) return 0;
-    const m = s.match(/(\d+)/);
-    return m ? parseInt(m[1], 10) : 5000;
+  /* Same names as the toolbar. "Level 1" and "LEVEL 1" are one floor. */
+  function toolbarFloor(raw){
+    const host = window.EKO_HOST_ENGINE;
+    const floor = host && host.floorOf ? host.floorOf(raw) : null;
+    return floor && floor.id ? floor : null;
   }
-  function roomGroups(rooms){
+  function roomGroups(rooms, s){
+    const dock = (s && s.dock) || {};
+    const pickedId = dock.level && dock.level !== 'ALL' ? dock.level : '';
+    const alone = !!dock.floorAlone;
+    const picked = pickedId ? (toolbarFloor(pickedId) || { id: pickedId, name: pickedId, rank: null }) : null;
     const by = new Map();
     (rooms || []).forEach(r => {
-      const key = r.level || '';
-      if(!by.has(key)) by.set(key, []);
-      by.get(key).push(r);
+      const floor = toolbarFloor(r.level || '');
+      if(picked){
+        if(!floor) return;
+        const other = floor.id !== picked.id;
+        if(other && (alone || picked.rank == null || floor.rank > picked.rank)) return;
+      }
+      const key = floor ? floor.id : '';
+      if(!by.has(key)) by.set(key, { key, name: floor ? floor.name : '', rank: floor ? floor.rank : 10000, rooms: [] });
+      by.get(key).rooms.push(r);
     });
-    return [...by.keys()].sort((a, b) => {
-      if(!a) return 1;
-      if(!b) return -1;
-      return levelKeyRank(a) - levelKeyRank(b) || a.localeCompare(b, undefined, { numeric: true });
-    }).map(key => ({ key, rooms: by.get(key) }));
+    return [...by.values()].sort((a, b) => {
+      if(!a.key) return 1;
+      if(!b.key) return -1;
+      if(picked && a.key === picked.id) return -1;
+      if(picked && b.key === picked.id) return 1;
+      return b.rank - a.rank || a.name.localeCompare(b.name, undefined, { numeric: true });
+    });
   }
   function heatPanel(E){
     const d = E.data.heat, s = E.state, ar = E.lang === 'ar';
@@ -858,17 +867,21 @@ window.EKO_A = (function(){
         <span class="tMonoS">${esc(heatText(z, mode, zones))}</span></button>`).join('')
       : `<p class="alempty">${esc(E.t('hmNone'))}</p>`;
     const openLevels = s.hmOpen || {};
-    const roomRows = roomList.length ? roomGroups(roomList).map(g => {
+    const groups = roomGroups(roomList, s);
+    const pickedId = s.dock && s.dock.level && s.dock.level !== 'ALL' ? s.dock.level : '';
+    const roomRows = roomList.length ? (groups.length ? groups.map(g => {
       const on = !!openLevels[g.key];
-      const head = `<button class="hmlevel" data-act="hmLevel" data-v="${esc(g.key)}" aria-expanded="${on}">
+      const here = !!(pickedId && g.key === pickedId);
+      const head = `<button class="hmlevel" data-act="hmLevel" data-v="${esc(g.key)}" data-on="${here}" aria-expanded="${on}"${here ? ' aria-current="true"' : ''}>
         <span aria-hidden="true">${on ? '▾' : '▸'}</span>
-        <span class="grow taS">${esc(g.key || E.t('hmNoLevel'))}</span>
+        <span class="grow taS">${esc(g.name || E.t('hmNoLevel'))}</span>
+        ${here ? `<span class="hmhere">${esc(E.t('hmFloorOn'))}</span>` : ''}
         <span class="tMonoS cT3">${g.rooms.length}</span></button>`;
       if(!on) return head;
       /* min-height keeps this spacer from shrinking, which pulled the next level up through the rows. */
       const h = g.rooms.length * 32;
       return head + `<div class="hmwin" data-level="${esc(g.key)}" style="height:${h}px;min-height:${h}px"></div>`;
-    }).join('') : `<p class="alempty">${esc(E.t('hmNoRooms'))}</p>`;
+    }).join('') : `<p class="alempty">${esc(E.t('hmNoRoomsFloor'))}</p>`) : `<p class="alempty">${esc(E.t('hmNoRooms'))}</p>`;
     const tglRow = (lbl, key, on) =>
       `<div class="hmtgl"><span class="grow">${esc(lbl)}</span>
         <button class="seg" data-on="${on}" data-act="hmLayer" data-v="${key}">${esc(on?E.t('onW'):E.t('offW'))}</button></div>`;
@@ -877,7 +890,7 @@ window.EKO_A = (function(){
     const roomShaped = roomSel ? { ...roomSel, nameEn: roomSel.name, bimId: roomSel.guid, gid: roomSel.guid } : null;
     const selBody = roomShaped
       ? `<div class="aprow"><dt>${esc(roomShaped.name)}</dt><dd>${esc(heatText(roomShaped, mode, [roomShaped]))}</dd></div>
-         <div class="aprow"><dt>${esc(E.t('hmRoomLevel'))}</dt><dd>${esc(roomSel.level || E.t('hmNoLevel'))}</dd></div>
+         <div class="aprow"><dt>${esc(E.t('hmRoomLevel'))}</dt><dd>${esc((toolbarFloor(roomSel.level) || {}).name || roomSel.level || E.t('hmNoLevel'))}</dd></div>
          <div class="aprow"><dt>${esc(E.t('hmRoomSensor'))}</dt><dd>${esc(roomSel.sensor || '—')}</dd></div>`
       : sel
       ? `<div class="aprow"><dt>${esc(zn(sel))}</dt><dd>${esc(heatText(sel, mode, zones))}</dd></div>`
@@ -908,7 +921,7 @@ window.EKO_A = (function(){
       <div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t(roomsOn ? 'hmRooms' : 'hmRanking'))}</span>
         ${listSwitch}<span class="alcardm">${esc(cap)}</span></div>
         <div class="col${roomsOn ? ' hmrooms' : ''}">${roomsOn ? roomRows : rankRows}</div>
-        <div class="alfoot">${esc(E.t(roomsOn ? 'hmRoomFoot' : 'hmRankFoot'))}</div></div>
+        ${roomsOn ? '' : `<div class="alfoot">${esc(E.t('hmRankFoot'))}</div>`}</div>
       <div class="hmtgl"><span class="grow">${esc(mode==='temp'?E.t('hmOutlineAbove'):E.t('hmOutlineBeyond'))} <span class="cT3">${esc(unit)}</span></span>
         <button class="seg" data-on="${s.hmOutline}" data-act="hmOutline">${esc(s.hmOutline?E.t('onW'):E.t('offW'))}</button></div>
       <div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('hmLayers'))}</span></div>
@@ -925,7 +938,7 @@ window.EKO_A = (function(){
     const boxes = document.querySelectorAll('.hmwin');
     if(!boxes.length) return;
     const d = E.data.heat || {}, s = E.state, mode = heatMode(s);
-    const groups = new Map(roomGroups(d.rooms || []).map(g => [g.key, g.rooms]));
+    const groups = new Map(roomGroups(d.rooms || [], s).map(g => [g.key, g.rooms]));
     const rowH = 32;
     boxes.forEach(win => {
       const scroller = win.closest('.hmrooms');

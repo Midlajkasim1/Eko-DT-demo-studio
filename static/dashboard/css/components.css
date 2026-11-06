@@ -3777,6 +3777,30 @@
   background:var(--s3)
 }
 
+.dashboard-native-container .hmlevel[data-on="true"] {
+  position:relative;
+  background:color-mix(in srgb, var(--acc) 16%, var(--s2))
+}
+
+.dashboard-native-container .hmlevel[data-on="true"]::before {
+  content:"";
+  position:absolute;
+  inset-inline-start:0;
+  inset-block:6px;
+  width:3px;
+  border-radius:2px;
+  background:var(--acc)
+}
+
+.dashboard-native-container .hmhere {
+  flex:none;
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:var(--acc)
+}
+
 .dashboard-native-container .hmroom {
   padding-inline-start:22px
 }
