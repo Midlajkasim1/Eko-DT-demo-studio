@@ -1400,6 +1400,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     let heatSheets: THREE.Mesh[] = []
     let heatSig = ''
     let heatSeq = 0
+    let heatBusy = false
+    let heatAgain = false
     let heatReq: { zones: { bimId?: string; bimIds?: string[]; gid?: string; nameEn?: string; tempC?: number | null; rh?: number | null; co2?: number | null }[]; mode?: string } | null = null
     /* Colour sits in the room and is tested against the building, so a ceiling does not hide it from an angled view. */
     let heatInsideWalls = false
@@ -1868,6 +1870,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     const clearSpaceHeat = async () => {
       heatSeq++
+      heatBusy = false
+      heatAgain = false
       heatReq = null
       spaceHeatActive = false
       heatInsideWalls = false
@@ -2050,18 +2054,37 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         for (const bimId of idsOf(z)) jobs.push({ bimId, t })
       }
       const valueSig = (inside ? 'in|' : 'out|') + md + '|' + (md === 'occ' ? 'p' + occPeople() + '|' + walkSig() + '|' : '') + jobs.map(j => `${j.bimId}:${round1(j.t)}`).join(';')
-      if (valueSig !== heatSig) {
-        dropHeatSheets()
-        heatSig = valueSig
-      }
-      const seq = ++heatSeq
-      const wanted = new Set(jobs.map(job => job.bimId))
       // The zones the dashboard counts people in, keyed as it keys them
       const crowdZones = md === 'occ'
         ? (zones || []).filter(z => z.bimId || z.gid || (z.bimIds && z.bimIds.length))
           .map(z => ({ key: String((z.bimIds && z.bimIds[0]) || z.bimId || z.gid || z.nameEn || ''), ids: idsOf(z) }))
         : []
       const alone = !!(window as any).EKO?.state?.dock?.floorAlone
+      if (valueSig === heatSig) {
+        const ready = floorsInView(levelId, alone)
+        const missingNow = ready.filter(id => !heatFloorSheets.get(id)?.done)
+        if (ready.length && !missingNow.length) {
+          showHeatFloors(new Set(ready))
+          if (md === 'occ') await placeCrowd(ready, crowdZones, occPeople())
+          else clearCrowd()
+          syncGhost()
+          const wakeNow = engine.world?.renderer as { needsUpdate?: boolean } | undefined
+          if (wakeNow) wakeNow.needsUpdate = true
+          return
+        }
+        /* A list switch shares this signature. Starting the room walk over is what freezes the page. */
+        if (heatBusy) return
+      } else if (heatBusy) {
+        heatAgain = true
+        return
+      } else {
+        dropHeatSheets()
+        heatSig = valueSig
+      }
+      const seq = ++heatSeq
+      heatBusy = true
+      try {
+      const wanted = new Set(jobs.map(job => job.bimId))
       if (levelId && levelId !== 'ALL') await guidsForFloor(levelId, wanted)
       else {
         for (const model of engine.fragments?.models?.list?.values() ?? []) await readStoreys(model)
@@ -2181,6 +2204,15 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         if (seq === heatSeq) kept.done = true
       }
       return
+      } finally {
+        if (seq === heatSeq) {
+          heatBusy = false
+          if (heatAgain && heatReq) {
+            heatAgain = false
+            void applySpaceHeat(heatReq.zones, heatReq.mode)
+          }
+        }
+      }
     }
 
     // Same rule as isAlarmed

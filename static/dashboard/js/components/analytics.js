@@ -865,8 +865,9 @@ window.EKO_A = (function(){
         <span class="grow taS">${esc(g.key || E.t('hmNoLevel'))}</span>
         <span class="tMonoS cT3">${g.rooms.length}</span></button>`;
       if(!on) return head;
-      /* The spacer holds the scroll height. fillHeatRooms draws only the rows on screen. */
-      return head + `<div class="hmwin" data-level="${esc(g.key)}" style="height:${g.rooms.length * 32}px"></div>`;
+      /* min-height keeps this spacer from shrinking, which pulled the next level up through the rows. */
+      const h = g.rooms.length * 32;
+      return head + `<div class="hmwin" data-level="${esc(g.key)}" style="height:${h}px;min-height:${h}px"></div>`;
     }).join('') : `<p class="alempty">${esc(E.t('hmNoRooms'))}</p>`;
     const tglRow = (lbl, key, on) =>
       `<div class="hmtgl"><span class="grow">${esc(lbl)}</span>

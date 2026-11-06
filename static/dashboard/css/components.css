@@ -3786,14 +3786,21 @@
   overflow:auto
 }
 
+.dashboard-native-container .hmrooms > .hmlevel,
+.dashboard-native-container .hmrooms > .hmwin {
+  flex:0 0 auto
+}
+
 .dashboard-native-container .hmwin {
-  position:relative
+  position:relative;
+  overflow:hidden
 }
 
 .dashboard-native-container .hmwin .hmroom {
   position:absolute;
   inset-inline:0;
   height:32px;
+  min-height:0;
   white-space:nowrap
 }
 
