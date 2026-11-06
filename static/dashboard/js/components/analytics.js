@@ -833,6 +833,8 @@ window.EKO_A = (function(){
     const cap = mode === 'occ' ? E.t('hmRankPeopleCap') : mode === 'comfort' ? E.t('hmRankComfortCap') : mode === 'hum' ? E.t('hmRankOccCap') : E.t('hmRankTempCap');
     const unit = mode === 'occ' ? '' : mode === 'comfort' ? E.t('hmUnitDt') : mode === 'hum' ? E.t('hmUnitPpl') : E.t('hmUnitTemp');
     const mseg = (lbl, on, v) => `<button class="hmseg" data-on="${on}" data-act="hmMode" data-v="${v}">${esc(lbl)}</button>`;
+    /* the module set that hides Spaces > Occupancy (Marsa's) hides this tab too */
+    const occTab = !window.EKO_ADDONS || window.EKO_ADDONS.state(E, 'spaces.occ') !== 'hidden';
     const fseg = (lbl, on, v) => `<button class="hmfloor" data-on="${on}" data-act="hmFloor" data-v="${esc(v)}">${esc(lbl)}</button>`;
     const realFloors = (d.floors || []).filter(f => f && f !== 'All');
     const floorBar = realFloors.length > 1
@@ -846,7 +848,7 @@ window.EKO_A = (function(){
       : E.t('hmTempFoot', { m: siteMean == null ? '—' : fmt(siteMean, 1) });
     return C().modShell(E, E.t('subHeat'), '', '',
       `<div class="hmwrap"><div class="row gap8">
-        <span class="row gap2">${mseg(E.t('hmTemp'), mode==='temp', 'temp')}${mseg(E.t('hmComfort'), mode==='comfort', 'comfort')}${mseg(E.t('hmOcc'), mode==='hum', 'hum')}${mseg(E.t('hmPeople'), mode==='occ', 'occ')}</span>
+        <span class="row gap2">${mseg(E.t('hmTemp'), mode==='temp', 'temp')}${mseg(E.t('hmComfort'), mode==='comfort', 'comfort')}${mseg(E.t('hmOcc'), mode==='hum', 'hum')}${occTab ? mseg(E.t('hmPeople'), mode==='occ', 'occ') : ''}</span>
         ${floorBar}</div>
       <div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('hmRanking'))}</span>
         <span class="alcardm">${esc(cap)}</span></div>
