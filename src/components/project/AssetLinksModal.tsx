@@ -94,7 +94,7 @@ function newLink(eq: LinkEquipment, guid: string, nameWords: boolean, el?: Model
 const HINTS: Record<Mode, string> = {
   equip: 'Link each FIN equipment to its element in the model. A link keeps the IFC GlobalId, so it carries over to a revised model.',
   cctv: 'Link each FIN camera to its element in the model, then set the room it is in. FIN’s bimId is suggested first. Rooms come from the Spaces tab.',
-  space: 'Rooms for the heatmap. Tick the models to read, press Scan, then add rooms. Rooms share the sample sensors; type a FIN sensor name such as IS-01 as the heatmap name to give one room its own sensor.',
+  space: 'Rooms for the heatmap, grouped by level. Choose a FIN sensor or a piece of equipment for a room, or type a name such as IS-01. Rooms with no sensor of their own share the sample sensors.',
 }
 
 export function AssetLinksModal({ visible, onClose, engineRef }: AssetLinksModalProps) {
@@ -164,6 +164,10 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
   const [pickerFor, setPickerFor] = useState<string | null>(null)
   const [pickerQuery, setPickerQuery] = useState('')
   const [pickerAll, setPickerAll] = useState(false)
+  const [finFor, setFinFor] = useState<string | null>(null)
+  const [finQuery, setFinQuery] = useState('')
+  const [finKind, setFinKind] = useState<'all' | 'sensor' | 'equip'>('all')
+  const spaceFold = useRef('')
   const linksRef = useRef(links)
   const scannedRef = useRef<ModelElement[] | null>(null)
   const declinedRef = useRef<Set<string>>(new Set())
@@ -181,12 +185,13 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       if (pickerFor) setPickerFor(null)
+      else if (finFor) setFinFor(null)
       else if (dirty) setConfirmClose(true)
       else onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [dirty, confirmClose, onClose, pickerFor])
+  }, [dirty, confirmClose, onClose, pickerFor, finFor])
 
   useEffect(() => { linksRef.current = links }, [links])
   useEffect(() => {
@@ -380,9 +385,11 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
     setLevel(ALL_LEVELS)
     setCollapsed(new Set())
     setPickerFor(null)
+    setFinFor(null)
     setNotice(null)
     setError(null)
     if (next === 'space') {
+      spaceFold.current = ''
       setElements(spaceCache.current)
       setScan({ state: 'idle' })
       return
@@ -528,7 +535,15 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
   const scopedSpaces = spaceRows.filter(r => inLevel(spaceLevel(r)))
   const where = levelKey === ALL_LEVELS ? '' : ` on ${levelLabel(levelKey)}`
   const scopeText = levelKey === ALL_LEVELS ? 'in this tab' : `on ${levelLabel(levelKey)}`
-  const showLevelHeads = levels.length > 1 || (levels.length === 1 && levels[0].key !== '')
+  const showLevelHeads = mode === 'space'
+    ? levels.length > 0
+    : levels.length > 1 || (levels.length === 1 && levels[0].key !== '')
+  const levelMark = `${levels.length}:${levels.map(l => l.key).join('\0')}`
+  useEffect(() => {
+    if (mode !== 'space' || !levels.length || spaceFold.current === levelMark) return
+    spaceFold.current = levelMark
+    setCollapsed(new Set(levels.map(l => l.key)))
+  }, [mode, levelMark, levels])
 
   const groupRows = <T,>(list: T[], levelOf: (r: T) => string) => {
     const byKey = new Map<string, T[]>()
@@ -695,8 +710,20 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
     setManualGuid('')
   }
 
-  const setHeatName = (guid: string, name: string) => {
-    setLinks(prev => prev.map(l => (l.kind === 'space' && l.guid === guid ? { ...l, equip: name } : l)))
+  const setHeatName = (guid: string, name: string, fromFin?: { finId?: string } | null) => {
+    setLinks(prev => prev.map(l => {
+      if (!(l.kind === 'space' && l.guid === guid)) return l
+      const next: AssetLink = { ...l, equip: name }
+      const hit = fromFin ?? finList.find(eq => !eq.cctv && foldName(eq.name) === foldName(name))
+      if (hit?.finId) next.finId = hit.finId
+      else delete next.finId
+      return next
+    }))
+  }
+
+  const sensorEq = (eq: { name: string; type?: string }) => {
+    const name = eq.name.toUpperCase()
+    return /SENSOR/.test(`${eq.type || ''} ${name}`) || /(?:^|[^A-Z0-9])(?:IAQ|IS)[^A-Z0-9]*\d/.test(name)
   }
 
   const unlinkSpace = (guid: string) => setLinks(prev => prev.filter(l => !(l.kind === 'space' && l.guid === guid)))
@@ -1065,27 +1092,72 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
     )
   }
 
+  const renderFinPick = (guid: string) => {
+    const q = finQuery.trim().toLowerCase()
+    const pool = finList.filter(eq => !eq.cctv && (finKind === 'all' || (finKind === 'sensor' ? sensorEq(eq) : !sensorEq(eq))))
+    const hits = pool.filter(eq => !q || `${eq.name} ${eq.type || ''} ${eq.floor || ''}`.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+    return (
+      <div className="al-picker">
+        <div className="al-picker-head">
+          <input autoFocus className="al-search" placeholder="Search FIN sensors or equipment" value={finQuery} onChange={e => setFinQuery(e.target.value)} />
+          <div className="al-filters">
+            {(['all', 'sensor', 'equip'] as const).map(id => (
+              <button key={id} type="button" className={`ds-toggle-btn ${finKind === id ? 'active' : ''}`} onClick={() => setFinKind(id)}>
+                {id === 'all' ? 'All' : id === 'sensor' ? 'Sensors' : 'Equipment'}
+              </button>
+            ))}
+          </div>
+          <span className="al-sub">{hits.length > 80 ? `First 80 of ${hits.length.toLocaleString()}` : `${hits.length.toLocaleString()} found`}</span>
+          <button type="button" className="ds-btn ds-btn-secondary al-small" onClick={() => setFinFor(null)}>Close</button>
+        </div>
+        <div className="al-picker-list">
+          {hits.slice(0, 80).map(eq => (
+            <button key={eq.finId || eq.name} type="button" className="al-option" onClick={() => { setHeatName(guid, eq.name, eq); setFinFor(null) }}>
+              <span className="al-option-name">{eq.name}</span>
+              <span className="al-sub">{[sensorEq(eq) ? 'Sensor' : 'Equipment', eq.floor, eq.type && eq.type !== 'other' ? eq.type : null].filter(Boolean).join(' · ')}</span>
+            </button>
+          ))}
+          {!hits.length && <div className="al-sub al-empty">{finConnected ? 'Nothing in FIN matches.' : 'FIN is not connected.'}</div>}
+        </div>
+      </div>
+    )
+  }
+
   const renderSpaceRow = (row: SpaceRow) => {
     const st = spaceStatuses.get(row)!
+    const picking = finFor === row.guid
     return (
-      <tr key={row.guid}>
-        <td>
-          <div className="al-name">{row.label}</div>
-          <code className="al-guid">{row.guid}</code>
-          {row.el?.modelName && <div className="al-sub">{row.el.modelName}</div>}
-        </td>
-        <td>
-          {row.link
-            ? <input className="al-search" style={{ minWidth: 140 }} value={row.link.equip} onChange={e => setHeatName(row.guid, e.target.value)} />
-            : <span className="al-sub">{row.label}</span>}
-        </td>
-        <td><span className={`al-status al-${st.tone}`}>{st.text}</span></td>
-        <td className="al-row-actions">
-          {row.link
-            ? <button className="ds-btn ds-btn-secondary al-small" onClick={() => unlinkSpace(row.guid)}>Remove</button>
-            : <button className="ds-btn ds-btn-secondary al-small" disabled={!row.el} onClick={() => row.el && addSpace(row.el)}>Add</button>}
-        </td>
-      </tr>
+      <Fragment key={row.guid}>
+        <tr className={picking ? 'al-row-picking' : undefined}>
+          <td>
+            <div className="al-name">{row.label}</div>
+            <code className="al-guid">{row.guid}</code>
+            {row.el?.modelName && <div className="al-sub">{row.el.modelName}</div>}
+          </td>
+          <td>
+            {row.link ? (
+              <span className="al-search-row">
+                <input className="al-search" style={{ minWidth: 140 }} list="al-fin-names" value={row.link.equip} onChange={e => setHeatName(row.guid, e.target.value)} />
+                <button type="button" className="ds-btn ds-btn-secondary al-small" onClick={() => { setFinFor(picking ? null : row.guid); setFinQuery('') }}>
+                  {picking ? 'Close' : 'Choose'}
+                </button>
+              </span>
+            ) : <span className="al-sub">{row.label}</span>}
+          </td>
+          <td><span className={`al-status al-${st.tone}`}>{st.text}</span></td>
+          <td className="al-row-actions">
+            {row.link
+              ? <button className="ds-btn ds-btn-secondary al-small" onClick={() => unlinkSpace(row.guid)}>Remove</button>
+              : <button className="ds-btn ds-btn-secondary al-small" disabled={!row.el} onClick={() => row.el && addSpace(row.el)}>Add</button>}
+          </td>
+        </tr>
+        {picking && (
+          <tr className="al-picker-row">
+            <td colSpan={4}>{renderFinPick(row.guid)}</td>
+          </tr>
+        )}
+      </Fragment>
     )
   }
 
@@ -1376,7 +1448,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
                   <thead>
                     <tr>
                       <th>Room</th>
-                      <th>Heatmap name</th>
+                      <th>FIN sensor or equipment</th>
                       <th>Status</th>
                       <th></th>
                     </tr>
@@ -1399,6 +1471,11 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
               {mode === 'cctv' && (
                 <datalist id="al-rooms">
                   {spaceLinks.map(l => <option key={l.guid} value={l.guid} label={l.equip} />)}
+                </datalist>
+              )}
+              {mode === 'space' && (
+                <datalist id="al-fin-names">
+                  {finList.filter(eq => !eq.cctv).map(eq => <option key={eq.finId || eq.name} value={eq.name} />)}
                 </datalist>
               )}
               {mode !== 'space' && (

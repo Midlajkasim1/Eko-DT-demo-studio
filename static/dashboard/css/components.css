@@ -3758,6 +3758,34 @@
   color:var(--t1)
 }
 
+.dashboard-native-container .hmlevel {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  width:100%;
+  margin-top:4px;
+  padding:6px 8px;
+  border-radius:6px;
+  background:var(--s2);
+  color:var(--t1);
+  font-size:var(--txCapSz);
+  font-weight:600;
+  text-align:start
+}
+
+.dashboard-native-container .hmlevel:hover {
+  background:var(--s3)
+}
+
+.dashboard-native-container .hmroom {
+  padding-inline-start:22px
+}
+
+.dashboard-native-container .hmrooms {
+  max-height:min(52vh, 520px);
+  overflow:auto
+}
+
 .dashboard-native-container .hmrbar {
   flex:0 0 64px;
   height:5px;
@@ -4065,7 +4093,8 @@
 }
 
 .dashboard-native-container .hmwrap .alcardh {
-  margin-block-end:2px
+  margin-block-end:2px;
+  flex-wrap:wrap
 }
 
 .dashboard-native-container .hmzone {

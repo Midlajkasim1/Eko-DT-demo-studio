@@ -21,13 +21,15 @@ export interface SpacePin {
   name: string
   guid: string
   element?: string
+  /** Storey saved on the space link. Empty until a scan has read it. */
+  level?: string
 }
 
 /** Heatmap rooms. Two rooms may share a display name; the GlobalId is the identity. */
 export function indexSpaceLinks(links: AssetLink[] | undefined): SpacePin[] {
   return (links ?? [])
     .filter(l => l.kind === 'space' && l.equip && isGuid(l.guid))
-    .map(l => ({ name: l.equip, guid: l.guid, element: l.element }))
+    .map(l => ({ name: l.equip, guid: l.guid, element: l.element, ...(l.level ? { level: l.level } : {}) }))
 }
 
 /** Room label from the model: "EXAM ROOM 12" when the long name and the name differ. */

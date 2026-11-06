@@ -801,6 +801,38 @@ window.EKO_A = (function(){
     if(mode === 'hum') return v > RH_SP;
     return v > TEMP_SP;
   }
+  /* Absent heatmap.panel stays the sensor ranking. rooms, or both with the panel switch on Rooms. */
+  function heatPanelMode(){
+    const h = (window.INJECTED_PROJECT_CONFIG || {}).heatmap || {};
+    return h.panel === 'rooms' || h.panel === 'both' ? h.panel : 'sensors';
+  }
+  function showingRooms(s){
+    const panel = heatPanelMode();
+    if(panel === 'rooms') return true;
+    return panel === 'both' && s.hmList === 'rooms';
+  }
+  function levelKeyRank(name){
+    const s = String(name || '').toUpperCase();
+    if(!s) return 10000;
+    if(/ROOF|\bRF\b/.test(s)) return 9000;
+    if(/BASEMENT|\bBF\b/.test(s)) return -100;
+    if(/GROUND|\bGF\b/.test(s)) return 0;
+    const m = s.match(/(\d+)/);
+    return m ? parseInt(m[1], 10) : 5000;
+  }
+  function roomGroups(rooms){
+    const by = new Map();
+    (rooms || []).forEach(r => {
+      const key = r.level || '';
+      if(!by.has(key)) by.set(key, []);
+      by.get(key).push(r);
+    });
+    return [...by.keys()].sort((a, b) => {
+      if(!a) return 1;
+      if(!b) return -1;
+      return levelKeyRank(a) - levelKeyRank(b) || a.localeCompare(b, undefined, { numeric: true });
+    }).map(key => ({ key, rooms: by.get(key) }));
+  }
   function heatPanel(E){
     const d = E.data.heat, s = E.state, ar = E.lang === 'ar';
     const mode = heatMode(s);
@@ -817,20 +849,47 @@ window.EKO_A = (function(){
     const siteMean = temps.length ? temps.reduce((n, v) => n + v, 0) / temps.length : null;
     const co2Mean = co2s.length ? co2s.reduce((n, v) => n + v, 0) / co2s.length : null;
     const zn = z => ar ? (z.nameAr || z.nameEn) : z.nameEn;
+    const roomsOn = showingRooms(s);
+    const roomList = roomsOn ? (d.rooms || []).map(r => ({ ...r, nameEn: r.name, bimId: r.guid, gid: r.guid })) : [];
     const rankRows = rank.length ? rank.map((z, i) =>
       `<button class="hmrank selrow" data-on="${s.hmSel===z.nameEn}" data-act="hmSel" data-v="${esc(z.nameEn)}">
         <span class="tMonoS cT3">${i+1}</span><span class="grow taS">${esc(zn(z))}</span>
         <span class="hmrbar"><span style="width:${heatBar(z, mode, zones).toFixed(0)}%;background:${heatCell(mode, heatValue(z, mode, zones), mode==='occ'?occOf(z, zones).ratio:null)}"></span></span>
         <span class="tMonoS">${esc(heatText(z, mode, zones))}</span></button>`).join('')
       : `<p class="alempty">${esc(E.t('hmNone'))}</p>`;
+    const openLevels = s.hmOpen || {};
+    const roomRows = roomList.length ? roomGroups(roomList).map(g => {
+      const on = !!openLevels[g.key];
+      const head = `<button class="hmlevel" data-act="hmLevel" data-v="${esc(g.key)}" aria-expanded="${on}">
+        <span aria-hidden="true">${on ? '▾' : '▸'}</span>
+        <span class="grow taS">${esc(g.key || E.t('hmNoLevel'))}</span>
+        <span class="tMonoS cT3">${g.rooms.length}</span></button>`;
+      if(!on) return head;
+      const body = g.rooms.map(r =>
+        `<button class="hmrank hmroom" data-on="${s.hmSel===r.guid}" data-act="hmSel" data-v="${esc(r.guid)}">
+          <span class="grow taS">${esc(r.name)}</span>
+          ${r.sensor && r.sensor !== r.name ? `<span class="tMonoS cT3">${esc(r.sensor)}</span>` : ''}
+          <span class="hmrbar"><span style="width:${heatBar(r, mode, roomList).toFixed(0)}%;background:${heatCell(mode, heatValue(r, mode, roomList), mode==='occ'?occOf(r, roomList).ratio:null)}"></span></span>
+          <span class="tMonoS">${esc(heatText(r, mode, roomList))}</span></button>`).join('');
+      return head + body;
+    }).join('') : `<p class="alempty">${esc(E.t('hmNoRooms'))}</p>`;
     const tglRow = (lbl, key, on) =>
       `<div class="hmtgl"><span class="grow">${esc(lbl)}</span>
         <button class="seg" data-on="${on}" data-act="hmLayer" data-v="${key}">${esc(on?E.t('onW'):E.t('offW'))}</button></div>`;
+    const roomSel = (d.rooms || []).find(r => r.guid === s.hmSel);
     const sel = zones.find(z => z.nameEn === s.hmSel);
-    const selBody = sel
+    const roomShaped = roomSel ? { ...roomSel, nameEn: roomSel.name, bimId: roomSel.guid, gid: roomSel.guid } : null;
+    const selBody = roomShaped
+      ? `<div class="aprow"><dt>${esc(roomShaped.name)}</dt><dd>${esc(heatText(roomShaped, mode, roomList.length ? roomList : [roomShaped]))}</dd></div>
+         <div class="aprow"><dt>${esc(E.t('hmRoomLevel'))}</dt><dd>${esc(roomSel.level || E.t('hmNoLevel'))}</dd></div>
+         <div class="aprow"><dt>${esc(E.t('hmRoomSensor'))}</dt><dd>${esc(roomSel.sensor || '—')}</dd></div>`
+      : sel
       ? `<div class="aprow"><dt>${esc(zn(sel))}</dt><dd>${esc(heatText(sel, mode, zones))}</dd></div>`
-      : `<p class="alempty">${esc(E.t('hmSelectedEmpty'))}</p>`;
-    const cap = mode === 'occ' ? E.t('hmRankPeopleCap') : mode === 'comfort' ? E.t('hmRankComfortCap') : mode === 'hum' ? E.t('hmRankOccCap') : E.t('hmRankTempCap');
+      : `<p class="alempty">${esc(E.t(roomsOn ? 'hmRoomPick' : 'hmSelectedEmpty'))}</p>`;
+    const cap = roomsOn ? E.t('hmRoomCap') : mode === 'occ' ? E.t('hmRankPeopleCap') : mode === 'comfort' ? E.t('hmRankComfortCap') : mode === 'hum' ? E.t('hmRankOccCap') : E.t('hmRankTempCap');
+    const listSwitch = heatPanelMode() === 'both'
+      ? `<span class="row gap2">${['sensors','rooms'].map(v => `<button class="hmseg" data-on="${(v==='rooms')===roomsOn}" data-act="hmList" data-v="${v}">${esc(E.t(v==='rooms'?'hmListRooms':'hmListSensors'))}</button>`).join('')}</span>`
+      : '';
     const unit = mode === 'occ' ? '' : mode === 'comfort' ? E.t('hmUnitDt') : mode === 'hum' ? E.t('hmUnitPpl') : E.t('hmUnitTemp');
     const mseg = (lbl, on, v) => `<button class="hmseg" data-on="${on}" data-act="hmMode" data-v="${v}">${esc(lbl)}</button>`;
     /* the module set that hides Spaces > Occupancy (Marsa's) hides this tab too */
@@ -850,10 +909,10 @@ window.EKO_A = (function(){
       `<div class="hmwrap"><div class="row gap8">
         <span class="row gap2">${mseg(E.t('hmTemp'), mode==='temp', 'temp')}${mseg(E.t('hmComfort'), mode==='comfort', 'comfort')}${mseg(E.t('hmOcc'), mode==='hum', 'hum')}${occTab ? mseg(E.t('hmPeople'), mode==='occ', 'occ') : ''}</span>
         ${floorBar}</div>
-      <div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('hmRanking'))}</span>
-        <span class="alcardm">${esc(cap)}</span></div>
-        <div class="col">${rankRows}</div>
-        <div class="alfoot">${esc(E.t('hmRankFoot'))}</div></div>
+      <div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t(roomsOn ? 'hmRooms' : 'hmRanking'))}</span>
+        ${listSwitch}<span class="alcardm">${esc(cap)}</span></div>
+        <div class="col${roomsOn ? ' hmrooms' : ''}">${roomsOn ? roomRows : rankRows}</div>
+        <div class="alfoot">${esc(E.t(roomsOn ? 'hmRoomFoot' : 'hmRankFoot'))}</div></div>
       <div class="hmtgl"><span class="grow">${esc(mode==='temp'?E.t('hmOutlineAbove'):E.t('hmOutlineBeyond'))} <span class="cT3">${esc(unit)}</span></span>
         <button class="seg" data-on="${s.hmOutline}" data-act="hmOutline">${esc(s.hmOutline?E.t('onW'):E.t('offW'))}</button></div>
       <div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t('hmLayers'))}</span></div>
@@ -885,7 +944,7 @@ window.EKO_A = (function(){
           : `style="left:${z.rect[0]}%;top:${z.rect[1]}%;width:${Math.max(z.rect[2], 14)}%;height:auto;min-height:72px"`;
         const tone = heatCell(mode, heatValue(z, mode, heatZones(d, s, mode)), mode==='occ' ? occOf(z, heatZones(d, s, mode)).ratio : null);
         const onlyDot = showDot && !showLabel && !showValue && !!bimId;
-        return `<button class="hmzone${bimId ? ' hmzone3d' : ''}${onlyDot ? ' hmdotonly' : ''}" data-on="${s.hmSel===z.nameEn}" data-out="${out}" data-act="hmSel" data-v="${esc(z.nameEn)}" ${pin}>
+        return `<button class="hmzone${bimId ? ' hmzone3d' : ''}${onlyDot ? ' hmdotonly' : ''}" data-on="${s.hmSel===z.nameEn || s.hmSel===bimId}" data-out="${out}" data-act="hmSel" data-v="${esc(z.nameEn)}" ${pin}>
         ${showDot?`<span class="hmdot" style="background:${tone}"></span>`:''}
         ${showLabel?`<span class="hmzn">${esc(E.lang==='ar'?(z.nameAr||z.nameEn):z.nameEn)}</span>`:''}
         ${showValue?`<span class="hmzv">${esc(label)}</span>`:''}</button>`;

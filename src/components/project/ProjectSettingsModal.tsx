@@ -66,6 +66,18 @@ function HeatmapPane({
       <h3 className="ds-section-title">Heatmap</h3>
       <p className="ds-hint">Rooms are coloured from FIN readings.</p>
 
+      <h3 className="ds-section-title" style={{ marginTop: 24 }}>Right panel</h3>
+      <div className="al-filters" style={{ marginBottom: 8 }}>
+        <button type="button" className={`ds-toggle-btn ${current.panel !== 'rooms' && current.panel !== 'both' ? 'active' : ''}`} onClick={() => {
+          const next = { ...current }
+          delete next.panel
+          onChange(next)
+        }}>Sensors</button>
+        <button type="button" className={`ds-toggle-btn ${current.panel === 'rooms' ? 'active' : ''}`} onClick={() => patch({ panel: 'rooms' })}>Rooms</button>
+        <button type="button" className={`ds-toggle-btn ${current.panel === 'both' ? 'active' : ''}`} onClick={() => patch({ panel: 'both' })}>Both</button>
+      </div>
+      <p className="ds-hint">Sensors lists each sensor. Rooms lists each linked room, by level, collapsed. Both puts a switch on the panel, for a project that has sensors and equipment on its rooms.</p>
+
       <h3 className="ds-section-title" style={{ marginTop: 24 }}>Sample readings</h3>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
         <input

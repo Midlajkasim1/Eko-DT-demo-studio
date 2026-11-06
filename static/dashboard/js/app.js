@@ -158,6 +158,7 @@
       regQ: '', regStF: null, regSysF: null, regSevF: null, regSort: null, regSortDir: 'asc',
       markersOn: ss.get('eko-mk') !== '0', eqLabelsOn: ss.get('eko-eql') !== '0', showAcked: true, tlMetric: 'kwh', tlRange: 'day',   /* D70: per session */
       hmMode: 'temp', hmFloor: 'All', hmSel: null, hmRange: 'today', hmPlay: false, hmStep: null, hmStepLabel: '', hmOutline: false,
+      hmList: 'sensors', hmOpen: {},
       hmLayers: { sensors: false, labels: true, values: true },
       woRaised: {}, dlg: null, palQ: '', palSel: 0,
       mobMore: false,
@@ -1833,6 +1834,13 @@
       E._hmTimer = setInterval(run, 1000);
     },
     hmFloor(el){ E.set({ hmFloor: el.dataset.v }); },
+    hmList(el){ E.set({ hmList: el.dataset.v === 'rooms' ? 'rooms' : 'sensors', hmSel: null }); },
+    hmLevel(el){
+      const key = el.dataset.v || '';
+      const open = { ...(E.state.hmOpen || {}) };
+      open[key] = !open[key];
+      E.set({ hmOpen: open });
+    },
     hmSel(el){ E.set({ hmSel: E.state.hmSel === el.dataset.v ? null : el.dataset.v }); },
     hmOutline(){ E.set({ hmOutline: !E.state.hmOutline }); },
     hmStill(){
