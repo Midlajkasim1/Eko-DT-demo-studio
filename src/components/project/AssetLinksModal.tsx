@@ -1164,8 +1164,8 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
   return (
     <>
       {createPortal(
-        <div className="dashboard-settings-overlay" onClick={requestClose}>
-          <div className="dashboard-settings-modal asset-links-modal" onClick={e => e.stopPropagation()}>
+        <div className="dashboard-settings-overlay">
+          <div className="dashboard-settings-modal asset-links-modal">
             <div className="dashboard-settings-header">
               <h2>
                 <i className="bx bx-link" style={{ marginRight: '8px' }}></i>

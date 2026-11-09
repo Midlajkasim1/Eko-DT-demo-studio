@@ -642,8 +642,8 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   }
 
   return createPortal(
-    <div className="dashboard-settings-overlay" onClick={onClose}>
-      <div className="dashboard-settings-modal" onClick={e => e.stopPropagation()}>
+    <div className="dashboard-settings-overlay">
+      <div className="dashboard-settings-modal">
         <div className="dashboard-settings-header">
           <h2>
             <i className="bx bx-slider-alt" style={{ marginRight: '8px' }}></i>
