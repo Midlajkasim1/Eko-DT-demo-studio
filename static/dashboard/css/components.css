@@ -17360,3 +17360,194 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .mtmore:hover {
   text-decoration:underline
 }
+
+/* ── Live Twin (layouts/hospital-twin.js): the Studio's bar and side panel around the reference's dark cutaway of the hospital ── */
+.dashboard-native-container .twinview { flex:1 1 auto; min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--s1) }
+.dashboard-native-container #mount > .twinview { flex:1 1 auto }
+.dashboard-native-container .twbar { flex:none; display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; padding:8px 14px; background:var(--s1); border-block-end:1px solid var(--bd2) }
+.dashboard-native-container .twttl { margin:0; font-size:15px; color:var(--t1) }
+.dashboard-native-container .twseg { display:inline-flex; border:1px solid var(--bd2); border-radius:6px; overflow:hidden }
+.dashboard-native-container .twseg button { border:0; background:none; padding:5px 11px; font:inherit; font-size:12px; font-weight:600; color:var(--t2); cursor:pointer }
+.dashboard-native-container .twseg button + button { border-inline-start:1px solid var(--bd2) }
+.dashboard-native-container .twseg button:hover { color:var(--t1); background:var(--acc8) }
+.dashboard-native-container .twseg button[aria-pressed="true"] { background:var(--acc); color:var(--onAcc) }
+.dashboard-native-container .twseg button:focus-visible { outline:2px solid var(--acc); outline-offset:-2px }
+.dashboard-native-container .twmeta { margin-inline-start:auto; display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; font-size:12px; color:var(--t2) }
+.dashboard-native-container .twillus { padding:2px 8px; border:1px dashed var(--bd2); border-radius:3px }
+.dashboard-native-container .twstatus { padding:2px 8px; border-radius:3px; font-weight:600; color:#fff; background:#6b7280 }
+.dashboard-native-container .twstatus[data-st="live"] { background:#0b249b }
+.dashboard-native-container .twbody { flex:1; min-height:0; display:flex }
+.dashboard-native-container .twstage { position:relative; flex:1 1 auto; min-width:0; min-height:0; display:flex; background:radial-gradient(1200px 700px at 55% 40%,#0d1621 0%,#070b10 70%) }
+.dashboard-native-container .twside { flex:none; width:320px; overflow:auto; padding:12px 14px 18px; background:var(--s1); border-inline-start:1px solid var(--bd2); font-size:13px; color:var(--t1) }
+.dashboard-native-container .twpick { margin:0 0 10px; color:var(--t2) }
+.dashboard-native-container .twsub { margin:14px 0 6px; font-size:11.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--t2) }
+.dashboard-native-container .twlegend { margin:0; display:grid; gap:8px }
+.dashboard-native-container .twlegend dt { font-weight:600; font-size:12px; color:var(--t1) }
+.dashboard-native-container .twlegend dd, .dashboard-native-container .twnets li { margin:2px 0 0; display:flex; align-items:center; gap:8px; font-size:12px; color:var(--t2) }
+.dashboard-native-container .twnets { list-style:none; margin:0; padding:0 }
+.dashboard-native-container .twkey { flex:none; width:16px; height:5px; border-radius:2px; box-shadow:inset 0 0 0 1px rgba(0,0,0,.25) }
+.dashboard-native-container .twlayers { flex:none; display:flex; flex-wrap:wrap; gap:6px; padding:6px 14px; background:var(--s1); border-block-end:1px solid var(--bd2) }
+.dashboard-native-container .twlayers button { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border:1px solid var(--bd2); border-radius:999px; background:none; font:inherit; font-size:12px; color:var(--t1); cursor:pointer }
+.dashboard-native-container .twlayers button[aria-pressed="false"] { color:var(--t2); text-decoration:line-through; opacity:.7 }
+.dashboard-native-container .twlayers button[aria-pressed="false"] .twsw { filter:grayscale(1) }
+.dashboard-native-container .twlayers button:focus-visible { outline:2px solid var(--acc); outline-offset:1px }
+.dashboard-native-container .twsw { display:inline-flex; gap:2px; min-width:36px }
+.dashboard-native-container .twsw i { width:9px; height:9px; border-radius:2px; box-shadow:inset 0 0 0 1px rgba(0,0,0,.25) }
+.dashboard-native-container .twnote { margin:12px 0 0; font-size:12px; color:var(--t2) }
+.dashboard-native-container .twdh { display:flex; justify-content:space-between; align-items:flex-start; gap:8px }
+.dashboard-native-container .twdt { margin:0; font-size:17px; color:var(--t1) }
+.dashboard-native-container .twdid { font-size:11.5px; color:var(--t2); overflow-wrap:anywhere }
+.dashboard-native-container .twchip { display:inline-block; margin:8px 0 4px; padding:2px 8px; border-radius:3px; font-size:11.5px; font-weight:600; background:#e5e7eb; color:#374151 }
+.dashboard-native-container .twchip[data-fin="mapped"] { background:var(--accT); color:var(--link) }
+.dashboard-native-container .twchip[data-fin="missing"], .dashboard-native-container .twchip[data-fin="ambiguous"] { background:#fee2e2; color:#991b1b }
+.dashboard-native-container .twchip[data-fin="unmapped"] { background:transparent; color:var(--t2); box-shadow:inset 0 0 0 1px var(--bd2) }
+.dashboard-native-container .twchip[data-fin="stale"] { background:#fef3c7; color:#92400e }
+.dashboard-native-container .twdl { margin:8px 0 0; display:grid; gap:4px }
+.dashboard-native-container .twdl div { display:flex; justify-content:space-between; gap:12px }
+.dashboard-native-container .twdl dt { color:var(--t2) }
+.dashboard-native-container .twdl dd { margin:0; text-align:end }
+.dashboard-native-container .twpts { width:100%; border-collapse:collapse; font-size:12.5px }
+.dashboard-native-container .twpts th { text-align:start; font-weight:400; color:var(--t2); padding:3px 0; border-block-end:1px solid var(--bd1) }
+.dashboard-native-container .twpts td { text-align:end; font-variant-numeric:tabular-nums; padding:3px 0; border-block-end:1px solid var(--bd1); overflow-wrap:anywhere }
+.dashboard-native-container .twpts tr:not([data-st="live"]) td { color:var(--t2); font-style:italic }
+.dashboard-native-container .twpts tr[data-st="stale"] td, .dashboard-native-container .twpts tr[data-st="unavailable"] td { color:#92400e }
+.dashboard-native-container .twflag { margin-inline-start:5px; padding:0 3px; border-radius:2px; font-size:9.5px; font-weight:700; text-decoration:none; color:var(--t2); box-shadow:inset 0 0 0 1px var(--bd2); cursor:help }
+.dashboard-native-container .twflag[data-k="al"] { color:#991b1b; box-shadow:inset 0 0 0 1px #fca5a5 }
+.dashboard-native-container .twfloors dd { color:var(--t2) }
+.dashboard-native-container .twfloors div[data-conflict="1"] dd { color:#991b1b; font-weight:600 }
+.dashboard-native-container .twwarn { color:#991b1b }
+.dashboard-native-container .twalarms { list-style:none; margin:0; padding:0; display:grid; gap:6px }
+.dashboard-native-container .twalarms li { display:flex; flex-direction:column; gap:2px; padding:6px 8px; border-radius:4px; border-inline-start:3px solid #f59e0b; background:var(--acc8) }
+.dashboard-native-container .twalarms li[data-sev="critical"], .dashboard-native-container .twalarms li[data-sev="high"] { border-inline-start-color:#dc2626 }
+.dashboard-native-container .twalarms b { font-weight:600; font-size:12.5px }
+.dashboard-native-container .twalarms span { font-size:11.5px; color:var(--t2) }
+
+.dashboard-native-container .twsvg { flex:1 1 auto; width:100%; height:100%; min-width:0; min-height:0; display:block; direction:ltr; touch-action:none; user-select:none; cursor:grab }
+.dashboard-native-container .twsvg .face { stroke-width:.45; stroke-linejoin:round }
+.dashboard-native-container .twsvg .grid { stroke:rgba(90,120,150,.07); stroke-width:.6 }
+.dashboard-native-container .twsvg .floor-grid { stroke:rgba(120,150,180,.08); stroke-width:.6 }
+.dashboard-native-container .twsvg .wall { stroke:rgba(91,126,166,.22); stroke-width:.6 }
+.dashboard-native-container .twsvg .level-name { fill:#6f88a6; font-size:15px; font-weight:600; letter-spacing:.16em }
+.dashboard-native-container .twsvg .slat { stroke:#1d2732; stroke-width:.7 }
+.dashboard-native-container .twsvg .seam { stroke:rgba(0,0,0,.35); stroke-width:.7 }
+.dashboard-native-container .twsvg .fin { stroke:#2c4a36; stroke-width:.8 }
+.dashboard-native-container .twsvg .hanger { stroke:#45576b; stroke-width:.8 }
+.dashboard-native-container .twsvg .breaker { stroke:#0b0f14; stroke-width:.3 }
+.dashboard-native-container .twsvg .lcd { stroke-width:.6 }
+.dashboard-native-container .twsvg .face-lbl { fill:#b7c6d6; font-weight:600 }
+.dashboard-native-container .twsvg .nozzle { stroke:#06090d; stroke-width:.8 }
+.dashboard-native-container .twsvg .rotor-house { fill:#0b1118; stroke:#6c7f94; stroke-width:1 }
+.dashboard-native-container .twsvg .blade { fill:#a7bbcf }
+.dashboard-native-container .twsvg .hub { fill:#dbe5ef }
+.dashboard-native-container .twsvg .wheel-face { fill:#2e4255; stroke:#7a93ab; stroke-width:.8 }
+.dashboard-native-container .twsvg .spoke { stroke:#8aa3bb; stroke-width:.6 }
+.dashboard-native-container .twsvg .lamp { fill:#3d4654; stroke:#06090d; stroke-width:.6 }
+.dashboard-native-container .twsvg .flame-window { fill:#1b0f0a; stroke:#c2410c; stroke-width:1 }
+.dashboard-native-container .twsvg .damper-ring { fill:#0c1218; stroke:#8aa0b6; stroke-width:.8 }
+.dashboard-native-container .twsvg .damper-blade { stroke:#e2e8f0; stroke-width:1.6; stroke-linecap:round }
+.dashboard-native-container .twsvg .halo { fill:transparent }
+.dashboard-native-container .twsvg .pipe { pointer-events:none }
+.dashboard-native-container .twsvg .pipe path { fill:none; stroke-linecap:round; stroke-linejoin:round }
+.dashboard-native-container .twsvg.hide-chw .pipe[data-layer="chw"], .dashboard-native-container .twsvg.hide-cw .pipe[data-layer="cw"], .dashboard-native-container .twsvg.hide-air .pipe[data-layer="air"], .dashboard-native-container .twsvg.hide-water .pipe[data-layer="water"], .dashboard-native-container .twsvg.hide-power .pipe[data-layer="power"], .dashboard-native-container .twsvg.hide-gas .pipe[data-layer="gas"] { display:none }
+.dashboard-native-container .twsvg[data-conn="1"] .pipe:not(.conn) { opacity:.3 }
+.dashboard-native-container .twsvg .pipe.conn .core { opacity:1 }
+.dashboard-native-container .twsvg .k-pipe.conn .core { stroke-width:3.4 }
+.dashboard-native-container .twsvg .k-cable.conn .core { stroke-width:2.2 }
+.dashboard-native-container .twsvg .k-duct.conn .core { opacity:.75 }
+.dashboard-native-container .twsvg .k-pipe .casing { stroke:#05080c; stroke-width:4.6 }
+.dashboard-native-container .twsvg .k-pipe .core { stroke-width:2.6; opacity:.75 }
+.dashboard-native-container .twsvg .k-duct .casing { stroke:#0b1017; stroke-width:9 }
+.dashboard-native-container .twsvg .k-duct .core { stroke-width:6.6; opacity:.35 }
+.dashboard-native-container .twsvg .k-cable .casing { stroke:#05080c; stroke-width:3 }
+.dashboard-native-container .twsvg .k-cable .core { stroke-width:1.5; opacity:.75 }
+.dashboard-native-container .twsvg .equip { cursor:pointer; outline:none }
+.dashboard-native-container .twsvg .equip:hover .face { filter:brightness(1.18) }
+.dashboard-native-container .twsvg .equip.sel .halo { fill:url(#twglowS); stroke:#7dd3fc; stroke-width:1.2; stroke-dasharray:4 3 }
+.dashboard-native-container .twsvg .equip:focus-visible .halo { stroke:#7dd3fc; stroke-width:1.4 }
+/* a picked floor: the others fade, the outside stays with the ground floor */
+.dashboard-native-container .twsvg .tw-level { transition:opacity .3s }
+.dashboard-native-container .twsvg[data-level="RF"] .tw-level:not([data-level="RF"]),
+.dashboard-native-container .twsvg[data-level="L2"] .tw-level:not([data-level="L2"]),
+.dashboard-native-container .twsvg[data-level="L1"] .tw-level:not([data-level="L1"]),
+.dashboard-native-container .twsvg[data-level="GF"] .tw-level:not([data-level="GF"]) { opacity:.16; pointer-events:none }
+.dashboard-native-container .twsvg[data-level="RF"] .tag:not([data-level="RF"]),
+.dashboard-native-container .twsvg[data-level="L2"] .tag:not([data-level="L2"]),
+.dashboard-native-container .twsvg[data-level="L1"] .tag:not([data-level="L1"]),
+.dashboard-native-container .twsvg[data-level="GF"] .tag:not([data-level="GF"]) { display:none }
+.dashboard-native-container .twsvg .tag { pointer-events:none }
+.dashboard-native-container .twsvg .tag-bg { fill:rgba(8,13,20,.88); stroke:#2a3b50; stroke-width:.7 }
+.dashboard-native-container .twsvg .tag-stem { stroke:#3b4d63; stroke-width:.7 }
+.dashboard-native-container .twsvg .tag-name { fill:#e6eef7; font-size:6.4px; font-weight:600 }
+.dashboard-native-container .twsvg .tag-dot { fill:#5a6779 }
+.dashboard-native-container .twsvg .tag[data-fin="mapped"] .tag-dot { fill:#5cc8ff }
+.dashboard-native-container .twsvg .tag[data-fin="missing"] .tag-dot, .dashboard-native-container .twsvg .tag[data-fin="ambiguous"] .tag-dot { fill:#ff6b7a }
+.dashboard-native-container .twsvg .tag[data-fin="unmapped"] .tag-dot { fill:transparent; stroke:#8a9bb0; stroke-width:.7 }
+.dashboard-native-container .twsvg .tag[data-fin="stale"] .tag-dot { fill:#fbbf24 }
+.dashboard-native-container .twsvg .tag.sel .tag-bg { stroke:#7dd3fc }
+.dashboard-native-container .twsvg[data-zoom="far"] .tag:not(.sel) { display:none }
+.dashboard-native-container .twsvg[data-zoom="mid"] .tag.minor:not(.sel) { display:none }
+
+/* a trace: the machine traced from (white), upstream (violet), downstream (red: would stop · amber: values would change); the rest step back */
+.dashboard-native-container .twsvg.tracing .equip:not([data-tr]) { opacity:.22 }
+.dashboard-native-container .twsvg.tracing .tag:not([data-tr]):not(.sel) { display:none }
+.dashboard-native-container .twsvg.tracing .pipe:not(.tr-on) { opacity:.14 }
+.dashboard-native-container .twsvg.tracing .pipe.tr-on .core { opacity:1 }
+.dashboard-native-container .twsvg .equip[data-tr] .halo { stroke-width:1.4 }
+.dashboard-native-container .twsvg .equip[data-tr="src"] .halo { stroke:#f8fafc; stroke-width:1.8 }
+.dashboard-native-container .twsvg .equip[data-tr^="up-"] .halo { stroke:#a78bfa }
+.dashboard-native-container .twsvg .equip[data-tr^="down-stop"] .halo { stroke:#f87171 }
+.dashboard-native-container .twsvg .equip[data-tr^="down-shift"] .halo { stroke:#fbbf24 }
+.dashboard-native-container .twsvg .equip[data-tr$="-shift"] .halo, .dashboard-native-container .twsvg .equip[data-tr$="-weak"] .halo { stroke-dasharray:3 2 }
+.dashboard-native-container .twsvg .tag[data-tr^="up-"] .tag-bg { stroke:#a78bfa }
+.dashboard-native-container .twsvg .tag[data-tr^="down-stop"] .tag-bg { stroke:#f87171 }
+.dashboard-native-container .twsvg .tag[data-tr^="down-shift"] .tag-bg { stroke:#fbbf24 }
+.dashboard-native-container .twsvg .tag[data-tr="src"] .tag-bg { stroke:#f8fafc }
+.dashboard-native-container .twsvg .tag[data-al="alarm"] .tag-name { fill:#fca5a5 }
+.dashboard-native-container .twsvg .tag[data-al="fault"] .tag-name { fill:#fcd34d }
+.dashboard-native-container .twtrace { position:absolute; inset-block-start:10px; inset-inline:10px; z-index:2; display:flex; align-items:center; gap:10px; padding:6px 10px; border-radius:6px; background:rgba(8,13,20,.9); border:1px solid #2a3b50; color:#e6eef7; font-size:12px }
+.dashboard-native-container .twtrace[hidden] { display:none }
+.dashboard-native-container .twtrace button { flex:none; color:#e6eef7; border-color:#4b5f78; background:rgba(255,255,255,.06) }
+.dashboard-native-container .twtrace .twtracet { flex:1 1 auto; min-width:0 }
+.dashboard-native-container .twacts { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 }
+.dashboard-native-container .twacts button[aria-pressed="true"] { border-color:var(--acc); color:var(--acc) }
+.dashboard-native-container .twgo { display:inline; padding:0; border:0; background:none; font:inherit; color:var(--acc); text-align:start; cursor:pointer }
+.dashboard-native-container .twgo:hover, .dashboard-native-container .twgo:focus-visible { text-decoration:underline }
+.dashboard-native-container .twallist .twgo { display:flex; flex-direction:column; gap:2px; color:inherit; width:100% }
+.dashboard-native-container .twallist .twgo b { color:var(--t1) }
+.dashboard-native-container .twalarms li[data-linked="0"] { border-inline-start-color:var(--bd2) }
+.dashboard-native-container .twaldl { margin-block-start:4px }
+.dashboard-native-container .twfdd, .dashboard-native-container .twrel, .dashboard-native-container .twev ul { list-style:none; margin:0; padding:0; display:grid; gap:5px; font-size:12px }
+.dashboard-native-container .twfdd li { display:flex; flex-direction:column; gap:2px; padding:5px 8px; border-radius:4px; background:var(--acc8); border-inline-start:3px solid var(--bd2) }
+.dashboard-native-container .twfdd li[data-st="fault"] { border-inline-start-color:#f59e0b }
+.dashboard-native-container .twfdd li[data-st="unavailable"] { opacity:.75; font-style:italic }
+.dashboard-native-container .twfdd li > div { display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px }
+.dashboard-native-container .twfdd .twfddst, .dashboard-native-container .twfdd em, .dashboard-native-container .twrel em, .dashboard-native-container .twev li > span { color:var(--t2); font-size:11.5px }
+.dashboard-native-container .twrel li { display:flex; flex-wrap:wrap; gap:2px 6px }
+.dashboard-native-container .twrel em { flex-basis:100% }
+.dashboard-native-container .twev h4 { margin:8px 0 4px; font-size:11.5px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; padding-inline-start:6px; border-inline-start:3px solid var(--bd2) }
+.dashboard-native-container .twev h4[data-k="confirmed"] { border-inline-start-color:#dc2626 }
+.dashboard-native-container .twev h4[data-k="reference"] { border-inline-start-color:#64748b }
+.dashboard-native-container .twev h4[data-k="possible"] { border-inline-start-color:#a78bfa }
+.dashboard-native-container .twev h4[data-k="impact"] { border-inline-start-color:#fbbf24 }
+.dashboard-native-container .twev li { display:flex; flex-wrap:wrap; gap:2px 6px }
+.dashboard-native-container .twev .twevfact { flex-basis:100% }
+.dashboard-native-container .twev .twmore { color:var(--t2) }
+
+/* Phase 5: the BIM link and the feed's age */
+.dashboard-native-container .twstatus[data-st="stale"] { background:#92400e }
+.dashboard-native-container .twchip[data-bim] { margin-block-end:4px }
+.dashboard-native-container .twchip[data-bim="verified"] { background:#dcfce7; color:#166534 }
+.dashboard-native-container .twchip[data-bim="shared"], .dashboard-native-container .twchip[data-bim="conflict"] { background:#fee2e2; color:#991b1b }
+.dashboard-native-container .twchip[data-bim="missing"], .dashboard-native-container .twchip[data-bim="unconfirmed"] { background:var(--acc8); color:var(--t2) }
+.dashboard-native-container .twcand { margin-block-start:6px; padding:6px 8px; border:1px dashed var(--bd2); border-radius:6px }
+
+/* tablet and phone: the details panel goes under the building */
+@media (max-width:860px) {
+  .dashboard-native-container .twbody { flex-direction:column }
+  .dashboard-native-container .twstage { min-height:300px }
+  .dashboard-native-container .twside { width:auto; max-height:42%; border-inline-start:0; border-block-start:1px solid var(--bd2) }
+  .dashboard-native-container .twmeta { margin-inline-start:0 }
+}
+@media (prefers-reduced-motion:reduce) {
+  .dashboard-native-container .twsvg .tw-level { transition:none }
+}

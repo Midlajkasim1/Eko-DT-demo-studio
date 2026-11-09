@@ -1,0 +1,266 @@
+{
+  "timestamp": "2026-11-06T16:57:29.118003",
+  "alarms": [
+    {
+      "id": "@3260b5da-8173162b_ahu_valSim_u0046Du0026D_4_Overcooling",
+      "source": "HOSPITAL AHU_01",
+      "source_id": "p:ekoHospital:r:3260b5da-8173162b",
+      "message": "Cooling Coil is Overcooling",
+      "detail": "Overcooling - Possible Faults: Incorrect cooling control/PID tuning, Cooling valve commanded open unnecessarily, temperature sensor issue, Manual override, Recommendation: Verify temperature and setpoint, Check cooling valve command/feedback, Review PID/control sequence, Check for manual overrides",
+      "priority": 150,
+      "severity": "info",
+      "dispatcher": "CONTROL",
+      "diagnosed": true,
+      "occurred": "2026-11-06T16:42:07.319+04:00 Dubai",
+      "state": "ahu_valSim_FD&D_4_Overcooling",
+      "history": [
+        {
+          "id": "@3260b5da-8173162b_ahu_valSim_u0046Du0026D_3_Fan_Commandu002fStatus_Mismatch",
+          "message": "Return to normal",
+          "detail": "Sensor Fault - MA Temp Sensor Fault, OA Temp Sesnor Fault, SA Temp Sensor Fault, RA Temp Sesnor Fault, SA Pressure Fault, RA Humidity Sensor Fault, RA CO2 Fault.",
+          "priority": 200,
+          "severity": "info",
+          "open": false,
+          "occurred": "2026-11-06T09:20:58.153+04:00 Dubai",
+          "state": "ahu_valSim_FD&D_3_Fan_Command/Status_Mismatch"
+        },
+        {
+          "id": "@3260b5da-8173162b_ahu_valSim_u0041larmStatus",
+          "message": "Return to normal",
+          "detail": "Fan Command Status Mismatch - Possible Faults: Fan trip, Motor fault, Contactor/relay fault, Power supply issue, Fan status feedback fault. Recommendation: Check trip status, Verify fan power supply, Check motor/EC fan controller, Verify fan command and run-status feedback.",
+          "priority": 250,
+          "severity": "info",
+          "open": false,
+          "occurred": "2026-11-06T09:20:57.137+04:00 Dubai",
+          "state": "ahu_valSim_AlarmStatus"
+        }
+      ]
+    },
+    {
+      "id": "@3260bccb-5aa93061_vav_valSim_right_u0046Du0026D_1_Airflow_Performance",
+      "source": "HOSPITAL VAV_04",
+      "source_id": "p:ekoHospital:r:3260bccb-5aa93061",
+      "message": "Airflow Performance",
+      "detail": "Airflow Performance - Possible Fault : Low supply airflow, Low duct pressure, Damper/actuator issue, Duct/diffuser restriction, High zone cooling load, Zone temperature sensor issue. Recommendation : Verify airflow, Check damper operation, Check AHU duct pressure, Inspect duct/diffuser, Verify zone temperature sensor.",
+      "priority": 200,
+      "severity": "info",
+      "dispatcher": "CONTROL",
+      "diagnosed": true,
+      "occurred": "2026-11-06T16:37:20.943+04:00 Dubai",
+      "state": "vav_valSim_right_FD&D_1_Airflow_Performance",
+      "history": []
+    },
+    {
+      "id": "@3260bccb-b3f500c6_vav_valSim_center_u0046Du0026D_1_Airflow_Performance",
+      "source": "HOSPITAL VAV_03",
+      "source_id": "p:ekoHospital:r:3260bccb-b3f500c6",
+      "message": "Airflow Performance",
+      "detail": "Airflow Performance - Possible Fault : Low supply airflow, Low duct pressure, Damper/actuator issue, Duct/diffuser restriction, High zone cooling load, Zone temperature sensor issue. Recommendation : Verify airflow, Check damper operation, Check AHU duct pressure, Inspect duct/diffuser, Verify zone temperature sensor.",
+      "priority": 200,
+      "severity": "info",
+      "dispatcher": "CONTROL",
+      "diagnosed": true,
+      "occurred": "2026-11-06T16:24:24.231+04:00 Dubai",
+      "state": "vav_valSim_center_FD&D_1_Airflow_Performance",
+      "history": []
+    },
+    {
+      "id": "@3260bccb-17316b91_vav_valSim_left_u0046Du0026D_1_Airflow_Performance",
+      "source": "HOSPITAL VAV_02",
+      "source_id": "p:ekoHospital:r:3260bccb-17316b91",
+      "message": "Airflow Performance",
+      "detail": "Airflow Performance - Possible Fault : Low supply airflow, Low duct pressure, Damper/actuator issue, Duct/diffuser restriction, High zone cooling load, Zone temperature sensor issue. Recommendation : Verify airflow, Check damper operation, Check AHU duct pressure, Inspect duct/diffuser, Verify zone temperature sensor.",
+      "priority": 200,
+      "severity": "info",
+      "dispatcher": "CONTROL",
+      "diagnosed": true,
+      "occurred": "2026-11-06T16:18:39.663+04:00 Dubai",
+      "state": "vav_valSim_left_FD&D_1_Airflow_Performance",
+      "history": []
+    },
+    {
+      "id": "@32631e63-38fdb747_fcu_valSim_left_u0046Du0026D_1_Cooling_Performance",
+      "source": "HOSPITAL FCU_05",
+      "source_id": "p:ekoHospital:r:32631e63-38fdb747",
+      "message": "Cooling Performance Fault",
+      "detail": "Cooling_Performance_Not_Meeting_Setpoint - Possible Faults : Dirty filter, Blocked strainer, Valve issue, Low CHW flow, High room load, Control issue. Recommendation : Verify valve operation, Inspect filter, Verify CHW, Inspect coil",
+      "priority": 200,
+      "severity": "info",
+      "dispatcher": "CONTROL",
+      "diagnosed": true,
+      "occurred": "2026-11-06T15:43:09.592+04:00 Dubai",
+      "state": "fcu_valSim_left_FD&D_1_Cooling_Performance",
+      "history": [
+        {
+          "id": "@32631e63-38fdb747_fcu_valSim_left_u0046Du0026D_3_Fan_Commandu002fStatus_Mismatch",
+          "message": "Return to normal",
+          "detail": "CoolingDemand 59.02",
+          "priority": 150,
+          "severity": "info",
+          "open": false,
+          "occurred": "2026-11-06T14:37:19.299+04:00 Dubai",
+          "state": "fcu_valSim_left_FD&D_3_Fan_Command/Status_Mismatch"
+        },
+        {
+          "id": "@32631e63-38fdb747_fcu_valSim_left_u0046Du0026D_5_Cmdu002fNoOccupancy_Mismatch",
+          "message": "Return to normal",
+          "detail": "CoolingDemand 59.02",
+          "priority": 200,
+          "severity": "info",
+          "open": false,
+          "occurred": "2026-11-06T14:16:47.113+04:00 Dubai",
+          "state": "fcu_valSim_left_FD&D_5_Cmd/NoOccupancy_Mismatch"
+        }
+      ]
+    },
+    {
+      "id": "@3260bab0-fdffa381_fcu_valSim_left_u0046Du0026D_1_Cooling_Performance",
+      "source": "HOSPITAL FCU_01",
+      "source_id": "p:ekoHospital:r:3260bab0-fdffa381",
+      "message": "Cooling Performance Fault",
+      "detail": "Cooling_Performance_Not_Meeting_Setpoint - Possible Faults : Dirty filter, Blocked strainer, Valve issue, Low CHW flow, High room load, Control issue. Recommendation : Verify valve operation, Inspect filter, Verify CHW, Inspect coil",
+      "priority": 200,
+      "severity": "info",
+      "dispatcher": "CONTROL",
+      "diagnosed": true,
+      "occurred": "2026-11-06T15:43:07.571+04:00 Dubai",
+      "state": "fcu_valSim_left_FD&D_1_Cooling_Performance",
+      "history": [
+        {
+          "id": "@3260bab0-fdffa381_fcu_valSim_left_u0046Du0026D_3_Fan_Commandu002fStatus_Mismatch",
+          "message": "Return to normal",
+          "detail": "CoolingDemand 59.02",
+          "priority": 150,
+          "severity": "info",
+          "open": false,
+          "occurred": "2026-11-06T14:34:02.827+04:00 Dubai",
+          "state": "fcu_valSim_left_FD&D_3_Fan_Command/Status_Mismatch"
+        },
+        {
+          "id": "@3260bab0-fdffa381_fcu_valSim_left_u0046Du0026D_5_Cmdu002fNoOccupancy_Mismatch",
+          "message": "Return to normal",
+          "detail": "CoolingDemand 59.02",
+          "priority": 200,
+          "severity": "info",
+          "open": false,
+          "occurred": "2026-11-06T14:13:30.555+04:00 Dubai",
+          "state": "fcu_valSim_left_FD&D_5_Cmd/NoOccupancy_Mismatch"
+        }
+      ]
+    },
+    {
+      "id": "@3260bad7-66788963_fcu_valSim_left_u0046Du0026D_1_Cooling_Performance",
+      "source": "HOSPITAL FCU_03",
+      "source_id": "p:ekoHospital:r:3260bad7-66788963",
+      "message": "Cooling Performance Fault",
+      "detail": "Cooling_Performance_Not_Meeting_Setpoint - Possible Faults : Dirty filter, Blocked strainer, Valve issue, Low CHW flow, High room load, Control issue. Recommendation : Verify valve operation, Inspect filter, Verify CHW, Inspect coil",
+      "priority": 200,
+      "severity": "info",
+      "dispatcher": "CONTROL",
+      "diagnosed": true,
+      "occurred": "2026-11-06T15:43:07.571+04:00 Dubai",
+      "state": "fcu_valSim_left_FD&D_1_Cooling_Performance",
+      "history": [
+        {
+          "id": "@3260bad7-66788963_fcu_valSim_left_u0046Du0026D_3_Fan_Commandu002fStatus_Mismatch",
+          "message": "Return to normal",
+          "detail": "CoolingDemand 59.02",
+          "priority": 150,
+          "severity": "info",
+          "open": false,
+          "occurred": "2026-11-06T14:33:36.351+04:00 Dubai",
+          "state": "fcu_valSim_left_FD&D_3_Fan_Command/Status_Mismatch"
+        },
+        {
+          "id": "@3260bad7-66788963_fcu_valSim_left_u0046Du0026D_5_Cmdu002fNoOccupancy_Mismatch",
+          "message": "Return to normal",
+          "detail": "CoolingDemand 59.02",
+          "priority": 200,
+          "severity": "info",
+          "open": false,
+          "occurred": "2026-11-06T14:13:04.094+04:00 Dubai",
+          "state": "fcu_valSim_left_FD&D_5_Cmd/NoOccupancy_Mismatch"
+        },
+        {
+          "id": "@3260bad7-66788963_fcu_valSim_left_u0041larmStatus",
+          "message": "Return to normal",
+          "detail": "Cooling_Performance_Not_Meeting_Setpoint - Possible Faults : Dirty filter, Blocked strainer, Valve issue, Low CHW flow, High room load, Control issue. Recommendation : Verify valve operation, Inspect filter, Verify CHW, Inspect coil",
+          "priority": 250,
+          "severity": "info",
+          "open": false,
+          "occurred": "2026-11-06T10:21:18.028+04:00 Dubai",
+          "state": "fcu_valSim_left_AlarmStatus"
+        }
+      ]
+    },
+    {
+      "id": "@3260b5da-8173162b_ahu_valSim_u0046Du0026D_2_Sensor_Fault",
+      "source": "HOSPITAL AHU_01",
+      "source_id": "p:ekoHospital:r:3260b5da-8173162b",
+      "message": "Sensor Fault",
+      "detail": "Sensor Fault - MA Temp Sensor Fault, OA Temp Sesnor Fault, SA Temp Sensor Fault, RA Temp Sesnor Fault, SA Pressure Fault, RA Humidity Sensor Fault, RA CO2 Fault.",
+      "priority": 150,
+      "severity": "info",
+      "dispatcher": "CONTROL",
+      "diagnosed": true,
+      "occurred": "2026-11-06T15:42:06.39+04:00 Dubai",
+      "state": "ahu_valSim_FD&D_2_Sensor_Fault",
+      "history": [
+        {
+          "id": "@3260b5da-8173162b_ahu_valSim_u0046Du0026D_3_Fan_Commandu002fStatus_Mismatch",
+          "message": "Return to normal",
+          "detail": "Sensor Fault - MA Temp Sensor Fault, OA Temp Sesnor Fault, SA Temp Sensor Fault, RA Temp Sesnor Fault, SA Pressure Fault, RA Humidity Sensor Fault, RA CO2 Fault.",
+          "priority": 200,
+          "severity": "info",
+          "open": false,
+          "occurred": "2026-11-06T09:20:58.153+04:00 Dubai",
+          "state": "ahu_valSim_FD&D_3_Fan_Command/Status_Mismatch"
+        },
+        {
+          "id": "@3260b5da-8173162b_ahu_valSim_u0041larmStatus",
+          "message": "Return to normal",
+          "detail": "Fan Command Status Mismatch - Possible Faults: Fan trip, Motor fault, Contactor/relay fault, Power supply issue, Fan status feedback fault. Recommendation: Check trip status, Verify fan power supply, Check motor/EC fan controller, Verify fan command and run-status feedback.",
+          "priority": 250,
+          "severity": "info",
+          "open": false,
+          "occurred": "2026-11-06T09:20:57.137+04:00 Dubai",
+          "state": "ahu_valSim_AlarmStatus"
+        }
+      ]
+    },
+    {
+      "id": "@32631956-941f3d03_ahu_valSim_u0046Du0026D_2_Sensor_Fault",
+      "source": "HOSPITAL AHU_03",
+      "source_id": "p:ekoHospital:r:32631956-941f3d03",
+      "message": "Sensor Fault",
+      "detail": "Sensor Fault - MA Temp Sensor Fault, OA Temp Sesnor Fault, SA Temp Sensor Fault, RA Temp Sesnor Fault, SA Pressure Fault, RA Humidity Sensor Fault, RA CO2 Fault.",
+      "priority": 150,
+      "severity": "info",
+      "dispatcher": "CONTROL",
+      "diagnosed": true,
+      "occurred": "2026-11-06T15:42:06.39+04:00 Dubai",
+      "state": "ahu_valSim_FD&D_2_Sensor_Fault",
+      "history": []
+    },
+    {
+      "id": "@3260b5eb-692b5f51_ahu_valSim_u0046Du0026D_2_Sensor_Fault",
+      "source": "HOSPITAL AHU_02",
+      "source_id": "p:ekoHospital:r:3260b5eb-692b5f51",
+      "message": "Sensor Fault",
+      "detail": "Sensor Fault - MA Temp Sensor Fault, OA Temp Sesnor Fault, SA Temp Sensor Fault, RA Temp Sesnor Fault, SA Pressure Fault, RA Humidity Sensor Fault, RA CO2 Fault.",
+      "priority": 150,
+      "severity": "info",
+      "dispatcher": "CONTROL",
+      "diagnosed": true,
+      "occurred": "2026-11-06T15:42:06.39+04:00 Dubai",
+      "state": "ahu_valSim_FD&D_2_Sensor_Fault",
+      "history": []
+    }
+  ],
+  "counts": {
+    "critical": 0,
+    "warning": 0,
+    "info": 10,
+    "total": 10
+  }
+}

@@ -235,7 +235,11 @@
       fam: 'sys',
       asset: matchedAsset ? matchedAsset.id : asset,
       bimId: matchedAsset ? matchedAsset.bimId : null,
+      sourceId: a.source_id || null,   // FIN's id of the equipment the alarm is on: the Live Twin matches alarms by it, never by name
+      state: a.state == null ? null : String(a.state),   // FIN's alarm state (names the rule point), for the Live Twin's alarm-point link
       sev: sev(a.severity),
+      finSeverity: a.severity ? String(a.severity) : null,   // FIN's own severity word and priority, shown as sent by the Live Twin
+      priority: typeof a.priority === 'number' ? a.priority : null,
       cat: a.diagnosed ? 'fdd' : 'sys',
       sys: classifySys(src + ' ' + msg, matchedAsset),
       ack: null,
@@ -1932,6 +1936,12 @@
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     var list = payload && payload.equipment;
     if (!site || !Array.isArray(list)) return;
+    // when the backend last read FIN's equipment (it keeps the old list when a read fails): the Live Twin marks data stale by it
+    site.equipmentAt = payload.timestamp || null;
+    // what the backend's name rule keeps out of the list (energy meters...): only the Hospital Live Twin reads it, as unverified candidates
+    site.finExcluded = (Array.isArray(payload.excluded) ? payload.excluded : []).map(function (eq) {
+      return { id: eq.name, finId: eq.finId || '', bimId: eq.bimId, floor: eq.floor, tags: eq.tags || [], typeEn: String(eq.type || '').toUpperCase(), st: 'ok', points: eq.points || [] };
+    });
     if (Object.prototype.hasOwnProperty.call(payload, 'workOrderError')) {
       site.workOrderError = payload.workOrderError || '';
       site.workOrderState = payload.workOrderState || '';
@@ -1998,6 +2008,7 @@
       var assetData = {
         id: eq.name,
         bimId: eq.bimId,
+        finId: eq.finId || "",   // FIN's own record id (backend _flatten_equip); the Live Twin checks its mapping against it
         sys: sys,
         crit: crit,
         wtyStart: wtyStart,

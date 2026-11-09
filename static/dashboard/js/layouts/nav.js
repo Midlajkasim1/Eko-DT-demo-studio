@@ -19,7 +19,9 @@ window.EKO_LAYOUTS.nav = {
         { "id": "security",   "label": "sysSecurity", "pageId": "systems" },
         /* E15 port: Other systems and Data health; hidden by entitlement where a site has no data for them */
         { "id": "other",      "label": "p2.nav.others", "pageId": "sys-other" },
-        { "id": "data",       "label": "p2.nav.data",  "pageId": "sys-data" } ] },
+        { "id": "data",       "label": "p2.nav.data",  "pageId": "sys-data" },
+        /* the Eko Hospital Live Twin (layouts/hospital-twin.js); hidden on every other project (app.js projectSetup) */
+        { "id": "twin",       "label": "sysLiveTwin",  "pageId": "live-twin" } ] },
     { "id": "energy",    "label": "modEnergy",    "icon": "bolt",   "pageId": "energy", "mobile": "mobEnergy",
       "subs": [
         { "id": "power", "label": "subPower", "pageId": "power" },

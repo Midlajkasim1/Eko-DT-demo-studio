@@ -55,6 +55,7 @@
       : { esg: 'available', maintenance: 'available', security: 'available' };
     ['systems.other', 'systems.data', 'spaces.occ', 'security.evac', 'security.nurse'].forEach(v => { states[v] = extended ? 'active' : 'hidden'; });
     if(window.INJECTED_PROJECT_CONFIG) states['energy.anom'] = 'active';   /* every Studio project: its meters, the sample's, or none yet */
+    states['systems.twin'] = cfg.hospitalHvac === true ? 'active' : 'hidden';   /* Systems > Live Twin (layouts/hospital-twin.js): the Eko Hospital project only, as the roof schematic */
     /* Ask EKO asks the backend's Eko-Chat for every Studio and exported project, whatever sample data it shows */
     if(window.INJECTED_PROJECT_CONFIG && D.marsa) D.marsa.features = Object.assign({}, D.marsa.features, { ask: 'eko-chat' });
     if(D.marsa){ D.marsa.entitlements = D.marsa.entitlements || {}; D.marsa.entitlements.modules = Object.assign({}, D.marsa.entitlements.modules, states); }
@@ -127,6 +128,7 @@
   }
 
   let roofHost = null;   /* the kept element of the Hospital roof schematic view (openRoofView) */
+  let twinHost = null;   /* the kept element of the Live Twin page (Systems > Live Twin): its camera, floor and selection survive every render */
   const E = window.EKO = {
     data: window.EKO_DATA.marsa,
     nav: window.EKO_LAYOUTS.nav,
@@ -1061,10 +1063,19 @@
       : E.state.born === 'navx' ? 'x'
       : (E.state.born === 'nav' || /^nsub:/.test(E.state.born || '')) ? '1' : '0');
     $('ekonav').innerHTML = navRail();
+    if(twinHost && E.state.pageId !== 'live-twin' && window.EKO_TWIN) window.EKO_TWIN.release(twinHost);   /* the Live Twin's highlight in the model is its own page's */
     if(E.state.roofView && roofHost){
       const m = $('mount');
       if(m.firstElementChild !== roofHost || m.childElementCount !== 1) m.replaceChildren(roofHost);   /* only when it is not already there: moving it restarts what is turning */
       window.EKO_ROOF.update(roofHost, E);
+    } else if(E.state.pageId === 'live-twin' && window.EKO_TWIN && window.EKO_TWIN_MAP){   /* the mapping is published only for the Hospital project (hospital-twin-map.js) */
+      /* the Live Twin is built once and kept, like the roof: render() only puts it back and updates it. A new language builds it again. */
+      if(!twinHost || twinHost.dataset.lang !== E.lang){ twinHost = window.EKO_TWIN.create(E); twinHost.dataset.lang = E.lang; }
+      const m = $('mount');
+      if(m.lastElementChild !== twinHost) m.replaceChildren(twinHost);
+      while(m.firstElementChild !== twinHost) m.firstElementChild.remove();
+      if(stacked) twinHost.insertAdjacentHTML('beforebegin', NB(pagehead()));   /* tablet and phone: the page header carries the Systems sub-tabs */
+      window.EKO_TWIN.update(twinHost, E);
     } else {
       /* E15 port: the page frame (headline, how-to-read line, tiles, tabs) on every page of a project on the extended module set (the Hospital). A project on the standard module set, Marsa Al Arab included, keeps its own page layouts. */
       const framed = window.EKO_FRAME && window.EKO_MODULES === 'extended';
