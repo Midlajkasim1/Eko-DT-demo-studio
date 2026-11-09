@@ -331,6 +331,8 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   const [metersRev, setMetersRev] = useState(0)
   const [docsRev, setDocsRev] = useState(0)
   const [docsError, setDocsError] = useState<string | null>(null)
+  // Mount the editor only after this open has copied the saved catalog, so an empty first mount cannot clear it.
+  const [docsLoadedFor, setDocsLoadedFor] = useState<string | null>(null)
   const [revs, setRevs] = useState<Record<MappingField, number>>(
     () => Object.fromEntries(MAPPING_FIELDS.map(f => [f, 0])) as Record<MappingField, number>
   )
@@ -398,48 +400,51 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
   }, [visible, activeTab])
 
   useEffect(() => {
-    if (visible && currentProject) {
-      const savedSettings = currentProject.apiSettings || {}
-      setMappings(mappingStatesFrom(savedSettings))
-      setRevs(prev => Object.fromEntries(MAPPING_FIELDS.map(f => [f, prev[f] + 1])) as typeof prev)
-      setBoardsRev(r => r + 1)
-      setDocsRev(r => r + 1)
-      setDocsError(null)
-      setSaveError(null)
-      setValidation(null)
-      setValidateError(null)
-      const mergedSettings: any = { 
-        ...DEFAULT_DASHBOARD_CONFIG,
-        ...savedSettings 
-      }
-
-      // FIN never returns a project name. The one name that is known to work is the one this
-      // project was just connected with, so offer it, but only into an empty field of the project
-      // that made the connection. It is saved with Save Settings like any other edit.
-      const fin = useFinStore.getState()
-      const connectedName = fin.status?.project_name
-      if (
-        currentProject.isFinProject && !savedSettings.finProjectName && connectedName &&
-        fin.isConnected && fin.status?.project_validated === true &&
-        fin.status.project_source === 'request' && fin.status.project_id === currentProject.projectId
-      ) {
-        mergedSettings.finProjectName = connectedName
-      }
-      
-      // Ensure any newly added default items that aren't in the saved database are appended
-      const arrayKeys = ['navButtons', 'leftCards', 'rightCards', 'sideButtons'] as const;
-      arrayKeys.forEach(key => {
-        if (savedSettings[key]) {
-          const savedIds = new Set(savedSettings[key].map((item: any) => item.id))
-          const missingItems = DEFAULT_DASHBOARD_CONFIG[key].filter((item: any) => !savedIds.has(item.id))
-          mergedSettings[key] = [...savedSettings[key], ...missingItems]
-        }
-      })
-
-      // Start from this project's own settings. Carrying the previous project's state
-      // over (the modal stays mounted) would leak its mappings into this one on save.
-      setSettings({ ...CONNECTION_DEFAULTS, ...mergedSettings })
+    if (!(visible && currentProject)) {
+      setDocsLoadedFor(null)
+      return
     }
+    const savedSettings = currentProject.apiSettings || {}
+    setMappings(mappingStatesFrom(savedSettings))
+    setRevs(prev => Object.fromEntries(MAPPING_FIELDS.map(f => [f, prev[f] + 1])) as typeof prev)
+    setBoardsRev(r => r + 1)
+    setDocsRev(r => r + 1)
+    setDocsError(null)
+    setDocsLoadedFor(currentProject.projectId)
+    setSaveError(null)
+    setValidation(null)
+    setValidateError(null)
+    const mergedSettings: any = { 
+      ...DEFAULT_DASHBOARD_CONFIG,
+      ...savedSettings 
+    }
+
+    // FIN never returns a project name. The one name that is known to work is the one this
+    // project was just connected with, so offer it, but only into an empty field of the project
+    // that made the connection. It is saved with Save Settings like any other edit.
+    const fin = useFinStore.getState()
+    const connectedName = fin.status?.project_name
+    if (
+      currentProject.isFinProject && !savedSettings.finProjectName && connectedName &&
+      fin.isConnected && fin.status?.project_validated === true &&
+      fin.status.project_source === 'request' && fin.status.project_id === currentProject.projectId
+    ) {
+      mergedSettings.finProjectName = connectedName
+    }
+    
+    // Ensure any newly added default items that aren't in the saved database are appended
+    const arrayKeys = ['navButtons', 'leftCards', 'rightCards', 'sideButtons'] as const;
+    arrayKeys.forEach(key => {
+      if (savedSettings[key]) {
+        const savedIds = new Set(savedSettings[key].map((item: any) => item.id))
+        const missingItems = DEFAULT_DASHBOARD_CONFIG[key].filter((item: any) => !savedIds.has(item.id))
+        mergedSettings[key] = [...savedSettings[key], ...missingItems]
+      }
+    })
+
+    // Start from this project's own settings. Carrying the previous project's state
+    // over (the modal stays mounted) would leak its mappings into this one on save.
+    setSettings({ ...CONNECTION_DEFAULTS, ...mergedSettings })
     // Re-read on open or project switch only; other changes to the project (a new thumbnail)
     // must not wipe edits in progress
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -942,13 +947,15 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 error={docsError ?? undefined}
                 onLoad={() => { update('finDocuments', undefined); setDocsError(null); setDocsRev(r => r + 1) }}
               >
-                <FinDocumentsEditor
-                  key={`${currentProject.projectId}-docs-${docsRev}`}
-                  value={settings.finDocuments}
-                  finProject={selectedFinProject}
-                  finConnected={finConnected}
-                  onChange={(families, error) => { update('finDocuments', families); setDocsError(error) }}
-                />
+                {docsLoadedFor === currentProject.projectId && (
+                  <FinDocumentsEditor
+                    key={`${currentProject.projectId}-docs-${docsRev}`}
+                    value={settings.finDocuments}
+                    finProject={selectedFinProject}
+                    finConnected={finConnected}
+                    onChange={(families, error) => { update('finDocuments', families); setDocsError(error) }}
+                  />
+                )}
               </MappingSection>
 
               <MappingSection
