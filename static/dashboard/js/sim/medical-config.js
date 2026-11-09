@@ -246,8 +246,8 @@
       evStates: { v: ['charging', 'available', 'available', 'fault'], note: 'EV charger states, demo; the charger feed replaces them' }
     },
     points: {
-      perIntegration: { v: { 'BMS (FIN Framework, BACnet)': 3350, 'CMMS': 0, 'Video system': 139, 'Access control': 205, 'Fire alarm panel (demo)': 106, 'Hospital system, bed status (demo)': 41, 'Nurse call (demo)': 41 }, note: 'points per integration: the BMS points list, one per camera, reader, fire device, bed and nurse call connector; the CMMS carries records, not points' },
-      intervalMin: { v: { 'BMS (FIN Framework, BACnet)': 5, 'Video system': 1, 'Access control': 1, 'Fire alarm panel (demo)': 1, 'Hospital system, bed status (demo)': 2, 'Nurse call (demo)': 1, 'CMMS': 15 }, note: 'expected update interval per integration, minutes; a point is stale after three intervals' },
+      perIntegration: { v: { 'BMS (EKO, BACnet)': 3350, 'CMMS': 0, 'Video system': 139, 'Access control': 205, 'Fire alarm panel (demo)': 106, 'Hospital system, bed status (demo)': 41, 'Nurse call (demo)': 41 }, note: 'points per integration: the BMS points list, one per camera, reader, fire device, bed and nurse call connector; the CMMS carries records, not points' },
+      intervalMin: { v: { 'BMS (EKO, BACnet)': 5, 'Video system': 1, 'Access control': 1, 'Fire alarm panel (demo)': 1, 'Hospital system, bed status (demo)': 2, 'Nurse call (demo)': 1, 'CMMS': 15 }, note: 'expected update interval per integration, minutes; a point is stale after three intervals' },
       bmsStale: { v: 64, note: 'BMS points stale now besides the sensors the faults name, demo' },
       bmsFlat: { v: 21, note: 'BMS points flat-lined (no change in 24 hours on a value that should move), demo' },
       bmsOor: { v: 11, note: 'BMS points out of their physical range, demo' },

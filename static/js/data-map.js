@@ -55,7 +55,7 @@
      - sites: only this project; the sample estate (other sites' figures) is empty */
   function clearFixtureServices(site) {
     site.user = Object.assign({}, site.user, { name: '', nameAr: '' });
-    site.integrations = [{ name: 'FIN Framework' + (siteInfo().finProject ? ' · ' + siteInfo().finProject : ''), proto: '', st: 'Connecting', hb: '', pts: '' }];
+    site.integrations = [{ name: 'EKO' + (siteInfo().finProject ? ' · ' + siteInfo().finProject : ''), proto: '', st: 'Connecting', hb: '', pts: '' }];
     var D = window.EKO_DATA || {};
     // the top bar reads the 'marsa' row, which a sample data set's site takes over
     if (Array.isArray(D.portfolio)) D.portfolio = D.portfolio.filter(function (p) { return p.key === site.key || p.key === 'marsa'; });
@@ -177,7 +177,7 @@
   function assetId(source) {
     var s = String(source || '').trim();
     var m = s.match(/\b([A-Z]{2,}[-_A-Z0-9.]+)\b/);
-    return m ? m[1] : (s.slice(0, 40) || 'FIN');
+    return m ? m[1] : (s.slice(0, 40) || 'EKO');
   }
 
   /* Systems overlay groups key on these labels: HVAC, Electrical, Life safety, Security. */
