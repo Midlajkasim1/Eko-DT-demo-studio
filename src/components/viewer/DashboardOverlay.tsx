@@ -20,6 +20,7 @@ import {
 } from '@/lib/layerGroups'
 import { runIfcDiagnostics } from '@/lib/ifcDiagnostics' // TEMPORARY, with EKO_IFC_DIAGNOSTICS below
 import { HVAC_GENERIC, HVAC_SPECIFIC, floorFilterSkips, isCeilingType, levelHides, reportLevel, type LevelIndex, type MechanicalInfo } from '@/lib/floorPolicy'
+import { choosePlate, plateLoops, platePrism, type XzTri } from '@/lib/floorOutline'
 import { setHidden, isHidden, onVisibilityApplied } from '@/lib/visibilityCoordinator'
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
@@ -1310,6 +1311,71 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       floorOutline.geometry.dispose()
       floorOutline = null
     }
+    const meshMatrix = (g: any) => g.transform instanceof THREE.Matrix4
+      ? g.transform as THREE.Matrix4
+      : new THREE.Matrix4().fromArray(g.transform?.elements ?? g.transform ?? new THREE.Matrix4().elements)
+    const planTris = async (model: any, ids: number[]) => {
+      const tris: XzTri[] = []
+      if (!ids.length || typeof model.getItemsGeometry !== 'function') return tris
+      model.object.updateMatrixWorld(true)
+      const world = model.object.matrixWorld as THREE.Matrix4
+      let res: any[][] = []
+      try { res = await model.getItemsGeometry(ids) } catch { return tris }
+      const v = new THREE.Vector3()
+      const take = (p: ArrayLike<number>, i: number, t: THREE.Matrix4) => {
+        v.set(Number(p[i * 3]) || 0, Number(p[i * 3 + 1]) || 0, Number(p[i * 3 + 2]) || 0).applyMatrix4(t).applyMatrix4(world)
+        return { x: v.x, z: v.z }
+      }
+      for (let n = 0; n < ids.length && tris.length < 120000; n++) {
+        for (const g of res?.[n] || []) {
+          if (!g?.positions || tris.length >= 120000) continue
+          const t = meshMatrix(g)
+          const p = g.positions as ArrayLike<number>
+          const idx = g.indices as ArrayLike<number> | undefined
+          const count = idx ? idx.length : p.length / 3
+          for (let i = 0; i + 2 < count && tris.length < 120000; i += 3) {
+            const ia = idx ? idx[i] : i, ib = idx ? idx[i + 1] : i + 1, ic = idx ? idx[i + 2] : i + 2
+            const a = take(p, ia, t), b = take(p, ib, t), c = take(p, ic, t)
+            const abx = b.x - a.x, abz = b.z - a.z, acx = c.x - a.x, acz = c.z - a.z
+            if (Math.abs(abx * acz - abz * acx) < 0.04) continue
+            tris.push({ ax: a.x, az: a.z, bx: b.x, bz: b.z, cx: c.x, cz: c.z })
+          }
+        }
+      }
+      return tris
+    }
+    /* Floor slabs first. Rooms are the plate when the slab is only a rectangle around them. */
+    const plateIds = async (model: any, floorId: string, kind: 'slab' | 'space') => {
+      const onFloor = new Set<number>((await indexModel(model)).byFloor.get(floorId) || [])
+      if (!onFloor.size || typeof model.getItemsOfCategories !== 'function') return [] as number[]
+      const found = await model.getItemsOfCategories([kind === 'slab' ? /^IFCSLAB$/i : /^IFCSPACE$/i])
+      let ids = (Object.values(found || {}).flat() as number[]).filter(id => onFloor.has(id))
+      if (!ids.length) return []
+      if (kind === 'slab' && typeof model.getItemsData === 'function') {
+        try {
+          const rows = await model.getItemsData(ids, {
+            attributesDefault: false, attributes: ['PredefinedType'], relationsDefault: { attributes: false, relations: false },
+          })
+          ids = ids.filter((_, i) => !/ROOF|LANDING/.test(attrText(rows[i], 'PredefinedType').toUpperCase()))
+        } catch { /* an untyped slab can still be the plate */ }
+      }
+      if (!ids.length || typeof model.getBoxes !== 'function') return ids.slice(0, kind === 'slab' ? 60 : 200)
+      let boxes: THREE.Box3[] = []
+      try { boxes = await model.getBoxes(ids) } catch { return [] }
+      const ranked: { id: number; area: number }[] = []
+      ids.forEach((id, i) => {
+        const b = boxes[i]
+        if (!b || b.isEmpty()) return
+        const dx = b.max.x - b.min.x, dy = b.max.y - b.min.y, dz = b.max.z - b.min.z
+        const area = dx * dz
+        if (kind === 'slab') {
+          if (dy > 1.8 || dx < 2 || dz < 2 || area < 8) return
+        } else if (area < 1.5 || area > 80000 || dy < 0.4) return
+        ranked.push({ id, area })
+      })
+      ranked.sort((a, b) => b.area - a.area)
+      return ranked.slice(0, kind === 'slab' ? 60 : 200).map(r => r.id)
+    }
     let outlineSeq = 0
     const outlineFloorOf = async (assetIdOrBimId: string | null) => {
       const seq = ++outlineSeq
@@ -1318,9 +1384,60 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (wake) wake.needsUpdate = true
       const bimId = assetIdOrBimId ? toBimId(assetIdOrBimId) : null
       const floorId = bimId ? await floorOf(bimId) : null
-      if (!floorId) return
+      if (!floorId || seq !== outlineSeq) return
+      const models = [...(engine.fragments?.models?.list?.values() ?? [])]
+      const slabIds: { model: any; ids: number[] }[] = []
+      for (const model of models) {
+        if (seq !== outlineSeq) return
+        const m = model as any
+        try {
+          const slabs = await plateIds(m, floorId, 'slab')
+          if (slabs.length) slabIds.push({ model: m, ids: slabs })
+        } catch { /* model not ready */ }
+      }
+      if (seq !== outlineSeq) return
+      const slabTris: XzTri[] = []
+      for (const part of slabIds) {
+        if (seq !== outlineSeq) return
+        slabTris.push(...await planTris(part.model, part.ids))
+      }
+      if (seq !== outlineSeq) return
+      const slabLoops = slabTris.length ? plateLoops(slabTris, { pad: 0.35 }) : null
+      // A four-corner slab is a pad. The rooms on that floor carry the building shape.
+      const plain = !slabLoops?.length || slabLoops[0].length / 2 - 1 <= 4
+      let spaceLoops: number[][] | null = null
+      if (plain) {
+        const spaceTris: XzTri[] = []
+        for (const model of models) {
+          if (seq !== outlineSeq) return
+          const m = model as any
+          try {
+            const spaces = await plateIds(m, floorId, 'space')
+            if (spaces.length) spaceTris.push(...await planTris(m, spaces))
+          } catch { /* model not ready */ }
+        }
+        if (seq !== outlineSeq) return
+        spaceLoops = spaceTris.length ? plateLoops(spaceTris, { pad: 0.35, bridge: 0.8 }) : null
+      }
+      const loops = choosePlate(slabLoops, spaceLoops)
+      const showPlate = (y0: number, y1: number) => {
+        if (!loops?.length) return false
+        const pos = platePrism(loops, y0, y1)
+        if (!pos.length) return false
+        const geom = new THREE.BufferGeometry()
+        geom.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+        geom.computeBoundingSphere()
+        floorOutline = new THREE.LineSegments(geom, outlineMat)
+        floorOutline.frustumCulled = false
+        floorOutline.renderOrder = 999
+        overlay.add(floorOutline)
+        if (wake) wake.needsUpdate = true
+        return true
+      }
+      const span = spanOf(floorId)
+      if (span && showPlate(span.yLo, Math.max(span.yHi, span.yLo + 0.5))) return
       const box = new THREE.Box3()
-      for (const model of engine.fragments?.models?.list?.values() ?? []) {
+      for (const model of models) {
         const m = model as any
         if (typeof m.getMergedBox !== 'function') continue
         try {
@@ -1332,9 +1449,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         } catch { /* model not ready */ }
       }
       if (seq !== outlineSeq || box.isEmpty()) return
-      // the floor's own height, not a stair core or a mast that rises through it
-      const span = spanOf(floorId)
       if (span) { box.min.y = span.yLo; box.max.y = Math.max(span.yHi, span.yLo + 0.5) }
+      if (showPlate(box.min.y, box.max.y)) return
       const size = box.getSize(new THREE.Vector3())
       floorOutline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(size.x + 0.6, size.y + 0.2, size.z + 0.6)), outlineMat)
       floorOutline.position.copy(box.getCenter(new THREE.Vector3()))
