@@ -2,11 +2,25 @@
   'use strict';
 
   var STYLE = { default: 'default', photo: 'photoreal', minimal: 'minimal', studio: 'studio', xray: 'xray' };
+  /* Passing through a page within this time never starts a restyle */
+  var STYLE_DELAY_MS = 400;
 
   window.EKO_VIEWER.register('host', function () {
     var host = null;
     var markers = [];
     var viewpoints = {}, vpSeq = 0;
+    var styleTimer = 0, pendingStyle = null;
+    var applyStyle = function (id) {
+      var h = window.EKO_HOST_ENGINE;
+      if (h && h.styleDuringFocus && h.styleDuringFocus(id)) return;
+      if (window.StudioViewer && window.StudioViewer.setStyle) window.StudioViewer.setStyle(id);
+      else if (window.ViewerTemplates && window.ViewerTemplates.set) window.ViewerTemplates.set(id);
+    };
+    var cancelStyle = function () {
+      clearTimeout(styleTimer);
+      styleTimer = 0;
+      pendingStyle = null;
+    };
     var cbs ={ ready: [], error: [], camera: [], assetClick: [], markerClick: [], measure: [], section: [] };
     var on = function (k) { return function (cb) { cbs[k].push(cb); }; };
     var fire = function (k, arg) { cbs[k].forEach(function (f) { f(arg); }); };
@@ -30,7 +44,7 @@
         if (host) host.style.pointerEvents = 'none';
         setTimeout(function () { fire('ready'); }, 0);
       },
-      destroy: function () { host = null; markers = []; },
+      destroy: function () { cancelStyle(); host = null; markers = []; },
       onReady: on('ready'),
       onError: on('error'),
 
@@ -105,10 +119,13 @@
       },
 
       setStyle: function (mode) {
-        var id = STYLE[mode] || 'photoreal', h = window.EKO_HOST_ENGINE;
-        if (h && h.styleDuringFocus && h.styleDuringFocus(id)) return;
-        if (window.StudioViewer && window.StudioViewer.setStyle) window.StudioViewer.setStyle(id);
-        else if (window.ViewerTemplates && window.ViewerTemplates.set) window.ViewerTemplates.set(id);
+        var id = STYLE[mode] || 'photoreal';
+        var T = window.ViewerTemplates, current = T && T.get ? T.get() : null;
+        if (!current || id === current) { cancelStyle(); applyStyle(id); return; }
+        if (id === pendingStyle) return;
+        cancelStyle();
+        pendingStyle = id;
+        styleTimer = setTimeout(function () { styleTimer = 0; pendingStyle = null; applyStyle(id); }, STYLE_DELAY_MS);
       },
       setAssetColor: noop,
       clearAssetColors: noop,
