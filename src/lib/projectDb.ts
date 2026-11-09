@@ -6,6 +6,7 @@ import { hasMap, pruneMapConfig } from '@/lib/mapConfig'
 import { documentCatalogText } from '@/lib/finDocuments'
 import { exportedSiteConfig, finExportMappings } from '@/lib/finSettings'
 import { BACKEND_EXPORT_FILES } from '@/lib/backendExport'
+import { readProjectJson, type ProjectFileRead } from '@/lib/projectFile'
 import { startViewerWindowsBat } from '@/lib/startViewerBat'
 import type { MapAsset, ProjectMeta, ProjectModel, RecentProjectCard, TextureAsset } from '@/types'
 
@@ -237,8 +238,15 @@ export async function openProjectFolder(): Promise<FolderProject | null> {
 
 /** Load project from a cached handle, including thumbnail */
 export async function loadProjectFromHandle(handle: FileSystemDirectoryHandle): Promise<ProjectMeta | null> {
-  const meta = await readJson<ProjectMeta>(handle, 'project.json')
-  if (!meta) return null
+  const read = await loadProjectDetailed(handle)
+  return 'meta' in read ? read.meta : null
+}
+
+/** As loadProjectFromHandle, saying why project.json could not be read (missing, invalid, unreadable). Never writes. */
+export async function loadProjectDetailed(handle: FileSystemDirectoryHandle): Promise<ProjectFileRead<ProjectMeta>> {
+  const read = await readProjectJson<ProjectMeta>(handle)
+  if (!('meta' in read)) return read
+  const meta = read.meta
 
   // Read thumbnail.webp from disk and attach as data URL
   try {
@@ -257,7 +265,7 @@ export async function loadProjectFromHandle(handle: FileSystemDirectoryHandle): 
     // No thumbnail yet, that's fine
   }
 
-  return meta
+  return { meta }
 }
 
 /** Save updated project.json */
