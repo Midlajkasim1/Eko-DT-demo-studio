@@ -57,12 +57,18 @@ test('Live Twin is a Systems entry, loaded by the dashboard, and only the Hospit
   assert.ok(read('static/dashboard/js/app.js').includes("states['systems.twin'] = cfg.hospitalHvac === true ? 'active' : 'hidden'"))
 })
 
-test('networks: the 14 reference systems in its colours and 6 layers, every pipe and riser tied to a drawn machine, none to an unmapped meter', () => {
-  // EKO_Live_Twin.html SYSTEMS: colour and layer of each system
+test('networks: the 14 systems and 6 layers; air is green/cyan, water blue/orange, power yellow, medical gas pink/magenta; every pipe and riser tied to a drawn machine, none to an unmapped meter', () => {
+  // the client asked for these hue families (the reference file's lavender air, red hot water and white oxygen were changed on purpose)
   assert.deepEqual(T.SYSTEMS, {
-    chws: ['#3b8cff', 'chw'], chwr: ['#8fc2ff', 'chw'], cws: ['#19c2a8', 'cw'], cwr: ['#ff8a3d', 'cw'], hw: ['#ff5a5f', 'water'], dcw: ['#2fd4f0', 'water'],
-    drn: ['#b08442', 'water'], sa: ['#b9a7ff', 'air'], fa: ['#7ee2a0', 'air'], ea: ['#94a3b8', 'air'], pwr: ['#ffd23f', 'power'], gen: ['#ff9f1c', 'power'],
-    o2: ['#e8eef6', 'gas'], ma: ['#f29cf5', 'gas'] })
+    chws: ['#2f6bff', 'chw'], chwr: ['#8fc2ff', 'chw'], cws: ['#12a7c9', 'cw'], cwr: ['#ffb347', 'cw'], hw: ['#ff6a3d', 'water'], dcw: ['#4aa8ff', 'water'],
+    drn: ['#c98b3a', 'water'], sa: ['#2de0b0', 'air'], fa: ['#8be26f', 'air'], ea: ['#7aa890', 'air'], pwr: ['#ffd23f', 'power'], gen: ['#ffb800', 'power'],
+    o2: ['#ff5ccf', 'gas'], ma: ['#f4a6ff', 'gas'] })
+  const hue = hex => { const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255), mx = Math.max(r, g, b), d = mx - Math.min(r, g, b); const h = mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; return h * 60 }
+  const band = { air: [80, 190], power: [40, 55], gas: [285, 330] }
+  for (const [k, [col, layer]] of Object.entries(T.SYSTEMS)) if (band[layer]) assert.ok(hue(col) >= band[layer][0] && hue(col) <= band[layer][1], `${k} ${col} is in the ${layer} hue family`)
+  const warm = ['hw', 'drn', 'cwr'].every(k => hue(T.SYSTEMS[k][0]) < 50), blue = ['chws', 'chwr', 'cws', 'dcw'].every(k => { const h = hue(T.SYSTEMS[k][0]); return h > 180 && h < 260 })
+  assert.ok(warm && blue, 'water and drainage: blue and orange')
+  assert.equal(new Set(Object.values(T.SYSTEMS).map(v => v[0])).size, 14, 'no two systems share a colour')
   assert.deepEqual(T.LAYERS, ['chw', 'cw', 'air', 'water', 'power', 'gas'])
   assert.equal(T.PIPES.length, 91)
   assert.equal(T.RISERS.length, 7)

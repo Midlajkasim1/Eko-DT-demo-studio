@@ -65,7 +65,7 @@ test('Systems > Live Twin opens the four-floor building in the content area', as
   const page = await openFor('eko')
   try {
     await openTwin(page)
-    assert.equal(await page.locator('#ekonav .nsub[data-sub="twin"]').innerText(), 'Live Twin')
+    assert.equal(await page.locator('#ekonav .nsub[data-sub="twin"]').innerText(), 'Schematic')
     assert.equal(await page.locator('#ekonav .nsub[data-sub="twin"]').getAttribute('data-on'), 'true')
     assert.equal(await page.locator('#mount').evaluate(m => m.childElementCount), 1, 'the twin stands alone in #mount: no iframe, no second layout')
     assert.equal(await page.locator('.twinview iframe').count(), 0)
@@ -336,7 +336,7 @@ test('a new language rebuilds the view in that language; the same language keeps
     assert.equal(await page.evaluate(() => document.querySelector('.twinview') === window.__tw), true)
     await page.locator('#topbar [data-act="lang"][data-v="ar"]').first().click()
     await page.waitForFunction(() => document.querySelector('.twinview') !== window.__tw)
-    assert.equal(await page.locator('.twttl').innerText(), 'مستشفى EKO – التوأم الحي')
+    assert.equal(await page.locator('.twttl').innerText(), 'مستشفى EKO – المخطط')
     assert.equal(await page.locator('.twsvg').getAttribute('dir'), 'ltr', 'the drawing stays left to right')
     assert.deepEqual(page.errors, [])
   } finally { await page.close() }
@@ -616,5 +616,70 @@ test('phone width: page header with the Systems tabs, details under the building
     assert.ok(side.y >= stage.y + stage.height - 1, 'the panel is under the stage')
     assert.ok(stage.width > 300)
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  } finally { await page.close() }
+})
+
+test('Schematic: title, air cones and room temperatures only from live data, Work orders from the work-order feed, one colour per system', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    assert.equal(await page.locator('.twttl').innerText(), 'EKO Hospital – Schematic')
+    assert.equal(await page.locator('.twsvg').getAttribute('aria-label'), 'EKO Hospital – Schematic')
+    assert.equal(await page.evaluate(() => document.body.innerText.includes('Live Twin') || document.body.innerText.includes('Live twin')), false, 'the old name is gone')
+    // nothing live: no cone, no temperature, no work order
+    const cones = () => page.locator('.twsvg .aircone').evaluateAll(cs => cs.map(c => +getComputedStyle(c).opacity))
+    assert.equal((await cones()).length, await page.evaluate(() => window.EKO_TWIN.EQUIP.filter(e => e.type === 'FCU' || e.type === 'VAV').length), 'one cone per ceiling unit')
+    assert.ok((await cones()).every(o => o === 0), 'no unit is known to run: no cone')
+    assert.equal(await page.locator('.twsvg .zone-t').evaluateAll(ts => ts.every(t => t.textContent === '')), true, 'no temperature is invented')
+    await page.locator('.twtabs [data-tab="wo"]').click()
+    assert.equal(await page.locator('.twtabs [data-tab="wo"]').innerText(), 'Work orders (—)')
+    assert.ok((await page.locator('.twside').innerText()).includes('not connected'))
+    // a live feed: FCU 01 runs at 22.4 against 22, FCU 02 is stopped; FCU 01 has an overdue work order
+    await page.evaluate(() => {
+      window.DashboardData = window.DashboardData || {}; Object.defineProperty(window.DashboardData, 'connected', { get: () => true, configurable: true })
+      const pt = (navName, v, o) => Object.assign({ navName, currentValue: String(v), reporting: true, status: 'ok', bool: null }, o)
+      const fcu = (id, finId, run, t) => ({ id, finId, floor: 'LEVEL-01', tags: ['fcu', 'hvac', 'left'], typeEn: 'FCU', st: 'ok', points: [
+        pt('FanRunStatus', run, { kind: 'Bool', pointKind: 'Bool', bool: run, text: String(run) }), pt('ZoneTemp', t, { unit: '°C', kind: 'Number', pointKind: 'Number' }), pt('ZoneTempSp', 22, { unit: '°C', kind: 'Number', pointKind: 'Number', sp: true })] })
+      const a = fcu('FCU_01', 'p:ekoHospital:r:3260bab0-fdffa381', true, 22.4)
+      a.workOrders = [{ id: '9001', equipment: '55', description: 'Replace filters', dueDate: '1/2/2026', dueIso: '2026-01-02', type: 'PM', status: 'over' },
+        { id: '9002', equipment: '55', description: 'Inspect coil', dueDate: '1/2/2099', dueIso: '2099-01-02', type: 'PM', status: 'sched' }]
+      window.EKO.data.assets = [a, fcu('FCU_02', 'p:ekoHospital:r:3260bab9-4b8768f5', false, 26.3)]
+      window.EKO.data.workOrderState = 'ok'
+      window.EKO.set({})
+    })
+    await page.waitForFunction(() => document.querySelector('.twsvg .equip[data-id="FCU_01"]').getAttribute('data-run') === 'on' && +getComputedStyle(document.querySelector('.twsvg .equip[data-id="FCU_01"] .aircone')).opacity > 0.3)   // the cone fades in (0.6 s)
+    const on = await page.evaluate(() => [...document.querySelectorAll('.twsvg .equip')].filter(g => g.querySelector('.aircone') && +getComputedStyle(g.querySelector('.aircone')).opacity > 0).map(g => g.dataset.id))
+    assert.deepEqual(on, ['FCU_01'], 'only the unit whose run status reads on blows')
+    const zones = await page.evaluate(() => window.EKO_TWIN.EQUIP && [...document.querySelectorAll('.twsvg .zone')].map(p => [p.getAttribute('class'), p.nextElementSibling.textContent]).filter(z => z[1]))
+    assert.deepEqual(zones.map(z => z[1]).sort(), ['22.4°C', '26.3°C'])
+    assert.deepEqual(zones.map(z => z[0]).sort(), ['zone z-hot', 'zone z-ok'], 'on target, and 4.3 above its setpoint')
+    // work orders: the two real ones, overdue first, labelled by the machine; a click goes to it
+    assert.equal(await page.locator('.twtabs [data-tab="wo"]').innerText(), 'Work orders (2)')
+    const items = await page.locator('.twwo li').evaluateAll(l => l.map(x => [x.dataset.wo, x.querySelector('b').textContent, x.querySelector('.twwod').textContent, x.querySelector('em').textContent]))
+    assert.deepEqual(items, [['over', 'FCU 01', 'Replace filters', 'Overdue'], ['sched', 'FCU 01', 'Inspect coil', 'Scheduled']])
+    assert.equal(await page.locator('.twwo li small').first().innerText(), 'Due 1/2/2026 · PM')
+    assert.ok((await page.locator('.twside').innerText()).includes('not provided'), 'it says what the feed does not carry')
+    assert.equal(await page.locator('.twside').innerText().then(t => /FIN/.test(t)), false)
+    await page.locator('.twwo li button').first().click()
+    assert.equal(await page.locator('.twsvg .equip.sel').getAttribute('data-id'), 'FCU_01')
+    for (const [st, text] of [['off', 'No work-order query'], ['pending', 'still being read'], ['error', 'read failed']]) {
+      await page.evaluate(s => { window.EKO.data.workOrderState = s; window.EKO.set({}) }, st)
+      await page.locator('.twtabs [data-tab="wo"]').click()
+      assert.ok((await page.locator('.twside').innerText()).includes(text), st); assert.equal(await page.locator('.twwo li').count(), 0)
+    }
+    // colour: the legend, the layer chips and the routes read one table, on every floor and with layers toggled
+    const col = async () => page.evaluate(() => { const out = {}; document.querySelectorAll('.twsvg .pipe .core').forEach(c => { const g = c.parentNode, k = g.getAttribute('data-sys'); (out[k] = out[k] || new Set()).add(c.getAttribute('stroke')) })
+      return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, [...v]])) })
+    const want = await page.evaluate(() => Object.fromEntries(Object.entries(window.EKO_TWIN.SYSTEMS).map(([k, v]) => [k, v[0]])))
+    const base = await col()
+    for (const [k, v] of Object.entries(base)) assert.deepEqual(v, [want[k]], k + ' route colour = its system colour')
+    for (const lv of ['RF', 'L2', 'L1', 'GF', 'ALL']) { await page.locator(`.twseg button[data-lv="${lv}"]`).click(); assert.deepEqual(await col(), base, 'same colours on ' + lv) }
+    await page.locator('.twlayers [data-layer="air"]').click()
+    assert.equal(await page.locator('.twsvg').evaluate(s => s.classList.contains('hide-air')), true)
+    assert.equal(await page.locator('.twsvg .aircone').first().evaluate(c => getComputedStyle(c).display), 'none', 'the air layer hides the cones too')
+    await page.locator('.twlayers [data-layer="air"]').click()
+    const chips = await page.locator('.twlayers button[data-layer] .twsw i').evaluateAll(is => is.map(i => i.style.background))
+    assert.equal(chips.length, 14); assert.ok(chips.every(c => c))
+    assert.deepEqual(page.errors, [])
   } finally { await page.close() }
 })

@@ -77,17 +77,24 @@
   E('BOILER_01', 'BOILER', 'RF', 46.6, 9.8, { label: 'Boiler 01', feed: 'ATS' });
   E('RF_ENERGY', 'EMETER', 'RF', 56.4, 12.9, { label: 'RF energy', dz: 1.4, meterFloor: 'RF' });
   E('WEATHER', 'WX', 'RF', 58.0, 2.0, { label: 'Outdoor air', nonFin: true });
+  /* floor patches under the ceiling units, as the reference's zones (x, y, width, depth). Each shows the room temperature its unit reports; nothing is estimated. */
+  var ZONES = [];
+  EQUIP.forEach(function (e) {
+    if (e.type === 'FCU') ZONES.push({ level: e.level, rect: e.x < 30 ? [15, 0, 11, 8] : [51, 0, 9, 8], src: e.id, pt: 'ZoneTemp', sp: 'ZoneTempSp' });
+    else if (e.type === 'VAV') ZONES.push({ level: e.level, rect: [e.x - 1.6, 0, 5, 8], src: e.id, pt: 'ZoneTemp', sp: 'ZoneTempSp' });
+  });
+  ZONES.push({ level: 'L2', rect: [26, 0, 25, 8], src: 'AHU_03', pt: 'RA Temp', sp: null });
   var EQ = {};
   EQUIP.forEach(function (e) { EQ[e.id] = e; });
   /* the small items whose name tag shows only when zoomed in (or selected) */
   var MINOR = { VAV: 1, FCU: 1, EF: 1, EMETER: 1, WM: 1, SMDB: 1, BTU: 1, PMU: 1, ATS: 1, WX: 1 };
 
-  /* pipes, ducts and cables: drawn still (no flow is claimed in Phase 1), coloured by system as in the reference */
+  /* pipes, ducts and cables: drawn still (no flow is claimed in Phase 1), coloured by system: air green/cyan, water blue/orange, power yellow, medical gas pink/magenta */
   var SYSTEMS = {
-    chws: ['#3b8cff', 'chw'], chwr: ['#8fc2ff', 'chw'], cws: ['#19c2a8', 'cw'], cwr: ['#ff8a3d', 'cw'],
-    hw: ['#ff5a5f', 'water'], dcw: ['#2fd4f0', 'water'], drn: ['#b08442', 'water'],
-    sa: ['#b9a7ff', 'air'], fa: ['#7ee2a0', 'air'], ea: ['#94a3b8', 'air'],
-    pwr: ['#ffd23f', 'power'], gen: ['#ff9f1c', 'power'], o2: ['#e8eef6', 'gas'], ma: ['#f29cf5', 'gas']
+    chws: ['#2f6bff', 'chw'], chwr: ['#8fc2ff', 'chw'], cws: ['#12a7c9', 'cw'], cwr: ['#ffb347', 'cw'],
+    hw: ['#ff6a3d', 'water'], dcw: ['#4aa8ff', 'water'], drn: ['#c98b3a', 'water'],
+    sa: ['#2de0b0', 'air'], fa: ['#8be26f', 'air'], ea: ['#7aa890', 'air'],
+    pwr: ['#ffd23f', 'power'], gen: ['#ffb800', 'power'], o2: ['#ff5ccf', 'gas'], ma: ['#f4a6ff', 'gas']
   };
   var LAYERS = ['chw', 'cw', 'air', 'water', 'power', 'gas'];
   var PIPES = [];
@@ -405,8 +412,13 @@
   }
   DRAW.AHU = function (g, e) { airUnit(g, e, false); };
   DRAW.FAHU = function (g, e) { airUnit(g, e, true); };
+  /* the supply-air cone under a ceiling unit: drawn always, shown (CSS) only while the unit's own run status reads on */
+  function airCone(g, e) {
+    poly2(g, hull(proj(ring(e.x + e.w / 2, e.y + e.d / 2, e.z, 0.55, 'xy', 18).concat(ring(e.x + e.w / 2, e.y + e.d / 2, LZ[e.level] + 0.05, 1.9, 'xy', 18)))), { 'class': 'aircone' });
+  }
   DRAW.FCU = function (g, e) {
     var x = e.x, y = e.y, z = e.z, w = e.w, d = e.d, h = e.h;
+    airCone(g, e);
     [[x + 0.3, y + 0.3], [x + w - 0.3, y + 0.3], [x + 0.3, y + d - 0.3], [x + w - 0.3, y + d - 0.3]].forEach(function (q) { seg(g, [q[0], q[1], z + h], [q[0], q[1], z + h + 0.9], 'hanger'); });
     box(g, x, y, z, w, d, h, 'steel');
     rotor(g, x + w / 2, y + d / 2, z + h + 0.01, 0.95, 'xy', 5);
@@ -414,6 +426,7 @@
   };
   DRAW.VAV = function (g, e) {
     var x = e.x, y = e.y, z = e.z, w = e.w, d = e.d, h = e.h;
+    airCone(g, e);
     seg(g, [x + w / 2, y + d / 2, z + h], [x + w / 2, y + d / 2, z + h + 0.6], 'hanger');
     cylY(g, x + w / 2, y + d, y + d + 0.25, z + h / 2, 0.32, 'steel');
     box(g, x, y, z, w, d, h, 'steel');
@@ -563,6 +576,12 @@
         box(g, -0.5, -0.5, z - 0.7, 61, 17, 0.7, SLAB, 'slab');
         for (var fx = 5; fx < 60; fx += 5) seg(g, [fx, -0.5, z + 0.01], [fx, 16.5, z + 0.01], 'floor-grid');
         seg(g, [-0.5, 8.2, z + 0.01], [60.5, 8.2, z + 0.01], 'floor-grid');
+        ZONES.filter(function (zn) { return zn.level === lv; }).forEach(function (zn) {
+          var r = zn.rect, c = P(r[0] + r[2] / 2, r[1] + r[3] / 2, z + 0.02);
+          var poly = face(g, [[r[0] + 0.15, r[1] + 0.15, z + 0.02], [r[0] + r[2] - 0.15, r[1] + 0.15, z + 0.02], [r[0] + r[2] - 0.15, r[1] + r[3] - 0.15, z + 0.02], [r[0] + 0.15, r[1] + r[3] - 0.15, z + 0.02]], 'transparent', 'zone z-none');
+          var tt = el('text', { x: fmt(c[0]), y: fmt(c[1]), 'class': 'zone-t', 'text-anchor': 'middle' }, g);
+          refs.zones.push({ zn: zn, poly: poly, tt: tt });
+        });
         var lp = P(-0.5, -0.5, z - 0.35), t = el('text', { x: fmt(lp[0] - 14), y: fmt(lp[1] + 4), 'class': 'level-name', 'text-anchor': 'end' }, g);
         t.textContent = T('twinLv.' + lv).toUpperCase();
         RISERS.forEach(function (r) {
@@ -747,6 +766,32 @@
         shared: String(n.shared || 0), conflict: String(n.conflict || 0), unconfirmed: String(n.unconfirmed || 0) })) + '</p>' +
       Object.keys(shared).map(function (k) { return '<p class="twnote twwarn">' + esc(tr(E, 'twinBimSharedPair', { names: k })) + '</p>'; }).join('');
   }
+  /* Work orders: the dashboard's own work-order feed (the CMMS query the project is set up with), linked to each drawn machine by the machine's equipment number.
+     The feed has no repair progress, technician, or completion data, so none is shown: a status is only the due date against today (the dashboard's own rule). */
+  function woList(E, s, connected) {
+    var st = (E && E.data && E.data.workOrderState) || '', rows = null, msg = '';
+    if (!connected) msg = 'twinWoOffline';
+    else if (st === 'off') msg = 'twinWoOff';
+    else if (st === 'pending') msg = 'twinWoPending';
+    else if (st === 'error') msg = 'twinWoFail';
+    else {
+      rows = [];
+      EQUIP.forEach(function (e) { var r = s.res[e.id], l = r && r.asset && r.asset.workOrders; if (l) l.forEach(function (o) { rows.push({ id: e.id, o: o }); }); });
+      var rk = { over: 0, due: 1, sched: 2 };
+      rows.sort(function (a, b) { return ((rk[a.o.status] == null ? 2 : rk[a.o.status]) - (rk[b.o.status] == null ? 2 : rk[b.o.status])) || String(a.o.dueIso || '').localeCompare(String(b.o.dueIso || '')); });
+      if (!rows.length) msg = 'twinWoNone';
+    }
+    return { rows: rows, msg: msg };
+  }
+  function woHtml(E, w) {
+    var n = w.rows ? w.rows.length : 0;
+    return '<h3 class="twsub">' + esc(tr(E, 'twinWoT', { n: w.rows ? String(n) : '\u2014' })) + '</h3>' +
+      (w.msg ? '<p class="twnote">' + esc(tr(E, w.msg)) + '</p>' : '<ul class="twwo">' + w.rows.map(function (x) {
+        var o = x.o, bits = [o.dueDate ? tr(E, 'twinWoDue', { d: o.dueDate }) : '', o.type || ''].filter(Boolean).join(' \u00b7 ');
+        return '<li data-wo="' + esc(o.status || 'sched') + '">' + goBtn(x.id, '<b>' + esc(label(x.id)) + '</b><span class="twwoid">' + esc(tr(E, 'twinWoNo', { id: o.id })) + '</span>' +
+          (o.description ? '<span class="twwod">' + esc(o.description) + '</span>' : '') + '<small>' + esc(bits) + '</small><em>' + esc(tr(E, 'twinWoSt.' + (o.status || 'sched'))) + '</em>') + '</li>';
+      }).join('') + '</ul>') + '<p class="twnote">' + esc(tr(E, 'twinWoNote')) + '</p>';
+  }
   function panelHtml(E, s, connected) {
     var id = s.sel, res = s.res;
     if (!id) {
@@ -826,10 +871,11 @@
         return '<option value="' + v + '"' + (ex.labels === v ? ' selected' : '') + '>' + esc(tr(E, 'twinExLbl.' + v)) + '</option>'; }).join('') + '</select></label></span></div>' +
       '<div class="twbody"><div class="twstage"><div class="twtrace" hidden><span class="twtracet"></span><button type="button" class="btnG btnSm" data-tw="untrace">' + esc(tr(E, 'twinTraceClear')) + '</button></div></div>' +
       '<aside class="twside"><div class="twtabs" role="tablist"><button type="button" role="tab" data-tw="tab" data-tab="alarms" aria-selected="true"></button>' +
-      '<button type="button" role="tab" data-tw="tab" data-tab="equip" aria-selected="false">' + esc(tr(E, 'twinTabEquip')) + '</button></div><div class="twpane" aria-live="polite"></div></aside></div>';
+      '<button type="button" role="tab" data-tw="tab" data-tab="equip" aria-selected="false">' + esc(tr(E, 'twinTabEquip')) + '</button>' +
+      '<button type="button" role="tab" data-tw="tab" data-tab="wo" aria-selected="false"></button></div><div class="twpane" aria-live="polite"></div></aside></div>';
     var stage = host.querySelector('.twstage');
     var svg = el('svg', { 'class': 'twsvg', role: 'img', 'aria-label': tr(E, 'twinTitle'), dir: 'ltr', 'data-level': 'ALL', 'data-labels': ex.labels, preserveAspectRatio: 'xMidYMid meet' }, stage);
-    var s = { E: E, svg: svg, side: host.querySelector('.twpane'), tabs: host.querySelectorAll('.twtabs button'), tab: 'alarms', ex: ex, flows: [], run: {}, seen: {}, opened: Date.now(), lastUser: 0, status: host.querySelector('.twstatus'), sel: null, level: 'ALL', eqs: {}, tags: {}, pipes: {}, vb: null, home: null, panel: '',
+    var s = { E: E, svg: svg, side: host.querySelector('.twpane'), tabs: host.querySelectorAll('.twtabs button'), tab: 'alarms', ex: ex, flows: [], zones: [], run: {}, seen: {}, opened: Date.now(), lastUser: 0, status: host.querySelector('.twstatus'), sel: null, level: 'ALL', eqs: {}, tags: {}, pipes: {}, vb: null, home: null, panel: '',
       graph: MAP.graph(EQUIP), trace: null, traceBar: host.querySelector('.twtrace'), res: {}, alIdx: { by: {}, unlinked: [] }, fdd: {}, faults: {},
       bim: { by: {}, guid: {} }, cands: {}, stale: false, lit: null, picked: null };
     LAYERS.forEach(function (l) { if (HIDDEN[l]) svg.classList.add('hide-' + l); });
@@ -1052,6 +1098,20 @@
       var rs = MAP.runState(e.id, e.type, res, connected); s.run[e.id] = rs;
       if (s.eqs[e.id].getAttribute('data-run') !== rs) { if (rs) s.eqs[e.id].setAttribute('data-run', rs); else s.eqs[e.id].removeAttribute('data-run'); }
     });
+    /* room temperature under each ceiling unit, as that unit reports it; without a live setpoint the patch is tinted neutral (no judgement is made) */
+    s.zones.forEach(function (z) {
+      var r = res[z.zn.src], v = MAP.liveReading(r, z.zn.pt), sp = z.zn.sp ? MAP.liveReading(r, z.zn.sp) : null, cls = 'zone z-none', txt = '';
+      if (v && v.type === 'number' && isFinite(v.value)) {
+        if (v.value < 5 || v.value > 45) { cls = 'zone z-bad'; txt = tr(E, 'twinZoneBad'); }
+        else {
+          txt = v.value.toFixed(1) + '\u00b0C';
+          if (sp && sp.type === 'number') { var dv = v.value - sp.value; cls = 'zone ' + (dv <= -1.5 ? 'z-cold' : dv <= 1.5 ? 'z-ok' : dv <= 2.5 ? 'z-warm' : 'z-hot'); }
+          else cls = 'zone z-temp';
+        }
+      }
+      if (z.poly.getAttribute('class') !== cls) z.poly.setAttribute('class', cls);
+      if (z.tt.textContent !== txt) z.tt.textContent = txt;
+    });
     /* Fly to new alarms: an alarm raised after the view opened (by its own time; none without one), not flown to before, takes the view to its machine
        once; not while the person is working on another machine or tracing, nor within 15 s of their last action */
     var act = {}, fly = null;
@@ -1064,7 +1124,9 @@
     var nAct = Object.keys(act).length + s.alIdx.unlinked.length, tabTxt = tr(E, 'twinTabAlarms', { n: String(nAct) });
     [].forEach.call(s.tabs, function (b) { b.setAttribute('aria-selected', String(b.dataset.tab === s.tab)); });
     if (s.tabs[0].textContent !== tabTxt) s.tabs[0].textContent = tabTxt;
-    var html = s.tab === 'alarms' ? alarmListHtml(E, s) + clearedHtml(E, s) : panelHtml(E, s, connected);
+    var wo = woList(E, s, connected), woTxt = tr(E, 'twinTabWo', { n: wo.rows ? String(wo.rows.length) : '\u2014' });
+    if (s.tabs[2].textContent !== woTxt) s.tabs[2].textContent = woTxt;
+    var html = s.tab === 'alarms' ? alarmListHtml(E, s) + clearedHtml(E, s) : s.tab === 'wo' ? woHtml(E, wo) : panelHtml(E, s, connected);
     if (html !== s.panel) { s.side.innerHTML = html; s.panel = html; }
     if (fly) goTo(host, fly);
     host.setAttribute('data-sel', s.sel ? '1' : '0');
