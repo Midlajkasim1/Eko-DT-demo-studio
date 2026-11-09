@@ -17449,6 +17449,7 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .twsvg .pipe { pointer-events:none }
 .dashboard-native-container .twsvg .pipe path { fill:none; stroke-linecap:round; stroke-linejoin:round }
 .dashboard-native-container .twsvg.hide-chw .pipe[data-layer="chw"], .dashboard-native-container .twsvg.hide-cw .pipe[data-layer="cw"], .dashboard-native-container .twsvg.hide-air .pipe[data-layer="air"], .dashboard-native-container .twsvg.hide-water .pipe[data-layer="water"], .dashboard-native-container .twsvg.hide-power .pipe[data-layer="power"], .dashboard-native-container .twsvg.hide-gas .pipe[data-layer="gas"] { display:none }
+.dashboard-native-container .twsvg.hide-chw .pipe[data-layer="chw"] .flow, .dashboard-native-container .twsvg.hide-cw .pipe[data-layer="cw"] .flow, .dashboard-native-container .twsvg.hide-air .pipe[data-layer="air"] .flow, .dashboard-native-container .twsvg.hide-water .pipe[data-layer="water"] .flow, .dashboard-native-container .twsvg.hide-power .pipe[data-layer="power"] .flow, .dashboard-native-container .twsvg.hide-gas .pipe[data-layer="gas"] .flow { animation:none }
 .dashboard-native-container .twsvg[data-conn="1"] .pipe:not(.conn) { opacity:.3 }
 .dashboard-native-container .twsvg .pipe.conn .core { opacity:1 }
 .dashboard-native-container .twsvg .k-pipe.conn .core { stroke-width:3.4 }
@@ -17484,8 +17485,9 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .twsvg .tag[data-fin="unmapped"] .tag-dot { fill:transparent; stroke:#8a9bb0; stroke-width:.7 }
 .dashboard-native-container .twsvg .tag[data-fin="stale"] .tag-dot { fill:#fbbf24 }
 .dashboard-native-container .twsvg .tag.sel .tag-bg { stroke:#7dd3fc }
-.dashboard-native-container .twsvg[data-zoom="far"] .tag:not(.sel) { display:none }
-.dashboard-native-container .twsvg[data-zoom="mid"] .tag.minor:not(.sel) { display:none }
+.dashboard-native-container .twsvg[data-labels="auto"][data-zoom="far"] .tag:not(.sel) { display:none }
+.dashboard-native-container .twsvg[data-labels="auto"][data-zoom="mid"] .tag.minor:not(.sel) { display:none }
+.dashboard-native-container .twsvg[data-labels="off"] .tag { display:none }
 
 /* a trace: the machine traced from (white), upstream (violet), downstream (red: would stop · amber: values would change); the rest step back */
 .dashboard-native-container .twsvg.tracing .equip:not([data-tr]) { opacity:.22 }
@@ -17512,8 +17514,8 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .twacts button[aria-pressed="true"] { border-color:var(--acc); color:var(--acc) }
 .dashboard-native-container .twgo { display:inline; padding:0; border:0; background:none; font:inherit; color:var(--acc); text-align:start; cursor:pointer }
 .dashboard-native-container .twgo:hover, .dashboard-native-container .twgo:focus-visible { text-decoration:underline }
-.dashboard-native-container .twallist .twgo { display:flex; flex-direction:column; gap:2px; color:inherit; width:100% }
-.dashboard-native-container .twallist .twgo b { color:var(--t1) }
+.dashboard-native-container .twallist .twgo, .dashboard-native-container .twcleared .twgo { display:flex; flex-direction:column; gap:2px; color:inherit; width:100% }
+.dashboard-native-container .twallist .twgo b, .dashboard-native-container .twcleared .twgo b { color:var(--t1) }
 .dashboard-native-container .twalarms li[data-linked="0"] { border-inline-start-color:var(--bd2) }
 .dashboard-native-container .twaldl { margin-block-start:4px }
 .dashboard-native-container .twfdd, .dashboard-native-container .twrel, .dashboard-native-container .twev ul { list-style:none; margin:0; padding:0; display:grid; gap:5px; font-size:12px }
@@ -17541,6 +17543,50 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .twchip[data-bim="missing"], .dashboard-native-container .twchip[data-bim="unconfirmed"] { background:var(--acc8); color:var(--t2) }
 .dashboard-native-container .twcand { margin-block-start:6px; padding:6px 8px; border:1px dashed var(--bd2); border-radius:6px }
 
+/* live flow: measured flow moves (dashes along the route's direction); running equipment without a flow meter shows still dashes; stopped dims; no data stays plain */
+.dashboard-native-container .twsvg .pipe .flow { fill:none; stroke-linecap:round; opacity:0; stroke-width:1.4; stroke-dasharray:1.6 6.5 }
+.dashboard-native-container .twsvg .k-duct .flow { stroke-width:2.2; stroke-dasharray:3 12 }
+.dashboard-native-container .twsvg .k-cable .flow { stroke-width:1.2; stroke-dasharray:2 9 }
+.dashboard-native-container .twsvg .pipe[data-flow="measured"] .flow { opacity:1; filter:brightness(1.6); animation:twflow 1s linear infinite }
+.dashboard-native-container .twsvg .k-duct[data-flow="measured"] .flow { animation-duration:1.6s }
+.dashboard-native-container .twsvg .pipe[data-flow="measured"] .core, .dashboard-native-container .twsvg .pipe[data-flow="running"] .core { opacity:1 }
+.dashboard-native-container .twsvg .pipe[data-flow="running"] .flow { opacity:.55 }
+.dashboard-native-container .twsvg .pipe[data-flow="stopped"] .core { opacity:.22 }
+@keyframes twflow { to { stroke-dashoffset:-16.2 } }
+/* fans and pumps turn only while their own run status is on */
+.dashboard-native-container .twsvg .equip[data-run="on"] .rotor { animation:twspin 1.6s linear infinite }
+@keyframes twspin { to { transform:rotate(360deg) } }
+/* nothing moves on a faded floor, in a hidden browser tab */
+.dashboard-native-container .twsvg.paused .flow, .dashboard-native-container .twsvg.paused .rotor,
+.dashboard-native-container .twsvg[data-level="RF"] .tw-level:not([data-level="RF"]) :is(.flow,.rotor),
+.dashboard-native-container .twsvg[data-level="L2"] .tw-level:not([data-level="L2"]) :is(.flow,.rotor),
+.dashboard-native-container .twsvg[data-level="L1"] .tw-level:not([data-level="L1"]) :is(.flow,.rotor),
+.dashboard-native-container .twsvg[data-level="GF"] .tw-level:not([data-level="GF"]) :is(.flow,.rotor) { animation-play-state:paused }
+/* right sidebar: Alarms and Equipment tabs */
+.dashboard-native-container .twside { display:flex; flex-direction:column; padding:0 }
+.dashboard-native-container .twtabs { flex:none; display:flex; border-block-end:1px solid var(--bd2); position:sticky; top:0; background:var(--s1); z-index:1 }
+.dashboard-native-container .twtabs button { flex:1; padding:10px 0 8px; border:0; border-block-end:2px solid transparent; background:none; font:inherit; font-weight:600; font-size:12.5px; color:var(--t2); cursor:pointer }
+.dashboard-native-container .twtabs button[aria-selected="true"] { color:var(--t1); border-block-end-color:var(--acc) }
+.dashboard-native-container .twpane { flex:1; min-height:0; overflow:auto; padding:12px 14px }
+.dashboard-native-container .twaldet { display:block; font-size:11.5px; color:var(--t2); margin-block-start:2px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical }
+.dashboard-native-container .twcleared li { opacity:.7; border-inline-start-color:var(--bd2) }
+/* Exhibition controls in the systems row */
+.dashboard-native-container .twex { display:inline-flex; flex-wrap:wrap; align-items:center; gap:4px 12px; margin-inline-start:auto; font-size:12px; color:var(--t1) }
+.dashboard-native-container .twex b { font-weight:600; color:var(--t2); text-transform:uppercase; letter-spacing:.06em; font-size:11px }
+.dashboard-native-container .twex label { display:inline-flex; align-items:center; gap:5px; cursor:pointer }
+.dashboard-native-container .twex select { font:inherit; font-size:12px; padding:2px 4px; border:1px solid var(--bd2); border-radius:4px; background:var(--s1); color:var(--t1) }
+.dashboard-native-container .twex .twexoff { color:var(--t2); cursor:not-allowed }
+.dashboard-native-container .twex .twexoff small { font-size:11px }
+.dashboard-native-container .twflowkey { list-style:none; margin:0; padding:0; display:grid; gap:4px; font-size:12px; color:var(--t2) }
+.dashboard-native-container .twflowkey li { display:flex; align-items:center; gap:8px }
+.dashboard-native-container .twfk { flex:none; width:22px; height:0; border-block-start:3px solid #5b7ea6 }
+.dashboard-native-container .twfk[data-flow="measured"] { border-block-start-style:dashed; border-color:#5cc8ff }
+.dashboard-native-container .twfk[data-flow="running"] { border-block-start-style:dotted }
+.dashboard-native-container .twfk[data-flow="stopped"] { opacity:.3 }
+.dashboard-native-container .twchip[data-run="on"] { background:#dcfce7; color:#166534 }
+.dashboard-native-container .twchip[data-run="off"] { background:#e5e7eb; color:#374151 }
+.dashboard-native-container .twchip[data-run="unknown"] { background:transparent; color:var(--t2); box-shadow:inset 0 0 0 1px var(--bd2) }
+
 /* tablet and phone: the details panel goes under the building */
 @media (max-width:860px) {
   .dashboard-native-container .twbody { flex-direction:column }
@@ -17550,4 +17596,6 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 }
 @media (prefers-reduced-motion:reduce) {
   .dashboard-native-container .twsvg .tw-level { transition:none }
+  .dashboard-native-container .twsvg .pipe[data-flow="measured"] .flow { animation:none; stroke-dasharray:none; opacity:.85 }
+  .dashboard-native-container .twsvg .equip[data-run="on"] .rotor { animation:none }
 }

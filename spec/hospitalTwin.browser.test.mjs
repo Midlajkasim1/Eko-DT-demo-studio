@@ -72,8 +72,8 @@ test('Systems > Live Twin opens the four-floor building in the content area', as
     assert.equal(await page.locator('.twsvg .tw-level').count(), 5, 'roof, L2, L1, outside, ground floor')
     assert.equal(await page.locator('.twsvg .equip').count(), await page.evaluate(() => window.EKO_TWIN.EQUIP.length), 'every machine is drawn')
     assert.deepEqual(await page.locator('.twseg button').allInnerTexts(), ['All', 'Roof', 'L2', 'L1', 'GF'])
-    assert.ok((await page.locator('.twside').innerText()).includes('Select equipment'))
-    assert.equal(await page.locator('.twstatus').innerText(), 'FIN not connected', 'no FIN here: nothing claimed')
+    await page.locator('.twtabs [data-tab="equip"]').click(); assert.ok((await page.locator('.twside').innerText()).includes('Select equipment'))
+    assert.equal(await page.locator('.twstatus').innerText(), 'Live data not connected', 'no live data here: nothing claimed')
     assert.deepEqual(page.errors, [])
   } finally { await page.close() }
 })
@@ -107,7 +107,7 @@ test('selecting equipment shows its mapping and points; the FIN feed is read as 
     await tap(page, 'CHILLER_01')
     assert.equal(await page.locator('.twsvg .equip.sel').getAttribute('data-id'), 'CHILLER_01')
     assert.equal(await page.locator('.twdt').innerText(), 'Chiller 01')
-    assert.equal(await page.locator('.twchip[data-fin]').innerText(), 'Missing from FIN')
+    assert.equal(await page.locator('.twchip[data-fin]').innerText(), 'Missing from the live feed')
     // a test feed in the dashboard's own data (as data-map.js shapes it: the chiller's FIN id, tags and floor as the export has them), then a re-render
     const vb = await viewBox(page)
     await page.evaluate(() => {
@@ -118,18 +118,18 @@ test('selecting equipment shows its mapping and points; the FIN feed is read as 
         { navName: 'Power', currentValue: '—', unit: 'kW', his: true, reporting: false, bool: null }] }]
       window.EKO.set({})
     })
-    assert.equal(await page.locator('.twchip[data-fin]').innerText(), 'Mapped · in the FIN feed')
+    assert.equal(await page.locator('.twchip[data-fin]').innerText(), 'Mapped · in the live feed')
     const rows = await page.locator('.twpts tr').evaluateAll(trs => trs.map(t => [t.querySelector('th').firstChild.textContent, t.querySelector('td').textContent, t.dataset.st]))
     assert.deepEqual(rows, [['CHWSTemp', '6.9 °C', 'live'], ['Power', 'No data', 'not-reporting'], ['CHWSTempSp', 'Missing', 'missing'], ['RunStatus', 'On', 'live'],
       ['AlarmStatus', 'Normal', 'live'], ['EnableCmd', 'Missing', 'missing'], ['CHWRTemp', 'Missing', 'missing'], ['OperatingHours', 'Missing', 'missing']])
     assert.equal(await page.locator('.twpts tr:has-text("CHWSTempSp") .twflag').innerText(), 'S', 'the export marks it a setpoint')
-    assert.equal(await page.locator('.twpts tr:has-text("AlarmStatus") td').getAttribute('title'), 'FIN values: Normal,Trip')
+    assert.equal(await page.locator('.twpts tr:has-text("AlarmStatus") td').getAttribute('title'), 'Possible values: Normal,Trip')
     const dl = await page.locator('.twdl div').evaluateAll(ds => Object.fromEntries(ds.map(d => [d.querySelector('dt').textContent, d.querySelector('dd').textContent])))
-    assert.deepEqual([dl['FIN equipment'], dl['FIN id'], dl['FIN type'], dl['FIN floor'], dl['BIM id']], ['CHILLER_01', 'p:ekoHospital:r:3260ac07-19aa0e85', 'CHILLER', 'ROOF', '—'])
+    assert.deepEqual([dl['Equipment name'], dl['Equipment id'], dl['Reported type'], dl['Reported floor'], dl['BIM id']], ['CHILLER_01', 'p:ekoHospital:r:3260ac07-19aa0e85', 'CHILLER', 'ROOF', '—'])
     assert.equal(await viewBox(page), vb, 'the camera is kept')
     assert.equal(await page.locator('.twsvg').getAttribute('data-level'), 'RF', 'the floor is kept')
     assert.equal(await page.locator('.twsvg .tag[data-id="CHILLER_01"]').getAttribute('data-fin'), 'mapped')
-    assert.equal(await page.locator('.twstatus').innerText(), '1 of 46 mapped equipment in the FIN feed')
+    assert.equal(await page.locator('.twstatus').innerText(), '1 of 46 mapped equipment in the live feed')
     // a feed item whose FIN id is not the export's is not read
     await page.evaluate(() => { window.EKO.data.assets[0].finId = 'p:ekoHospital:r:00000000-00000000'; window.EKO.set({}) })
     assert.equal(await page.locator('.twchip[data-fin]').innerText(), 'Ambiguous match')
@@ -138,7 +138,7 @@ test('selecting equipment shows its mapping and points; the FIN feed is read as 
     await page.locator('.twsvg .equip[data-id="RF_ENERGY"]').focus()
     await page.keyboard.press('Enter')
     assert.equal(await page.locator('.twchip[data-fin]').innerText(), 'Unmapped')
-    assert.match(await page.locator('.twside').innerText(), /names RF_ENERGY, with energy points only/)
+    assert.match(await page.locator('.twside').innerText(), /names RF_ENERGY, with energy points/)
     // keyboard: Enter selects, Escape clears; the floor mapping shows with nothing selected
     await page.locator('.twsvg .equip[data-id="BOILER_01"]').focus()
     await page.keyboard.press('Enter')
@@ -151,7 +151,7 @@ test('selecting equipment shows its mapping and points; the FIN feed is read as 
     await tap(page, 'GENERATOR')
     assert.equal(await page.locator('.twchip[data-fin]').innerText(), 'Shown for context')
     await page.locator('.twside [data-tw="close"]').click()
-    assert.ok((await page.locator('.twside').innerText()).includes('Select equipment'))
+    await page.locator('.twtabs [data-tab="equip"]').click(); assert.ok((await page.locator('.twside').innerText()).includes('Select equipment'))
     assert.deepEqual(page.errors, [])
   } finally { await page.close() }
 })
@@ -165,7 +165,7 @@ test('the saved FIN exports as the feed: all 46 mapped, floors agree, alarms on 
   try {
     await openTwin(page)
     await page.evaluate(([a, al]) => { window.DashboardData = window.DashboardData || {}; Object.defineProperty(window.DashboardData, 'connected', { get: () => true, configurable: true }); window.EKO.data.assets = a; window.EKO.data.alarms = al; window.EKO.set({}) }, [assets, alarms])
-    assert.equal(await page.locator('.twstatus').innerText(), '46 of 46 mapped equipment in the FIN feed')
+    assert.equal(await page.locator('.twstatus').innerText(), '46 of 46 mapped equipment in the live feed')
     const count = st => page.locator(`.twsvg .equip[data-fin="${st}"]`).count()
     assert.deepEqual([await count('mapped'), await count('missing'), await count('ambiguous'), await count('unmapped'), await count('not-fin')], [46, 0, 0, 4, 3])
     assert.equal(await page.locator('.twfloors div[data-conflict="1"]').count(), 0)
@@ -179,7 +179,7 @@ test('the saved FIN exports as the feed: all 46 mapped, floors agree, alarms on 
     assert.match(await page.locator('.twdl div:has(dt:text-is("BIM id")) dd').innerText(), /shared with another equipment/)
     await page.locator('.twsvg .equip[data-id="SP_01"]').focus()
     await page.keyboard.press('Enter')
-    assert.equal(await page.locator('.twdl div:has(dt:text-is("FIN equipment")) dd').innerText(), 'SUMP_PUMP')
+    assert.equal(await page.locator('.twdl div:has(dt:text-is("Equipment name")) dd').innerText(), 'SUMP_PUMP')
     assert.equal(await page.locator('.twalarms').count(), 0)
     assert.deepEqual(page.errors, [])
   } finally { await page.close() }
@@ -197,8 +197,9 @@ test('networks: every system drawn still; layer chips hide one layer each, throu
     assert.equal(await page.evaluate(() => document.querySelector('.twsvg').getAnimations({ subtree: true }).length), 0, 'nothing moves: no flow is shown')
     assert.equal(await page.locator('.twsvg .flowline').count(), 0)
     assert.deepEqual(await page.locator('.twlayers button').allInnerTexts(), ['Chilled water', 'Condenser water', 'Air', 'Water & drainage', 'Power', 'Medical gas'])
-    assert.equal(await page.locator('.twlegend dd').count(), 14, 'every system in the legend')
-    assert.match(await page.locator('.twside').innerText(), /illustrative until checked against the hospital's engineering drawings/)
+    await page.locator('.twtabs [data-tab="equip"]').click(); assert.equal(await page.locator('.twlegend dd').count(), 14, 'every system in the legend')
+    assert.match(await page.locator('.twside').innerText(), /Building layout and service routes are illustrative and require engineering verification\./)
+    assert.doesNotMatch(await page.locator('.twside').innerText(), /no flow is shown|not surveyed/)
     const shown = l => page.evaluate(l => [...document.querySelectorAll(`.twsvg .pipe[data-layer="${l}"]`)].filter(g => getComputedStyle(g).display !== 'none').length, l)
     const equipShown = () => page.evaluate(() => [...document.querySelectorAll('.twsvg .equip')].every(g => getComputedStyle(g).display !== 'none'))
     // each chip hides its own layer and nothing else
@@ -262,7 +263,7 @@ test('equipment intelligence: alarms go to their equipment; traces up and down a
     await openTwin(page)
     await page.evaluate(([a, al]) => { window.DashboardData = window.DashboardData || {}; Object.defineProperty(window.DashboardData, 'connected', { get: () => true, configurable: true }); window.EKO.data.assets = a; window.EKO.data.alarms = al; window.EKO.set({}) }, [assets, alarms])
     // nothing selected: every open FIN alarm, the cleared record left out
-    assert.match(await page.locator('.twside h3.twsub').first().innerText(), /Open FIN alarms in the hospital \(11\)/i)
+    assert.match(await page.locator('.twside h3.twsub').first().innerText(), /Open alarms in the hospital \(11\)/i)
     assert.equal(await page.locator('.twallist li').count(), 11)
     assert.equal(await page.locator('.twallist li:has-text("Return to normal")').count(), 0)
     assert.match(await page.locator('.twallist li[data-linked="0"]').innerText(), /Camera offline\nHOSPITAL CCTV_01 · not on drawn equipment/)
@@ -290,7 +291,7 @@ test('equipment intelligence: alarms go to their equipment; traces up and down a
     assert.equal(await page.locator('.twacts button[data-dir="down"]').getAttribute('aria-pressed'), 'true')
     // evidence: confirmed, reference, possible, impact under their own headings
     assert.deepEqual(await page.locator('.twev h4').evaluateAll(hs => hs.map(h => h.dataset.k)), ['confirmed', 'reference', 'possible', 'impact'])
-    assert.match(await page.locator('.twev').innerText(), /No upstream equipment has an open FIN alarm or FDD fault/)
+    assert.match(await page.locator('.twev').innerText(), /No upstream equipment has an open alarm or FDD fault/)
     // a layer hidden mid-trace stays hidden; the trace survives a data re-render
     await page.locator('.twlayers button[data-layer="air"]').click()
     await page.evaluate(() => window.EKO.set({}))
@@ -307,7 +308,7 @@ test('equipment intelligence: alarms go to their equipment; traces up and down a
     assert.deepEqual([up.VAV_02, up.AHU_01, up.SMDB_01, up.CHILLER_01, up.DEWA_SUPPLY], ['src', 'up-stop', 'up-stop', 'up-shift', 'up-shift'])
     assert.equal(Object.keys(up).length, 11)
     assert.deepEqual(await page.locator('.twev h4[data-k="possible"] + ul > li > button').allInnerTexts(), ['AHU 01'])
-    assert.match(await page.locator('.twev h4[data-k="possible"] + ul').innerText(), /FIN alarm: Cooling Coil is Overcooling/)
+    assert.match(await page.locator('.twev h4[data-k="possible"] + ul').innerText(), /Alarm: Cooling Coil is Overcooling/)
     // Escape clears the trace first, then the selection
     await page.keyboard.press('Escape')
     assert.deepEqual(await tr(), {})
@@ -388,14 +389,14 @@ test('BIM: a verified GlobalId is highlighted on selection; a shared one never; 
     await page.evaluate(HOST_STUB)
     await openTwin(page)
     await feedIn(page, fixtureFeed(), { equipmentAt: new Date().toISOString() })
-    assert.match(await page.locator('.twside').innerText(), /25 with a verified BIM element · 19 without one · 2 on a shared id · 0 in conflict · 4 not checked/)
-    assert.match(await page.locator('.twside').innerText(), /Shared BIM id in FIN: VAV_07 · VAV_10\. Not linked to the model/)
+    await page.locator('.twtabs [data-tab="equip"]').click(); assert.match(await page.locator('.twside').innerText(), /25 with a verified BIM element · 19 without one · 2 on a shared id · 0 in conflict · 4 not checked/)
+    assert.match(await page.locator('.twside').innerText(), /Shared BIM ID: VAV_07 · VAV_10\. These assets cannot be linked to the model/)
     assert.equal(await page.locator('.twsvg .equip[data-bim="verified"]').count(), 25)
     await page.evaluate(() => { window.__calls = [] })
     await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'AHU_01'))
     assert.deepEqual(await calls(page), [['highlightAsset', '2wLf9$IGsICFYFjFAcUnf2']], 'by the GlobalId itself, not the asset id')
     assert.equal(await page.locator('.twchip[data-bim]').innerText(), 'BIM element verified')
-    assert.match(await page.locator('.twside').innerText(), /IFC GlobalId\n2wLf9\$IGsICFYFjFAcUnf2\nFrom\nFIN equipment bimId\nLoaded model\nElement found\nModel storey\nLEVEL-01/)
+    assert.match(await page.locator('.twside').innerText(), /IFC GlobalId\n2wLf9\$IGsICFYFjFAcUnf2\nFrom\nEquipment record\nLoaded model\nElement found\nModel storey\nLEVEL-01/)
     // a data refresh does not highlight again
     await page.evaluate(() => window.EKO.set({}))
     assert.equal((await calls(page)).length, 1)
@@ -403,7 +404,7 @@ test('BIM: a verified GlobalId is highlighted on selection; a shared one never; 
     await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'VAV_07'))
     assert.deepEqual((await calls(page)).slice(1), [['clearHighlight']])
     assert.equal(await page.locator('.twchip[data-bim]').innerText(), 'BIM id shared · not linked')
-    assert.match(await page.locator('.twside').innerText(), /more than one equipment \(VAV_10\)/)
+    assert.match(await page.locator('.twside').innerText(), /shared with VAV_10/)
     assert.equal(await page.locator('[data-tw="bim"]').count(), 0)
     // no BIM id in FIN (BTU 01): nothing guessed
     await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'BTU_01'))
@@ -437,21 +438,21 @@ test('live feed: an old equipment read is stale on every machine; energy meters 
     const meter = { id: 'GF_ENERGY', finId: 'p:ekoHospital:r:meter-gf', floor: 'LEVEL-01', tags: ['meter'], typeEn: 'METER',
       points: [{ navName: 'GF_ENERGY_CONSUMPTION', currentValue: '41.2', unit: 'kW', pointKind: 'Number', reporting: true, status: 'ok', bool: null }] }
     await feedIn(page, fixtureFeed(), { equipmentAt: new Date().toISOString(), finExcluded: [meter] })
-    assert.equal(await page.locator('.twstatus').innerText(), '46 of 46 mapped equipment in the FIN feed', 'the candidate is not counted')
+    assert.equal(await page.locator('.twstatus').innerText(), '46 of 46 mapped equipment in the live feed', 'the candidate is not counted')
     await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'GF_ENERGY'))
     assert.equal(await page.locator('.twchip[data-fin]').innerText(), 'Unmapped')
-    assert.match(await page.locator('.twcand').innerText(), /Candidate FIN record \(unverified\)[\s\S]*p:ekoHospital:r:meter-gf[\s\S]*GF_ENERGY_CONSUMPTION\t41\.2 kW/i)
+    assert.match(await page.locator('.twcand').innerText(), /Candidate record \(unverified\)[\s\S]*p:ekoHospital:r:meter-gf[\s\S]*GF_ENERGY_CONSUMPTION\t41\.2 kW/i)
     assert.equal(await page.locator('.twsvg .equip[data-id="GF_ENERGY"]').getAttribute('data-fin'), 'unmapped')
     // the backend stops reading FIN: its last list grows old
     await page.evaluate(() => { window.EKO.data.equipmentAt = new Date(Date.now() - 10 * 60000).toISOString(); window.EKO.set({}) })
-    assert.match(await page.locator('.twstatus').innerText(), /^FIN data stale · last read /)
+    assert.match(await page.locator('.twstatus').innerText(), /^Live data stale · last read /)
     assert.equal(await page.locator('.twsvg .equip[data-fin="stale"]').count(), 46)
     await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'CHILLER_01'))
     assert.ok(await page.locator('.twpts tr').count() > 0)
     assert.equal(await page.locator('.twpts tr:not([data-st="stale"])').count(), 0, 'no value shown as current')
     // disconnected
     await page.evaluate(() => { Object.defineProperty(window.DashboardData, 'connected', { get: () => false, configurable: true }); window.EKO.set({}) })
-    assert.equal(await page.locator('.twstatus').innerText(), 'FIN not connected')
+    assert.equal(await page.locator('.twstatus').innerText(), 'Live data not connected')
     assert.deepEqual(page.errors, [])
   } finally { await page.close() }
 })
@@ -476,6 +477,133 @@ test('switching projects in the same tab leaves nothing of the Hospital behind',
     assert.equal(await page.locator('.twinview').count(), 0)
     assert.deepEqual(errors, [])
   } finally { await ctx.close() }
+})
+
+/* the alarm export as data-map.js keeps it: FIN's time and its cleared records */
+const fixtureAlarms = (raisedAt = Date.parse('2026-11-06T12:00:00Z')) => JSON.parse(fs.readFileSync(path.join(root, 'spec/fixtures/eko-hospital/alarms.json'), 'utf8')).alarms
+  .map(a => ({ id: a.id, sourceId: a.source_id, state: a.state, plainEn: a.message, techEn: a.detail, sev: a.severity, finSeverity: a.severity, priority: a.priority, raisedAt,
+    hist: a.history.map(h => ({ id: h.id, msg: h.message, tech: h.detail, open: h.open, at: raisedAt - 3600e3, state: h.state })) }))
+const newAlarm = (finId, id, at) => ({ id, sourceId: finId, state: 'x_AlarmStatus', plainEn: 'Test alarm ' + id, sev: 'info', raisedAt: at })
+const flowOf = page => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.twsvg .pipe')].map(g => [g.dataset.pipe, g.dataset.flow])))
+/* what is animating: the flow state of each animated pipe, 'rotor' for a turning fan or pump */
+const animating = page => page.evaluate(() => document.querySelector('.twsvg').getAnimations({ subtree: true }).filter(a => a instanceof CSSAnimation).map(a => {
+  const t = a.effect.target, pipe = t.closest('.pipe'); return { kind: pipe ? pipe.dataset.flow : 'rotor:' + t.closest('.equip').dataset.run, layer: pipe ? pipe.dataset.layer : null,
+    level: t.closest('.tw-level').dataset.level, state: a.playState } }))
+
+test('exhibition and sidebar: tabs, fly to new alarms, labels, settings kept; no word FIN on screen', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    const [alTab, eqTab] = await page.locator('.twtabs button').allInnerTexts()
+    assert.match(alTab, /^Alarms \(\d+\)$/); assert.equal(eqTab, 'Equipment')
+    assert.equal(await page.locator('.twtabs [data-tab="alarms"]').getAttribute('aria-selected'), 'true')
+    assert.equal(await page.locator('[data-tw-ex="fly"]').isChecked(), true, 'on by default, as in the reference')
+    assert.equal(await page.locator('.twexoff input').isDisabled(), true, 'no random faults in the live view')
+    assert.match(await page.locator('.twexoff').innerText(), /Random faults and repairs\s+Not available in the live view: no simulated faults are created\./)
+    const assets = fixtureFeed(), base = fixtureAlarms()
+    await feedIn(page, assets, { equipmentAt: new Date().toISOString(), alarms: base })
+    assert.equal(await page.locator('.twinview').getAttribute('data-sel'), '0', 'alarms present when the view opened are not flown to')
+    assert.equal(await page.locator('.twtabs button').first().innerText(), 'Alarms (10)')
+    assert.match(await page.locator('.twallist li').first().innerText(), /AHU 01 · Ground floor · Open · severity info · priority 150 · /)
+    assert.ok(await page.locator('.twcleared li').count() > 0, 'recently cleared records listed')
+    assert.equal(await page.locator('.twcleared li').filter({ hasText: 'Returned to normal' }).count(), await page.locator('.twcleared li').count())
+    assert.equal(await page.locator('.twallist li').filter({ hasText: 'Return to normal' }).count(), 0, 'a cleared record is never active')
+    // a new alarm (raised now) takes the view to its machine, on its floor, once
+    const ahu2 = assets.find(a => a.id === 'AHU_02').finId
+    await page.evaluate(al => { window.EKO.data.alarms = al; window.EKO.set({}) }, [...base, newAlarm(ahu2, 'n1', Date.now() + 1000)])
+    assert.equal(await page.locator('.twdt').innerText(), 'AHU 02')
+    assert.equal(await page.locator('.twsvg').getAttribute('data-level'), 'L1')
+    assert.equal(await page.locator('.twtabs [data-tab="equip"]').getAttribute('aria-selected'), 'true')
+    // not while another machine is being looked at
+    await page.evaluate(() => window.EKO_TWIN.select(document.querySelector('.twinview'), 'BOILER_01'))
+    const fcu3 = assets.find(a => a.id === 'FCU_03').finId
+    await page.evaluate(al => { window.EKO.data.alarms = al; window.EKO.set({}) }, [...base, newAlarm(ahu2, 'n1', Date.now()), newAlarm(fcu3, 'n2', Date.now() + 1000)])
+    assert.equal(await page.locator('.twdt').innerText(), 'Boiler 01')
+    // switched off: never
+    await page.evaluate(() => { window.EKO_TWIN.select(document.querySelector('.twinview'), null); const c = document.querySelector('[data-tw-ex="fly"]'); c.checked = false; c.dispatchEvent(new Event('change', { bubbles: true })) })
+    await page.evaluate(al => { window.EKO.data.alarms = al; window.EKO.set({}) }, [...base, newAlarm(fcu3, 'n3', Date.now() + 1000)])
+    assert.equal(await page.locator('.twinview').getAttribute('data-sel'), '0')
+    // an alarm click selects its machine, shows its floor and the Equipment tab
+    await page.locator('.twtabs [data-tab="alarms"]').click()
+    await page.locator('.twallist li:has-text("Cooling Performance Fault"):has-text("FCU 05") button').click()
+    assert.equal(await page.locator('.twdt').innerText(), 'FCU 05')
+    assert.equal(await page.locator('.twsvg').getAttribute('data-level'), 'L2')
+    assert.match(await page.locator('.twpane').innerText(), /Running|Stopped|Run status unavailable/)
+    // live points update in place
+    await page.evaluate(() => { const a = window.EKO.data.assets.find(x => x.id === 'FCU_05'); a.points.find(p => p.navName === 'FanSpeed').currentValue = 'Low'; a.points.find(p => p.navName === 'FanSpeed').text = 'Low'; window.EKO.set({}) })
+    assert.equal(await page.locator('.twpts tr:has(th:text-is("FanSpeed")) td').innerText(), 'Low')
+    // labels: Off hides them all, Always shows every label on the floors in view, Auto follows the zoom
+    await page.locator('.twbar button[data-tw="home"]').click()
+    const shownTags = () => page.evaluate(() => [...document.querySelectorAll('.twsvg .tag')].filter(t => getComputedStyle(t).display !== 'none').length)
+    const total = await page.locator('.twsvg .tag').count()
+    await page.locator('[data-tw-ex="labels"]').selectOption('off')
+    assert.equal(await shownTags(), 0)
+    await page.locator('[data-tw-ex="labels"]').selectOption('always')
+    assert.equal(await shownTags(), total)
+    await page.locator('[data-tw-ex="labels"]').selectOption('auto')
+    assert.ok(await shownTags() < total, 'far zoom: labels thin out')
+    // settings kept for the project through a reload in this session
+    await page.locator('[data-tw-ex="labels"]').selectOption('always')
+    await page.reload()
+    await page.waitForFunction(() => window.EKO && document.querySelector('#ekonav .nvi'))
+    await openTwin(page)
+    assert.deepEqual([await page.locator('[data-tw-ex="labels"]').inputValue(), await page.locator('[data-tw-ex="fly"]').isChecked()], ['always', false])
+    assert.equal(await page.locator('.twsvg').getAttribute('data-labels'), 'always')
+    // the word FIN is nowhere on screen, in either tab, with a machine selected or not
+    await feedIn(page, assets, { equipmentAt: new Date().toISOString(), alarms: base })
+    for (const id of [null, 'AHU_01', 'VAV_07', 'GF_ENERGY', 'DEWA_SUPPLY']) {
+      await page.evaluate(id => window.EKO_TWIN.select(document.querySelector('.twinview'), id), id)
+      for (const tab of ['alarms', 'equip']) {
+        await page.locator(`.twtabs [data-tab="${tab}"]`).click()
+        assert.doesNotMatch(await page.locator('.twinview').innerText(), /\bFIN\b/, `${id} ${tab}`)
+      }
+    }
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+})
+
+test('live flow: only metered flow moves, running equipment never claims flow, nothing moves without data; layers, floors, polling, reduced motion', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    assert.equal(await page.locator('.twsvg .pipe:not([data-flow="unknown"])').count(), 0, 'no feed: every network unknown')
+    assert.deepEqual(await animating(page), [], 'and still')
+    await feedIn(page, fixtureFeed(), { equipmentAt: new Date().toISOString() })
+    const f = await flowOf(page)
+    assert.deepEqual([f.chws_hdr_GF, f.dcw_L1, f.sa_vav_06, f.o2_GF, f.ma_GF, f.pwr_dewa_pmu], ['measured', 'measured', 'measured', 'measured', 'measured', 'measured'])
+    assert.deepEqual([f.cws_ct_cwp, f.cwr_ch_ct, f.fa_in_GF, f.sa_main_GF, f.hw_boiler_riser, f.ea_01], ['running', 'running', 'running', 'running', 'running', 'running'], 'pumps and fans running: status only')
+    assert.deepEqual([f.chws_ahu_GF, f.gen_ats], ['unknown', 'stopped'])
+    const kinds = [...new Set((await animating(page)).map(a => a.kind))].sort()
+    assert.deepEqual(kinds, ['measured', 'rotor:on'], 'only measured flow and running fans and pumps move')
+    // polling keeps the drawing: same elements, no rebuild
+    await page.evaluate(() => { window.__p = document.querySelector('.twsvg .pipe[data-pipe="chws_hdr_GF"]'); window.__svg = document.querySelector('.twsvg'); window.EKO.set({}); window.EKO.set({}) })
+    assert.deepEqual(await page.evaluate(() => [document.querySelector('.twsvg .pipe[data-pipe="chws_hdr_GF"]') === window.__p, document.querySelector('.twsvg') === window.__svg]), [true, true])
+    // a hidden layer does not animate
+    await page.locator('.twlayers button[data-layer="chw"]').click()
+    assert.equal((await animating(page)).filter(a => a.layer === 'chw').length, 0)
+    await page.locator('.twlayers button[data-layer="chw"]').click()
+    assert.ok((await animating(page)).some(a => a.layer === 'chw'))
+    // a picked floor: the faded floors pause
+    await page.locator('.twseg button[data-lv="L1"]').click()
+    const byLevel = await animating(page)
+    assert.ok(byLevel.filter(a => a.level !== 'L1').every(a => a.state === 'paused') && byLevel.some(a => a.level === 'L1' && a.state === 'running'))
+    await page.locator('.twbar button[data-tw="home"]').click()
+    // the meter at 0 stops the chilled water flow; its pumps still running say nothing of the water
+    await page.evaluate(() => { const p = window.EKO.data.assets.find(x => x.id === 'BTU_01').points.find(q => q.navName === 'CHWFlow'); p.currentValue = '0L/s'; window.EKO.set({}) })
+    assert.equal((await flowOf(page)).chws_hdr_GF, 'stopped')
+    // disconnected or stale: nothing flows, nothing turns
+    await page.evaluate(() => { window.EKO.data.equipmentAt = new Date(Date.now() - 10 * 60000).toISOString(); window.EKO.set({}) })
+    assert.equal(await page.locator('.twsvg .pipe:not([data-flow="unknown"])').count(), 0, 'stale')
+    await page.evaluate(() => { window.EKO.data.equipmentAt = new Date().toISOString(); Object.defineProperty(window.DashboardData, 'connected', { get: () => false, configurable: true }); window.EKO.set({}) })
+    assert.equal(await page.locator('.twsvg .pipe:not([data-flow="unknown"])').count(), 0, 'disconnected')
+    assert.deepEqual(await animating(page), [])
+    // reduced motion: states still shown, nothing moves
+    await page.evaluate(() => { Object.defineProperty(window.DashboardData, 'connected', { get: () => true, configurable: true }); window.EKO.set({}) })
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    assert.ok(await page.locator('.twsvg .pipe[data-flow="measured"]').count() > 0)
+    assert.deepEqual(await animating(page), [])
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
 })
 
 test('phone width: page header with the Systems tabs, details under the building, no sideways scroll', async () => {

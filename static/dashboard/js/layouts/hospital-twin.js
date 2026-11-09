@@ -192,6 +192,9 @@
     return { connected: connected, stale: stale, res: res, bim: MAP.bimLinks(res, res._idx, call3d('listMapped')) };
   }
   var PICK = null, LAST = null;
+  if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener('visibilitychange', function () {
+    var s = LAST && STATE && STATE.get(LAST); if (s) s.svg.classList.toggle('paused', !!document.hidden);
+  });
   if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('viewer-command', function (ev) {
     var d = ev && ev.detail || {};
     if (d.action !== 'openAssetByBimId' || !d.bimId || (window.INJECTED_PROJECT_CONFIG || {}).hospitalHvac !== true || !window.EKO) return;
@@ -528,12 +531,14 @@
     el('stop', { offset: '0', 'stop-color': '#5b7ea6', 'stop-opacity': '.10' }, wg); el('stop', { offset: '1', 'stop-color': '#5b7ea6', 'stop-opacity': '.02' }, wg);
   }
   function pathD(pts) { return pts.map(function (q, i) { var p = P(q[0], q[1], q[2]); return (i ? 'L' : 'M') + fmt(p[0]) + ',' + fmt(p[1]); }).join(' '); }
-  /* one pipe, duct or cable, drawn still: no flow is shown (none is read). data-src: the machine the reference ties it to (selection highlights it) */
+  /* one pipe, duct or cable. data-src: the machine the reference ties it to (selection highlights it). The .flow overlay is drawn once; update() only sets
+     data-flow (measured · running · stopped · unknown, MAP.flowState) and CSS animates measured flow alone. */
   function drawPipe(g, p, refs) {
-    var d = pathD(p.pts), grp = el('g', { 'class': 'pipe k-' + p.kind, 'data-pipe': p.id, 'data-sys': p.sys, 'data-layer': SYSTEMS[p.sys][1], 'data-src': p.src }, g);
+    var d = pathD(p.pts), grp = el('g', { 'class': 'pipe k-' + p.kind, 'data-pipe': p.id, 'data-sys': p.sys, 'data-layer': SYSTEMS[p.sys][1], 'data-src': p.src, 'data-flow': 'unknown' }, g);
     el('path', { d: d, 'class': 'casing' }, grp);
     el('path', { d: d, 'class': 'core', stroke: SYSTEMS[p.sys][0] }, grp);
-    if (refs) (refs.pipes[p.src] = refs.pipes[p.src] || []).push(grp);
+    el('path', { d: d, 'class': 'flow', stroke: SYSTEMS[p.sys][0] }, grp);
+    if (refs) { (refs.pipes[p.src] = refs.pipes[p.src] || []).push(grp); if (refs.flows) refs.flows.push({ g: grp, p: p, rule: MAP && MAP.flowRule(p, EQ) }); }
   }
   function minZ(p) { return Math.min.apply(null, p.pts.map(function (q) { return q[2]; })); }
   function levelOfZ(z) { return z >= LZ.RF ? 'RF' : z >= LZ.L2 ? 'L2' : z >= LZ.L1 ? 'L1' : 'GF'; }
@@ -601,6 +606,11 @@
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   function isConnected() { var d = typeof window !== 'undefined' && window.DashboardData; return !(d && d.connected === false); }
   var STATE = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function when(E, ms) { return ms == null ? '' : new Date(ms).toLocaleString(E && E.lang === 'ar' ? 'ar-AE' : 'en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); }
+  /* Exhibition settings, kept for this project in this browser session: fly to new alarms (on), labels (auto) */
+  function exKey() { return 'eko-twin-ex:' + (((typeof window !== 'undefined' && window.INJECTED_PROJECT_CONFIG) || {}).projectId || ''); }
+  function exLoad() { var x = {}; try { x = JSON.parse(window.sessionStorage.getItem(exKey())) || {}; } catch (e) {} return { fly: x.fly !== false, labels: ['auto', 'always', 'off'].indexOf(x.labels) >= 0 ? x.labels : 'auto' }; }
+  function exSave(ex) { try { window.sessionStorage.setItem(exKey(), JSON.stringify(ex)); } catch (e) {} }
   var HIDDEN = {};   /* the system layers switched off, for the page session */
 
   /* the floor mapping, with no machine selected: what FIN floor each drawn level's mapped equipment report */
@@ -621,14 +631,28 @@
     var by = s.alIdx.by, ids = Object.keys(by), n = ids.reduce(function (k, id) { return k + by[id].length; }, 0) + s.alIdx.unlinked.length;
     var rows = ids.sort(function (a, b) { return EQUIP.indexOf(EQ[a]) - EQUIP.indexOf(EQ[b]); }).map(function (id) {
       return by[id].map(function (a) {
-        return '<li data-sev="' + esc(a.sev || '') + '">' + goBtn(id, '<b>' + esc(a.message) + '</b><span>' + esc(label(id) + ' · ' + tr(E, 'twinLv.' + EQ[id].level) + alarmFacts(E, a)) + '</span>') + '</li>';
+        return '<li data-sev="' + esc(a.sev || '') + '">' + goBtn(id, '<b>' + esc(a.message) + '</b><span>' + esc(label(id) + ' · ' + tr(E, 'twinLv.' + EQ[id].level) + ' · ' +
+          tr(E, a.ack ? 'twinAlAcked' : 'twinAlOpen') + alarmFacts(E, a) + (a.at != null ? ' · ' + when(E, a.at) : '')) + '</span>' + (a.detail ? '<span class="twaldet">' + esc(a.detail) + '</span>' : '')) + '</li>';
       }).join('');
     }).join('') + s.alIdx.unlinked.map(function (a) {
       return '<li data-linked="0"><b>' + esc(a.message) + '</b><span>' + esc(tr(E, 'twinAlUnlinked', { source: a.source || a.sourceId || '?' })) + '</span></li>';
     }).join('');
     return '<h3 class="twsub">' + esc(tr(E, 'twinAlarmsAll', { n: String(n) })) + '</h3>' + (n ? '<ul class="twalarms twallist">' + rows + '</ul>' : '<p class="twnote">' + esc(tr(E, 'twinAlNone')) + '</p>');
   }
-  /* what FIN says of an alarm, and nothing else: its severity word and priority as sent */
+  /* the earlier records of the open alarms that returned to normal, newest first: never counted as active */
+  function clearedHtml(E, s) {
+    var seen = {}, rows = [];
+    Object.keys(s.alIdx.by).forEach(function (id) { s.alIdx.by[id].forEach(function (a) { (a.clearedRecs || []).forEach(function (c) {
+      var k = c.id || id + c.point + c.at; if (seen[k]) return; seen[k] = 1; rows.push({ id: id, c: c });
+    }); }); });
+    rows.sort(function (a, b) { return (b.c.at || 0) - (a.c.at || 0); });
+    rows = rows.slice(0, 12);
+    return '<h3 class="twsub">' + esc(tr(E, 'twinCleared', { n: String(rows.length) })) + '</h3>' + (rows.length ? '<ul class="twalarms twcleared">' + rows.map(function (x) {
+      return '<li data-cleared="1">' + goBtn(x.id, '<b>' + esc(label(x.id)) + '</b><span>' + esc(tr(E, 'twinClearedRow') + (x.c.point ? ' · ' + x.c.point : '') + (x.c.at != null ? ' · ' + when(E, x.c.at) : '')) + '</span>' +
+        (x.c.detail ? '<span class="twaldet">' + esc(x.c.detail) + '</span>' : '')) + '</li>';
+    }).join('') + '</ul>' : '<p class="twnote">' + esc(tr(E, 'twinClearedNone')) + '</p>');
+  }
+  /* what the source says of an alarm, and nothing else: its severity word and priority as sent */
   function alarmFacts(E, a) {
     return (a.finSeverity ? ' · ' + tr(E, 'twinAlSevV', { v: a.finSeverity }) : '') + (a.priority != null ? ' · ' + tr(E, 'twinAlPriV', { v: String(a.priority) }) : '');
   }
@@ -726,12 +750,14 @@
   function panelHtml(E, s, connected) {
     var id = s.sel, res = s.res;
     if (!id) {
-      return '<p class="twpick">' + esc(tr(E, 'twinPick')) + '</p>' + alarmListHtml(E, s) + floorsHtml(E, res) + bimSummaryHtml(E, s) + '<h3 class="twsub">' + esc(tr(E, 'twinSystems')) + '</h3><dl class="twlegend">' +
+      return '<p class="twpick">' + esc(tr(E, 'twinPick')) + '</p>' + floorsHtml(E, res) + bimSummaryHtml(E, s) + '<h3 class="twsub">' + esc(tr(E, 'twinSystems')) + '</h3><dl class="twlegend">' +
         LAYERS.map(function (l) {
           return '<div data-layer="' + l + '"><dt>' + esc(tr(E, 'twinLayer.' + l)) + '</dt>' + Object.keys(SYSTEMS).filter(function (k) { return SYSTEMS[k][1] === l; }).map(function (k) {
             return '<dd><i class="twkey" data-sys="' + k + '" style="background:' + SYSTEMS[k][0] + '"></i>' + esc(tr(E, 'twinSys.' + k)) + '</dd>';
           }).join('') + '</div>';
-        }).join('') + '</dl><p class="twnote">' + esc(tr(E, 'twinNetIllus')) + '</p><p class="twnote">' + esc(tr(E, 'twinIllus')) + '</p>';
+        }).join('') + '</dl><h3 class="twsub">' + esc(tr(E, 'twinFlowT')) + '</h3><ul class="twflowkey">' + ['measured', 'running', 'stopped', 'unknown'].map(function (k) {
+          return '<li><i class="twfk" data-flow="' + k + '"></i>' + esc(tr(E, 'twinFlow.' + k)) + '</li>';
+        }).join('') + '</ul><p class="twnote">' + esc(tr(E, 'twinLayoutNote')) + '</p>';
     }
     var e = EQ[id], r = res[id], st = r.state, none = tr(E, 'twinNone');
     var rows = [[tr(E, 'twinType'), tr(E, 'twinT.' + e.type)], [tr(E, 'twinLevel'), tr(E, 'twinLv.' + e.level)]];
@@ -751,7 +777,8 @@
       (s.trace ? '<button type="button" class="btnG btnSm" data-tw="untrace">' + esc(tr(E, 'twinTraceClear')) + '</button>' : '') + '</div>';
     return '<div class="twdh"><div><h3 class="twdt">' + esc(e.label) + '</h3><code class="twdid">' + esc(e.nonFin ? tr(E, 'twinNotFinId') : tr(E, 'twinDrawnId', { id: id })) + '</code></div>' +
       '<button type="button" class="btnG btnSm twclose" data-tw="close" aria-label="' + esc(tr(E, 'twinClose')) + '">✕</button></div>' +
-      '<span class="twchip" data-fin="' + st + '">' + esc(tr(E, 'twinFin.' + st)) + '</span>' + why +
+      '<span class="twchip" data-fin="' + st + '">' + esc(tr(E, 'twinFin.' + st)) + '</span>' +
+      (MAP.RUNPTS[e.type] ? ' <span class="twchip" data-run="' + (s.run[id] || 'unknown') + '">' + esc(tr(E, 'twinRun.' + (s.run[id] || 'unknown'))) + '</span>' : '') + why +
       (s.picked && s.picked.id === id ? '<p class="twnote">' + esc(tr(E, 'twinPicked', { guid: s.picked.bimId })) + '</p>' : '') + actions +
       '<dl class="twdl">' + rows.map(function (x) { return '<div><dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd></div>'; }).join('') + '</dl>' +
       bimHtml(E, s, id) + candHtml(E, s, id, connected) +
@@ -763,7 +790,7 @@
             return '<tr data-st="' + p.state + '"><th>' + esc(p.name) + tags + '</th><td' + (p.enumText ? ' title="' + esc(tr(E, 'twinEnum', { values: p.enumText })) + '"' : '') + '>' + esc(pointShown(E, p)) + '</td></tr>';
           }).join('') + '</table>'
         : r.fin && (st === 'mapped' || st === 'stale') ? '<p class="twnote">' + esc(tr(E, 'twinNoPoints')) + '</p>' : '') +
-      netsHtml(E, id) + '<p class="twnote">' + esc(tr(E, 'twinIllus')) + '</p>';
+      netsHtml(E, id) + '<p class="twnote">' + esc(tr(E, 'twinLayoutNote')) + '</p>';
   }
   /* the systems of the pipes the reference ties to this machine (its `src`); no state of theirs is claimed */
   function netsHtml(E, id) {
@@ -777,7 +804,7 @@
   }
 
   function create(E) {
-    var host = document.createElement('section');
+    var host = document.createElement('section'), ex = exLoad();
     host.className = 'twinview';
     host.setAttribute('aria-label', tr(E, 'twinTitle'));
     var floors = ['ALL'].concat(LEVELS).map(function (lv) {
@@ -791,12 +818,18 @@
       '<div class="twseg" role="group" aria-label="' + esc(tr(E, 'twinFloors')) + '">' + floors + '</div>' +
       '<button type="button" class="btnG btnSm" data-tw="home">' + esc(tr(E, 'twinWhole')) + '</button>' +
       '<span class="twmeta"><span class="twillus">' + esc(tr(E, 'twinIllusShort')) + '</span><span class="twstatus" role="status"></span></span></div>' +
-      '<div class="twlayers" role="group" aria-label="' + esc(tr(E, 'twinSystems')) + '">' + layerChips + '</div>' +
+      '<div class="twlayers" role="group" aria-label="' + esc(tr(E, 'twinSystems')) + '">' + layerChips +
+      '<span class="twex" role="group" aria-label="' + esc(tr(E, 'twinEx')) + '"><b>' + esc(tr(E, 'twinEx')) + '</b>' +
+      '<label><input type="checkbox" data-tw-ex="fly"' + (ex.fly ? ' checked' : '') + '> ' + esc(tr(E, 'twinExFly')) + '</label>' +
+      '<label class="twexoff" title="' + esc(tr(E, 'twinExFaultsNo')) + '"><input type="checkbox" disabled> ' + esc(tr(E, 'twinExFaults')) + ' <small>' + esc(tr(E, 'twinExFaultsNo')) + '</small></label>' +
+      '<label>' + esc(tr(E, 'twinExLabels')) + ' <select data-tw-ex="labels">' + ['auto', 'always', 'off'].map(function (v) {
+        return '<option value="' + v + '"' + (ex.labels === v ? ' selected' : '') + '>' + esc(tr(E, 'twinExLbl.' + v)) + '</option>'; }).join('') + '</select></label></span></div>' +
       '<div class="twbody"><div class="twstage"><div class="twtrace" hidden><span class="twtracet"></span><button type="button" class="btnG btnSm" data-tw="untrace">' + esc(tr(E, 'twinTraceClear')) + '</button></div></div>' +
-      '<aside class="twside" aria-live="polite"></aside></div>';
+      '<aside class="twside"><div class="twtabs" role="tablist"><button type="button" role="tab" data-tw="tab" data-tab="alarms" aria-selected="true"></button>' +
+      '<button type="button" role="tab" data-tw="tab" data-tab="equip" aria-selected="false">' + esc(tr(E, 'twinTabEquip')) + '</button></div><div class="twpane" aria-live="polite"></div></aside></div>';
     var stage = host.querySelector('.twstage');
-    var svg = el('svg', { 'class': 'twsvg', role: 'img', 'aria-label': tr(E, 'twinTitle'), dir: 'ltr', 'data-level': 'ALL', preserveAspectRatio: 'xMidYMid meet' }, stage);
-    var s = { E: E, svg: svg, side: host.querySelector('.twside'), status: host.querySelector('.twstatus'), sel: null, level: 'ALL', eqs: {}, tags: {}, pipes: {}, vb: null, home: null, panel: '',
+    var svg = el('svg', { 'class': 'twsvg', role: 'img', 'aria-label': tr(E, 'twinTitle'), dir: 'ltr', 'data-level': 'ALL', 'data-labels': ex.labels, preserveAspectRatio: 'xMidYMid meet' }, stage);
+    var s = { E: E, svg: svg, side: host.querySelector('.twpane'), tabs: host.querySelectorAll('.twtabs button'), tab: 'alarms', ex: ex, flows: [], run: {}, seen: {}, opened: Date.now(), lastUser: 0, status: host.querySelector('.twstatus'), sel: null, level: 'ALL', eqs: {}, tags: {}, pipes: {}, vb: null, home: null, panel: '',
       graph: MAP.graph(EQUIP), trace: null, traceBar: host.querySelector('.twtrace'), res: {}, alIdx: { by: {}, unlinked: [] }, fdd: {}, faults: {},
       bim: { by: {}, guid: {} }, cands: {}, stale: false, lit: null, picked: null };
     LAYERS.forEach(function (l) { if (HIDDEN[l]) svg.classList.add('hide-' + l); });
@@ -817,7 +850,16 @@
       else if (b.dataset.tw === 'untrace') { trace(host, null); refocus(s.sel ? '[data-tw="trace"]' : null); }
       else if (b.dataset.tw === 'go') goTo(host, b.dataset.id);
       else if (b.dataset.tw === 'bim') showInModel(host, s.sel);
+      else if (b.dataset.tw === 'tab') { s.tab = b.dataset.tab; update(host, s.E); }
     });
+    host.addEventListener('change', function (ev) {
+      var k = ev.target.getAttribute && ev.target.getAttribute('data-tw-ex'); if (!k) return;
+      if (k === 'fly') s.ex.fly = !!ev.target.checked;
+      if (k === 'labels') { s.ex.labels = ev.target.value; svg.setAttribute('data-labels', s.ex.labels); }
+      exSave(s.ex);
+    });
+    /* a person working in the view is not moved by Fly to new alarms */
+    ['pointerdown', 'keydown', 'wheel'].forEach(function (t) { host.addEventListener(t, function () { s.lastUser = Date.now(); }, { passive: true }); });
     host.addEventListener('keydown', function (ev) {
       var g = ev.target.closest && ev.target.closest('.equip');
       if (g && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); ev.stopPropagation(); select(host, g.getAttribute('data-id')); }
@@ -900,6 +942,7 @@
   function select(host, id) {
     var s = host && STATE && STATE.get(host); if (!s) return;
     s.sel = id && EQ[id] ? id : null;
+    if (s.sel) s.tab = 'equip';
     if (s.picked && s.picked.id !== s.sel) s.picked = null;
     if (s.trace && s.trace.seed !== s.sel) trace(host, null, true);
     Object.keys(s.eqs).forEach(function (k) { s.eqs[k].classList.toggle('sel', k === s.sel); s.tags[k].classList.toggle('sel', k === s.sel); });
@@ -1004,8 +1047,26 @@
       var flag = s.alIdx.by[e.id] ? 'alarm' : s.faults[e.id] ? 'fault' : null;
       if (s.eqs[e.id].getAttribute('data-al') !== flag) { if (flag) { s.eqs[e.id].setAttribute('data-al', flag); s.tags[e.id].setAttribute('data-al', flag); } else { s.eqs[e.id].removeAttribute('data-al'); s.tags[e.id].removeAttribute('data-al'); } }
     });
-    var html = panelHtml(E, s, connected);
+    s.flows.forEach(function (f) { var st = MAP.flowState(f.rule, res, connected); if (f.g.getAttribute('data-flow') !== st) f.g.setAttribute('data-flow', st); });
+    EQUIP.forEach(function (e) {
+      var rs = MAP.runState(e.id, e.type, res, connected); s.run[e.id] = rs;
+      if (s.eqs[e.id].getAttribute('data-run') !== rs) { if (rs) s.eqs[e.id].setAttribute('data-run', rs); else s.eqs[e.id].removeAttribute('data-run'); }
+    });
+    /* Fly to new alarms: an alarm raised after the view opened (by its own time; none without one), not flown to before, takes the view to its machine
+       once; not while the person is working on another machine or tracing, nor within 15 s of their last action */
+    var act = {}, fly = null;
+    Object.keys(s.alIdx.by).forEach(function (id) { s.alIdx.by[id].forEach(function (a) {
+      act[a.id] = id;
+      if (!fly && !s.seen[a.id] && a.at != null && a.at > s.opened) fly = id;
+      s.seen[a.id] = 1;
+    }); });
+    if (fly && !(s.ex.fly && !s.trace && (!s.sel || s.sel === fly) && Date.now() - s.lastUser > 15000)) fly = null;
+    var nAct = Object.keys(act).length + s.alIdx.unlinked.length, tabTxt = tr(E, 'twinTabAlarms', { n: String(nAct) });
+    [].forEach.call(s.tabs, function (b) { b.setAttribute('aria-selected', String(b.dataset.tab === s.tab)); });
+    if (s.tabs[0].textContent !== tabTxt) s.tabs[0].textContent = tabTxt;
+    var html = s.tab === 'alarms' ? alarmListHtml(E, s) + clearedHtml(E, s) : panelHtml(E, s, connected);
     if (html !== s.panel) { s.side.innerHTML = html; s.panel = html; }
+    if (fly) goTo(host, fly);
     host.setAttribute('data-sel', s.sel ? '1' : '0');
     return { found: found, total: fin };
   }

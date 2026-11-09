@@ -779,7 +779,12 @@
     return (Array.isArray(alarms) ? alarms : []).filter(function (a) { return isActive(a) && bareId(a.sourceId) === id; }).map(function (a) {
       return { id: a.id, message: a.plainEn || '', detail: a.techEn || '', sev: a.sev || null, finSeverity: a.finSeverity || null,
         priority: typeof a.priority === 'number' ? a.priority : null, sourceId: bareId(a.sourceId), ack: a.ack || null,
-        cleared: (a.hist || []).filter(function (h) { return h && h.open !== true; }).length, point: alarmPointOf(a.state, r.asset.points) };
+        cleared: (a.hist || []).filter(function (h) { return h && h.open !== true; }).length, point: alarmPointOf(a.state, r.asset.points),
+        at: typeof a.raisedAt === 'number' ? a.raisedAt : null,
+        /* the alarm's earlier records that returned to normal, as sent: never active, shown as recently cleared */
+        clearedRecs: (a.hist || []).filter(function (h) { return h && h.open !== true; }).map(function (h) {
+          return { id: h.id || null, message: h.msg || '', detail: h.tech || '', at: typeof h.at === 'number' ? h.at : null, point: alarmPointOf(h.state, r.asset.points) };
+        }) };
     });
   }
   /* Every open FIN alarm against the drawn machines: { by: { drawnId: [alarm] }, unlinked: [alarm] } (unlinked: on FIN equipment the twin does not draw) */
@@ -1000,8 +1005,50 @@
     return isFinite(t) && (now - t) > (maxMs || STALE_MS);
   }
 
+  /* ── live flow evidence for a drawn pipe, duct or cable ──
+     measure: live meters on that network ([drawnId, point]); run: the equipment's own run status points. A run status never stands for measured flow.
+     Chilled-water coil branches have neither (no meter or valve reading on the branch). */
+  var RUNPTS = { PUMPSET: ['Pump01RunStatus', 'Pump02RunStatus'], BOOSTER: ['Pump01RunStatus', 'Pump02RunStatus'], SUMP: ['Pump01RunStatus', 'Pump02RunStatus'],
+    BOILER: ['RunStatus'], CHILLER: ['RunStatus'], AHU: ['SA Fan Status'], FAHU: ['SupplyFanStatus'], EF: ['EF_Run_Sts'], CT: ['FanRunStatus'], FCU: ['FanRunStatus'],
+    VAV: ['Status'], O2: ['RunStatus'], MAC: ['RunStatus'], ATS: ['NormalSupplySts', 'EmergencySupplySts'], SMDB: ['Incomer_ON_OFF_Status'] };
+  function flowRule(p, EQ) {
+    var t = EQ[p.src] && EQ[p.src].type, M = [], R = [];
+    var run = function (id) { (RUNPTS[EQ[id] && EQ[id].type] || []).forEach(function (n) { R.push([id, n]); }); };
+    if (p.sys === 'chws' || p.sys === 'chwr') { if (t === 'PUMPSET') { M.push(['BTU_01', 'CHWFlow']); run(p.src); } }
+    else if (t === 'WM') M.push([p.src, 'FlowRate']);
+    else if (t === 'VAV') M.push([p.src, 'Airflow']);
+    else if (t === 'O2' || t === 'MAC') M.push([p.src, 'Flow']);
+    else if (p.src === 'DEWA_SUPPLY' || t === 'PMU') M.push(['PMU_Main', 'ActivePower']);
+    else if (p.src === 'GENERATOR') R.push(['AUTOMATIC_TRANSFER_SWITCH_01', 'EmergencySupplySts']);
+    else run(p.src);
+    return { measure: M, run: R };
+  }
+  /* a point of a confirmed (mapped, not stale) machine, read live; else null */
+  function liveReading(r, name) {
+    if (!r || !r.asset || r.state !== 'mapped') return null;
+    var pts = r.asset.points || [], k = fold(name);
+    for (var i = 0; i < pts.length; i++) if (pts[i] && fold(pts[i].navName) === k) { var x = readPoint(pts[i], { connected: true }); return x.state === 'live' ? x : null; }
+    return null;
+  }
+  /* measured: a live meter reads above 0 · running: only a run status is on · stopped: the meter reads 0, or every run status is off · unknown: nothing live */
+  function flowState(rule, res, connected) {
+    if (connected === false || !rule) return 'unknown';
+    var m = rule.measure.map(function (q) { return liveReading(res[q[0]], q[1]); }).filter(function (x) { return x && x.type === 'number'; });
+    if (m.length) return m.some(function (x) { return x.value > 0; }) ? 'measured' : 'stopped';
+    var rr = rule.run.map(function (q) { return liveReading(res[q[0]], q[1]); }).filter(function (x) { return x && x.type === 'bool'; });
+    if (!rr.length) return 'unknown';
+    return rr.some(function (x) { return x.value; }) ? 'running' : rr.length === rule.run.length ? 'stopped' : 'unknown';
+  }
+  /* a machine's own run status: on · off · null (none live) */
+  function runState(id, type, res, connected) {
+    if (connected === false) return null;
+    var rr = (RUNPTS[type] || []).map(function (n) { return liveReading(res[id], n); }).filter(function (x) { return x && x.type === 'bool'; });
+    return rr.length ? (rr.some(function (x) { return x.value; }) ? 'on' : 'off') : null;
+  }
+
   return { REF: REF, PIN: PIN, TYPE_TAG: TYPE_TAG, LEVELS: LEVELS, NAME_ONLY: NAME_ONLY, fold: fold, finName: finName, refPoints: refPoints, bimOf: bimOf,
     index: index, resolve: resolve, readPoint: readPoint, pointRows: pointRows, alarmPointOf: alarmPointOf, alarmsFor: alarmsFor, alarmIndex: alarmIndex,
     isActive: isActive, fddRows: fddRows, buildLinks: buildLinks, graph: graph, evidence: evidence, floorCheck: floorCheck,
-    bimLinks: bimLinks, modelLevel: modelLevel, candidateFor: candidateFor, feedStale: feedStale, STALE_MS: STALE_MS };
+    bimLinks: bimLinks, modelLevel: modelLevel, candidateFor: candidateFor, feedStale: feedStale, STALE_MS: STALE_MS,
+    RUNPTS: RUNPTS, flowRule: flowRule, flowState: flowState, runState: runState, liveReading: liveReading };
 });

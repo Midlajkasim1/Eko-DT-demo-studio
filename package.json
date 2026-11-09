@@ -13,7 +13,7 @@
     "test:unit": "node tests/run.mjs --unit",
     "test:browser": "node tests/run.mjs --browser",
     "test:eko-chat": "node --test spec/ekoChatMessages.test.mjs spec/ekoChatMarkdown.test.mjs spec/ekoChatParts.test.mjs spec/startViewerBat.test.mjs",
-    "test:hospital-hvac": "node --test spec/hospitalHvac.test.mjs spec/hvacGraphics.test.mjs spec/hospitalRoof.test.mjs spec/hospitalTwin.test.mjs spec/hospitalTwinMap.test.mjs spec/hospitalTwinGraph.test.mjs spec/hospitalTwinBim.test.mjs",
+    "test:hospital-hvac": "node --test spec/hospitalHvac.test.mjs spec/hvacGraphics.test.mjs spec/hospitalRoof.test.mjs spec/hospitalTwin.test.mjs spec/hospitalTwinMap.test.mjs spec/hospitalTwinGraph.test.mjs spec/hospitalTwinBim.test.mjs spec/hospitalTwinFlow.test.mjs",
     "test:hospital-hvac:browser": "node --test spec/hospitalPanel.browser.test.mjs spec/hospitalOverlay.browser.test.mjs spec/hospitalRoof.browser.test.mjs spec/hospitalTwin.browser.test.mjs",
     "build:renders": "node scripts/buildBuiltinRenders.mjs"
   },
