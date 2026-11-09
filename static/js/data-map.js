@@ -322,6 +322,7 @@
     site.alarms = payload.alarms.map(mapAlarm);
     site.alarms.forEach(function (a) { if (acked[a.id]) a.ack = acked[a.id]; });
     linkAlarms(site);
+    if (window.EKO && typeof window.EKO.noteAlarms === 'function') window.EKO.noteAlarms(site.alarms);
     if (window.EKO_HOST_ENGINE && typeof window.EKO_HOST_ENGINE.resolveAllAssetPositions === 'function') {
       window.EKO_HOST_ENGINE.resolveAllAssetPositions();
     }

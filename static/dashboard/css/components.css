@@ -9674,9 +9674,43 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .dlgalerts > .achead {
   position:static;
   flex:none;
+  flex-wrap:wrap;
   margin:0;
   padding:14px 18px 10px;
   border-block-end:1px solid var(--bd1)
+}
+
+.dashboard-native-container .acsnd {
+  flex:1 0 100%;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-top:8px
+}
+
+.dashboard-native-container .acsnd-on {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  color:var(--t2);
+  font-size:var(--txCapSz);
+  cursor:pointer
+}
+
+.dashboard-native-container .acsnd-on input {
+  width:auto;
+  margin:0
+}
+
+.dashboard-native-container .acsnd-pick {
+  height:28px;
+  border-radius:8px;
+  border:1px solid var(--bd1);
+  background:var(--s2);
+  color:var(--t1);
+  font-family:var(--fB),sans-serif;
+  font-size:var(--txCapSz);
+  padding:0 8px
 }
 
 .dashboard-native-container .acmeta {

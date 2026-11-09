@@ -182,6 +182,7 @@ const MIME_TYPES: Record<string, string> = {
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
   '.mp4': 'video/mp4',
+  '.wav': 'audio/wav',
   '.glb': 'model/gltf-binary',
 }
 

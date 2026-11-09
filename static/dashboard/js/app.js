@@ -489,6 +489,50 @@
     });
   })();
 
+  const ALARM_SOUNDS = [
+    { id: 'chime', key: 'alarmChime', file: 'alarm-chime.wav' },
+    { id: 'two', key: 'alarmTwo', file: 'alarm-two-tone.wav' },
+    { id: 'triple', key: 'alarmTriple', file: 'alarm-triple.wav' },
+    { id: 'bell', key: 'alarmBell', file: 'alarm-bell.wav' },
+    { id: 'pulse', key: 'alarmPulse', file: 'alarm-pulse.wav' },
+  ];
+  const alarmAudio = new Audio();
+  let heardAlarms = null;   /* the open list is remembered first, so alarms already on screen do not sound */
+  const alarmSoundId = () => {
+    const id = ls.get('eko-alarm-snd') || 'chime';
+    return ALARM_SOUNDS.some(s => s.id === id) ? id : 'chime';
+  };
+  const alarmSoundOn = () => ls.get('eko-alarm-snd-on') !== '0';
+  const playAlarmSound = () => {
+    const sound = ALARM_SOUNDS.find(s => s.id === alarmSoundId()) || ALARM_SOUNDS[0];
+    const url = '/static/dashboard/assets/sounds/' + sound.file;
+    if (alarmAudio.getAttribute('src') !== url) alarmAudio.src = url;
+    alarmAudio.volume = 1;
+    alarmAudio.currentTime = 0;
+    const played = alarmAudio.play();
+    if (played && typeof played.catch === 'function') played.catch(() => {});
+  };
+  document.addEventListener('pointerdown', function unlockAlarm(ev) {
+    if (ev.target.closest && ev.target.closest('.acsnd')) return;
+    const url = '/static/dashboard/assets/sounds/' + (ALARM_SOUNDS.find(s => s.id === alarmSoundId()) || ALARM_SOUNDS[0]).file;
+    if (alarmAudio.getAttribute('src') !== url) alarmAudio.src = url;
+    alarmAudio.volume = 0;
+    const played = alarmAudio.play();
+    const restore = () => { alarmAudio.pause(); alarmAudio.currentTime = 0; alarmAudio.volume = 1; };
+    if (played && typeof played.then === 'function') played.then(restore, restore);
+    else restore();
+    document.removeEventListener('pointerdown', unlockAlarm, true);
+  }, true);
+  E.noteAlarms = list => {
+    const ids = new Set((list || []).map(a => a && a.id).filter(Boolean));
+    if (heardAlarms) {
+      let fresh = false;
+      ids.forEach(id => { if (!heardAlarms.has(id)) fresh = true; });
+      if (fresh && alarmSoundOn()) playAlarmSound();
+    }
+    heardAlarms = ids;
+  };
+
   E.engine = window.EKO_VIEWER.create(E.data.viewer.engine || 'static');
   E.engine.onCameraChange(() => window.EKO_V.position(E));
   E.engine.onMarkerClick(id => E.set({ born:'pop', mkPop: id, mkPopN: 0 }));   /* D128: a marker opens its popup, never the panel */
@@ -902,7 +946,16 @@
       <div class="dlg dlgdrop dropMid dlgalerts" data-born="${E.state.born==='dlg'?1:0}" role="dialog" aria-label="${esc(E.t('alertCentre'))}">
         <div class="draghandle"></div>
         <div class="dlghead achead"><h2>${esc(E.t('alertCentre'))}</h2><span class="acmeta" data-tip="${esc(E.t('alarmsMetaTip'))}">${esc(E.t('acActiveN',{n:counts.active}) + (counts.acknowledged ? ' \u00b7 ' + E.t('acAckN',{n:counts.acknowledged}) : ''))}</span>
-          <button class="iconbtn msA" data-act="closeDlg" aria-label="${esc(E.t('close'))}">${icon('x',14)}</button></div>
+          <button class="iconbtn msA" data-act="closeDlg" aria-label="${esc(E.t('close'))}">${icon('x',14)}</button>
+          <div class="acsnd">
+            <label class="acsnd-on" data-tip="${esc(E.t('alarmSndTip'))}">
+              <input type="checkbox" data-chg="alarmSnd" ${alarmSoundOn() ? 'checked' : ''} aria-label="${esc(E.t('alarmSnd'))}">
+              <span>${esc(E.t('alarmSnd'))}</span>
+            </label>
+            <select class="acsnd-pick" data-chg="alarmSndPick" aria-label="${esc(E.t('alarmSndPick'))}">
+              ${ALARM_SOUNDS.map(s => `<option value="${s.id}"${s.id === alarmSoundId() ? ' selected' : ''}>${esc(E.t(s.key))}</option>`).join('')}
+            </select>
+          </div></div>
         <div class="acfilters" role="group" aria-label="${esc(E.t('acSevT'))}" data-model="${E.state.markersOn}">
           <button class="acchip acmaster" data-on="${E.state.markersOn}" data-act="mkToggle" aria-pressed="${E.state.markersOn}"
             data-tip="${esc(E.t(E.state.markersOn ? 'mkHideTip' : 'mkShowTip'))}">${icon(E.state.markersOn ? 'eye' : 'eyeOff', 13)}<span>${esc(E.t('acOnModel'))}</span></button>
@@ -1565,6 +1618,8 @@
     none(){},
 
     /* Alarm filters change the display only, never the ribbon. */
+    alarmSnd(el){ ls.set('eko-alarm-snd-on', el.checked ? '1' : '0'); if (el.checked) playAlarmSound(); E.set({}); },
+    alarmSndPick(el){ if (ALARM_SOUNDS.some(s => s.id === el.value)) ls.set('eko-alarm-snd', el.value); playAlarmSound(); E.set({}); },
     fltSev(el){ const s = E.state.alarmF.sev, v = el.dataset.v;
       s.has(v) ? s.delete(v) : s.add(v); render(); },
     ackTgl(){ E.set({ showAcked: !E.state.showAcked }); },
