@@ -970,11 +970,12 @@
   }
   let keptHost = null;   /* live #enginehost, re-adopted across renders so the
                             scene never re-mounts (no image flash on clicks) */
+  let lastMountHtml = '';   /* a poll that does not change the page must not rebuild it */
   /* D86: markup is rebuilt on every state change, which would reset every
      scroller to the top (the alarms panel jumped when the account menu
      opened). Positions are captured before the rebuild and restored after,
      matched by selector and order. */
-  const SCROLLERS = ['#modcontent', '.ovpad', '.apbody', '.nflist', '.regscroll', '.dgscroll', '.dlg', '.aclist', '.vplist', '#ekonav', '.rpwrap', '.rphub', '.pagepad', '.pwarea', '.scrollY', '.pmurows', '.hmrooms'];
+  const SCROLLERS = ['#modcontent', '.ovpad', '.apbody', '.nflist', '.regscroll', '.dgscroll', '.dlg', '.aclist', '.vplist', '#ekonav', '.rpwrap', '.rphub', '.pagepad', '.pwarea', '.pfbody', '.pfvisual', '#mount', '.scrollY', '.pmurows', '.hmrooms', '.cufeed', '.btable', '.br14col', '.br14tl', '.br14body', '.br14main', '.br14fullb', '.ho14left', '.ho14right', '.bfcard'];
   /* The model tree's host sits outside the markup render() rebuilds. render() puts it back in the panel,
      and keepTree() carries its scroll position and focus across the rebuild. */
   let treeScrollTop = 0;
@@ -1029,6 +1030,7 @@
     if(E.state.wall && window.EKO_WALL){   /* D106: a display context — no rail, no ask bar, no overlays, no pointer */
       (document.querySelector('.dashboard-native-container') || window.DASHBOARD_ROOT || document.documentElement).setAttribute('data-wall', '1');
       const liveW = document.getElementById('enginehost'); if(liveW && liveW.dataset.live === '1') keptHost = liveW;
+      lastMountHtml = '';
       $('mount').innerHTML = window.EKO_WALL.render(E);
       const freshW = document.getElementById('enginehost'); if(freshW && keptHost) freshW.replaceWith(keptHost);
       $('topbar').innerHTML = ''; $('ekonav').innerHTML = ''; $('mobtabs').innerHTML = ''; $('overlays').innerHTML = '';
@@ -1067,16 +1069,21 @@
     $('ekonav').innerHTML = navRail();
     if(E.state.roofView && roofHost){
       const m = $('mount');
+      lastMountHtml = '';
       if(m.firstElementChild !== roofHost || m.childElementCount !== 1) m.replaceChildren(roofHost);   /* only when it is not already there: moving an iframe reloads it */
     } else {
       /* E15 port: the page frame (headline, how-to-read line, tiles, tabs) on every page of a project on the extended module set (the Hospital). A project on the standard module set, Marsa Al Arab included, keeps its own page layouts. */
       const framed = window.EKO_FRAME && window.EKO_MODULES === 'extended';
-      $('mount').innerHTML = NB((stacked ? pagehead() : '') + (framed ? window.EKO_FRAME.apply(E, P.renderPage(E)) : P.renderPage(E)));
+      const pageHtml = NB((stacked ? pagehead() : '') + (framed ? window.EKO_FRAME.apply(E, P.renderPage(E)) : P.renderPage(E)));
+      if(pageHtml !== lastMountHtml){
+        lastMountHtml = pageHtml;
+        $('mount').innerHTML = pageHtml;
       /* E17: on a phone or a tablet the page's active sub-tab is scrolled into view when the page changes */
       if(stacked){ const k = E.state.pageId + '/' + (E.state.sub || ''); if(render._phOn !== k){ render._phOn = k;
         const on = $('mount').querySelector('#pagehead .phsub[data-on="1"]'), strip = on && on.parentElement;
         if(on && strip && strip.scrollWidth > strip.clientWidth){ const sr = strip.getBoundingClientRect(), r = on.getBoundingClientRect();
           if(r.left < sr.left) strip.scrollLeft -= sr.left - r.left + 24; else if(r.right > sr.right) strip.scrollLeft += r.right - sr.right + 24; } } }
+      }
     }
     const fresh = document.getElementById('enginehost');
     if(fresh && keptHost) fresh.replaceWith(keptHost);
