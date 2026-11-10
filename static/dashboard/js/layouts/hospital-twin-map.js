@@ -35,12 +35,14 @@
     "AUTOMATIC_TRANSFER_SWITCH_01": { id: "p:ekoHospital:r:3260c251-6d293f64", floor: "LEVEL-01", type: "ats", tags: ["ats", "elec"], bim: null, points: [
       ["EmergencySupplySts", "", "B"],
       ["NormalSupplySts", "", "B"]] },
-    "SMDB_GF": { id: "p:ekoHospital:r:3260c26f-8dcc9eb8", floor: "LEVEL-01", type: "elecPanel", tags: ["elecPanel", "smdb"], bim: null, points: [
+    /* SMDB_01, MCC_01, DB_01 and BTU: the 6 Nov export names these SMDB_GF, MCC_GF, DB_GF and BTU_01. The live FIN project (Phase 6A, 10 Nov) holds records named
+       SMDB_01, MCC_01, DB_01 and BTU with the SAME FIN ids, floors and types, so the keys here are the live names and the ids are the export's. */
+    "SMDB_01": { id: "p:ekoHospital:r:3260c26f-8dcc9eb8", floor: "LEVEL-01", type: "elecPanel", tags: ["elecPanel", "smdb"], bim: null, points: [
       ["Incomer_ON_OFF_Status", "", "B", "OFF,ON"],
       ["Incomer_Trip_Status", "", "B", "NORMAL,TRIP"]] },
-    /* PROVISIONAL (see PROVISIONAL below): in the 6 Nov export these two have no points at all and no BIM id, only the FIN record id. */
-    "MCC_GF": { id: "p:ekoHospital:r:328032b7-6a718568", floor: "LEVEL-01", type: "elecPanel", tags: ["elecPanel", "mcc"], bim: null, points: [] },
-    "DB_GF": { id: "p:ekoHospital:r:328032b7-2fe18cc2", floor: "LEVEL-01", type: "elecPanel", tags: ["db", "elecPanel"], bim: null, points: [] },
+    /* in the 6 Nov export these two have no points at all and no BIM id, only the FIN record id. */
+    "MCC_01": { id: "p:ekoHospital:r:328032b7-6a718568", floor: "LEVEL-01", type: "elecPanel", tags: ["elecPanel", "mcc"], bim: null, points: [] },
+    "DB_01": { id: "p:ekoHospital:r:328032b7-2fe18cc2", floor: "LEVEL-01", type: "elecPanel", tags: ["db", "elecPanel"], bim: null, points: [] },
     /* V2 equipment in the 6 Nov export with no points: the MDB (no BIM id), nine cameras and six medical devices (each with an IFC GlobalId from FIN, not
        yet checked against an Eko Hospital model: none is available). Electrical readings for the MDB come from PMU_Main, see BORROW. */
     "MDB": { id: "p:ekoHospital:r:328032b7-71b04cfa", floor: "LEVEL-01", type: "elecPanel", tags: ["elecPanel", "mdb"], bim: null, points: [] },
@@ -635,7 +637,16 @@
       ["Pump01Speed", "%", "N"],
       ["Pump01RunStatus", "", "B"],
       ["Pump02Trip", "", "B", "NORMAL,ALARM"]] },
-    "BTU_01": { id: "p:ekoHospital:r:32686e8e-a7370a0d", floor: "ROOF", type: "meter", tags: ["btu", "hvac", "meter"], bim: null, points: [
+    /* Phase 6C: six boards the 6 Nov export does not have. The live FIN project lists them (Phase 6A diagnostic, 10 Nov): exact name, FIN id and floor below, type ELECPANEL.
+       The diagnostic gave a point COUNT for each but no point names, kinds, units or tags, so none is listed here: the panel shows whatever points the live feed holds on them, and the
+       type tag is checked only if the live record carries tags. */
+    "MCC_02": { id: "p:ekoHospital:r:3283053f-a3ebc379", floor: "LEVEL-02", type: "elecPanel", tags: [], bim: null, points: [] },
+    "DB_02": { id: "p:ekoHospital:r:32830521-9d9e9fc8", floor: "LEVEL-02", type: "elecPanel", tags: [], bim: null, points: [] },
+    "MCC_03": { id: "p:ekoHospital:r:3283058e-0f03e17d", floor: "LEVEL-03", type: "elecPanel", tags: [], bim: null, points: [] },
+    "DB_03": { id: "p:ekoHospital:r:3283056f-0c9ade56", floor: "LEVEL-03", type: "elecPanel", tags: [], bim: null, points: [] },
+    "SMDB_04": { id: "p:ekoHospital:r:328305c6-9c9cc2b5", floor: "ROOF", type: "elecPanel", tags: [], bim: null, points: [] },
+    "MCC_04": { id: "p:ekoHospital:r:328305ce-812006ab", floor: "ROOF", type: "elecPanel", tags: [], bim: null, points: [] },
+    "BTU": { id: "p:ekoHospital:r:32686e8e-a7370a0d", floor: "ROOF", type: "meter", tags: ["btu", "hvac", "meter"], bim: null, points: [
       ["CoolingPower", "kW", "Nh"],
       ["CHWSupplyTemp", "°C", "Nh"],
       ["CHWFlow", "L/s", "Nh"],
@@ -650,12 +661,11 @@
       ["HWSTemp", "°C", "Nh"],
       ["HWRTemp", "°C", "Nh"]] }
   };
-  /* drawn ids whose FIN name differs. Each is the only FIN equipment with that type tag on that floor in the equipment export (the tests check this). */
-  var PIN = { CHILLED_WATER_PUMP_01: 'CHILLED_WATER_PUMP', CONDENSER_WATER_PUMP_01: 'CONDENSER_WATER_PUMP', SP_01: 'SUMP_PUMP', SMDB_01: 'SMDB_GF', MCC_01: 'MCC_GF', DB_01: 'DB_GF' };
-  /* PROVISIONAL pins: client-approved working assumptions, NOT confirmed against the live FIN server (unreachable when added; the saved export is the only
-     evidence). Each fits the same rule as the other pins (the only exported equipment with that type tag on that floor) but the names differ, so nothing
-     proves it. To confirm, delete the key here; to correct, change it in PIN and in REF. resolve() reports `provisional` so the view can say so. */
-  var PROVISIONAL = { SMDB_01: 'SMDB_GF', MCC_01: 'MCC_GF', DB_01: 'DB_GF' };
+  /* drawn ids whose FIN name differs. Each is the only FIN equipment with that type tag on that floor in the equipment export (the tests check this); BTU_01 is pinned by FIN id (live record BTU, Phase 6A). */
+  var PIN = { CHILLED_WATER_PUMP_01: 'CHILLED_WATER_PUMP', CONDENSER_WATER_PUMP_01: 'CONDENSER_WATER_PUMP', SP_01: 'SUMP_PUMP', BTU_01: 'BTU' };
+  /* PROVISIONAL pins: a name the client assumed but nothing proves. None now: SMDB_01, MCC_01, DB_01 and BTU were confirmed by their FIN ids on the live server (Phase 6B).
+     resolve() reports `provisional` for a key listed here, so the view can say so. */
+  var PROVISIONAL = {};
   /* the FIN type tag a drawn type must carry */
   var TYPE_TAG = { CHILLER: 'chiller', CT: 'coolingTower', PUMPSET: 'pump', BTU: 'btu', BOILER: 'boiler', AHU: 'ahu', FAHU: 'fahu', FCU: 'fcu', VAV: 'vav',
     EF: 'exhaust', PMU: 'pmu', ATS: 'ats', MDB: 'mdb', SMDB: 'smdb', MCC: 'mcc', DB: 'db', CCTV: 'cctv', WM: 'water', BOOSTER: 'booster', SUMP: 'sump',
