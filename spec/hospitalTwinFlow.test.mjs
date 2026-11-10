@@ -16,56 +16,57 @@ const EQX = JSON.parse(read('spec/fixtures/eko-hospital/equipment.json')).equipm
 const ALARMS = JSON.parse(read('spec/fixtures/eko-hospital/alarms.json')).alarms
 const EQ = Object.fromEntries(T.EQUIP.map(e => [e.id, e]))
 const feed = (list = EQX) => list.map(e => ({ id: e.name, finId: e.finId, bimId: e.bimId, floor: e.floor, tags: e.tags, typeEn: String(e.type).toUpperCase(), st: 'ok', points: e.points }))
-const resolveAll = (assets, connected = true) => { const idx = M.index(assets); return Object.fromEntries(T.EQUIP.map(e => [e.id, M.resolve(e, idx, connected)])) }
+/* as the twin's resolveAll: the drawn items, plus PMU_Main (not drawn) for the mains cable's reading */
+const resolveAll = (assets, connected = true) => { const idx = M.index(assets); return { ...Object.fromEntries(T.EQUIP.map(e => [e.id, M.resolve(e, idx, connected)])), PMU_Main: M.resolve({ id: 'PMU_Main', type: 'PMU', level: 'L1' }, idx, connected) } }
 const pipe = id => T.PIPES.find(p => p.id === id)
 const rule = id => M.flowRule(pipe(id), EQ)
 /* the export with one point changed */
 const withPoint = (eq, nav, patch) => feed(EQX.map(e => e.name !== eq ? e : { ...e, points: e.points.map(p => p.navName === nav ? { ...p, ...patch } : p) }))
 
 test('flow evidence per network: meters where they exist, run status otherwise, nothing on the coil branches', () => {
-  assert.deepEqual(rule('chws_hdr_GF'), { measure: [['BTU_01', 'CHWFlow']], run: [['CHILLED_WATER_PUMP_01', 'Pump01RunStatus'], ['CHILLED_WATER_PUMP_01', 'Pump02RunStatus']] })
-  assert.deepEqual(rule('chws_ahu_GF'), { measure: [], run: [] }, 'a coil branch has no meter and the fan says nothing of the water')
+  assert.deepEqual(rule('chws_hdr_L1'), { measure: [['BTU_01', 'CHWFlow']], run: [['CHILLED_WATER_PUMP_01', 'Pump01RunStatus'], ['CHILLED_WATER_PUMP_01', 'Pump02RunStatus']] })
+  assert.deepEqual(rule('chws_ahu_L1'), { measure: [], run: [] }, 'a coil branch has no meter and the fan says nothing of the water')
   assert.deepEqual(rule('cws_ct_cwp'), { measure: [], run: [['CONDENSER_WATER_PUMP_01', 'Pump01RunStatus'], ['CONDENSER_WATER_PUMP_01', 'Pump02RunStatus']] })
-  assert.deepEqual(rule('dcw_L1'), { measure: [['WATER_METER_02', 'FlowRate']], run: [] })
+  assert.deepEqual(rule('dcw_L2'), { measure: [['WATER_METER_02', 'FlowRate']], run: [] })
   assert.deepEqual(rule('sa_vav_06'), { measure: [['VAV_06', 'Airflow']], run: [] })
-  assert.deepEqual(rule('sa_main_GF'), { measure: [], run: [['AHU_01', 'SA Fan Status']] })
-  assert.deepEqual(rule('fa_in_GF'), { measure: [], run: [['FAHU_01', 'SupplyFanStatus']] })
-  assert.deepEqual(rule('o2_GF'), { measure: [['OXYGEN_PLANT_01', 'Flow']], run: [] })
-  assert.deepEqual(rule('ma_GF'), { measure: [['MEDICAL_AIR_COMPRESSOR_01', 'Flow']], run: [] })
-  assert.deepEqual(rule('pwr_dewa_pmu'), { measure: [['PMU_Main', 'ActivePower']], run: [] })
+  assert.deepEqual(rule('sa_main_L1'), { measure: [], run: [['AHU_01', 'SA Fan Status']] })
+  assert.deepEqual(rule('fa_in_L1'), { measure: [], run: [['FAHU_01', 'SupplyFanStatus']] })
+  assert.deepEqual(rule('o2_L1'), { measure: [['OXYGEN_PLANT_01', 'Flow']], run: [] })
+  assert.deepEqual(rule('ma_L1'), { measure: [['MEDICAL_AIR_COMPRESSOR_01', 'Flow']], run: [] })
+  assert.deepEqual(rule('pwr_dewa_ats'), { measure: [['PMU_Main', 'ActivePower']], run: [] })
   assert.deepEqual(rule('gen_ats'), { measure: [], run: [['AUTOMATIC_TRANSFER_SWITCH_01', 'EmergencySupplySts']] })
   // every meter and status point named is a point of that equipment in the export
-  const names = Object.fromEntries(T.EQUIP.filter(e => M.finName(e)).map(e => [e.id, new Set(M.REF[M.finName(e)].points.map(p => M.fold(p[0])))]))
-  for (const p of T.PIPES) { const r = M.flowRule(p, EQ); for (const [id, n] of r.measure.concat(r.run)) assert.ok(names[id] && names[id].has(M.fold(n)), `${p.id}: ${id}.${n}`) }
+  const names = Object.fromEntries([...T.EQUIP.filter(e => M.finName(e)).map(e => [e.id, M.finName(e)]), ['PMU_Main', 'PMU_Main']].map(([id, n]) => [id, new Set(M.REF[n].points.map(p => M.fold(p[0])))]))
+  for (const p of T.PIPES) { const r = M.flowRule(p, EQ); for (const [id, n] of r.measure.concat(r.run)) assert.ok(names[id] ? names[id].has(M.fold(n)) : !M.finName(EQ[id]), `${p.id}: ${id}.${n} (an unmapped item names a point that reads as unknown, never a value)`) }
 })
 
 test('flow states from the export: measured only with a live meter above 0; running only from run status; meter at 0 is stopped', () => {
   const res = resolveAll(feed())
   const st = id => M.flowState(rule(id), res, true)
-  assert.equal(st('chws_hdr_GF'), 'measured', 'BTU_01 CHWFlow 17 L/s')
+  assert.equal(st('chws_hdr_L1'), 'measured', 'BTU_01 CHWFlow 17 L/s')
   assert.equal(st('cws_ct_cwp'), 'running', 'condenser pump running, no flow meter: running, never measured')
-  assert.equal(st('fa_in_GF'), 'running', 'FAHU fan running, no airflow meter')
-  assert.equal(st('sa_main_GF'), 'running')
-  assert.equal(st('o2_GF'), 'measured')
-  assert.equal(st('chws_ahu_GF'), 'unknown', 'no data: static')
+  assert.equal(st('fa_in_L1'), 'running', 'FAHU fan running, no airflow meter')
+  assert.equal(st('sa_main_L1'), 'running')
+  assert.equal(st('o2_L1'), 'measured')
+  assert.equal(st('chws_ahu_L1'), 'unknown', 'no data: static')
   assert.equal(st('gen_ats'), 'stopped', 'on mains: the generator feed is off')
   // a meter reading 0 wins over a running pump
   const zero = resolveAll(withPoint('BTU_01', 'CHWFlow', { currentValue: '0L/s' }))
-  assert.equal(M.flowState(rule('chws_hdr_GF'), zero, true), 'stopped')
+  assert.equal(M.flowState(rule('chws_hdr_L1'), zero, true), 'stopped')
   // the meter not reporting: back to the pumps' run status
   const silent = resolveAll(withPoint('BTU_01', 'CHWFlow', { reporting: false, currentValue: '—' }))
-  assert.equal(M.flowState(rule('chws_hdr_GF'), silent, true), 'running')
+  assert.equal(M.flowState(rule('chws_hdr_L1'), silent, true), 'running')
   // pumps off, no meter
   const off = resolveAll(withPoint('CONDENSER_WATER_PUMP', 'Pump01RunStatus', { bool: false, currentValue: 'Off', text: 'Off' }))
   assert.equal(M.flowState(rule('cws_ct_cwp'), off, true), 'stopped')
 })
 
 test('flow states when the data cannot be trusted: disconnected, stale or missing is unknown, never flowing', () => {
-  assert.equal(M.flowState(rule('chws_hdr_GF'), resolveAll(feed(), false), false), 'unknown')
+  assert.equal(M.flowState(rule('chws_hdr_L1'), resolveAll(feed(), false), false), 'unknown')
   const res = resolveAll(feed())
   const stale = Object.fromEntries(Object.entries(res).map(([k, r]) => [k, { ...r, state: r.state === 'mapped' ? 'stale' : r.state }]))
   assert.ok(T.PIPES.every(p => M.flowState(M.flowRule(p, EQ), stale, true) === 'unknown'))
-  assert.equal(M.flowState(rule('chws_hdr_GF'), resolveAll([]), true), 'unknown', 'nothing in the feed')
+  assert.equal(M.flowState(rule('chws_hdr_L1'), resolveAll([]), true), 'unknown', 'nothing in the feed')
   assert.equal(M.flowState(rule('cws_ct_cwp'), resolveAll(withPoint('CONDENSER_WATER_PUMP', 'Pump01RunStatus', { status: 'fault' })), true), 'unknown',
     'one of two statuses unreadable and the other off: not called stopped')
 })

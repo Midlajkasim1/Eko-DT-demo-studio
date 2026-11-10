@@ -21,13 +21,16 @@
   'use strict';
 
   /* ── the building model (pure data, as in the reference) ── */
-  var LZ = { RF: 66, L2: 44, L1: 22, GF: 0, EXT: 0 };
-  var LEVELS = ['RF', 'L2', 'L1', 'GF'];
+  var LZ = { RF: 66, L3: 44, L2: 22, L1: 0, EXT: 0 };
+  var LEVELS = ['RF', 'L3', 'L2', 'L1'];
+  /* equipment sizes [w (x), d (y), h (z)] by drawing type (client design V2) */
   var SIZE = {
     CHILLER: [10, 4.2, 4.2], CT: [7, 6, 6.2], PUMPSET: [6, 3, 2.4], BTU: [2.4, 1.4, 2.2], BOILER: [3.2, 3.2, 5.4],
     AHU: [9, 3.6, 3.6], FAHU: [9, 3.6, 3.6], FCU: [2.6, 2.6, 1.1], VAV: [1.8, 1.4, 0.9], EF: [2.2, 2.2, 2],
-    PMU: [1.8, 1, 3], ATS: [3, 1.4, 3.6], SMDB: [2.6, 1, 3.2], EMETER: [1.3, 0.6, 1.6], WM: [1.6, 1, 1.3],
-    BOOSTER: [6, 4, 3.4], SUMP: [4, 4, 1.4], O2: [5, 3, 5.4], MAC: [5, 2.8, 3.4], DEWA: [4, 3, 3.4], GEN: [6, 3, 3.2], WX: [1, 1, 4]
+    ATS: [3, 1.4, 3.6], MDB: [3.4, 1.2, 3.6], SMDB: [2.6, 1, 3.2], MCC: [2.6, 1.2, 3.4], DB: [1.4, 0.6, 2.0], WM: [1.6, 1, 1.3],
+    BOOSTER: [6, 4, 3.4], SUMP: [4, 4, 1.4], O2: [5, 3, 5.4], MAC: [5, 2.8, 3.4], DEWA: [4, 3, 3.4], GEN: [6, 3, 3.2], WX: [1, 1, 4],
+    CCTV: [0.8, 0.8, 0.6], DIALYSIS: [1.0, 0.9, 1.6], STRETCHER: [2.2, 0.9, 0.95], LASER: [1.3, 1.0, 1.5], FRIDGE: [1.1, 0.9, 2.0],
+    ULTRASOUND: [1.0, 0.9, 1.5], SCALE: [1.2, 1.2, 1.4]
   };
   var EQUIP = [];
   function E(id, type, level, x, y, o) {
@@ -37,45 +40,59 @@
     EQUIP.push(e);
   }
   function p2(n) { return (n < 10 ? '0' : '') + n; }
+  /* the 72 items of the client's V2 design. Ids are the drawn ids the mapping resolves (hospital-twin-map.js); feed is the board that powers the item, as in V2. */
   E('DEWA_SUPPLY', 'DEWA', 'EXT', -11, 7.5, { label: 'DEWA supply', nonFin: true });
   E('GENERATOR', 'GEN', 'EXT', -12, 12.4, { label: 'Standby generator', nonFin: true });
-  E('PMU_Main', 'PMU', 'GF', 1.2, 12.6, { label: 'PMU Main' });
-  E('AUTOMATIC_TRANSFER_SWITCH_01', 'ATS', 'GF', 3.8, 12.2, { label: 'ATS 01' });
-  E('SMDB_01', 'SMDB', 'GF', 7.6, 12.6, { label: 'SMDB 01', feed: 'ATS' });
-  E('GF_ENERGY', 'EMETER', 'GF', 10.6, 12.9, { label: 'GF energy', dz: 1.4, meterFloor: 'GF' });
-  E('BOOSTER_PUMP', 'BOOSTER', 'GF', 1.2, 1.6, { label: 'Booster pump', feed: 'ATS' });
-  E('SP_01', 'SUMP', 'GF', 8.4, 2.0, { label: 'Sump pump 01', feed: 'ATS' });
-  E('WATER_METER_01', 'WM', 'GF', 12.8, 8.9, { label: 'Water meter 01', dz: 1.0, fcus: ['FCU_01', 'FCU_02'] });
-  E('OXYGEN_PLANT_01', 'O2', 'GF', 15.4, 10.4, { label: 'Oxygen plant 01', feed: 'ATS' });
-  E('MEDICAL_AIR_COMPRESSOR_01', 'MAC', 'GF', 21.0, 11.0, { label: 'Medical air 01', feed: 'ATS' });
+  /* electrical rooms: one row along the back-left of every floor. There is no DB on the roof, and no DB_04. */
+  E('AUTOMATIC_TRANSFER_SWITCH_01', 'ATS', 'L1', 0.2, 12.2, { label: 'ATS 01' });
+  E('MDB', 'MDB', 'L1', 3.8, 12.4, { label: 'MDB', feed: 'AUTOMATIC_TRANSFER_SWITCH_01', tagLift: 2.4 });
+  var ROOM = { L1: { smdb: 7.8, mcc: 11.0, db: 14.0 }, L2: { smdb: 3.6, mcc: 7.0, db: 10.4 }, L3: { smdb: 3.6, mcc: 7.0, db: 10.4 }, RF: { smdb: 53.0, mcc: 56.0 } };
   var FLOORPLAN = [
-    { lv: 'GF', n: 1, fcu: [1, 2], ef: [1, 2], vav: [1, 2, 3, 4, 5] },
-    { lv: 'L1', n: 2, fcu: [3, 4], ef: [3, 4], vav: [6, 7, 8, 9, 10] },
-    { lv: 'L2', n: 3, fcu: [5, 6], ef: [5, 6], vav: [] }
+    { lv: 'L1', n: 1, fcu: [1, 2], ef: [1, 2], vav: [1, 2, 3, 4, 5], cctv: [1, 2, 3] },
+    { lv: 'L2', n: 2, fcu: [3, 4], ef: [3, 4], vav: [6, 7, 8, 9, 10], cctv: [4, 5, 6] },
+    { lv: 'L3', n: 3, fcu: [5, 6], ef: [5, 6], vav: [], cctv: [7, 8, 9] }
   ];
-  var SMDB_OF = { GF: 'SMDB_01', L1: 'SMDB_02', L2: 'SMDB_03' };
-  FLOORPLAN.forEach(function (f) {
-    var n = p2(f.n), sm = SMDB_OF[f.lv];
-    if (f.lv !== 'GF') {
-      E(sm, 'SMDB', f.lv, 7.6, 12.6, { label: sm.replace('_', ' '), feed: 'ATS' });
-      E(f.lv === 'L1' ? '1F_ENERGY' : '2F_ENERGY', 'EMETER', f.lv, 10.6, 12.9, { label: (f.lv === 'L1' ? '1F' : '2F') + ' energy', dz: 1.4, meterFloor: f.lv });
-      E('WATER_METER_' + n, 'WM', f.lv, 12.8, 8.9, { label: 'Water meter ' + n, dz: 1.0, fcus: f.fcu.map(function (k) { return 'FCU_' + p2(k); }) });
-    }
-    E('FAHU_' + n, 'FAHU', f.lv, 26.6, 11.6, { label: 'FAHU ' + n, feed: sm });
-    E('AHU_' + n, 'AHU', f.lv, 38.0, 11.6, { label: 'AHU ' + n, feed: sm, vavs: f.vav.map(function (k) { return 'VAV_' + p2(k); }) });
-    E('EXHAUST_FAN_' + p2(f.ef[0]), 'EF', f.lv, 48.6, 13.2, { label: 'Exhaust fan ' + p2(f.ef[0]), feed: sm, fahu: 'FAHU_' + n });
-    E('EXHAUST_FAN_' + p2(f.ef[1]), 'EF', f.lv, 56.4, 13.2, { label: 'Exhaust fan ' + p2(f.ef[1]), feed: sm, fahu: 'FAHU_' + n });
-    E('FCU_' + p2(f.fcu[0]), 'FCU', f.lv, 19.2, 3.0, { label: 'FCU ' + p2(f.fcu[0]), dz: 3.3, feed: sm, fahu: 'FAHU_' + n });
-    E('FCU_' + p2(f.fcu[1]), 'FCU', f.lv, 54.6, 3.0, { label: 'FCU ' + p2(f.fcu[1]), dz: 3.3, feed: sm, fahu: 'FAHU_' + n });
-    f.vav.forEach(function (k, i) { E('VAV_' + p2(k), 'VAV', f.lv, 27.6 + i * 5, 3.2, { label: 'VAV ' + p2(k), dz: 3.4, feed: sm }); });
+  var SMDB_OF = { L1: 'SMDB_01', L2: 'SMDB_02', L3: 'SMDB_03', RF: 'SMDB_04' };
+  var MCC_OF = { L1: 'MCC_01', L2: 'MCC_02', L3: 'MCC_03', RF: 'MCC_04' };
+  var DB_OF = { L1: 'DB_01', L2: 'DB_02', L3: 'DB_03' };
+  ['L1', 'L2', 'L3', 'RF'].forEach(function (lv) {
+    var r = ROOM[lv], sm = SMDB_OF[lv];
+    E(sm, 'SMDB', lv, r.smdb, 12.6, { label: sm.replace('_', ' '), feed: 'MDB' });
+    E(MCC_OF[lv], 'MCC', lv, r.mcc, 12.4, { label: MCC_OF[lv].replace('_', ' '), feed: sm, tagLift: 2.4 });
+    if (DB_OF[lv]) E(DB_OF[lv], 'DB', lv, r.db, 12.9, { label: DB_OF[lv].replace('_', ' '), feed: sm, dz: 0.6 });
   });
-  E('COOLING_TOWER_01', 'CT', 'RF', 1.6, 8.6, { label: 'Cooling tower 01', feed: 'ATS' });
-  E('CONDENSER_WATER_PUMP_01', 'PUMPSET', 'RF', 12.2, 2.4, { label: 'CW pumps 01', feed: 'ATS' });
-  E('CHILLER_01', 'CHILLER', 'RF', 21.0, 9.2, { label: 'Chiller 01', feed: 'ATS' });
-  E('CHILLED_WATER_PUMP_01', 'PUMPSET', 'RF', 34.0, 2.4, { label: 'CHW pumps 01', feed: 'ATS' });
-  E('BTU_01', 'BTU', 'RF', 43.4, 11.9, { label: 'BTU meter 01' });
-  E('BOILER_01', 'BOILER', 'RF', 46.6, 9.8, { label: 'Boiler 01', feed: 'ATS' });
-  E('RF_ENERGY', 'EMETER', 'RF', 56.4, 12.9, { label: 'RF energy', dz: 1.4, meterFloor: 'RF' });
+  /* level 1 plant */
+  E('BOOSTER_PUMP', 'BOOSTER', 'L1', 1.2, 1.6, { label: 'Booster pump', feed: 'MCC_01' });
+  E('SUMP_PUMP', 'SUMP', 'L1', 8.4, 2.0, { label: 'Sump pump', feed: 'MCC_01' });
+  E('OXYGEN_PLANT_01', 'O2', 'L1', 15.8, 10.4, { label: 'Oxygen plant 01', feed: 'MCC_01' });
+  E('MEDICAL_AIR_COMPRESSOR_01', 'MAC', 'L1', 21.0, 11.0, { label: 'Medical air 01', feed: 'MCC_01' });
+  /* air side, water meters and cameras on every floor */
+  FLOORPLAN.forEach(function (f) {
+    var n = p2(f.n), mcc = MCC_OF[f.lv], db = DB_OF[f.lv];
+    E('WATER_METER_' + n, 'WM', f.lv, 12.8, 8.9, { label: 'Water meter ' + n, dz: 1.0, feed: mcc, fcus: f.fcu.map(function (k) { return 'FCU_' + p2(k); }) });
+    E('FAHU_' + n, 'FAHU', f.lv, 26.6, 11.6, { label: 'FAHU ' + n, feed: mcc });
+    E('AHU_' + n, 'AHU', f.lv, 38.0, 11.6, { label: 'AHU ' + n, feed: mcc, vavs: f.vav.map(function (k) { return 'VAV_' + p2(k); }) });
+    E('EXHAUST_FAN_' + p2(f.ef[0]), 'EF', f.lv, 48.6, 13.2, { label: 'Exhaust fan ' + p2(f.ef[0]), feed: db, fahu: 'FAHU_' + n });
+    E('EXHAUST_FAN_' + p2(f.ef[1]), 'EF', f.lv, 56.4, 13.2, { label: 'Exhaust fan ' + p2(f.ef[1]), feed: db, fahu: 'FAHU_' + n });
+    E('FCU_' + p2(f.fcu[0]), 'FCU', f.lv, 19.2, 3.0, { label: 'FCU ' + p2(f.fcu[0]), dz: 3.3, feed: db, fahu: 'FAHU_' + n });
+    E('FCU_' + p2(f.fcu[1]), 'FCU', f.lv, 54.6, 3.0, { label: 'FCU ' + p2(f.fcu[1]), dz: 3.3, feed: db, fahu: 'FAHU_' + n });
+    f.vav.forEach(function (k, i) { E('VAV_' + p2(k), 'VAV', f.lv, 27.6 + i * 5, 3.2, { label: 'VAV ' + p2(k), dz: 3.4, feed: db }); });
+    [0.2, 24.6, 59.0].forEach(function (x, i) { E('CCTV_' + p2(f.cctv[i]), 'CCTV', f.lv, x, 0.2, { label: 'CCTV ' + p2(f.cctv[i]), dz: 4.1, feed: db }); });
+  });
+  /* medical devices on the floor DB, in the patient rooms */
+  E('Dialysis Machine', 'DIALYSIS', 'L1', 16.0, 1.0, { label: 'Dialysis Machine', feed: 'DB_01' });
+  E('Stretcher', 'STRETCHER', 'L1', 51.8, 1.2, { label: 'Stretcher', feed: 'DB_01' });
+  E('Laser System', 'LASER', 'L2', 16.0, 1.0, { label: 'Laser System', feed: 'DB_02' });
+  E('Refrigerator with Freezer', 'FRIDGE', 'L2', 23.4, 1.0, { label: 'Refrigerator with Freezer', feed: 'DB_02' });
+  E('Ultrasound', 'ULTRASOUND', 'L2', 52.2, 1.0, { label: 'Ultrasound', feed: 'DB_02' });
+  E('Scale Clinical Bariatric', 'SCALE', 'L3', 16.4, 1.2, { label: 'Scale Clinical Bariatric', feed: 'DB_03' });
+  /* roof plant */
+  E('COOLING_TOWER_01', 'CT', 'RF', 1.6, 8.6, { label: 'Cooling tower 01', feed: 'MCC_04' });
+  E('CONDENSER_WATER_PUMP_01', 'PUMPSET', 'RF', 12.2, 2.4, { label: 'CW pumps 01', feed: 'MCC_04' });
+  E('CHILLER_01', 'CHILLER', 'RF', 21.0, 9.2, { label: 'Chiller 01', feed: 'MCC_04' });
+  E('CHILLED_WATER_PUMP_01', 'PUMPSET', 'RF', 34.0, 2.4, { label: 'CHW pumps 01', feed: 'MCC_04' });
+  E('BTU_01', 'BTU', 'RF', 43.4, 11.9, { label: 'BTU meter 01', feed: 'MCC_04' });
+  E('BOILER_01', 'BOILER', 'RF', 46.6, 9.8, { label: 'Boiler 01', feed: 'MCC_04' });
   E('WEATHER', 'WX', 'RF', 58.0, 2.0, { label: 'Outdoor air', nonFin: true });
   /* floor patches under the ceiling units, as the reference's zones (x, y, width, depth). Each shows the room temperature its unit reports; nothing is estimated. */
   var ZONES = [];
@@ -83,13 +100,13 @@
     if (e.type === 'FCU') ZONES.push({ level: e.level, rect: e.x < 30 ? [15, 0, 11, 8] : [51, 0, 9, 8], src: e.id, pt: 'ZoneTemp', sp: 'ZoneTempSp' });
     else if (e.type === 'VAV') ZONES.push({ level: e.level, rect: [e.x - 1.6, 0, 5, 8], src: e.id, pt: 'ZoneTemp', sp: 'ZoneTempSp' });
   });
-  ZONES.push({ level: 'L2', rect: [26, 0, 25, 8], src: 'AHU_03', pt: 'RA Temp', sp: null });
+  ZONES.push({ level: 'L3', rect: [26, 0, 25, 8], src: 'AHU_03', pt: 'RA Temp', sp: null });
   var EQ = {};
   EQUIP.forEach(function (e) { EQ[e.id] = e; });
   /* the small items whose name tag shows only when zoomed in (or selected) */
-  var MINOR = { VAV: 1, FCU: 1, EF: 1, EMETER: 1, WM: 1, SMDB: 1, BTU: 1, PMU: 1, ATS: 1, WX: 1 };
+  var MINOR = { VAV: 1, FCU: 1, EF: 1, WM: 1, SMDB: 1, MCC: 1, DB: 1, BTU: 1, ATS: 1, WX: 1, CCTV: 1, DIALYSIS: 1, STRETCHER: 1, LASER: 1, FRIDGE: 1, ULTRASOUND: 1, SCALE: 1 };
 
-  /* pipes, ducts and cables: drawn still (no flow is claimed in Phase 1), coloured by system: air green/cyan, water blue/orange, power yellow, medical gas pink/magenta */
+  /* pipes, ducts and cables: drawn still (no flow is claimed here), coloured by system: air green/cyan, water blue/orange, power yellow, medical gas pink/magenta */
   var SYSTEMS = {
     chws: ['#2f6bff', 'chw'], chwr: ['#8fc2ff', 'chw'], cws: ['#12a7c9', 'cw'], cwr: ['#ffb347', 'cw'],
     hw: ['#ff6a3d', 'water'], dcw: ['#4aa8ff', 'water'], drn: ['#c98b3a', 'water'],
@@ -108,11 +125,12 @@
   PI('chws_ch_btu', 'chws', 'CHILLED_WATER_PUMP_01', [[31, 12.4, RZ + 2.6], [33, 12.4, RZ + 2.6], [33, 12.6, RZ + 1.2], [43.4, 12.6, RZ + 1.2]]);
   PI('chws_btu_riser', 'chws', 'CHILLED_WATER_PUMP_01', [[45.8, 12.6, RZ + 1.2], [51, 12.6, RZ + 1.2], [51, 15.2, RZ + 1.2]]);
   PI('hw_boiler_riser', 'hw', 'BOILER_01', [[49.8, 11.4, RZ + 1.4], [52, 11.4, RZ + 1.4], [52, 15.2, RZ + 1.4]]);
+  /* risers (one segment per floor gap is cut from these when the scene is drawn) */
   var RISERS = [
     { sys: 'chws', src: 'CHILLED_WATER_PUMP_01', x: 51.0, y: 15.2, top: RZ + 1.2, bottom: 4.6 }, { sys: 'chwr', src: 'CHILLED_WATER_PUMP_01', x: 50.2, y: 15.2, top: RZ + 0.9, bottom: 4.9 },
-    { sys: 'hw', src: 'BOILER_01', x: 52.0, y: 15.2, top: RZ + 1.4, bottom: 4.2 }, { sys: 'dcw', src: 'BOOSTER_PUMP', x: 13.6, y: 10.6, top: LZ.L2 + 1.8, bottom: 1.6 },
-    { sys: 'o2', src: 'OXYGEN_PLANT_01', x: 24.4, y: 15.2, top: LZ.L2 + 3.2, bottom: 3.2 }, { sys: 'ma', src: 'MEDICAL_AIR_COMPRESSOR_01', x: 25.1, y: 15.2, top: LZ.L2 + 3.6, bottom: 3.6 },
-    { sys: 'pwr', src: 'AUTOMATIC_TRANSFER_SWITCH_01', x: 6.9, y: 15.5, top: RZ + 3.0, bottom: 3.0, kind: 'cable' }
+    { sys: 'hw', src: 'BOILER_01', x: 52.0, y: 15.2, top: RZ + 1.4, bottom: 4.2 }, { sys: 'dcw', src: 'BOOSTER_PUMP', x: 13.6, y: 10.6, top: LZ.L3 + 1.8, bottom: 1.6 },
+    { sys: 'o2', src: 'OXYGEN_PLANT_01', x: 24.4, y: 15.2, top: LZ.L3 + 3.2, bottom: 3.2 }, { sys: 'ma', src: 'MEDICAL_AIR_COMPRESSOR_01', x: 25.1, y: 15.2, top: LZ.L3 + 3.6, bottom: 3.6 },
+    { sys: 'pwr', src: 'MDB', x: 5.6, y: 15.5, top: RZ + 3.6, bottom: 3.9, kind: 'cable' }
   ];
   FLOORPLAN.forEach(function (f) {
     var z = LZ[f.lv], n = p2(f.n);
@@ -140,24 +158,58 @@
     PI('hw_' + f.lv, 'hw', 'BOILER_01', [[52, 15.2, z + 4.2], [52, 13.0, z + 4.2], [59, 13.0, z + 4.2]]);
     PI('o2_' + f.lv, 'o2', 'OXYGEN_PLANT_01', [[24.4, 15.2, z + 3.2], [24.4, 6.4, z + 3.2], [16.4, 6.4, z + 3.2]]);
     PI('ma_' + f.lv, 'ma', 'MEDICAL_AIR_COMPRESSOR_01', [[25.1, 15.2, z + 3.6], [25.1, 6.9, z + 3.6], [16.4, 6.9, z + 3.6]]);
-    PI('pwr_bus_' + f.lv, 'pwr', SMDB_OF[f.lv], [[10.2, 15.6, z + 0.3], [59, 15.6, z + 0.3]], 'cable');
-    if (f.lv !== 'GF') PI('pwr_riser_' + f.lv, 'pwr', 'AUTOMATIC_TRANSFER_SWITCH_01', [[6.9, 15.5, z + 3.0], [8.9, 15.5, z + 3.0], [8.9, 13.6, z + 3.0]], 'cable');
   });
-  PI('pwr_dewa_pmu', 'pwr', 'DEWA_SUPPLY', [[-7, 9.0, 0.6], [1.0, 9.0, 0.6], [1.0, 13.1, 0.6], [1.2, 13.1, 0.6]], 'cable');
-  PI('pwr_pmu_ats', 'pwr', 'PMU_Main', [[3.0, 13.1, 2.4], [3.8, 13.1, 2.4]], 'cable');
-  PI('gen_ats', 'gen', 'GENERATOR', [[-6, 14.6, 0.6], [4.9, 14.6, 0.6], [4.9, 13.6, 0.6]], 'cable');
-  PI('pwr_ats_smdb1', 'pwr', 'AUTOMATIC_TRANSFER_SWITCH_01', [[6.8, 12.9, 2.8], [7.6, 12.9, 2.8]], 'cable');
-  PI('pwr_ats_riser', 'pwr', 'AUTOMATIC_TRANSFER_SWITCH_01', [[5.4, 13.6, 3.0], [5.4, 15.5, 3.0], [6.9, 15.5, 3.0]], 'cable');
-  PI('pwr_roof', 'pwr', 'AUTOMATIC_TRANSFER_SWITCH_01', [[6.9, 15.5, RZ + 3.0], [56.8, 15.5, RZ + 3.0], [56.8, 13.5, RZ + 3.0]], 'cable');
+  /* power: riser, SMDB, then the MCC (floor bus) and the DB (ceiling bus) */
+  ['L1', 'L2', 'L3', 'RF'].forEach(function (lv) {
+    var z = LZ[lv], r = ROOM[lv], sm = SMDB_OF[lv], mcc = MCC_OF[lv], db = DB_OF[lv], sx = r.smdb, mx = r.mcc;
+    if (lv === 'RF') PI('pwr_riser_RF', 'pwr', 'MDB', [[5.6, 15.5, z + 3.6], [5.6, 15.5, z + 4.2], [sx + 1.3, 15.5, z + 4.2], [sx + 1.3, 13.1, z + 4.2], [sx + 1.3, 13.1, z + 3.2]], 'cable');
+    else if (lv !== 'L1') PI('pwr_riser_' + lv, 'pwr', 'MDB', [[5.6, 15.5, z + 3.6], [5.6, 13.1, z + 3.6], [5.6, 13.1, z + 3.2]], 'cable');
+    PI('pwr_' + sm + '_' + mcc, 'pwr', sm, [[sx + 1.6, 13.1, z + 3.2], [sx + 1.6, 13.1, z + 3.9], [mx + 1.3, 13.0, z + 3.9], [mx + 1.3, 13.0, z + 3.4]], 'cable');
+    if (db) {
+      var dx = r.db;
+      PI('pwr_' + sm + '_' + db, 'pwr', sm, [[sx + 2.2, 13.4, z + 3.2], [sx + 2.2, 14.4, z + 4.1], [dx + 0.7, 14.4, z + 4.1], [dx + 0.7, 13.2, z + 2.6]], 'cable');
+      PI('pwr_bus_' + db, 'pwr', db, [[dx + 1.1, 13.5, z + 2.4], [dx + 1.1, 15.8, z + 4.4], [59.4, 15.8, z + 4.4]], 'cable');
+    }
+    if (lv === 'RF') PI('pwr_bus_' + mcc, 'pwr', mcc, [[mx + 1.3, 13.6, z + 0.3], [mx + 1.3, 15.8, z + 0.3], [1.0, 15.8, z + 0.3]], 'cable');
+    else PI('pwr_bus_' + mcc, 'pwr', mcc, [[mx + 1.3, 13.6, z + 0.3], [mx + 1.3, 15.7, z + 0.3], [47.0, 15.7, z + 0.3]], 'cable');
+  });
+  /* level 1: the incoming supplies, ATS and MDB */
+  PI('pwr_dewa_ats', 'pwr', 'DEWA_SUPPLY', [[-7, 9.0, 0.6], [1.0, 9.0, 0.6], [1.0, 12.2, 0.6]], 'cable');
+  PI('gen_ats', 'gen', 'GENERATOR', [[-6, 14.6, 0.6], [2.6, 14.6, 0.6], [2.6, 13.6, 0.6]], 'cable');
+  PI('pwr_ats_mdb', 'pwr', 'AUTOMATIC_TRANSFER_SWITCH_01', [[1.7, 12.9, 3.6], [1.7, 12.9, 4.2], [4.6, 13.0, 4.2], [4.6, 13.0, 3.6]], 'cable');
+  PI('pwr_mdb_smdb1', 'pwr', 'MDB', [[6.6, 13.0, 3.6], [6.6, 13.0, 4.1], [9.1, 13.1, 4.1], [9.1, 13.1, 3.2]], 'cable');
+  PI('pwr_mdb_riser', 'pwr', 'MDB', [[5.6, 13.6, 3.6], [5.6, 15.5, 3.9]], 'cable');
+  PI('pwr_mcc1_plumbing', 'pwr', 'MCC_01', [[12.3, 12.4, 0.25], [12.3, 7.2, 0.25], [4.2, 7.2, 0.25], [4.2, 5.6, 0.25]], 'cable');
+  PI('pwr_mcc1_sump', 'pwr', 'MCC_01', [[10.4, 7.2, 0.25], [10.4, 6.0, 0.25]], 'cable');
   PI('dcw_booster', 'dcw', 'BOOSTER_PUMP', [[7.2, 3.4, 1.6], [13.6, 3.4, 1.6], [13.6, 10.6, 1.6]]);
-  PI('drn_floor', 'drn', 'SP_01', [[14.6, 8.2, 0.3], [11.4, 8.2, 0.3], [11.4, 6.0, 0.3]]);
-  PI('drn_out', 'drn', 'SP_01', [[10.4, 2.0, 1.2], [10.4, -1.8, 1.2]]);
-  PI('o2_gf', 'o2', 'OXYGEN_PLANT_01', [[20.4, 11.8, 3.2], [24.4, 11.8, 3.2], [24.4, 15.2, 3.2]]);
-  PI('ma_gf', 'ma', 'MEDICAL_AIR_COMPRESSOR_01', [[26.0, 12.4, 3.6], [25.1, 12.4, 3.6], [25.1, 15.2, 3.6]]);
+  PI('drn_floor', 'drn', 'SUMP_PUMP', [[14.6, 8.2, 0.3], [11.4, 8.2, 0.3], [11.4, 6.0, 0.3]]);
+  PI('drn_out', 'drn', 'SUMP_PUMP', [[10.4, 2.0, 1.2], [10.4, -1.8, 1.2]]);
+  PI('o2_l1', 'o2', 'OXYGEN_PLANT_01', [[20.8, 11.8, 3.2], [24.4, 11.8, 3.2], [24.4, 15.2, 3.2]]);
+  PI('ma_l1', 'ma', 'MEDICAL_AIR_COMPRESSOR_01', [[26.0, 12.4, 3.6], [25.1, 12.4, 3.6], [25.1, 15.2, 3.6]]);
 
   /* ── projection: x runs right/down, y runs into the building, z up ── */
-  var K = 10, AX = { x: [0.97, 0.16], y: [0.58, -0.46] };
-  function P(x, y, z) { return [(x * AX.x[0] + y * AX.y[0]) * K, (x * AX.x[1] + y * AX.y[1] - z) * K]; }
+  var K = 10, AX0 = { x: [0.97, 0.16], y: [0.58, -0.46] }, AX = { x: AX0.x.slice(), y: AX0.y.slice() }, VIEW = { yaw: 0, tilt: 1, zs: 1, gap: 0 };
+  /* the view turns within the front-right quadrant only, so the faces that are drawn stay the faces that are seen (client design V2) */
+  var YAW_MIN = -40, YAW_MAX = 15, TILT_MIN = 0.6, TILT_MAX = 1.55;
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  /* turn the world about the vertical axis (yaw, degrees) and tilt it (a scale on the floor axes' vertical part). setView(0, 1) is the original view, exactly. */
+  function setView(yaw, tilt) {
+    VIEW.yaw = clamp(yaw, YAW_MIN, YAW_MAX); VIEW.tilt = clamp(tilt, TILT_MIN, TILT_MAX);
+    var a = VIEW.yaw * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a), ex = AX0.x, ey = AX0.y;
+    AX.x = [c * ex[0] + sn * ey[0], (c * ex[1] + sn * ey[1]) * VIEW.tilt];
+    AX.y = [-sn * ex[0] + c * ey[0], (-sn * ex[1] + c * ey[1]) * VIEW.tilt];
+    VIEW.zs = VIEW.tilt > 1 ? 1 - 0.32 * (VIEW.tilt - 1) : 1;
+    /* a turned floor takes more screen height: open the gap between floors so they never overlap */
+    var ext = function (v) { return 60 * Math.abs(v.x[1]) + 16 * Math.abs(v.y[1]); };
+    VIEW.gap = Math.max(0, ext(AX) - ext(AX0)) / VIEW.zs * 1.1;
+  }
+  /* floors are 22 m apart; the extra gap is added in the empty air between a floor's services and the slab above */
+  function zmap(z) {
+    if (!VIEW.gap) return z;
+    var i = Math.max(0, Math.min(3, Math.floor((z + 0.7) / 22))), zin = z - 22 * i;
+    return z + VIEW.gap * (i + (i < 3 ? Math.max(0, Math.min(1, (zin - 8) / 13.3)) : 0));
+  }
+  function P(x, y, z) { return [(x * AX.x[0] + y * AX.y[0]) * K, (x * AX.x[1] + y * AX.y[1] - zmap(z) * VIEW.zs) * K]; }
   function fmt(v) { return v.toFixed(1); }
   /* the whole drawing's bounds, from the site's corners: needs no layout, so the camera can frame it before the view is on screen */
   function worldBounds() {
@@ -187,6 +239,10 @@
     var idx = MAP.index(assets), out = {};
     EQUIP.forEach(function (e) { var r = MAP.resolve(e, idx, connected); if (stale && r.state === 'mapped') r.state = 'stale'; out[e.id] = r; });
     Object.defineProperty(out, '_idx', { value: idx, enumerable: false });
+    /* PMU_Main is FIN equipment the design does not draw (its readings show on the MDB panel and drive the mains cable): resolved for those reads only,
+       kept out of the drawn list so it is never counted, listed or given an alarm as a drawn machine */
+    var pmu = MAP.resolve({ id: 'PMU_Main', type: 'PMU', level: 'L1' }, idx, connected); if (stale && pmu.state === 'mapped') pmu.state = 'stale';
+    Object.defineProperty(out, 'PMU_Main', { value: pmu, enumerable: false });
     return out;
   }
   /* the Studio's BIM bridge, read only through its existing methods (DashboardOverlay.tsx); absent outside the Studio */
@@ -312,7 +368,7 @@
   }
   function faceText(g, x, y, z, txt, size, plane, cls) {
     var o = P(x, y, z), a = plane === 'yz' ? AX.y : AX.x;
-    var grp = el('g', { transform: 'matrix(' + a[0] + ',' + a[1] + ',0,1,' + fmt(o[0]) + ',' + fmt(o[1]) + ')' }, g);
+    var grp = el('g', { transform: 'matrix(' + a[0] + ',' + a[1] + ',0,' + VIEW.zs + ',' + fmt(o[0]) + ',' + fmt(o[1]) + ')' }, g);
     var t = el('text', { x: 0, y: 0, 'class': cls || 'lcd-t', 'font-size': size || 7 }, grp);
     t.textContent = txt;
     return t;
@@ -441,11 +497,6 @@
     rotor(g, e.x + 1.1, e.y + 0.19, e.z + 1.15, 0.72, 'xz', 7);
     lamp(g, e.x + 2.0, e.y, e.z + 0.45, 2.4);
   };
-  DRAW.PMU = function (g, e) {
-    box(g, e.x, e.y, e.z, e.w, e.d, e.h, 'panel');
-    lcd(g, e.x + 0.15, e.y - 0.01, e.z + 1.9, 1.5, 0.8);
-    lamp(g, e.x + 1.5, e.y, e.z + 2.8, 2.6);
-  };
   DRAW.ATS = function (g, e) {
     var x = e.x, y = e.y, z = e.z;
     box(g, x, y, z, e.w, e.d, e.h, 'panel');
@@ -462,7 +513,97 @@
     }
     lamp(g, e.x + 1.3, e.y, e.z + 2.85, 2.8);
   };
-  DRAW.EMETER = function (g, e) { box(g, e.x, e.y, e.z, e.w, e.d, e.h, 'dark'); lcd(g, e.x + 0.1, e.y - 0.01, e.z + 0.7, 1.1, 0.6); };
+  DRAW.MDB = function (g, e) {
+    var x = e.x, y = e.y, z = e.z;
+    box(g, x, y, z, e.w, e.d, e.h, 'panel');
+    vlines(g, x, y, z, e.w, e.h, 3, 'xz', 'seam');
+    [0, 1, 2].forEach(function (i) { var bx = x + 0.28 + i * 1.12; face(g, [[bx, y - 0.01, z + 0.5], [bx + 0.6, y - 0.01, z + 0.5], [bx + 0.6, y - 0.01, z + 1.4], [bx, y - 0.01, z + 1.4]], '#1b2028', 'breaker'); });
+    lcd(g, x + 0.3, y - 0.01, z + 2.25, 1.9, 0.75);
+    faceText(g, x + 2.4, y - 0.01, z + 2.5, 'MDB', 5.2, 'xz', 'face-lbl');
+    lamp(g, x + 3.0, y, z + 3.25, 2.8);
+  };
+  DRAW.MCC = function (g, e) {
+    var x = e.x, y = e.y, z = e.z;
+    box(g, x, y, z, e.w, e.d, e.h, 'steel');
+    vlines(g, x, y, z, e.w, e.h, 2, 'xz', 'seam');
+    for (var r = 0; r < 4; r++) for (var c = 0; c < 2; c++) {
+      var bx = x + 0.15 + c * 1.3, bz = z + 0.3 + r * 0.55;
+      face(g, [[bx, y - 0.01, bz], [bx + 1.0, y - 0.01, bz], [bx + 1.0, y - 0.01, bz + 0.45], [bx, y - 0.01, bz + 0.45]], '#2a3340', 'breaker');
+    }
+    lcd(g, x + 0.25, y - 0.01, z + 2.6, 1.5, 0.5);
+    lamp(g, x + 2.2, y, z + 2.85, 2.6);
+  };
+  DRAW.DB = function (g, e) {
+    var x = e.x, y = e.y, z = e.z, w = e.w, h = e.h;
+    box(g, x, y, z, w, e.d, h, 'panel');
+    face(g, [[x + 0.12, y - 0.01, z + 0.15], [x + w - 0.12, y - 0.01, z + 0.15], [x + w - 0.12, y - 0.01, z + h - 0.15], [x + 0.12, y - 0.01, z + h - 0.15]], '#323a47', 'breaker');
+    for (var r = 0; r < 3; r++) seg(g, [x + 0.22, y - 0.02, z + 0.45 + r * 0.38], [x + w - 0.22, y - 0.02, z + 0.45 + r * 0.38], 'seam');
+    lcd(g, x + 0.2, y - 0.02, z + 1.45, 1.0, 0.35);
+    lamp(g, x + w - 0.22, y, z + h - 0.25, 2.4);
+  };
+  DRAW.CCTV = function (g, e) {
+    var x = e.x, y = e.y, z = e.z, w = e.w, d = e.d, h = e.h;
+    box(g, x, y, z + h - 0.1, w, d, 0.1, 'dark');
+    seg(g, [x + w / 2, y + d / 2, z + h - 0.1], [x + w / 2, y + d / 2, z + 0.3], 'hanger');
+    cylX(g, x + 0.05, x + 0.8, y + d / 2, z + 0.25, 0.17, 'white');
+    poly2(g, proj(ring(x + 0.8, y + d / 2, z + 0.25, 0.1, 'yz', 14)), { fill: '#0b1622', stroke: '#2b3f55', 'stroke-width': 0.4 });
+    lamp(g, x + 0.25, y + d / 2 - 0.17, z + 0.38, 1.6);
+  };
+  /* medical devices: small power on the floor DB. Drawn only; no state is shown (FIN lists no point on them). */
+  DRAW.DIALYSIS = function (g, e) {
+    var x = e.x, y = e.y, z = e.z;
+    box(g, x, y, z, 1.0, 0.9, 0.22, 'dark');
+    box(g, x + 0.1, y + 0.1, z + 0.22, 0.8, 0.7, 1.05, 'white');
+    seg(g, [x + 0.5, y + 0.45, z + 1.27], [x + 0.5, y + 0.45, z + 1.75], 'hanger');
+    cylV(g, x + 0.3, y + 0.45, z + 1.3, 0.09, 0.35, 'red'); cylV(g, x + 0.7, y + 0.45, z + 1.3, 0.09, 0.35, 'blue');
+    lcd(g, x + 0.18, y + 0.09, z + 0.85, 0.64, 0.32);
+    lamp(g, x + 0.8, y + 0.1, z + 0.45, 2);
+  };
+  DRAW.STRETCHER = function (g, e) {
+    var x = e.x, y = e.y, z = e.z;
+    [[x + 0.15, y + 0.12], [x + 2.05, y + 0.12], [x + 0.15, y + 0.78], [x + 2.05, y + 0.78]].forEach(function (q) { seg(g, [q[0], q[1], z + 0.1], [q[0], q[1], z + 0.62], 'hanger'); });
+    box(g, x, y, z + 0.55, 2.2, 0.9, 0.12, 'steel');
+    box(g, x + 0.05, y + 0.05, z + 0.67, 2.1, 0.8, 0.16, 'blue');
+    box(g, x + 1.6, y + 0.15, z + 0.83, 0.5, 0.6, 0.1, 'white');
+    seg(g, [x, y, z + 1.0], [x + 2.2, y, z + 1.0], 'hanger');
+    lamp(g, x + 2.2, y, z + 0.6, 1.8);
+  };
+  DRAW.LASER = function (g, e) {
+    var x = e.x, y = e.y, z = e.z;
+    box(g, x, y, z, 1.0, 0.9, 1.0, 'panel');
+    cylV(g, x + 0.8, y + 0.5, z + 1.0, 0.08, 0.55, 'steel');
+    cylX(g, x + 0.25, x + 0.85, y + 0.5, z + 1.5, 0.07, 'steel');
+    cylV(g, x + 0.25, y + 0.5, z + 1.15, 0.1, 0.35, 'white');
+    lcd(g, x + 0.12, y - 0.01, z + 0.6, 0.76, 0.28);
+    lamp(g, x + 0.85, y, z + 0.25, 2);
+  };
+  DRAW.FRIDGE = function (g, e) {
+    var x = e.x, y = e.y, z = e.z;
+    box(g, x, y, z, 1.1, 0.9, 2.0, 'white');
+    seg(g, [x, y - 0.01, z + 0.75], [x + 1.1, y - 0.01, z + 0.75], 'seam');
+    seg(g, [x + 0.9, y - 0.02, z + 0.85], [x + 0.9, y - 0.02, z + 1.6], 'hanger');
+    seg(g, [x + 0.9, y - 0.02, z + 0.2], [x + 0.9, y - 0.02, z + 0.6], 'hanger');
+    lcd(g, x + 0.15, y - 0.02, z + 1.65, 0.55, 0.22);
+    lamp(g, x + 0.82, y, z + 1.76, 1.8);
+  };
+  DRAW.ULTRASOUND = function (g, e) {
+    var x = e.x, y = e.y, z = e.z;
+    box(g, x, y, z, 1.0, 0.9, 0.18, 'dark');
+    box(g, x + 0.2, y + 0.2, z + 0.18, 0.6, 0.5, 0.7, 'white');
+    box(g, x + 0.05, y + 0.05, z + 0.88, 0.9, 0.7, 0.1, 'steel');
+    seg(g, [x + 0.5, y + 0.75, z + 0.98], [x + 0.5, y + 0.75, z + 1.15], 'hanger');
+    box(g, x + 0.1, y + 0.7, z + 1.15, 0.8, 0.08, 0.5, 'dark');
+    lcd(g, x + 0.14, y + 0.69, z + 1.2, 0.72, 0.38);
+    lamp(g, x + 0.85, y + 0.05, z + 0.95, 1.8);
+  };
+  DRAW.SCALE = function (g, e) {
+    var x = e.x, y = e.y, z = e.z;
+    box(g, x, y, z, 1.2, 1.2, 0.12, 'steel');
+    cylV(g, x + 0.6, y + 1.05, z + 0.12, 0.05, 1.05, 'steel');
+    box(g, x + 0.3, y + 0.95, z + 1.12, 0.6, 0.2, 0.3, 'panel');
+    lcd(g, x + 0.36, y + 0.94, z + 1.17, 0.48, 0.2);
+    lamp(g, x + 0.85, y + 0.95, z + 1.36, 1.6);
+  };
   DRAW.WM = function (g, e) {
     cylX(g, e.x, e.x + 1.6, e.y + 0.5, e.z + 0.35, 0.32, 'steel');
     cylV(g, e.x + 0.8, e.y + 0.5, e.z + 0.55, 0.42, 0.35, 'amber');
@@ -554,7 +695,7 @@
     if (refs) { (refs.pipes[p.src] = refs.pipes[p.src] || []).push(grp); if (refs.flows) refs.flows.push({ g: grp, p: p, rule: MAP && MAP.flowRule(p, EQ) }); }
   }
   function minZ(p) { return Math.min.apply(null, p.pts.map(function (q) { return q[2]; })); }
-  function levelOfZ(z) { return z >= LZ.RF ? 'RF' : z >= LZ.L2 ? 'L2' : z >= LZ.L1 ? 'L1' : 'GF'; }
+  function levelOfZ(z) { return z >= LZ.RF ? 'RF' : z >= LZ.L3 ? 'L3' : z >= LZ.L2 ? 'L2' : 'L1'; }
   function pipeLevel(p) { return p.pts[0][0] < 0 ? 'EXT' : levelOfZ(minZ(p)); }
 
   /* ── the scene: built once per view ── */
@@ -566,9 +707,10 @@
     for (var gx = -20; gx <= 66; gx += 4) seg(gnd, [gx, -6, -0.7], [gx, 23, -0.7], 'grid');
     for (var gy = -6; gy <= 23; gy += 4) seg(gnd, [-20, gy, -0.7], [66, gy, -0.7], 'grid');
     var sortKey = function (e) { return P(e.x + e.w / 2, e.y + e.d / 2, 0)[1]; };
-    ['RF', 'L2', 'L1', 'EXT', 'GF'].forEach(function (lv) {
+    /* upper floors first, so the risers that run up through the building show in front of the floor slabs (the original look; the floors never overlap on screen) */
+    ['RF', 'L3', 'L2', 'EXT', 'L1'].forEach(function (lv) {
       /* outside equipment belongs with the ground floor when a floor is picked */
-      var g = el('g', { 'class': 'tw-level', 'data-level': lv === 'EXT' ? 'GF' : lv }, world), z = LZ[lv];
+      var g = el('g', { 'class': 'tw-level', 'data-level': lv === 'EXT' ? 'L1' : lv }, world), z = LZ[lv];
       if (lv !== 'EXT') {
         var wh = lv === 'RF' ? 1.0 : 4.8;
         face(g, [[0, 16.5, z], [60.5, 16.5, z], [60.5, 16.5, z + wh], [0, 16.5, z + wh]], 'url(#twwall)', 'wall');
@@ -585,11 +727,11 @@
         var lp = P(-0.5, -0.5, z - 0.35), t = el('text', { x: fmt(lp[0] - 14), y: fmt(lp[1] + 4), 'class': 'level-name', 'text-anchor': 'end' }, g);
         t.textContent = T('twinLv.' + lv).toUpperCase();
         RISERS.forEach(function (r) {
-          var up = { GF: LZ.L1, L1: LZ.L2, L2: LZ.RF, RF: 999 }[lv], a = Math.max(r.bottom, z), b = Math.min(r.top, up - 0.7);
+          var up = { L1: LZ.L2, L2: LZ.L3, L3: LZ.RF, RF: 999 }[lv], a = Math.max(r.bottom, z), b = Math.min(r.top, up - 0.7);
           if (b > a + 0.2) drawPipe(g, { id: 'riser_' + r.sys + '_' + lv, sys: r.sys, src: r.src, kind: r.kind || 'pipe', pts: [[r.x, r.y, a], [r.x, r.y, b]] }, refs);
         });
       }
-      var floorTop = LZ[lv === 'EXT' ? 'GF' : lv] + 3.2;
+      var floorTop = LZ[lv === 'EXT' ? 'L1' : lv] + 3.2;
       PIPES.filter(function (p) { return pipeLevel(p) === lv && minZ(p) < floorTop; }).forEach(function (p) { drawPipe(g, p, refs); });
       var list = EQUIP.filter(function (e) { return e.level === lv; });
       list.filter(function (e) { return e.type !== 'FCU' && e.type !== 'VAV'; }).sort(function (a, b) { return sortKey(a) - sortKey(b); }).forEach(function (e) { drawEquip(g, e, T, refs); });
@@ -601,22 +743,28 @@
     EQUIP.forEach(function (e) { refs.tags[e.id] = tag(tags, e); });
   }
   function drawEquip(parent, e, T, refs) {
-    var g = el('g', { 'class': 'equip', 'data-id': e.id, 'data-level': e.level === 'EXT' ? 'GF' : e.level, 'data-fin': e.nonFin ? 'not-fin' : 'missing',
+    var g = el('g', { 'class': 'equip', 'data-id': e.id, 'data-level': e.level === 'EXT' ? 'L1' : e.level, 'data-fin': e.nonFin ? 'not-fin' : 'missing',
       tabindex: '0', role: 'button', 'aria-label': e.label + ' · ' + T('twinT.' + e.type) }, parent);
+    /* what the mapping says before any live data (MAP.mapStatus, from the saved export): shown on the drawing so an unmapped, provisional or point-less item is never mistaken for a live one */
+    var ms = MAP.mapStatus(e);
+    g.setAttribute('data-map', ms.mapping); if (ms.noPoints) g.setAttribute('data-nopts', '1');
     halo(g, e);
     DRAW[e.type](g, e);
     refs.eqs[e.id] = g;
   }
   function tag(parent, e) {
-    var top = P(e.x + e.w / 2, e.y + e.d / 2, e.z + e.h + (e.type === 'FCU' || e.type === 'VAV' ? 0.9 : 1.1));
-    var g = el('g', { 'class': 'tag' + (MINOR[e.type] ? ' minor' : ''), 'data-id': e.id, 'data-level': e.level === 'EXT' ? 'GF' : e.level,
-      transform: 'translate(' + fmt(top[0]) + ',' + fmt(top[1]) + ')' }, parent);
+    var top = P(e.x + e.w / 2, e.y + e.d / 2, e.z + e.h + (e.type === 'FCU' || e.type === 'VAV' ? 0.9 : 1.1) + (e.tagLift || 0));
+    var g = el('g', { 'class': 'tag' + (MINOR[e.type] ? ' minor' : ''), 'data-id': e.id, 'data-level': e.level === 'EXT' ? 'L1' : e.level,
+      'data-map': MAP.mapStatus(e).mapping, transform: 'translate(' + fmt(top[0]) + ',' + fmt(top[1]) + ')' }, parent);
     var w = Math.max(40, e.label.length * 3.7 + 16);
-    el('line', { x1: 0, y1: 0, x2: 0, y2: -6, 'class': 'tag-stem' }, g);
-    el('rect', { x: fmt(-w / 2), y: -17, width: fmt(w), height: 11, rx: 2.5, 'class': 'tag-bg' }, g);
-    el('circle', { cx: fmt(-w / 2 + 5), cy: -11.5, r: 2.2, 'class': 'tag-dot' }, g);
-    var t = el('text', { x: fmt(-w / 2 + 10), y: -9, 'class': 'tag-name' }, g);
+    /* the label is drawn in an inner group that is scaled to keep its size on screen (see tagLayout); g itself stays put at the machine */
+    var inn = el('g', { 'class': 'tag-in' }, g);
+    el('line', { x1: 0, y1: 0, x2: 0, y2: -6, 'class': 'tag-stem' }, inn);
+    el('rect', { x: fmt(-w / 2), y: -17, width: fmt(w), height: 11, rx: 2.5, 'class': 'tag-bg' }, inn);
+    el('circle', { cx: fmt(-w / 2 + 5), cy: -11.5, r: 2.2, 'class': 'tag-dot' }, inn);
+    var t = el('text', { x: fmt(-w / 2 + 10), y: -9, 'class': 'tag-name' }, inn);
     t.textContent = e.label;
+    g.__tag = { x: top[0], y: top[1], w: w, inn: inn, minor: !!MINOR[e.type], id: e.id, level: e.level === 'EXT' ? 'L1' : e.level };
     return g;
   }
 
@@ -721,7 +869,8 @@
   /* the reference's direct relationships into and out of a machine */
   function depsHtml(E, s, id) {
     var d = s.graph.direct(id);
-    var row = function (other, l) { return '<li>' + goBtn(other, esc(label(other))) + ' <span>' + esc(tr(E, l.kind === 'stop' ? 'twinRelStop' : 'twinRelShift')) + '</span><em>' + esc(l.what) + '</em></li>'; };
+    var row = function (other, l) { return '<li>' + goBtn(other, esc(label(other))) + ' <span>' + esc(tr(E, l.kind === 'stop' ? 'twinRelStop' : 'twinRelShift')) + '</span><em>' + esc(l.what) + '</em>' +
+      (l.also || []).map(function (x) { return '<em class="twalso">' + esc(tr(E, 'twinRelAlso', { what: x.what })) + '</em>'; }).join('') + '</li>'; };
     return '<h3 class="twsub">' + esc(tr(E, 'twinDeps', { n: String(d.up.length) })) + '</h3>' + (d.up.length ? '<ul class="twrel">' + d.up.map(function (l) { return row(l.from, l); }).join('') + '</ul>' : '') +
       '<h3 class="twsub">' + esc(tr(E, 'twinAffects', { n: String(d.down.length) })) + '</h3>' + (d.down.length ? '<ul class="twrel">' + d.down.map(function (l) { return row(l.to, l); }).join('') + '</ul>' : '') +
       '<p class="twnote">' + esc(tr(E, 'twinRelRef')) + '</p>';
@@ -810,10 +959,11 @@
       rows.push([tr(E, 'twinFinName'), r.fin || none], [tr(E, 'twinFinId'), r.finId || none], [tr(E, 'twinFinType'), r.type || none],
         [tr(E, 'twinFinFloor'), r.floor || none], [tr(E, 'twinBim'), r.bimId ? r.bimId + (r.bimShared ? ' · ' + tr(E, 'twinBimShared') : '') : none]);
     }
-    if (e.feed) rows.push([tr(E, 'twinFeed'), e.feed === 'ATS' ? 'ATS 01' : e.feed.replace('_', ' ')]);
+    if (e.feed) rows.push([tr(E, 'twinFeed'), label(e.feed)]);
     var pts = r.fin && (st === 'mapped' || st === 'stale' || st === 'offline') ? MAP.pointRows(r, connected) : [];
     var live = pts.filter(function (p) { return p.state === 'live'; }).length;
     var why = (r.reason ? '<p class="twnote">' + esc(tr(E, 'twinWhy.' + r.reason, { fin: r.fin || r.candidate || '', id: id })) + '</p>' : '') +
+      (r.provisional ? '<p class="twnote twwarn">' + esc(tr(E, 'twinProvNote', { fin: r.fin })) + '</p>' : '') +
       (r.floorDiffers ? '<p class="twnote twwarn">' + esc(tr(E, 'twinFloorDiffers', { floor: r.floor, want: MAP.LEVELS[e.level] })) + '</p>' : '');
     var tracing = s.trace && s.trace.seed === id;
     var actions = '<div class="twacts">' +
@@ -823,6 +973,7 @@
     return '<div class="twdh"><div><h3 class="twdt">' + esc(e.label) + '</h3><code class="twdid">' + esc(e.nonFin ? tr(E, 'twinNotFinId') : tr(E, 'twinDrawnId', { id: id })) + '</code></div>' +
       '<button type="button" class="btnG btnSm twclose" data-tw="close" aria-label="' + esc(tr(E, 'twinClose')) + '">✕</button></div>' +
       '<span class="twchip" data-fin="' + st + '">' + esc(tr(E, 'twinFin.' + st)) + '</span>' +
+      (r.provisional ? ' <span class="twchip" data-prov="1">' + esc(tr(E, 'twinProv')) + '</span>' : '') +
       (MAP.RUNPTS[e.type] ? ' <span class="twchip" data-run="' + (s.run[id] || 'unknown') + '">' + esc(tr(E, 'twinRun.' + (s.run[id] || 'unknown'))) + '</span>' : '') + why +
       (s.picked && s.picked.id === id ? '<p class="twnote">' + esc(tr(E, 'twinPicked', { guid: s.picked.bimId })) + '</p>' : '') + actions +
       '<dl class="twdl">' + rows.map(function (x) { return '<div><dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd></div>'; }).join('') + '</dl>' +
@@ -835,7 +986,16 @@
             return '<tr data-st="' + p.state + '"><th>' + esc(p.name) + tags + '</th><td' + (p.enumText ? ' title="' + esc(tr(E, 'twinEnum', { values: p.enumText })) + '"' : '') + '>' + esc(pointShown(E, p)) + '</td></tr>';
           }).join('') + '</table>'
         : r.fin && (st === 'mapped' || st === 'stale') ? '<p class="twnote">' + esc(tr(E, 'twinNoPoints')) + '</p>' : '') +
-      netsHtml(E, id) + '<p class="twnote">' + esc(tr(E, 'twinLayoutNote')) + '</p>';
+      borrowedHtml(E, s, id, connected) + netsHtml(E, id) + '<p class="twnote">' + esc(tr(E, 'twinLayoutNote')) + '</p>';
+  }
+  /* readings of another FIN equipment shown on this machine's panel (the MDB shows PMU_Main's), each labelled with its source and never a measurement of this machine */
+  function borrowedHtml(E, s, id, connected) {
+    var b = MAP.BORROW[id]; if (!b) return '';
+    var rows = MAP.borrowedRows(id, s.res._idx, connected, s.stale);
+    return '<section class="twborrow" data-from="' + esc(b.from) + '"><h3 class="twsub">' + esc(tr(E, 'twinBorrowT', { src: b.from })) + '</h3><p class="twnote">' + esc(tr(E, 'twinBorrowNote', { src: b.from, id: id })) + '</p>' +
+      '<table class="twpts">' + rows.map(function (p) {
+        return '<tr data-st="' + p.state + '" data-src="' + esc(p.source) + '"><th>' + esc(p.name) + '<abbr class="twflag" title="' + esc(tr(E, 'twinBorrowSrc', { src: p.source })) + '">' + esc(p.source) + '</abbr></th><td>' + esc(pointShown(E, p)) + '</td></tr>';
+      }).join('') + '</table></section>';
   }
   /* the systems of the pipes the reference ties to this machine (its `src`); no state of theirs is claimed */
   function netsHtml(E, id) {
@@ -846,6 +1006,15 @@
     return '<h3 class="twsub">' + esc(tr(E, 'twinNets')) + '</h3><ul class="twnets">' + sys.map(function (k) {
       return '<li><i class="twkey" style="background:' + SYSTEMS[k][0] + '"></i>' + esc(tr(E, 'twinSys.' + k)) + '</li>';
     }).join('') + '</ul><p class="twnote">' + esc(tr(E, 'twinNetsNote')) + '</p>';
+  }
+
+  /* the 3D view controls, on the stage: turn, tilt, drag-to-turn, reset (they sit at the top, clear of the notification toast and the Ask button at the bottom) */
+  function camHtml(E) {
+    var b = function (c, glyph, key) { return '<button type="button" class="twcamb" data-tw="cam" data-cam="' + c + '" title="' + esc(tr(E, key)) + '" aria-label="' + esc(tr(E, key)) + '">' + glyph + '</button>'; };
+    return '<div class="twcam" role="group" aria-label="' + esc(tr(E, 'twinCam')) + '"><button type="button" class="twcamb twcamt" data-tw="cam" data-cam="toggle" aria-expanded="false" aria-label="' + esc(tr(E, 'twinCam')) + '">3D</button><span class="twcamh">' + esc(tr(E, 'twinCam')) + ' <b class="twcamr">0\u00b0 \u00b7 0\u00b0</b></span>' +
+      '<span class="twcamrow">' + b('yawL', '\u27f2', 'twinCamL') + b('yawR', '\u27f3', 'twinCamR') + b('tiltU', '\u25b2', 'twinCamU') + b('tiltD', '\u25bc', 'twinCamD') + '</span>' +
+      '<span class="twcamrow"><button type="button" class="twcamb twcamw" data-tw="cam" data-cam="mode" data-g="⇄" aria-pressed="false" aria-label="' + esc(tr(E, 'twinCamTurn')) + '" title="' + esc(tr(E, 'twinCamTurnTip')) + '">' + esc(tr(E, 'twinCamTurn')) + '</button>' +
+      '<button type="button" class="twcamb twcamw" data-tw="cam" data-cam="reset" data-g="◎" aria-label="' + esc(tr(E, 'twinCamReset')) + '" title="' + esc(tr(E, 'twinCamReset')) + '">' + esc(tr(E, 'twinCamReset')) + '</button></span></div>';
   }
 
   function create(E) {
@@ -869,16 +1038,18 @@
       '<label class="twexoff" title="' + esc(tr(E, 'twinExFaultsNo')) + '"><input type="checkbox" disabled> ' + esc(tr(E, 'twinExFaults')) + ' <small>' + esc(tr(E, 'twinExFaultsNo')) + '</small></label>' +
       '<label>' + esc(tr(E, 'twinExLabels')) + ' <select data-tw-ex="labels">' + ['auto', 'always', 'off'].map(function (v) {
         return '<option value="' + v + '"' + (ex.labels === v ? ' selected' : '') + '>' + esc(tr(E, 'twinExLbl.' + v)) + '</option>'; }).join('') + '</select></label></span></div>' +
-      '<div class="twbody"><div class="twstage"><div class="twtrace" hidden><span class="twtracet"></span><button type="button" class="btnG btnSm" data-tw="untrace">' + esc(tr(E, 'twinTraceClear')) + '</button></div></div>' +
+      '<div class="twbody"><div class="twstage"><div class="twtrace" hidden><span class="twtracet"></span><button type="button" class="btnG btnSm" data-tw="untrace">' + esc(tr(E, 'twinTraceClear')) + '</button></div>' +
+      camHtml(E) + '</div>' +
       '<aside class="twside"><div class="twtabs" role="tablist"><button type="button" role="tab" data-tw="tab" data-tab="alarms" aria-selected="true"></button>' +
       '<button type="button" role="tab" data-tw="tab" data-tab="equip" aria-selected="false">' + esc(tr(E, 'twinTabEquip')) + '</button>' +
       '<button type="button" role="tab" data-tw="tab" data-tab="wo" aria-selected="false"></button></div><div class="twpane" aria-live="polite"></div></aside></div>';
     var stage = host.querySelector('.twstage');
     var svg = el('svg', { 'class': 'twsvg', role: 'img', 'aria-label': tr(E, 'twinTitle'), dir: 'ltr', 'data-level': 'ALL', 'data-labels': ex.labels, preserveAspectRatio: 'xMidYMid meet' }, stage);
-    var s = { E: E, svg: svg, side: host.querySelector('.twpane'), tabs: host.querySelectorAll('.twtabs button'), tab: 'alarms', ex: ex, flows: [], zones: [], run: {}, seen: {}, opened: Date.now(), lastUser: 0, status: host.querySelector('.twstatus'), sel: null, level: 'ALL', eqs: {}, tags: {}, pipes: {}, vb: null, home: null, panel: '',
+    var s = { E: E, host: host, view: null, cam: 'fit', turnMode: false, tagKs: null, svg: svg, side: host.querySelector('.twpane'), tabs: host.querySelectorAll('.twtabs button'), tab: 'alarms', ex: ex, flows: [], zones: [], run: {}, seen: {}, opened: Date.now(), lastUser: 0, status: host.querySelector('.twstatus'), sel: null, level: 'ALL', eqs: {}, tags: {}, pipes: {}, vb: null, home: null, panel: '',
       graph: MAP.graph(EQUIP), trace: null, traceBar: host.querySelector('.twtrace'), res: {}, alIdx: { by: {}, unlinked: [] }, fdd: {}, faults: {},
       bim: { by: {}, guid: {} }, cands: {}, stale: false, lit: null, picked: null };
     LAYERS.forEach(function (l) { if (HIDDEN[l]) svg.classList.add('hide-' + l); });
+    setView(0, 1);   /* a view opens on the original camera */
     var T = function (k) { return tr(E, k); };
     scene(svg, T, s);
     if (STATE) STATE.set(host, s);
@@ -897,11 +1068,12 @@
       else if (b.dataset.tw === 'go') goTo(host, b.dataset.id);
       else if (b.dataset.tw === 'bim') showInModel(host, s.sel);
       else if (b.dataset.tw === 'tab') { s.tab = b.dataset.tab; update(host, s.E); }
+      else if (b.dataset.tw === 'cam') camAction(host, b.dataset.cam);
     });
     host.addEventListener('change', function (ev) {
       var k = ev.target.getAttribute && ev.target.getAttribute('data-tw-ex'); if (!k) return;
       if (k === 'fly') s.ex.fly = !!ev.target.checked;
-      if (k === 'labels') { s.ex.labels = ev.target.value; svg.setAttribute('data-labels', s.ex.labels); }
+      if (k === 'labels') { s.ex.labels = ev.target.value; svg.setAttribute('data-labels', s.ex.labels); tagLayout(s); }
       exSave(s.ex);
     });
     /* a person working in the view is not moved by Fly to new alarms */
@@ -916,33 +1088,170 @@
     return host;
   }
 
-  /* ── camera: pan, zoom, frame a level (viewBox only: nothing is redrawn) ── */
+  /* ── camera: pan, zoom, frame a level (viewBox only: nothing is redrawn); turn and tilt (the drawing is rebuilt at most once per frame, every state kept) ── */
+  var ANCHOR = [30, 8, 33];   /* the building's centre: the point that stays put on screen when a zoomed-in view turns */
+  var TARGET_PX = 10.5;       /* a label's text height on screen, whatever the zoom */
+  function reducedMotion() { return typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
   function applyVB(s) {
     var v = s.vb;
     s.svg.setAttribute('viewBox', v.x.toFixed(1) + ' ' + v.y.toFixed(1) + ' ' + v.w.toFixed(1) + ' ' + v.h.toFixed(1));
     var zoom = s.home ? s.home.w / v.w : 1;
     s.svg.setAttribute('data-zoom', zoom > 1.9 ? 'near' : zoom > 1.2 ? 'mid' : 'far');
+    tagsSoon(s);
   }
-  function aspect(s) { var r = s.svg.getBoundingClientRect(); return r.width && r.height ? r.height / r.width : 0.6; }
+  /* the stage's shape, kept from the resize observer: reading it from the page would force a layout of the whole drawing on every turn */
+  function aspect(s) { if (s.sz) return s.sz.h / s.sz.w; var r = s.svg.getBoundingClientRect(); return r.width && r.height ? r.height / r.width : 0.6; }
   function frame(s) {
     var a = aspect(s);
     s.home = fit(worldBounds(), a, 10);
     s.vb = s.level === 'ALL' ? s.home : fit(levelBounds(s.level), a, 10);
+    s.cam = 'fit';
     applyVB(s);
   }
+
+  /* ── labels: a constant size on screen, and only as many as fit. Done on the label's own inner group, nothing about the machine moves. ──
+     Priority when two would overlap: the selected one, one in a trace, one with an alarm or FD&D fault, a main machine, a small one. A label that would leave the
+     view is left out (except the selected one). Only in Auto: Always shows every label, Off none. */
+  function tagsSoon(s) {
+    if (s.tagRaf || typeof requestAnimationFrame !== 'function') return;
+    s.tagRaf = requestAnimationFrame(function () { s.tagRaf = 0; tagLayout(s); });
+  }
+  function tagLayout(s) {
+    var r = s.sz || s.svg.getBoundingClientRect(), v = s.vb; if (!v || !r.width && !r.w || !(r.height || r.h)) return;
+    var rw = r.w || r.width, rh = r.h || r.height;
+    var k = clamp(TARGET_PX / (6.4 * Math.min(rw / v.w, rh / v.h)), 0.5, 6), ks = k.toFixed(3), ids = Object.keys(s.tags);
+    if (s.tagKs !== ks) { s.tagKs = ks; ids.forEach(function (id) { s.tags[id].__tag.inn.setAttribute('transform', 'scale(' + ks + ')'); }); }
+    var hide = function (t, h) { if (h) { if (t.getAttribute('data-hide') !== '1') t.setAttribute('data-hide', '1'); } else if (t.hasAttribute('data-hide')) t.removeAttribute('data-hide'); };
+    if (s.ex.labels !== 'auto') { ids.forEach(function (id) { hide(s.tags[id], false); }); return; }
+    var rank = function (id) { var t = s.tags[id]; return id === s.sel ? 0 : t.hasAttribute('data-tr') ? 1 : t.hasAttribute('data-al') ? 2 : t.__tag.minor ? 4 : 3; };
+    var seen = ids.filter(function (id) { var d = s.tags[id].__tag; return (s.level === 'ALL' || d.level === s.level) && (!s.trace || id === s.sel || s.tags[id].hasAttribute('data-tr')); });
+    ids.forEach(function (id) { if (seen.indexOf(id) === -1) hide(s.tags[id], false); });
+    seen.sort(function (a, b) { return rank(a) - rank(b) || EQUIP.indexOf(EQ[a]) - EQUIP.indexOf(EQ[b]); });
+    var placed = [], x0 = v.x + 2, y0 = v.y + 2, x1 = v.x + v.w - 2, y1 = v.y + v.h - 2, pad = 1.5 * k;
+    seen.forEach(function (id) {
+      var t = s.tags[id], d = t.__tag, hw = d.w * k / 2, c = [d.x - hw, d.y - 17 * k, d.x + hw, d.y];
+      var inside = c[0] >= x0 && c[2] <= x1 && c[1] >= y0 && c[3] <= y1, hit = false;
+      for (var i = 0; i < placed.length && !hit; i++) { var p = placed[i]; hit = c[0] < p[2] + pad && c[2] > p[0] - pad && c[1] < p[3] + pad && c[3] > p[1] - pad; }
+      var show = id === s.sel || (inside && !hit);
+      if (show) placed.push(c);
+      hide(t, !show);
+    });
+  }
+
+  /* ── turning: the drawing is built for one view, so a new view rebuilds it. What the person has set is carried over by snapshot, not recomputed: each machine's
+     and label's state attributes, the selection, the trace marks, each pipe's flow state, the room patches, the keyboard focus. ── */
+  var SNAP = ['data-fin', 'data-bim', 'data-al', 'data-run', 'data-tr'];
+  function snapshot(s) {
+    var o = { eqs: {}, pipes: {}, zones: s.zones.map(function (z) { return [z.poly.getAttribute('class'), z.tt.textContent]; }) };
+    Object.keys(s.eqs).forEach(function (id) {
+      var one = function (n) { var a = {}; SNAP.forEach(function (k) { if (n.hasAttribute(k)) a[k] = n.getAttribute(k); }); a.sel = n.classList.contains('sel'); return a; };
+      o.eqs[id] = [one(s.eqs[id]), one(s.tags[id])];
+    });
+    Object.keys(s.pipes).forEach(function (k) { o.pipes[k] = s.pipes[k].map(function (g) { return [g.getAttribute('data-flow'), g.classList.contains('conn'), g.classList.contains('tr-on')]; }); });
+    return o;
+  }
+  function restore(s, o) {
+    Object.keys(o.eqs).forEach(function (id) {
+      [s.eqs[id], s.tags[id]].forEach(function (n, i) { var a = o.eqs[id][i]; SNAP.forEach(function (k) { if (k in a) n.setAttribute(k, a[k]); else n.removeAttribute(k); }); n.classList.toggle('sel', a.sel); });
+    });
+    Object.keys(o.pipes).forEach(function (k) { (s.pipes[k] || []).forEach(function (g, i) { var a = o.pipes[k][i]; if (!a) return; g.setAttribute('data-flow', a[0]); g.classList.toggle('conn', a[1]); g.classList.toggle('tr-on', a[2]); }); });
+    s.zones.forEach(function (z, i) { if (o.zones[i]) { z.poly.setAttribute('class', o.zones[i][0]); z.tt.textContent = o.zones[i][1]; } });
+  }
+  function rebuild(s) {
+    var snap = snapshot(s), ae = document.activeElement, fe = ae && s.svg.contains(ae) && ae.closest ? ae.closest('.equip') : null, fid = fe ? fe.getAttribute('data-id') : null;
+    s.eqs = {}; s.tags = {}; s.pipes = {}; s.flows = []; s.zones = []; s.tagKs = null;
+    /* built apart from the page and put in with one replace: the browser styles and paints the new drawing once, not as it is made */
+    var fresh = document.createElementNS(NS, 'svg');
+    scene(fresh, function (k) { return tr(s.E, k); }, s);
+    if (s.svg.replaceChildren) s.svg.replaceChildren.apply(s.svg, [].slice.call(fresh.childNodes));
+    else { while (s.svg.firstChild) s.svg.removeChild(s.svg.firstChild); while (fresh.firstChild) s.svg.appendChild(fresh.firstChild); }
+    restore(s, snap);
+    if (fid && s.eqs[fid]) try { s.eqs[fid].focus({ preventScroll: true }); } catch (e) {}
+    tagsSoon(s);
+  }
+  /* the world point that stays where it is on screen when a zoomed-in view turns: the selected machine, else the floor in view, else the building's centre */
+  function anchorOf(s) {
+    var e = s.sel && EQ[s.sel];
+    if (e) return [e.x + e.w / 2, e.y + e.d / 2, e.z + e.h / 2];
+    return s.level === 'ALL' ? ANCHOR : [30, 8, LZ[s.level] + 3];
+  }
+  function camLabel(s) {
+    var b = s.host && s.host.querySelector('.twcamr'); if (b) b.textContent = Math.round(-VIEW.yaw) + '° · ' + Math.round((VIEW.tilt - 1) * 40) + '°';
+    var set = function (sel, off) { var n = s.host && s.host.querySelector(sel); if (n) n.disabled = off; };
+    set('[data-cam="yawL"]', VIEW.yaw >= YAW_MAX - 1e-6); set('[data-cam="yawR"]', VIEW.yaw <= YAW_MIN + 1e-6);
+    set('[data-cam="tiltU"]', VIEW.tilt >= TILT_MAX - 1e-6); set('[data-cam="tiltD"]', VIEW.tilt <= TILT_MIN + 1e-6);
+  }
+  /* Turn to yaw, tilt. A view that is framed (the building, or a floor) is framed again for the new shape, so the whole of it stays centred and inside the view;
+     a view the person has zoomed or moved keeps its scale and the anchor point where it was on screen. Floor, selection, layers and trace are not touched. */
+  function turn(host, yaw, tilt) {
+    var s = host && STATE && STATE.get(host); if (!s) return;
+    yaw = clamp(yaw, YAW_MIN, YAW_MAX); tilt = clamp(tilt, TILT_MIN, TILT_MAX);
+    if (Math.abs(yaw - VIEW.yaw) < 1e-4 && Math.abs(tilt - VIEW.tilt) < 1e-5) return;
+    var an = anchorOf(s), b = P(an[0], an[1], an[2]), a0 = aspect(s);
+    var framed = s.cam === 'fit' || s.vb.w >= s.home.w * 0.97;
+    setView(yaw, tilt);
+    rebuild(s);
+    s.home = fit(worldBounds(), a0, 10);
+    if (framed) { s.vb = s.level === 'ALL' ? s.home : fit(levelBounds(s.level), a0, 10); s.cam = 'fit'; }
+    else { var a = P(an[0], an[1], an[2]); s.vb = { x: s.vb.x + a[0] - b[0], y: s.vb.y + a[1] - b[1], w: s.vb.w, h: s.vb.h }; }
+    applyVB(s); tagLayout(s); camLabel(s);   /* labels sized and decluttered in the same frame as the new drawing, not a frame later */
+  }
+  function turnAnim(host, yaw, tilt, ms) {
+    var s = host && STATE && STATE.get(host); if (!s) return;
+    yaw = clamp(yaw, YAW_MIN, YAW_MAX); tilt = clamp(tilt, TILT_MIN, TILT_MAX);
+    var id = s.animId = (s.animId || 0) + 1, y0 = VIEW.yaw, t0 = VIEW.tilt;
+    if (reducedMotion() || !ms || typeof requestAnimationFrame !== 'function') { turn(host, yaw, tilt); return; }
+    var st = null;
+    (function step(now) {
+      if (s.animId !== id) return;
+      if (st === null) st = now;
+      var k = Math.min(1, (now - st) / ms), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      turn(host, y0 + (yaw - y0) * e, t0 + (tilt - t0) * e);
+      if (k < 1) requestAnimationFrame(step);
+    })(typeof performance !== 'undefined' ? performance.now() : 0);
+  }
+  /* dragging turns the building: the movement is gathered and applied once per frame, never per pointer event */
+  function turnDrag(host, dYaw, dTilt) {
+    var s = STATE.get(host); s.animId = (s.animId || 0) + 1;
+    var q = s.turnQ = s.turnQ || { yaw: VIEW.yaw, tilt: VIEW.tilt };
+    q.yaw = clamp(q.yaw + dYaw, YAW_MIN, YAW_MAX); q.tilt = clamp(q.tilt + dTilt, TILT_MIN, TILT_MAX);
+    if (s.turnRaf) return;
+    var go = function () { s.turnRaf = 0; var t = s.turnQ; s.turnQ = null; if (t) turn(host, t.yaw, t.tilt); };
+    s.turnRaf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(go) : (go(), 0);
+  }
+  /* the original view and the framing of the floor in view; the floor, selection, layers and trace stay as they are */
+  function resetView(host) {
+    var s = host && STATE && STATE.get(host); if (!s) return;
+    s.cam = 'fit';
+    if (!reducedMotion() && typeof requestAnimationFrame === 'function') turnAnim(host, 0, 1, 320); else turn(host, 0, 1);
+    if (Math.abs(VIEW.yaw) < 1e-4 && Math.abs(VIEW.tilt - 1) < 1e-5) { frame(s); camLabel(s); }
+  }
+  function camAction(host, what) {
+    var s = host && STATE && STATE.get(host); if (!s) return;
+    if (what === 'yawL') turnAnim(host, VIEW.yaw + 15, VIEW.tilt, 260);
+    else if (what === 'yawR') turnAnim(host, VIEW.yaw - 15, VIEW.tilt, 260);
+    else if (what === 'tiltU') turnAnim(host, VIEW.yaw, VIEW.tilt + 0.2, 260);
+    else if (what === 'tiltD') turnAnim(host, VIEW.yaw, VIEW.tilt - 0.2, 260);
+    else if (what === 'reset') resetView(host);
+    else if (what === 'toggle') { var c = host.querySelector('.twcam'), on = c.getAttribute('data-open') !== '1'; if (on) c.setAttribute('data-open', '1'); else c.removeAttribute('data-open'); var t = host.querySelector('[data-cam="toggle"]'); if (t) t.setAttribute('aria-expanded', String(on)); }
+    else if (what === 'mode') { s.turnMode = !s.turnMode; s.svg.classList.toggle('turnmode', s.turnMode); var b = host.querySelector('[data-cam="mode"]'); if (b) b.setAttribute('aria-pressed', String(s.turnMode)); }
+  }
+
   function camera(s) {
-    var svg = s.svg, pts = {}, n = 0, moved = 0, downEq = null;
+    var svg = s.svg, pts = {}, n = 0, moved = 0, downId = null, turning = false;
     frame(s);
     function toW(cx, cy) { var r = svg.getBoundingClientRect(); return { x: s.vb.x + (cx - r.left) / r.width * s.vb.w, y: s.vb.y + (cy - r.top) / r.height * s.vb.h }; }
     function zoomAt(p, f) {
       var nw = Math.max(160, Math.min(s.vb.w * f, s.home.w * 2.2)); f = nw / s.vb.w;
       s.vb = { x: p.x - (p.x - s.vb.x) * f, y: p.y - (p.y - s.vb.y) * f, w: s.vb.w * f, h: s.vb.h * f };
+      s.cam = 'free';
       applyVB(s);
     }
+    svg.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     svg.addEventListener('wheel', function (e) { e.preventDefault(); zoomAt(toW(e.clientX, e.clientY), Math.exp(e.deltaY * 0.0015)); }, { passive: false });
     svg.addEventListener('pointerdown', function (e) {
       pts[e.pointerId] = { x: e.clientX, y: e.clientY }; n++;
-      if (n === 1) { moved = 0; downEq = e.target.closest && e.target.closest('.equip'); }
+      if (n === 1) { var q = e.target.closest && e.target.closest('.equip'); moved = 0; downId = q ? q.getAttribute('data-id') : null; turning = !!(s.turnMode || e.button === 2 || e.shiftKey || e.altKey); }
       try { svg.setPointerCapture(e.pointerId); } catch (x) {}
     });
     svg.addEventListener('pointermove', function (e) {
@@ -950,7 +1259,10 @@
       var cu = { x: e.clientX, y: e.clientY }, r = svg.getBoundingClientRect();
       if (n === 1) {
         var dx = cu.x - pv.x, dy = cu.y - pv.y; moved += Math.abs(dx) + Math.abs(dy);
-        if (moved > 4 && r.width) { s.vb.x -= dx / r.width * s.vb.w; s.vb.y -= dy / r.height * s.vb.h; applyVB(s); }
+        if (moved > 4 && r.width) {
+          if (turning) turnDrag(svg.closest('.twinview'), -dx * 0.22, dy * 0.004);
+          else { s.vb.x -= dx / r.width * s.vb.w; s.vb.y -= dy / r.height * s.vb.h; s.cam = 'free'; applyVB(s); }
+        }
       } else if (n === 2) {
         var oid = Object.keys(pts).filter(function (k) { return k !== String(e.pointerId); })[0], o = pts[oid];
         var d0 = Math.hypot(pv.x - o.x, pv.y - o.y), d1 = Math.hypot(cu.x - o.x, cu.y - o.y);
@@ -963,22 +1275,25 @@
       if (!pts[e.pointerId]) return;
       delete pts[e.pointerId]; n--;
       /* a tap (not a drag) on a machine selects it; on empty ground it clears the selection */
-      if (!n && e.type === 'pointerup' && moved <= 4) select(svg.closest('.twinview'), downEq ? downEq.getAttribute('data-id') : null);
+      if (!n && e.type === 'pointerup' && moved <= 4) select(svg.closest('.twinview'), downId);
     }
     svg.addEventListener('pointerup', end);
     svg.addEventListener('pointercancel', end);
     /* the view is built before it is on screen: frame it once it has a size, and keep the frame when the stage is resized */
     if (typeof ResizeObserver === 'function') {
       var last = 0;
-      new ResizeObserver(function () {
-        var a = aspect(s); if (!a || Math.abs(a - last) < 1e-3) return;
+      new ResizeObserver(function (entries) {
+        var cr = entries && entries[0] && entries[0].contentRect; if (cr && cr.width && cr.height) s.sz = { w: cr.width, h: cr.height };
+        var a = aspect(s); if (!a || Math.abs(a - last) < 1e-3) { if (a) tagsSoon(s); return; }
         if (!last) frame(s);
+        else if (s.cam === 'fit') frame(s);
         else { var cy = s.vb.y + s.vb.h / 2; s.vb.h = s.vb.w * a; s.vb.y = cy - s.vb.h / 2; s.home = fit(worldBounds(), a, 10); applyVB(s); }
         last = a;
       }).observe(svg);
     }
   }
   function setLevel(host, lv) {
+    if (lv === 'GF') lv = 'L1';   /* V1's ground-floor key; its old L1/L2 cannot be told from V2's, see MAP.LEGACY_LEVELS */
     var s = STATE && STATE.get(host); if (!s || (lv !== 'ALL' && LEVELS.indexOf(lv) === -1)) return;
     s.level = lv;
     s.svg.setAttribute('data-level', lv);
@@ -995,12 +1310,13 @@
     /* its own pipes stand out, the rest step back; only class changes, and only on a selection (never on a data update) */
     Object.keys(s.pipes).forEach(function (k) { s.pipes[k].forEach(function (g) { g.classList.toggle('conn', k === s.sel); }); });
     s.svg.setAttribute('data-conn', s.sel && s.pipes[s.sel] ? '1' : '0');
+    tagsSoon(s);
     update(host, s.E);
   }
   /* from an alarm or a relationship: select the machine and show its floor */
   function goTo(host, id) {
     var s = host && STATE && STATE.get(host); if (!s || !EQ[id]) return;
-    setLevel(host, EQ[id].level === 'EXT' ? 'GF' : EQ[id].level);
+    setLevel(host, EQ[id].level === 'EXT' ? 'L1' : EQ[id].level);
     select(host, id);
     var g = s.eqs[id]; if (g && g.focus) try { g.focus({ preventScroll: true }); } catch (e) {}
   }
@@ -1023,12 +1339,13 @@
     s.svg.classList.toggle('tracing', !!s.trace);
     s.svg.setAttribute('data-trace', s.trace ? s.trace.dir : '');
     if (s.trace) {
-      var levels = {}; Object.keys(on).forEach(function (k) { levels[EQ[k].level === 'EXT' ? 'GF' : EQ[k].level] = 1; });
+      var levels = {}; Object.keys(on).forEach(function (k) { levels[EQ[k].level === 'EXT' ? 'L1' : EQ[k].level] = 1; });
       if (s.level !== 'ALL' && Object.keys(levels).length > 1) setLevel(host, 'ALL');
       var n = { stop: 0, shift: 0 }; Object.keys(on).forEach(function (k) { if (k !== seed) n[/-stop/.test(on[k]) ? 'stop' : 'shift']++; });
       s.traceBar.querySelector('.twtracet').textContent = tr(s.E, dir === 'down' ? 'twinTracingDown' : 'twinTracingUp', { name: label(seed), stop: String(n.stop), shift: String(n.shift) });
     }
     s.traceBar.hidden = !s.trace;
+    tagsSoon(s);
     if (!quiet) update(host, s.E);
   }
   /* Show the selected machine in the Studio's BIM model, the way Locate in 3D does (app.js locate): the Overview's model (on a phone or tablet its
@@ -1130,9 +1447,12 @@
     if (html !== s.panel) { s.side.innerHTML = html; s.panel = html; }
     if (fly) goTo(host, fly);
     host.setAttribute('data-sel', s.sel ? '1' : '0');
+    tagsSoon(s);
     return { found: found, total: fin };
   }
 
   return { LZ: LZ, LEVELS: LEVELS, EQUIP: EQUIP, PIPES: PIPES, SYSTEMS: SYSTEMS, LAYERS: LAYERS, P: P, worldBounds: worldBounds, levelBounds: levelBounds, fit: fit, RISERS: RISERS, create: create, update: update, setLevel: setLevel, setLayer: setLayer, select: select, trace: trace, goTo: goTo,
-    showInModel: showInModel, release: release, machineForBim: machineForBim };
+    showInModel: showInModel, release: release, machineForBim: machineForBim,
+    setView: setView, view: function (host, yaw, tilt) { turn(host, yaw, tilt); }, getView: function () { return { yaw: VIEW.yaw, tilt: VIEW.tilt }; }, resetView: resetView, tagLayout: function (host) { var s = host && STATE && STATE.get(host); if (s) tagLayout(s); },
+    YAW: [YAW_MIN, YAW_MAX], TILT: [TILT_MIN, TILT_MAX] };
 });

@@ -6,3 +6,6 @@ Saved EKO Hospital FIN exports (6 Nov 2026), the reference for the Live Twin map
 - alarms.json: the open alarms, 10 on 9 equipment, with FIN equipment ids and states. Each alarm's `history` holds cleared records (Return to normal).
 
 They are a snapshot. They do not prove that FIN is reachable now or still says the same. BIM ids in equipment.json keep FIN's Zinc escape (\$ for $).
+
+- v2-equipment.json: not a FIN export. The client's V2 Live Twin design (EKO_Live_Twin_Schematic_Version2.html) as its equipment list: 72 drawn items with id,
+  drawing type, V2 level (L1 = FIN LEVEL-01 ... RF = ROOF) and feeding board. The mapping tests resolve every one of them against equipment.json.

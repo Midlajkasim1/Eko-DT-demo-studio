@@ -19,16 +19,16 @@ const bimOfName = n => M.bimOf({ id: n, bimId: EQ.find(e => e.name === n).bimId 
 const links = (assets, l) => { const [res, idx] = resolveAll(assets); return M.bimLinks(res, idx, l) }
 const count = b => Object.values(b.by).reduce((n, x) => (n[x.state] = (n[x.state] || 0) + 1, n), {})
 
-test('BIM: from the FIN export, 25 machines verified, 19 without a BIM id, VAV_07 and VAV_10 shared and not linked', () => {
+test('BIM: from the FIN export, 40 machines have a GlobalId, 21 none, VAV_07 and VAV_10 shared and not linked, the 6 unmapped boards unconfirmed', () => {
   const b = links(feed(), [])
-  assert.deepEqual(count(b), { verified: 25, missing: 19, shared: 2, unconfirmed: 4, 'not-fin': 3 })
+  assert.deepEqual(count(b), { verified: 40, missing: 21, shared: 2, unconfirmed: 6, 'not-fin': 3 })
   assert.deepEqual([b.by.VAV_07.state, b.by.VAV_07.with, b.by.VAV_10.state, b.by.VAV_10.with], ['shared', ['VAV_10'], 'shared', ['VAV_07']])
   assert.equal(bimOfName('VAV_07'), bimOfName('VAV_10'), 'the export really gives both the same id')
   assert.equal(b.guid[bimOfName('VAV_07')], undefined, 'a shared id never leads to a machine')
   assert.deepEqual([b.by.AHU_01.state, b.by.AHU_01.guid, b.by.AHU_01.source], ['verified', '2wLf9$IGsICFYFjFAcUnf2', 'fin'])
   assert.equal(b.guid['2wLf9$IGsICFYFjFAcUnf2'], 'AHU_01')
-  assert.equal(Object.keys(b.guid).length, 25, 'one machine per verified GlobalId')
-  assert.ok(['GF_ENERGY', '1F_ENERGY', '2F_ENERGY', 'RF_ENERGY'].every(id => b.by[id].state === 'unconfirmed'), 'unmapped meters: no BIM link')
+  assert.equal(Object.keys(b.guid).length, 40, 'one machine per verified GlobalId')
+  assert.ok(['MCC_02', 'MCC_03', 'MCC_04', 'DB_02', 'DB_03', 'SMDB_04'].every(id => b.by[id].state === 'unconfirmed'), 'unmapped boards: no BIM link')
 })
 
 test('BIM: a FIN id or a name is never a GlobalId; nothing guessed when FIN has none', () => {
@@ -62,8 +62,8 @@ test('BIM: the project\'s own equipment links verify, agree, conflict or collide
   assert.equal(links(feed(), [{ id: 'BTU_01', bimId: '2wLf9$IGsICFYFjFAcUnf2' }]).by.AHU_01.state, 'shared')
   // a link that is not a GlobalId (a FIN id) is ignored
   assert.equal(links(feed(), [{ id: 'BTU_01', bimId: 'p:ekoHospital:r:3260ac07-19aa0e85' }]).by.BTU_01.state, 'missing')
-  // a link alone cannot make an unconfirmed meter a BIM link
-  assert.equal(links(feed(), [{ id: 'GF_ENERGY', bimId: G1 }]).by.GF_ENERGY.state, 'unconfirmed')
+  // a link alone cannot make an unmapped board a BIM link
+  assert.equal(links(feed(), [{ id: 'MCC_02', bimId: G1 }]).by.MCC_02.state, 'unconfirmed')
 })
 
 test('model storeys: only a storey with the FIN floor\'s own name, and only when it is the one', () => {
@@ -75,15 +75,16 @@ test('model storeys: only a storey with the FIN floor\'s own name, and only when
 })
 
 test('energy meters: an excluded FIN record with the exact name is an unverified candidate, never a mapping', () => {
-  const meter = T.EQUIP.find(e => e.id === 'GF_ENERGY')
+  /* the four energy meters are V1 items the V2 design does not draw; the name-only rule is kept for them */
+  const meter = { id: 'GF_ENERGY', type: 'EMETER', level: 'L1' }
   const rec = { id: 'GF_ENERGY', finId: 'p:ekoHospital:r:m', floor: 'LEVEL-01', points: [] }
   assert.deepEqual(M.candidateFor(meter, [rec]), { state: 'one', asset: rec })
   assert.deepEqual(M.candidateFor(meter, [rec, { ...rec, finId: 'x' }]), { state: 'several', asset: null })
   assert.deepEqual(M.candidateFor(meter, [{ ...rec, id: 'GF_ENERGY_TOTAL' }]), { state: 'none', asset: null }, 'exact name only')
   assert.deepEqual(M.candidateFor(T.EQUIP.find(e => e.id === 'AHU_01'), [rec]), { state: 'none', asset: null })
   // the meter stays unmapped even with its record in the main list
-  const [res] = resolveAll([...feed(), { id: 'GF_ENERGY', finId: 'p:ekoHospital:r:m', floor: 'LEVEL-01', tags: ['meter'], st: 'ok', points: [] }])
-  assert.deepEqual([res.GF_ENERGY.state, res.GF_ENERGY.reason], ['unmapped', 'name-only'])
+  const idx = M.index([...feed(), { id: 'GF_ENERGY', finId: 'p:ekoHospital:r:m', floor: 'LEVEL-01', tags: ['meter'], st: 'ok', points: [] }]), r = M.resolve(meter, idx, true)
+  assert.deepEqual([r.state, r.reason], ['unmapped', 'name-only'])
 })
 
 test('live feed: stale when the backend\'s last equipment read is old; a missing time is not called stale', () => {

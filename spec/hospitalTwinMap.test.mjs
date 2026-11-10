@@ -27,59 +27,91 @@ const feed = (list = EQ) => list.map(e => ({ id: e.name, finId: e.finId, bimId: 
 const dashAlarms = () => ALARMS.map(a => ({ id: a.id, sourceId: a.source_id, state: a.state, plainEn: a.message, sev: a.severity }))
 const resolveAll = (assets, connected = true) => { const idx = M.index(assets); return Object.fromEntries(T.EQUIP.map(e => [e.id, M.resolve(e, idx, connected)])) }
 
-test('equipment: 46 of the 50 FIN items mapped, each to one exported equipment whose FIN id, type tag and floor all agree', () => {
+test('equipment: 63 of the 69 FIN items mapped, each to one exported equipment whose FIN id, type tag and floor all agree', () => {
   const mapped = fin.filter(e => M.finName(e))
-  assert.equal(T.EQUIP.length, 53)
-  assert.equal(mapped.length, 46)
+  assert.equal(T.EQUIP.length, 72)
+  assert.equal(mapped.length, 63)
   const names = mapped.map(e => M.finName(e))
   assert.equal(new Set(names).size, names.length, 'no FIN equipment is used twice')
   for (const e of mapped) {
     const x = byName[M.finName(e)], r = M.REF[M.finName(e)]
     assert.ok(x, e.id + ' is in the equipment export')
     assert.equal(r.id, x.finId, e.id + ' FIN id')
-    assert.ok(x.tags.includes(M.TYPE_TAG[e.type]), `${e.id}: FIN tags [${x.tags}] carry ${M.TYPE_TAG[e.type]}`)
+    if (x.tags.length) assert.ok(x.tags.includes(M.TYPE_TAG[e.type]), `${e.id}: FIN tags [${x.tags}] carry ${M.TYPE_TAG[e.type]}`)
+    else assert.equal(x.type, 'other', e.id + ': only the untagged medical devices skip the type check')
     assert.equal(x.floor, M.LEVELS[e.level], e.id + ' floor')
   }
 })
 
+/* the V1 id SP_01 is pinned to FIN's SUMP_PUMP; V2 draws it as SUMP_PUMP */
+const drawnOrAlias = id => drawn(id === 'SP_01' ? 'SUMP_PUMP' : id)
+
 test('pins: each pinned FIN name is the only exported equipment with that type tag on that floor', () => {
-  assert.deepEqual(Object.keys(M.PIN).sort(), ['CHILLED_WATER_PUMP_01', 'CONDENSER_WATER_PUMP_01', 'SMDB_01', 'SP_01'])
-  const need = { CHILLED_WATER_PUMP_01: 'chilled', CONDENSER_WATER_PUMP_01: 'condenser', SP_01: 'sump', SMDB_01: 'smdb' }
+  assert.deepEqual(Object.keys(M.PIN).sort(), ['CHILLED_WATER_PUMP_01', 'CONDENSER_WATER_PUMP_01', 'DB_01', 'MCC_01', 'SMDB_01', 'SP_01'])
+  const need = { CHILLED_WATER_PUMP_01: 'chilled', CONDENSER_WATER_PUMP_01: 'condenser', SP_01: 'sump', SMDB_01: 'smdb', MCC_01: 'mcc', DB_01: 'db' }
   for (const [id, name] of Object.entries(M.PIN)) {
-    const e = drawn(id), floor = M.LEVELS[e.level]
+    const e = drawnOrAlias(id), floor = M.LEVELS[e.level]
     const fits = EQ.filter(x => x.floor === floor && x.tags.includes(M.TYPE_TAG[e.type]) && x.tags.includes(need[id]))
     assert.deepEqual(fits.map(x => x.name), [name], id)
   }
 })
 
-test('unmapped: the four energy meters (history names only, no FIN id, type or floor) and nothing else; the three context items are not FIN', () => {
+test('provisional pins: SMDB_01, MCC_01 and DB_01 resolve to FIN SMDB_GF, MCC_GF and DB_GF, are flagged provisional, and invent no point, value or BIM id', () => {
+  assert.deepEqual(M.PROVISIONAL, { SMDB_01: 'SMDB_GF', MCC_01: 'MCC_GF', DB_01: 'DB_GF' })
+  for (const id of Object.keys(M.PROVISIONAL)) assert.equal(M.PROVISIONAL[id], M.PIN[id], id + ' provisional agrees with its pin')
+  const idx = M.index(feed())
+  for (const [id, name] of Object.entries(M.PROVISIONAL)) {
+    const r = M.resolve(drawnOrAlias(id), idx, true), x = byName[name]
+    assert.equal(r.state, 'mapped', id)
+    assert.equal(r.provisional, true, id)
+    assert.equal(r.fin, name, id); assert.equal(r.finId, x.finId, id)
+    assert.equal(r.bimId, null, id + ': FIN gives only its own record id, never a GlobalId')
+    assert.deepEqual(r.expected.map(p => p.name), x.points.map(p => p.navName), id + ': expected points are exactly the exported ones')
+  }
+  assert.deepEqual(M.REF.MCC_GF.points, []); assert.deepEqual(M.REF.DB_GF.points, [])
+  /* a confirmed pin is not flagged */
+  assert.equal(M.resolve(drawn('SUMP_PUMP'), idx, true).provisional, false)
+})
+
+test('provisional pins: unavailable data is stated, never filled in (FIN offline, equipment missing from the feed, a different type under the name)', () => {
+  const off = M.resolve(drawn('MCC_01'), M.index([]), false)
+  assert.equal(off.state, 'offline'); assert.equal(off.provisional, true)
+  const gone = M.resolve(drawn('DB_01'), M.index(feed(EQ.filter(x => x.name !== 'DB_GF'))), true)
+  assert.equal(gone.state, 'missing'); assert.equal(gone.reason, 'not-in-feed')
+  const wrong = M.resolve(drawn('MCC_01'), M.index(feed(EQ.map(x => x.name === 'MCC_GF' ? { ...x, tags: ['elecPanel', 'smdb'] } : x))), true)
+  assert.equal(wrong.state, 'ambiguous'); assert.equal(wrong.reason, 'type-differs')
+  assert.deepEqual(M.pointRows(M.resolve(drawn('MCC_01'), M.index(feed()), true), true), [], 'no points in FIN means no rows, not invented ones')
+  /* a feed that gives the board a point it does not have in the export shows exactly that point */
+  const withPt = feed().map(a => a.id === 'MCC_GF' ? { ...a, points: [{ navName: 'Incomer_ON_OFF_Status', currentValue: 'On', bool: true, text: 'ON', kind: 'Bool', pointKind: 'Bool', status: 'ok', reporting: true }] } : a)
+  assert.deepEqual(M.pointRows(M.resolve(drawn('MCC_01'), M.index(withPt), true), true).map(r => r.name), ['Incomer_ON_OFF_Status'])
+})
+
+test('unmapped: the six V2 boards FIN does not list (no FIN id, type or floor, nothing in the history export); the three context items are not FIN', () => {
   const un = fin.filter(e => !M.finName(e)).map(e => e.id).sort()
-  assert.deepEqual(un, ['1F_ENERGY', '2F_ENERGY', 'GF_ENERGY', 'RF_ENERGY'])
+  assert.deepEqual(un, ['DB_02', 'DB_03', 'MCC_02', 'MCC_03', 'MCC_04', 'SMDB_04'])
   for (const id of un) {
     assert.ok(!byName[id], id + ' is not in the equipment export')
-    assert.ok(HIST.some(p => p.equip === 'HOSPITAL ' + id), id + ' is named by the history export')
+    assert.ok(!HIST.some(p => p.equip === 'HOSPITAL ' + id), id + ' is not named by the history export')
     const r = M.resolve(drawn(id), M.index(feed()), true)
-    assert.deepEqual([r.state, r.reason, r.candidate], ['unmapped', 'name-only', id])
+    assert.deepEqual([r.state, r.reason, r.candidate, r.finId], ['unmapped', 'no-evidence', null, null])
   }
   assert.deepEqual(T.EQUIP.filter(e => e.nonFin).map(e => e.id).sort(), ['DEWA_SUPPLY', 'GENERATOR', 'WEATHER'])
 })
 
-test('the exported equipment the twin does not draw: CCTV, medical devices and three electrical panels', () => {
+test('the exported equipment the twin does not draw: only PMU_Main (its readings show on the MDB panel)', () => {
   const used = new Set(fin.map(e => M.finName(e)).filter(Boolean))
   const rest = EQ.filter(e => !used.has(e.name))
-  assert.equal(rest.length, 18)
-  assert.ok(rest.every(e => ['cctv', 'other', 'elecPanel'].includes(e.type)), rest.map(e => e.name + ':' + e.type).join(' '))
-  assert.deepEqual(rest.filter(e => e.type === 'elecPanel').map(e => e.name).sort(), ['DB_GF', 'MCC_GF', 'MDB'])
-  assert.ok(rest.every(e => e.points.length === 0), 'none of them reports a point')
+  assert.deepEqual(rest.map(e => e.name), ['PMU_Main'])
+  assert.equal(rest[0].points.length, 6)
 })
 
-test('against the exported feed: all 46 mapped, with the export\'s FIN ids, types and floors; nothing ambiguous', () => {
+test('against the exported feed: all 63 mapped, with the export\'s FIN ids, types and floors; nothing ambiguous', () => {
   const r = resolveAll(feed())
   const by = {}
   for (const x of Object.values(r)) (by[x.state] ||= []).push(x.id)
-  assert.deepEqual([by.mapped.length, by.unmapped.length, by['not-fin'].length, by.ambiguous, by.missing], [46, 4, 3, undefined, undefined])
+  assert.deepEqual([by.mapped.length, by.unmapped.length, by['not-fin'].length, by.ambiguous, by.missing], [63, 6, 3, undefined, undefined])
   assert.equal(r.CHILLED_WATER_PUMP_01.asset.id, 'CHILLED_WATER_PUMP')
-  assert.equal(r.SP_01.finId, 'p:ekoHospital:r:3264826b-af1f8966')
+  assert.equal(r.SUMP_PUMP.finId, 'p:ekoHospital:r:3264826b-af1f8966')
   assert.equal(r.AHU_01.type, 'AHU')
   assert.ok(Object.values(r).every(x => !x.floorDiffers))
 })
@@ -110,9 +142,9 @@ test('no duplicate FIN ids or names in the export; the one shared BIM id is flag
   assert.ok(r.VAV_07.bimShared && r.VAV_10.bimShared, 'VAV_07 and VAV_10 carry the same BIM id in FIN')
   assert.equal(r.AHU_01.bimId, '2wLf9$IGsICFYFjFAcUnf2')
   assert.equal(r.CHILLER_01.bimId, '3m5IrqWH1JDH7hfYYN8kjc')
-  assert.equal(r.PMU_Main.bimId, null, 'the feed sent the FIN id: no BIM id')
+  assert.equal(M.resolve({ id: 'PMU_Main', type: 'PMU', level: 'L1' }, M.index(feed()), true).bimId, null, 'the feed sent the FIN id: no BIM id')
   const withBim = Object.values(r).filter(x => x.bimId).length, without = Object.values(r).filter(x => x.state === 'mapped' && !x.bimId).length
-  assert.deepEqual([withBim, without], [27, 19])
+  assert.deepEqual([withBim, without], [42, 21])
 })
 
 test('points: the reference table is the equipment export, point for point, with kind, unit, history, alarm and setpoint flags and enums', () => {
@@ -205,16 +237,18 @@ test('alarms: cleared history records are never active; an alarm is never matche
 })
 
 test('floors: each drawn level is one FIN floor, and every mapped equipment of it reports that floor', () => {
-  assert.deepEqual(M.LEVELS, { GF: 'LEVEL-01', L1: 'LEVEL-02', L2: 'LEVEL-03', RF: 'ROOF' })
+  assert.deepEqual(M.LEVELS, { L1: 'LEVEL-01', L2: 'LEVEL-02', L3: 'LEVEL-03', RF: 'ROOF' })
+  assert.deepEqual(Object.fromEntries(Object.entries(M.LEGACY_LEVELS).map(([v1, v2]) => [v1, M.LEVELS[v2]])),
+    { GF: 'LEVEL-01', L1: 'LEVEL-02', L2: 'LEVEL-03', RF: 'ROOF' }, 'each V1 key still reaches the FIN floor it always meant')
   assert.deepEqual([...new Set(EQ.map(e => e.floor))].sort(), ['LEVEL-01', 'LEVEL-02', 'LEVEL-03', 'ROOF'])
   const fc = M.floorCheck(Object.values(resolveAll(feed())))
   assert.deepEqual(Object.fromEntries(Object.entries(fc).map(([k, v]) => [k, [v.floors, v.conflict]])), {
-    GF: [{ 'LEVEL-01': 19 }, false], L1: [{ 'LEVEL-02': 13 }, false], L2: [{ 'LEVEL-03': 8 }, false], RF: [{ ROOF: 6 }, false] })
+    L1: [{ 'LEVEL-01': 26 }, false], L2: [{ 'LEVEL-02': 19 }, false], L3: [{ 'LEVEL-03': 12 }, false], RF: [{ ROOF: 6 }, false] })
   // FIN's own floor tags on the water meters agree: LEVEL-01 is the ground floor
   assert.deepEqual(['WATER_METER_01', 'WATER_METER_02', 'WATER_METER_03'].map(n => [byName[n].floor, byName[n].tags.find(t => /Floor$/.test(t))]),
     [['LEVEL-01', 'groundFloor'], ['LEVEL-02', 'firstFloor'], ['LEVEL-03', 'secondFloor']])
   const moved = feed().map(a => a.id === 'VAV_01' ? { ...a, floor: 'LEVEL-02' } : a)
-  assert.equal(M.floorCheck(Object.values(resolveAll(moved))).GF.conflict, true)
+  assert.equal(M.floorCheck(Object.values(resolveAll(moved))).L1.conflict, true)
 })
 
 test('project isolation: the mapping is published only when the project has the Hospital graphics, and is withdrawn otherwise', () => {

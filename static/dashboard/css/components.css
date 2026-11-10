@@ -17468,13 +17468,13 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 /* a picked floor: the others fade, the outside stays with the ground floor */
 .dashboard-native-container .twsvg .tw-level { transition:opacity .3s }
 .dashboard-native-container .twsvg[data-level="RF"] .tw-level:not([data-level="RF"]),
+.dashboard-native-container .twsvg[data-level="L3"] .tw-level:not([data-level="L3"]),
 .dashboard-native-container .twsvg[data-level="L2"] .tw-level:not([data-level="L2"]),
-.dashboard-native-container .twsvg[data-level="L1"] .tw-level:not([data-level="L1"]),
-.dashboard-native-container .twsvg[data-level="GF"] .tw-level:not([data-level="GF"]) { opacity:.16; pointer-events:none }
+.dashboard-native-container .twsvg[data-level="L1"] .tw-level:not([data-level="L1"]) { opacity:.16; pointer-events:none }
 .dashboard-native-container .twsvg[data-level="RF"] .tag:not([data-level="RF"]),
+.dashboard-native-container .twsvg[data-level="L3"] .tag:not([data-level="L3"]),
 .dashboard-native-container .twsvg[data-level="L2"] .tag:not([data-level="L2"]),
-.dashboard-native-container .twsvg[data-level="L1"] .tag:not([data-level="L1"]),
-.dashboard-native-container .twsvg[data-level="GF"] .tag:not([data-level="GF"]) { display:none }
+.dashboard-native-container .twsvg[data-level="L1"] .tag:not([data-level="L1"]) { display:none }
 .dashboard-native-container .twsvg .tag { pointer-events:none }
 .dashboard-native-container .twsvg .tag-bg { fill:rgba(8,13,20,.88); stroke:#2a3b50; stroke-width:.7 }
 .dashboard-native-container .twsvg .tag-stem { stroke:#3b4d63; stroke-width:.7 }
@@ -17483,10 +17483,19 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .twsvg .tag[data-fin="mapped"] .tag-dot { fill:#5cc8ff }
 .dashboard-native-container .twsvg .tag[data-fin="missing"] .tag-dot, .dashboard-native-container .twsvg .tag[data-fin="ambiguous"] .tag-dot { fill:#ff6b7a }
 .dashboard-native-container .twsvg .tag[data-fin="unmapped"] .tag-dot { fill:transparent; stroke:#8a9bb0; stroke-width:.7 }
+/* the mapping's own state, before any live data: an unmapped item is outlined grey and dimmed, a provisional one amber dotted; a mapped item with no FIN points has a dotted dot */
+.dashboard-native-container .twsvg .equip[data-map="unmapped"] { opacity:.62 }
+.dashboard-native-container .twsvg .equip[data-map="unmapped"] .halo { stroke:#8a9bb0; stroke-width:.9; stroke-dasharray:2 3 }
+.dashboard-native-container .twsvg .equip[data-map="provisional"] .halo { stroke:#fbbf24; stroke-width:.9; stroke-dasharray:1 3 }
+.dashboard-native-container .twsvg .tag[data-map="unmapped"] .tag-name { opacity:.75 }
+.dashboard-native-container .twsvg .tag[data-map="provisional"] .tag-bg { stroke:#fbbf24; stroke-dasharray:2 2 }
+.dashboard-native-container .twchip[data-prov] { background:#fef3c7; color:#92400e }
 .dashboard-native-container .twsvg .tag[data-fin="stale"] .tag-dot { fill:#fbbf24 }
 .dashboard-native-container .twsvg .tag.sel .tag-bg { stroke:#7dd3fc }
-.dashboard-native-container .twsvg[data-labels="auto"][data-zoom="far"] .tag:not(.sel) { display:none }
-.dashboard-native-container .twsvg[data-labels="auto"][data-zoom="mid"] .tag.minor:not(.sel) { display:none }
+/* Auto: the labels that fit (tagLayout marks the rest data-hide); Always: all of them; Off: none */
+.dashboard-native-container .twsvg[data-labels="auto"] .tag[data-hide="1"]:not(.sel) { display:none }
+.dashboard-native-container .twsvg .tag-in { pointer-events:none }
+.dashboard-native-container .twsvg .tag-bg { fill:rgba(8,13,20,.92) }
 .dashboard-native-container .twsvg[data-labels="off"] .tag { display:none }
 
 /* a trace: the machine traced from (white), upstream (violet), downstream (red: would stop · amber: values would change); the rest step back */
@@ -17559,9 +17568,9 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 /* nothing moves on a faded floor, in a hidden browser tab */
 .dashboard-native-container .twsvg.paused .flow, .dashboard-native-container .twsvg.paused .rotor,
 .dashboard-native-container .twsvg[data-level="RF"] .tw-level:not([data-level="RF"]) :is(.flow,.rotor),
+.dashboard-native-container .twsvg[data-level="L3"] .tw-level:not([data-level="L3"]) :is(.flow,.rotor),
 .dashboard-native-container .twsvg[data-level="L2"] .tw-level:not([data-level="L2"]) :is(.flow,.rotor),
-.dashboard-native-container .twsvg[data-level="L1"] .tw-level:not([data-level="L1"]) :is(.flow,.rotor),
-.dashboard-native-container .twsvg[data-level="GF"] .tw-level:not([data-level="GF"]) :is(.flow,.rotor) { animation-play-state:paused }
+.dashboard-native-container .twsvg[data-level="L1"] .tw-level:not([data-level="L1"]) :is(.flow,.rotor) { animation-play-state:paused }
 /* right sidebar: Alarms and Equipment tabs */
 .dashboard-native-container .twside { display:flex; flex-direction:column; padding:0 }
 .dashboard-native-container .twtabs { flex:none; display:flex; border-block-end:1px solid var(--bd2); position:sticky; top:0; background:var(--s1); z-index:1 }
@@ -17587,12 +17596,46 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .twchip[data-run="off"] { background:#e5e7eb; color:#374151 }
 .dashboard-native-container .twchip[data-run="unknown"] { background:transparent; color:var(--t2); box-shadow:inset 0 0 0 1px var(--bd2) }
 
-/* tablet and phone: the details panel goes under the building */
+/* the 3D view controls: top right of the stage, under the trace bar while one is shown. Never at the bottom, where the toast and the Ask button are. */
+.dashboard-native-container .twcam { position:absolute; inset-block-start:10px; inset-inline-end:10px; z-index:2; display:flex; flex-direction:column; align-items:flex-end; gap:5px; padding:6px; border-radius:8px; background:rgba(9,14,21,.72); border:1px solid #1d2a39; color:#9fb0c3; font-size:11.5px }
+.dashboard-native-container .twtrace:not([hidden]) ~ .twcam { inset-block-start:56px }
+.dashboard-native-container .twcamt { display:none }
+.dashboard-native-container .twcamh { font-weight:600; letter-spacing:.06em; text-transform:uppercase; font-size:10.5px }
+.dashboard-native-container .twcamh b { margin-inline-start:6px; font-weight:500; letter-spacing:0; color:#dce6f1; font-variant-numeric:tabular-nums }
+.dashboard-native-container .twcamrow { display:flex; gap:5px }
+.dashboard-native-container .twcamb { min-width:32px; min-height:32px; padding:3px 8px; border:1px solid #2a3a4e; border-radius:6px; background:#111924; color:#dce6f1; font:inherit; font-size:14px; cursor:pointer }
+.dashboard-native-container .twcamb.twcamw { font-size:11.5px; padding:3px 9px }
+.dashboard-native-container .twcamb:hover:not(:disabled) { border-color:#3d5470 }
+.dashboard-native-container .twcamb:disabled { opacity:.38; cursor:default }
+.dashboard-native-container .twcamb[aria-pressed="true"] { background:#13263a; border-color:#2f5a80 }
+.dashboard-native-container .twcamb:focus-visible { outline:2px solid var(--acc); outline-offset:1px }
+.dashboard-native-container .twsvg.turnmode { cursor:ew-resize }
+
+/* tablet and phone: the controls take one row each, the building stays in view (the stage sticks to the top while the panel is read), the panel goes under it */
 @media (max-width:860px) {
-  .dashboard-native-container .twbody { flex-direction:column }
-  .dashboard-native-container .twstage { min-height:300px }
-  .dashboard-native-container .twside { width:auto; max-height:42%; border-inline-start:0; border-block-start:1px solid var(--bd2) }
+  .dashboard-native-container .twbody { flex:none; flex-direction:column }
+  .dashboard-native-container .twbar { gap:4px 8px; padding:6px 10px }
+  .dashboard-native-container .twttl { flex:1 0 100%; margin:0; font-size:14px }
+  .dashboard-native-container .twlayers { flex-wrap:nowrap; overflow-x:auto; gap:6px; padding:6px 10px; scrollbar-width:none; -webkit-overflow-scrolling:touch }
+  .dashboard-native-container .twlayers::-webkit-scrollbar { display:none }
+  .dashboard-native-container .twlayers > *, .dashboard-native-container .twex > * { flex:none; white-space:nowrap }
+  .dashboard-native-container .twex { flex-wrap:nowrap; margin-inline-start:6px; padding-inline-end:10px }
+  .dashboard-native-container .twstage { position:sticky; inset-block-start:0; z-index:3; flex:none; min-height:0; height:clamp(220px, min(46dvh, calc(100dvh - 400px)), 520px) }
+  .dashboard-native-container .twside { width:auto; max-height:none; overflow:visible; border-inline-start:0; border-block-start:1px solid var(--bd2) }
   .dashboard-native-container .twmeta { margin-inline-start:0 }
+  /* one "3D" button in the corner; it opens the controls as a small grid (two columns, so it stays clear of the Ask button), the word buttons become glyphs
+     (their names stay as the accessible label) */
+  .dashboard-native-container .twcam { inset-block-start:4px; inset-inline-end:4px; padding:3px; gap:3px; background:rgba(9,14,21,.6) }
+  .dashboard-native-container .twcamt { display:inline-flex; align-items:center; justify-content:center; font-size:12px; font-weight:700 }
+  .dashboard-native-container .twcam:not([data-open="1"]) .twcamrow { display:none }
+  .dashboard-native-container .twcam[data-open="1"] { display:grid; grid-template-columns:repeat(2, 38px); background:rgba(9,14,21,.82) }
+  .dashboard-native-container .twcam[data-open="1"] .twcamt { grid-column:1 / -1 }
+  .dashboard-native-container .twcamh { display:none }
+  .dashboard-native-container .twcamrow { display:contents }
+  .dashboard-native-container .twcamb { min-width:38px; min-height:38px; padding:2px }
+  .dashboard-native-container .twcamb.twcamw { font-size:0 }
+  .dashboard-native-container .twcamb.twcamw::before { content:attr(data-g); font-size:16px }
+  .dashboard-native-container .twtrace:not([hidden]) ~ .twcam { inset-block-start:52px }
 }
 @media (prefers-reduced-motion:reduce) {
   .dashboard-native-container .twsvg .tw-level { transition:none }

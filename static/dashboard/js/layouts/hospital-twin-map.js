@@ -38,6 +38,27 @@
     "SMDB_GF": { id: "p:ekoHospital:r:3260c26f-8dcc9eb8", floor: "LEVEL-01", type: "elecPanel", tags: ["elecPanel", "smdb"], bim: null, points: [
       ["Incomer_ON_OFF_Status", "", "B", "OFF,ON"],
       ["Incomer_Trip_Status", "", "B", "NORMAL,TRIP"]] },
+    /* PROVISIONAL (see PROVISIONAL below): in the 6 Nov export these two have no points at all and no BIM id, only the FIN record id. */
+    "MCC_GF": { id: "p:ekoHospital:r:328032b7-6a718568", floor: "LEVEL-01", type: "elecPanel", tags: ["elecPanel", "mcc"], bim: null, points: [] },
+    "DB_GF": { id: "p:ekoHospital:r:328032b7-2fe18cc2", floor: "LEVEL-01", type: "elecPanel", tags: ["db", "elecPanel"], bim: null, points: [] },
+    /* V2 equipment in the 6 Nov export with no points: the MDB (no BIM id), nine cameras and six medical devices (each with an IFC GlobalId from FIN, not
+       yet checked against an Eko Hospital model: none is available). Electrical readings for the MDB come from PMU_Main, see BORROW. */
+    "MDB": { id: "p:ekoHospital:r:328032b7-71b04cfa", floor: "LEVEL-01", type: "elecPanel", tags: ["elecPanel", "mdb"], bim: null, points: [] },
+    "CCTV_01": { id: "p:ekoHospital:r:3275e82e-871268cf", floor: "LEVEL-01", type: "cctv", tags: ["cctv"], bim: "0N2_7qYhzV2fHjvUXsA3DL", points: [] },
+    "CCTV_02": { id: "p:ekoHospital:r:3275e8e8-8f4d73dd", floor: "LEVEL-01", type: "cctv", tags: ["cctv"], bim: "15C9hkYjaryi3LYwxTUh8V", points: [] },
+    "CCTV_03": { id: "p:ekoHospital:r:3275e8e8-9d10c0e0", floor: "LEVEL-01", type: "cctv", tags: ["cctv"], bim: "3Q9Xq9LpBbDdwClhPdvJRH", points: [] },
+    "CCTV_04": { id: "p:ekoHospital:r:3275e929-77be7f12", floor: "LEVEL-02", type: "cctv", tags: ["cctv"], bim: "2oBWD5AX7I4YbN3hm5jA7n", points: [] },
+    "CCTV_05": { id: "p:ekoHospital:r:3275e929-4a88af05", floor: "LEVEL-02", type: "cctv", tags: ["cctv"], bim: "1umrm_IMUgTv5M_dVjNDqY", points: [] },
+    "CCTV_06": { id: "p:ekoHospital:r:3275e929-96575306", floor: "LEVEL-02", type: "cctv", tags: ["cctv"], bim: "07Qoc9Rf7_WYNDoVTV8asN", points: [] },
+    "CCTV_07": { id: "p:ekoHospital:r:3275e995-ae7d12ee", floor: "LEVEL-03", type: "cctv", tags: ["cctv"], bim: "2zohlaY67QBMyMbPvDJknX", points: [] },
+    "CCTV_08": { id: "p:ekoHospital:r:3275e995-8d710de2", floor: "LEVEL-03", type: "cctv", tags: ["cctv"], bim: "1M4EDLMPAjylxMUM4zwN_g", points: [] },
+    "CCTV_09": { id: "p:ekoHospital:r:3275e995-3f772b87", floor: "LEVEL-03", type: "cctv", tags: ["cctv"], bim: "2d0CT5Eg_iv_DReyjENMUU", points: [] },
+    "Dialysis Machine": { id: "p:ekoHospital:r:327c4826-23cfadc1", floor: "LEVEL-01", type: "other", tags: [], bim: "0q1KvvrGTE6OkpHWFiyqw6", points: [] },
+    "Stretcher": { id: "p:ekoHospital:r:327c4848-25037d5c", floor: "LEVEL-01", type: "other", tags: [], bim: "3cnYKHgGPEL9y_WhisbBNm", points: [] },
+    "Laser System": { id: "p:ekoHospital:r:327c487d-ef56d6c6", floor: "LEVEL-02", type: "other", tags: [], bim: "2RYeQGW$H2LvFkemIHa9aU", points: [] },
+    "Refrigerator with Freezer": { id: "p:ekoHospital:r:327c4897-66c47bdf", floor: "LEVEL-02", type: "other", tags: [], bim: "1zLtYklgzEURMf8B9jsTZR", points: [] },
+    "Ultrasound": { id: "p:ekoHospital:r:327c48b3-98b50ceb", floor: "LEVEL-02", type: "other", tags: [], bim: "0nTmzwD6rFwBly6r9SvQLo", points: [] },
+    "Scale Clinical Bariatric": { id: "p:ekoHospital:r:327c48d0-4984fb0c", floor: "LEVEL-03", type: "other", tags: [], bim: "08C6n76h526AkJKCDGnceQ", points: [] },
     "BOOSTER_PUMP": { id: "p:ekoHospital:r:3260c3c7-fe81fee5", floor: "LEVEL-01", type: "pump", tags: ["booster", "plumbing", "pump"], bim: null, points: [
       ["CutOutPressure", "bar", "N"],
       ["Pump01RunStatus", "", "B"],
@@ -630,12 +651,21 @@
       ["HWRTemp", "°C", "Nh"]] }
   };
   /* drawn ids whose FIN name differs. Each is the only FIN equipment with that type tag on that floor in the equipment export (the tests check this). */
-  var PIN = { CHILLED_WATER_PUMP_01: 'CHILLED_WATER_PUMP', CONDENSER_WATER_PUMP_01: 'CONDENSER_WATER_PUMP', SP_01: 'SUMP_PUMP', SMDB_01: 'SMDB_GF' };
+  var PIN = { CHILLED_WATER_PUMP_01: 'CHILLED_WATER_PUMP', CONDENSER_WATER_PUMP_01: 'CONDENSER_WATER_PUMP', SP_01: 'SUMP_PUMP', SMDB_01: 'SMDB_GF', MCC_01: 'MCC_GF', DB_01: 'DB_GF' };
+  /* PROVISIONAL pins: client-approved working assumptions, NOT confirmed against the live FIN server (unreachable when added; the saved export is the only
+     evidence). Each fits the same rule as the other pins (the only exported equipment with that type tag on that floor) but the names differ, so nothing
+     proves it. To confirm, delete the key here; to correct, change it in PIN and in REF. resolve() reports `provisional` so the view can say so. */
+  var PROVISIONAL = { SMDB_01: 'SMDB_GF', MCC_01: 'MCC_GF', DB_01: 'DB_GF' };
   /* the FIN type tag a drawn type must carry */
   var TYPE_TAG = { CHILLER: 'chiller', CT: 'coolingTower', PUMPSET: 'pump', BTU: 'btu', BOILER: 'boiler', AHU: 'ahu', FAHU: 'fahu', FCU: 'fcu', VAV: 'vav',
-    EF: 'exhaust', PMU: 'pmu', ATS: 'ats', SMDB: 'smdb', WM: 'water', BOOSTER: 'booster', SUMP: 'sump', O2: 'oxygen', MAC: 'compressor' };
-  /* FIN's floor for each drawn level (floorRef names in the equipment export). FIN numbers the ground floor LEVEL-01. */
-  var LEVELS = { GF: 'LEVEL-01', L1: 'LEVEL-02', L2: 'LEVEL-03', RF: 'ROOF' };
+    EF: 'exhaust', PMU: 'pmu', ATS: 'ats', MDB: 'mdb', SMDB: 'smdb', MCC: 'mcc', DB: 'db', CCTV: 'cctv', WM: 'water', BOOSTER: 'booster', SUMP: 'sump',
+    O2: 'oxygen', MAC: 'compressor' };
+  /* (the six medical devices have FIN type "other" and no tags: nothing to check, so they map by exact name and floor only) */
+  /* FIN's floor for each drawn level (floorRef names in the equipment export), V2's numbering: L1 is FIN LEVEL-01, the ground floor. */
+  var LEVELS = { L1: 'LEVEL-01', L2: 'LEVEL-02', L3: 'LEVEL-03', RF: 'ROOF' };
+  /* V1's level keys (GF, L1, L2, RF) to V2's. Use only on a value known to be V1's: its L1 and L2 are V2's L2 and L3, so a bare key cannot be told apart.
+     No V1 level key is stored anywhere (the twin keeps only fly-to and labels per session); the twin's setLevel takes 'GF', which has one meaning. */
+  var LEGACY_LEVELS = { GF: 'L1', L1: 'L2', L2: 'L3', RF: 'RF' };
   /* named only by the history export, with energy points and nothing else: no FIN id, type or floor to confirm them, and the Studio backend leaves
      equipment named ENERGY / USAGE / CALC out of the feed (main.py _flatten_equip). Shown as candidates, never mapped. */
   var NAME_ONLY = { GF_ENERGY: 'GF_ENERGY', '1F_ENERGY': '1F_ENERGY', '2F_ENERGY': '2F_ENERGY', RF_ENERGY: 'RF_ENERGY' };
@@ -681,7 +711,7 @@
   function resolve(e, idx, connected) {
     var fin = finName(e), ref = fin ? REF[fin] : null;
     var out = { id: e.id, level: e.level, fin: fin, finId: ref ? ref.id : null, refFloor: ref ? ref.floor : null, expected: fin ? refPoints(fin) : [],
-      pinned: has(PIN, e.id), candidate: null, asset: null, floor: null, floorDiffers: false, bimId: null, bimShared: false, type: null, state: null, reason: null };
+      pinned: has(PIN, e.id), provisional: has(PROVISIONAL, e.id) && PROVISIONAL[e.id] === PIN[e.id], candidate: null, asset: null, floor: null, floorDiffers: false, bimId: null, bimShared: false, type: null, state: null, reason: null };
     if (e.nonFin) { out.state = 'not-fin'; return out; }
     if (!fin) { out.state = 'unmapped'; out.reason = has(NAME_ONLY, e.id) ? 'name-only' : 'no-evidence'; out.candidate = NAME_ONLY[e.id] || null; return out; }
     if (connected === false) { out.state = 'offline'; return out; }
@@ -755,6 +785,32 @@
     return rows;
   }
 
+  /* ── what the mapping itself says of a drawn machine, before any live data (evidence: the 6 Nov export, never the live server) ──
+     mapping: confirmed (its exact FIN name, or a pin the export proves) · provisional (PROVISIONAL) · unmapped · not-fin.
+     noPoints: mapped, but FIN lists no point on it. bim: 'unverified' (FIN gives an IFC GlobalId; no Eko Hospital model has been checked) · 'none'. */
+  function mapStatus(e) {
+    var fin = finName(e), ref = fin ? REF[fin] : null;
+    return { id: e.id, level: e.level, fin: fin, finId: ref ? ref.id : null, floor: ref ? ref.floor : null,
+      floorDiffers: !!(ref && LEVELS[e.level] && ref.floor !== LEVELS[e.level]),
+      mapping: e.nonFin ? 'not-fin' : !ref ? 'unmapped' : PROVISIONAL[e.id] === fin ? 'provisional' : 'confirmed',
+      points: ref ? ref.points.length : 0, noPoints: !!ref && !ref.points.length, bim: ref && ref.bim ? 'unverified' : 'none' };
+  }
+
+  /* ── another FIN equipment's readings shown on a drawn machine's panel, always labelled with their source ──
+     The MDB has no points in FIN; its electrical readings are PMU_Main's. PMU_Main stays its own FIN equipment (resolved here like any other, never mapped
+     to the MDB), and each row carries source: 'PMU_Main'. When PMU_Main is not in the feed, every row says unavailable. */
+  var BORROW = { MDB: { from: 'PMU_Main', type: 'PMU', level: 'L1', points: ['Voltage', 'Frequency', 'Current', 'ActivePower', 'TotalEnergy', 'DEWA_SupplyLost'] } };
+  function borrowedRows(id, idx, connected, stale) {
+    var b = has(BORROW, id) ? BORROW[id] : null; if (!b) return [];
+    var src = resolve({ id: b.from, type: b.type, level: b.level }, idx, connected);
+    if (stale && src.state === 'mapped') src.state = 'stale';
+    var ok = src.state === 'mapped' || src.state === 'stale';
+    return pointRows(ok ? src : { expected: src.expected, asset: null, state: src.state }, connected)
+      .filter(function (r) { return b.points.indexOf(r.name) >= 0; })
+      .sort(function (x, y) { return b.points.indexOf(x.name) - b.points.indexOf(y.name); })
+      .map(function (r) { r.source = b.from; if (r.state === 'missing') r.state = 'unavailable'; return r; });
+  }
+
   /* ── alarms ── */
   /* The FIN alarm point an alarm is on: the longest alarm-point name its state ends with ("ahu_valSim_FD&D_4_Overcooling" -> FD&D_4_Overcooling, not the
      shorter Overcooling text point). null when none fits. */
@@ -820,24 +876,27 @@
     });
   }
 
-  /* ── equipment relationships: the reference's LINKS, verbatim (EKO_Live_Twin.html), on the drawn machines. Kept apart from the pipe geometry. ──
+  /* ── equipment relationships: the client's reference relationships (V2 design, EKO_Live_Twin_Schematic_Version2.html), generated by rules on the drawn machines and
+     kept apart from the pipe geometry. They are reference relationships, not engineering-verified. ──
      kind: stop (the receiver stops or loses its function) · shift (its values change). prop: the effect keeps spreading (every stop; some shifts). */
   function buildLinks(EQUIP) {
     var L = [], EQ = {};
     EQUIP.forEach(function (e) { EQ[e.id] = e; });
     function LK(from, to, kind, what, prop) { L.push({ from: from, to: to, kind: kind, what: what, prop: prop == null ? kind === 'stop' : !!prop }); }
     var ATS = 'AUTOMATIC_TRANSFER_SWITCH_01', by = function (f) { return EQUIP.filter(f); };
-    LK('DEWA_SUPPLY', 'PMU_Main', 'stop', 'Mains supply');
-    LK('PMU_Main', ATS, 'shift', 'Voltage, frequency \u2192 transfer to emergency', true);
+    var BOARD = { ATS: 1, MDB: 1, SMDB: 1, MCC: 1, DB: 1 };
+    /* power: DEWA and the generator reach the ATS, the ATS feeds the MDB, the MDB the SMDBs, each SMDB its MCC and DB (the DB only where one is drawn), and every
+       board the equipment it powers (its `feed`). Each powered item also reports its load back to its board. */
+    LK('DEWA_SUPPLY', 'MDB', 'shift', 'Mains voltage and frequency', true);
+    LK('MDB', ATS, 'shift', 'Voltage, frequency \u2192 transfer to the generator', true);
     LK('GENERATOR', ATS, 'shift', 'Emergency supply');
-    ['SMDB_01', 'SMDB_02', 'SMDB_03'].forEach(function (x) { LK(ATS, x, 'stop', 'Power to the floor board'); });
-    by(function (e) { return e.feed === 'ATS' && e.type !== 'SMDB'; }).forEach(function (e) { LK(ATS, e.id, 'stop', 'Essential power'); });
-    by(function (e) { return e.feed && e.feed.indexOf('SMDB') === 0; }).forEach(function (e) { LK(e.feed, e.id, 'stop', 'Floor power'); });
-    by(function (e) { return e.meterFloor; }).forEach(function (m) {
-      by(function (e) { return !e.nonFin && !e.meterFloor && e.level === m.meterFloor && e.feed; }).forEach(function (e) { LK(e.id, m.id, 'shift', 'Electrical load (kW)'); });
-      LK(m.id, 'PMU_Main', 'shift', 'Floor load \u2192 building load');
+    LK(ATS, 'MDB', 'stop', 'Supply to the main board (PowerAvailable)');
+    by(function (e) { return e.feed && e.feed !== ATS; }).forEach(function (e) {
+      var bt = EQ[e.feed] && EQ[e.feed].type;
+      LK(e.feed, e.id, 'stop', bt === 'MDB' ? 'PowerAvailable \u2192 floor board' : bt === 'SMDB' ? 'PowerAvailable \u2192 board' : 'Power');
+      LK(e.id, e.feed, 'shift', BOARD[e.type] ? 'Loads (kW) \u2192 board meters' : 'ActiveLoad (kW)');
     });
-    LK(ATS, 'PMU_Main', 'shift', 'On emergency \u2192 mains reads 0 kW');
+    LK(ATS, 'MDB', 'shift', 'On generator \u2192 building meters read 0');
     LK('CHILLER_01', 'CHILLED_WATER_PUMP_01', 'stop', 'EnableCmd, AlarmStatus');
     LK('CHILLER_01', 'CONDENSER_WATER_PUMP_01', 'stop', 'EnableCmd, AlarmStatus');
     LK('CHILLED_WATER_PUMP_01', 'CHILLER_01', 'stop', 'Flow proof, cooling demand');
@@ -859,20 +918,32 @@
       (e.vavs || []).forEach(function (v) { LK(e.id, v, 'stop', 'Supply air, fan status'); });
     });
     by(function (e) { return e.type === 'EF'; }).forEach(function (e) { LK(e.fahu, e.id, 'stop', 'Supply fan status (Auto)'); });
-    by(function (e) { return e.type === 'FCU'; }).forEach(function (e) { LK(e.fahu, e.id, 'shift', 'Fresh air to the room', true); LK(e.id, e.fahu, 'shift', 'Return air to the heat wheel'); });
+    by(function (e) { return e.type === 'FCU'; }).forEach(function (e) { LK(e.fahu, e.id, 'shift', 'Fresh air to the room', true); LK(e.id, e.fahu, 'shift', 'Return air to the heat wheel');
+      LK(e.id, e.feed, 'shift', 'Occupancy \u2192 lighting and small power');
+    });
     by(function (e) { return e.type === 'WM'; }).forEach(function (w) {
       (w.fcus || []).forEach(function (f) { LK(f, w.id, 'shift', 'Occupancy \u2192 water use'); });
       LK(w.id, 'BOILER_01', 'shift', 'Hot water demand');
       LK(w.id, 'BOOSTER_PUMP', 'shift', 'Water demand');
-      LK(w.id, 'SP_01', 'shift', 'Drainage inflow');
+      LK(w.id, 'SUMP_PUMP', 'shift', 'Drainage inflow');
       LK('BOOSTER_PUMP', w.id, 'shift', 'Riser pressure \u2192 floor flow', true);
     });
     by(function (e) { return e.type === 'FCU'; }).forEach(function (e) {
       LK(e.id, 'OXYGEN_PLANT_01', 'shift', 'Occupancy \u2192 oxygen demand');
       LK(e.id, 'MEDICAL_AIR_COMPRESSOR_01', 'shift', 'Occupancy \u2192 air demand');
     });
-    LK('CHILLER_01', 'PMU_Main', 'shift', 'Power'); LK('BOILER_01', 'PMU_Main', 'shift', 'Power');
-    return L.filter(function (l) { return EQ[l.from] && EQ[l.to]; });
+    /* One edge per from > to pair, nothing lost. An exact repeat (same wording) is dropped. A second relationship between the same two machines is kept on the
+       edge as `also` ({ kind, what, prop }); where one is a stop and the other a shift, the stop is the edge (a physical dependency) and the shift is its note. */
+    var out = [], at = {};
+    L.filter(function (l) { return EQ[l.from] && EQ[l.to]; }).forEach(function (l) {
+      var k = l.from + '>' + l.to, e = at[k];
+      if (!e) { e = at[k] = { from: l.from, to: l.to, kind: l.kind, what: l.what, prop: l.prop, also: [] }; out.push(e); return; }
+      if (e.what === l.what && e.kind === l.kind) return;
+      if (l.kind === 'stop' && e.kind !== 'stop') {
+        e.also.push({ kind: e.kind, what: e.what, prop: e.prop }); e.kind = l.kind; e.what = l.what; e.prop = l.prop;
+      } else if (!e.also.some(function (x) { return x.kind === l.kind && x.what === l.what; })) e.also.push({ kind: l.kind, what: l.what, prop: l.prop });
+    });
+    return out;
   }
   /* The graph over the drawn machines. downstream(id): what id stopping reaches, as the reference's downstream(): { id: { state: fail · warn, step, via,
      weak } } (fail = would stop; warn = values would change; weak = only through a measurement, the effect stops there). upstream(id): every machine whose
@@ -1046,7 +1117,8 @@
     return rr.length ? (rr.some(function (x) { return x.value; }) ? 'on' : 'off') : null;
   }
 
-  return { REF: REF, PIN: PIN, TYPE_TAG: TYPE_TAG, LEVELS: LEVELS, NAME_ONLY: NAME_ONLY, fold: fold, finName: finName, refPoints: refPoints, bimOf: bimOf,
+  return { REF: REF, PIN: PIN, PROVISIONAL: PROVISIONAL, TYPE_TAG: TYPE_TAG, LEVELS: LEVELS, LEGACY_LEVELS: LEGACY_LEVELS, NAME_ONLY: NAME_ONLY,
+    BORROW: BORROW, mapStatus: mapStatus, borrowedRows: borrowedRows, fold: fold, finName: finName, refPoints: refPoints, bimOf: bimOf,
     index: index, resolve: resolve, readPoint: readPoint, pointRows: pointRows, alarmPointOf: alarmPointOf, alarmsFor: alarmsFor, alarmIndex: alarmIndex,
     isActive: isActive, fddRows: fddRows, buildLinks: buildLinks, graph: graph, evidence: evidence, floorCheck: floorCheck,
     bimLinks: bimLinks, modelLevel: modelLevel, candidateFor: candidateFor, feedStale: feedStale, STALE_MS: STALE_MS,
