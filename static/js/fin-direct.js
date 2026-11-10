@@ -375,7 +375,7 @@
       mahu: ['setpoint', 'status', 'output', 'choice'],
       fahu: ['setpoint', 'status', 'output', 'choice']
     },
-    status: ['startstop', 'runcmd', 'onoff', 'fancmd', 'fancommand', 'safancmd', 'rafancmd', 'supplyfancmd', 'exhaustfancmd', 'sfvfdcmd', 'efvfdcmd', 'hrwcmd', 'sensiblecmd', 'enablecmd', 'fanenablecmd', 'status', 'effectiveoccupancy'],
+    status: ['startstop', 'runcmd', 'onoff', 'fancmd', 'fancommand', 'safancmd', 'rafancmd', 'supplyfancmd', 'exhaustfancmd', 'sfvfdcmd', 'efvfdcmd', 'hrwcmd', 'sensiblecmd', 'enablecmd', 'fanenablecmd', 'fanrunstatus', 'status', 'effectiveoccupancy'],
     output: ['coolingvalvecmd', 'coolingcoil', 'oadamper', 'madamper', 'eadamper', 'sfvfdspdcmd', 'efvfdspdcmd', 'hrwvfdspdcmd', 'sensiblevfdspdcmd', 'sfvfd', 'rfvfd', 'safanvfd', 'rafanvfd', 'supplyfanspeedcmd', 'exhaustfanspeedcmd'],
     choice: ['fanspeedmode', 'fanspeed'],
     ranges: {
