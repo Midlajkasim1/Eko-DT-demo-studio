@@ -9,7 +9,7 @@ import {
 } from '@/lib/hvacGeometry'
 import type { HvacCtx } from '@/lib/hvacGeometry'
 import { createFahuSchematic } from '@/lib/fahuSchematic'
-import { pick, sensor, statusOf, speedOf, part, filterOf } from '@/lib/ekoPointRules'
+import { pick, sensor, statusOf, speedOf, part, filterOf, damper } from '@/lib/ekoPointRules'
 import type { PointRules } from '@/lib/ekoPointRules'
 
 /**
@@ -42,8 +42,8 @@ const SF = part(['sf'], ['safan', 'supplyfan'])
 const EF = part(['ef'], ['eafan', 'exhaustfan'])
 const HRW = part(['hrw'], ['heatrecovery', 'wheel'])
 export const EKO_FAHU_POINT_RULES: EkoFahuPointRules = {
-  faDamper: [sensor('fadamper'), sensor('oadamper')],
-  eaDamper: [sensor('eadamper')],
+  faDamper: damper(['fa', 'oa'], ['freshair', 'outsideair', 'outdoorair']),
+  eaDamper: damper(['ea'], ['exhaust']),
   sfStatus: [statusOf(SF)],
   efStatus: [statusOf(EF)],
   sfSpeed: [speedOf(SF)],

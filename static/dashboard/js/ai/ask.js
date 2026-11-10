@@ -16,16 +16,21 @@ window.EKO_AI = (function(){
   'use strict';
   let E = null;
   const LS = 'eko-ai-conv-v1', LSF = 'eko-ai-feedback-v1', MAX_CONV = 10;
-  const C = () => window.EKO_C, R = () => window.EKO_R, RN = () => window.EKO_RN, LLM = () => window.EKO_LLM, RX = () => window.EKO_RX;
+  const C = () => window.EKO_C, R = () => window.EKO_R, RN = () => window.EKO_RN, LLM = () => window.EKO_LLM, RX = () => window.EKO_RX, CHAT = () => window.EKO_CHAT;
   const esc = s => C().esc(s);
   const icon = (n, s) => C().icon(n, s);
   const t = (k, v) => E.t(k, v);
+  const tOr = (k, fb, v) => { const s = E.t(k, v); return s !== k ? s : fb; };   /* a translation, or fb when the key does not exist */
   const hhmm = d => { d = d instanceof Date ? d : new Date(d); return isNaN(d) ? '' : String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
   const dateLbl = iso => { try{ return new Date(iso).toLocaleDateString(E.lang === 'ar' ? 'ar-AE' : 'en-GB', { day:'numeric', month:'short' }); }catch(e){ return ''; } };
   const uid = () => 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
   /* --------------------------------- state --------------------------------- */
-  const S = { open:false, ctx:null, ctxFresh:false, hist:false, menu:false, streaming:null, fbOpen:null, lastCopy:null, lastExport:null, log:[], unread:false, route:null };
+  const S = { open:false, ctx:null, ctxFresh:false, hist:false, menu:false, streaming:null, fbOpen:null, lastCopy:null, lastExport:null, log:[], unread:false, route:null,
+    draft:'',          /* the question being typed: the panel is rebuilt by every render, so the input's text lives here */
+    caret:null,        /* the input's selection when a render found it focused, put back by after() */
+    stick:true, top:0  /* the message list: following the newest turn, or the position the reader left it at */ };
+  const nearBottom = box => box.scrollHeight - box.scrollTop - box.clientHeight <= 24;
   let store = null;
   function load(){ if(store) return store; try{ store = JSON.parse(localStorage.getItem(LS) || 'null'); }catch(e){ store = null; } if(!store || !Array.isArray(store.convs)) store = { convs:[], cur:null }; return store; }
   function save(){ try{ localStorage.setItem(LS, JSON.stringify(store)); }catch(e){} }
@@ -143,12 +148,65 @@ window.EKO_AI = (function(){
     }, 30) };
     E.set({});   /* the input row shows Stop while the answer streams */
   }
-  function stop(){ if(!S.streaming) return; const turn = S.streaming.turn; clearInterval(S.streaming.timer); S.streaming = null; turn.a.text = turn.a.shown || ''; turn.a.stopped = true; delete turn.a.shown; save(); E.set({}); }
+  function stop(){
+    if(!S.streaming) return; const turn = S.streaming.turn, req = S.streaming.req, timer = S.streaming.timer;
+    S.streaming = null;
+    if(req) req.abort(); else clearInterval(timer);
+    turn.a.text = turn.a.shown || ''; turn.a.stopped = true; delete turn.a.shown;
+    if(turn.a.status === 'pending' || turn.a.status === 'streaming'){ turn.a.status = 'ok'; turn.a.at = new Date().toISOString(); }
+    save(); E.set({});
+  }
+
+  /* ---------------------------- Eko-Chat backend ---------------------------- */
+  /* features.ask = "eko-chat" (D-Phase 3): the question goes to POST /api/chat
+     (llm/eko-chat.js) and the answer streams back. The backend runs the tools,
+     checks every number in the answer and builds the card from the tool
+     result; this file only renders what arrives. Every callback first checks
+     that its turn is still the streaming one, so a replaced request can never
+     write into a newer answer. */
+  const useBackend = () => !!(E && E.data && (E.data.features || {}).ask === 'eko-chat' && CHAT());
+  let chat = null;
+  function askBackend(q, turn){
+    if(!chat) chat = CHAT().session();
+    Object.assign(turn.a, { backend:true, tools:[], card:null, parts:null, project:'', figures:[], evidence:null, actions:[], sources:'', window:'' });
+    turn.a.shown = '';
+    const live = () => !!S.streaming && S.streaming.turn === turn;
+    const req = chat.send(q, {
+      start(d){ if(live()) turn.a.model = d.model || ''; },
+      tool(d){
+        if(!live()) return;
+        const run = d.status !== 'running' && turn.a.tools.find(x => x.tool === d.tool && x.status === 'running');
+        if(run) Object.assign(run, d); else turn.a.tools.push(Object.assign({}, d));
+        patchMsgs();
+      },
+      token(d){ if(!live()) return; turn.a.shown += d.text; turn.a.status = 'streaming'; patchMsgs(); },
+      done(d){
+        if(!live()) return;
+        turn.a.text = String(d.answer || ''); turn.a.status = d.grounded === false ? 'ungrounded' : 'ok';
+        turn.a.partial = d.partial === true;     /* the backend's deadline passed: what had been read, and nothing more */
+        turn.a.card = d.card || null; turn.a.model = d.model || turn.a.model || '';
+        turn.a.parts = Array.isArray(d.parts) && d.parts.length ? d.parts : null;     /* several questions: one section each, in the order asked */
+        turn.a.project = (d.project && d.project.name) || '';
+        turn.a.sources = d.card ? t('ai.srcLive', { project: d.card.project || (d.project && d.project.name) || '', t: hhmm(d.card.as_of) }) : '';
+      },
+      error(d){ if(!live()) return; turn.a.status = 'error'; turn.a.errCode = d.code || 'error'; }
+    });
+    S.streaming = { turn, req };
+    E.set({});   /* the input row shows Stop */
+    req.promise.then(r => {
+      if(!live()) return;
+      S.streaming = null; delete turn.a.shown; turn.a.at = new Date().toISOString();
+      if(r.status !== 'done' && turn.a.status !== 'error'){ turn.a.status = 'error'; turn.a.errCode = r.code || 'stream_interrupted'; }
+      if(!S.open) S.unread = true;
+      save(); E.set({});
+    });
+  }
 
   /* ---------------------------------- ask ---------------------------------- */
   async function ask(question, opts){
     opts = opts || {};
     const q = String(question || '').trim(); if(!q) return;
+    S.stick = true;   /* sending is the reader asking to see the answer */
     if(opts.regenerateOf == null && S.route && S.route(q)) return;   /* D133: a report ask is the report engine's */
     S.ctxFresh = false;
     if(S.streaming) stop();
@@ -158,6 +216,7 @@ window.EKO_AI = (function(){
     if(opts.regenerateOf != null) c.turns.splice(opts.regenerateOf, 1, turn); else c.turns.push(turn);
     c.updated = new Date().toISOString();
     open(); save(); E.set({});
+    if(useBackend()){ askBackend(q, turn); return; }
     await answer(q, S.ctx, turn);
     turn.a.at = new Date().toISOString();
     if(turn.a.status === 'error'){ if(!S.open) S.unread = true; save(); E.set({}); return; }
@@ -168,7 +227,7 @@ window.EKO_AI = (function(){
   function open(ctx){
     if(ctx !== undefined){ S.ctx = ctx; S.ctxFresh = !!ctx; }
     S.unread = false;
-    if(!S.open){ S.open = true; S.opening = true; }   /* D132c: a floating pop-up over the page — the page and its panels stay as they are */
+    if(!S.open){ S.open = true; S.opening = true; S.stick = true; }   /* D132c: a floating pop-up over the page — the page and its panels stay as they are */
     S.hist = false; S.menu = false;
   }
   function close(){ if(!S.open) return; S.open = false; S.hist = false; S.menu = false; S.fbOpen = null; if(S.streaming) stop(); }
@@ -197,7 +256,15 @@ window.EKO_AI = (function(){
 
   /* ------------------------------- clipboard ------------------------------- */
   function copyText(text){ S.lastCopy = text; try{ if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => {}); }catch(e){} }
-  function turnText(turn, withSources){ return turn.a.text + (withSources && turn.a.sources ? '\n' + turn.a.sources : ''); }
+  function turnText(turn, withSources){ return turn.a.text + (turn.a.card ? '\n' + cardHeadline(turn.a.card) : '') + (withSources && turn.a.sources ? '\n' + turn.a.sources : ''); }
+  function cardMd(c){
+    if(!c || !c.headline) return [];
+    const cols = c.columns || [], cell = (v, k) => cardCell(v, k).replace(/\|/g, '\\|');
+    const out = ['**' + cardHeadline(c) + '**', ''];
+    if((c.rows || []).length) out.push('| ' + cols.map(k => tOr('ai.card.c.' + k, k)).join(' | ') + ' |', '|' + cols.map(() => '---').join('|') + '|', ...c.rows.map(r => '| ' + cols.map((k, j) => cell(r[j], k)).join(' | ') + ' |'), '');
+    if(c.interpreted_as) out.push('_' + cardInterpreted(c) + '_', '');
+    return out;
+  }
   function convText(c){ return c.turns.map(tr => t('ai.youLbl') + ': ' + tr.q.text + '\n' + t('ai.ekoLbl') + ': ' + tr.a.text + (tr.a.sources ? '\n' + tr.a.sources : '') + '\n' + hhmm(tr.a.at || tr.q.at)).join('\n\n'); }
 
   /* -------------------------------- export --------------------------------- */
@@ -210,6 +277,7 @@ window.EKO_AI = (function(){
   function exportMd(c){
     const lines = ['# ' + t('ai.exportTitle'), '', t('ai.convLine', { n:c.turns.length, d:dateLbl(c.at) }), ''];
     c.turns.forEach(tr => { lines.push('## ' + t('ai.youLbl') + ' · ' + hhmm(tr.q.at)); lines.push(tr.q.text, ''); lines.push('**' + t('ai.ekoLbl') + '** · ' + hhmm(tr.a.at || tr.q.at) + (tr.a.window ? ' · ' + tr.a.window : '')); lines.push(tr.a.text || '', '');
+      lines.push(...cardMd(tr.a.card));
       if(tr.a.figures && tr.a.figures.length){ lines.push('| ' + t('ai.colFig') + ' | ' + t('ai.colVal') + ' |', '|---|---|'); tr.a.figures.forEach(f => lines.push('| ' + f.label + ' | ' + f.fmt + (f.unit ? ' ' + f.unit : '') + ' |')); lines.push(''); }
       if(tr.a.sources) lines.push('_' + tr.a.sources + '_', ''); });
     lines.push('---', '**' + t('rpFt.label') + '**'); footerRows().forEach(([k, v]) => lines.push('- ' + k + ': ' + v));
@@ -221,6 +289,7 @@ window.EKO_AI = (function(){
     const body = `<div class="aiprint"><h1>${esc(t('ai.exportTitle'))}</h1><p class="tCap">${esc(t('ai.convLine', { n:c.turns.length, d:dateLbl(c.at) }))}</p>
       ${c.turns.map(tr => `<section class="aiprintturn"><h3>${esc(t('ai.youLbl'))} · ${esc(hhmm(tr.q.at))}</h3><p>${esc(tr.q.text)}</p>
         <h3>${esc(t('ai.ekoLbl'))} · ${esc(hhmm(tr.a.at || tr.q.at))}${tr.a.window ? ' · ' + esc(tr.a.window) : ''}</h3>${(tr.a.text || '').split(/\n+/).map(p => `<p>${esc(p)}</p>`).join('')}
+        ${cardHtml(tr.a.card)}
         ${tr.a.figures && tr.a.figures.length ? `<table class="rpt"><thead><tr><th>${esc(t('ai.colFig'))}</th><th>${esc(t('ai.colVal'))}</th></tr></thead><tbody>${tr.a.figures.map(f => `<tr><td>${esc(f.label)}</td><td class="tMonoS">${esc(f.fmt)}${f.unit ? ' ' + esc(f.unit) : ''}</td></tr>`).join('')}</tbody></table>` : ''}
         ${tr.a.sources ? `<p class="tCap">${esc(tr.a.sources)}</p>` : ''}</section>`).join('')}
       <div class="rpfootblock"><b>${esc(t('rpFt.label'))}</b>${footerRows().map(([k, v]) => `<div class="rpfootrow"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}</div></div>`;
@@ -245,18 +314,143 @@ window.EKO_AI = (function(){
     if(!figs || !figs.length) return '';
     return `<table class="aifigs"><tbody>${figs.map(f => `<tr><td>${esc(f.label)}</td><td class="tMonoS">${esc(f.fmt)}${f.unit ? ` <span class="tCap">${esc(f.unit)}</span>` : ''}${f.flagged ? ` <span class="aiflag tipU" data-tip="${esc(t('rpB.flagged'))}" role="img" aria-label="${esc(t('rpB.flagged'))}">${icon('warn', 12)}</span>` : ''}</td></tr>`).join('')}</tbody></table>`;
   }
+  /* Eko-Chat answers: the card the backend built from the tool result, rendered as given */
+  function cardText(o, kind, extra){ if(!o) return ''; return tOr('ai.card.' + kind + '.' + o.key, o.text || '', Object.assign({}, o.params || {}, extra || {})); }
+  function filtersText(list){
+    return (list || []).map(f => ' · ' + tOr('ai.card.f.' + f.name, f.name) + ': ' + (typeof f.value === 'boolean' ? t(f.value ? 'ai.card.yes' : 'ai.card.no') : f.value)).join('');
+  }
+  function cardCell(v, col){
+    if(v == null || v === '') return '—';
+    if(typeof v === 'boolean') return t(v ? 'ai.card.yes' : 'ai.card.no');
+    if(col === 'metric') return tOr('ai.card.m.' + v, String(v));
+    if(col === 'severity') return tOr('ai.card.sev.' + v, String(v));
+    if(col === 'status' || col === 'data') return tOr('ai.card.cap.' + v, String(v));   /* a capability's status and data kind; any other value stays as sent */
+    return String(v);
+  }
+  function cardHeadline(c){ return c && c.headline ? cardText(c.headline, 'h') : ''; }
+  function cardInterpreted(c){ return c && c.interpreted_as ? t('ai.interpreted', { text: cardText(c.interpreted_as, 'i', { f: filtersText(c.filters) }) }) : ''; }
+  function cardHtml(c){
+    if(!c || !c.headline) return '';
+    const cols = c.columns || [], rows = c.rows || [];
+    const table = rows.length ? `<table class="aitbl"><thead><tr>${cols.map(k => `<th class="tCap">${esc(tOr('ai.card.c.' + k, k))}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(r => `<tr>${cols.map((k, j) => `<td>${esc(cardCell(r[j], k))}</td>`).join('')}</tr>`).join('')}</tbody></table>` : '';
+    const more = c.truncated ? `<p class="tCap">${esc(t('ai.card.more', { n: rows.length, total: c.total }))}</p>` : '';
+    return `<div class="aicard"><p><b>${esc(cardHeadline(c))}</b></p>${table}${more}${c.interpreted_as ? `<p class="aisrc">${esc(cardInterpreted(c))}</p>` : ''}</div>`;
+  }
+  /* " · not mapped: Live Points: avg_zone_temp, avg_zone_temp_sp": the Data Mapping names a failed read needs (names only, grouped by block) */
+  function missingText(list){
+    if(!Array.isArray(list) || !list.length) return '';
+    const groups = [];
+    list.forEach(m => {
+      if(!m || typeof m.mapping !== 'string') return;
+      let g = groups.find(x => x.mapping === m.mapping);
+      if(!g) groups.push(g = { mapping: m.mapping, keys: [] });
+      if(typeof m.key === 'string' && m.key) g.keys.push(m.key);
+    });
+    if(!groups.length) return '';
+    return ' · ' + t('ai.tool.notMapped', { list: groups.map(g => tOr('ai.mapping.' + g.mapping, g.mapping) + (g.keys.length ? ': ' + g.keys.join(', ') : '')).join('; ') });
+  }
+  function toolText(x){
+    if(x.tool === 'unknown') return t('ai.tool.unknown');
+    const name = tOr('ai.toolName.' + x.tool, x.tool);
+    if(x.status === 'failed') return t('ai.tool.failed', { name, reason: tOr('ai.reason.' + x.reason, x.reason || '') }) + missingText(x.missing);
+    return t(x.status === 'completed' ? 'ai.tool.completed' : 'ai.tool.running', { name });
+  }
+  function toolsHtml(a){ return a.tools && a.tools.length ? `<div class="aitools tCap">${a.tools.map(x => `<div data-status="${esc(x.status)}">${esc(toolText(x))}</div>`).join('')}</div>` : ''; }
+  function errText(a){ return a.errCode ? tOr('ai.err.' + a.errCode, t('ai.error')) : t('ai.error'); }
+  /* ---- safe Markdown (Eko-Chat answers) ----
+     The model's text is DATA. It is HTML-escaped first, whole, with the dashboard's own esc(); only then are the few Markdown shapes below turned into a
+     FIXED set of tags (p, h4-h6, ul, ol, li, table, thead, tbody, tr, th, td, pre, code, strong, em), whose only attributes are dir="auto" (each line or
+     cell takes its own direction, so Arabic and English mix) and a class of ours. No raw HTML survives, a [text](url) or ![](url) stays text (no link,
+     no image, no javascript: URL), and nothing from the text becomes an attribute or a style. */
+  function mdInline(s){
+    const codes = [];
+    s = s.replace(/`([^`\n]+)`/g, (m, c) => { codes.push(c); return '\u0001' + (codes.length - 1) + '\u0001'; });
+    s = s.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*\w])\*([^*\s][^*\n]*?)\*(?![*\w])/g, '$1<em>$2</em>');
+    s = s.replace(/(^|[^\w])_([^_\s][^_\n]*?)_(?!\w)/g, '$1<em>$2</em>');      /* only at word edges: avg_zone_temp stays as written */
+    return s.replace(/\u0001(\d+)\u0001/g, (m, i) => '<code>' + String(codes[+i] == null ? '' : codes[+i]) + '</code>');
+  }
+  function mdHtml(text){
+    const lines = esc(String(text == null ? '' : text).replace(/[\u0000\u0001]/g, '')).replace(/\r\n?/g, '\n').split('\n');
+    const cellsOf = row => row.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+    const isSep = ln => ln.includes('|') && ln.includes('-') && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(ln);
+    const out = [];
+    let i = 0, m;
+    while(i < lines.length){
+      const ln = lines[i];
+      if(!ln.trim()){ i++; continue; }
+      if(/^\s*```/.test(ln)){                                       /* a code block: its text is shown as written (already escaped) */
+        const body = [];
+        i++;
+        while(i < lines.length && !/^\s*```/.test(lines[i])) body.push(lines[i++]);
+        i++;
+        out.push('<pre dir="ltr" class="aimdcode"><code>' + body.join('\n') + '</code></pre>');
+        continue;
+      }
+      if((m = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(ln))){
+        const lvl = m[1].length <= 2 ? 4 : m[1].length === 3 ? 5 : 6;
+        out.push('<h' + lvl + ' dir="auto" class="aimdh">' + mdInline(m[2]) + '</h' + lvl + '>');
+        i++;
+        continue;
+      }
+      if(ln.includes('|') && i + 1 < lines.length && isSep(lines[i + 1])){
+        const head = cellsOf(ln);
+        i += 2;
+        const body = [];
+        while(i < lines.length && lines[i].trim() && lines[i].includes('|')) body.push(cellsOf(lines[i++]));
+        out.push('<table class="aimdtbl"><thead><tr>' + head.map(c => '<th dir="auto">' + mdInline(c) + '</th>').join('') + '</tr></thead><tbody>'
+          + body.map(r => '<tr>' + r.map(c => '<td dir="auto">' + mdInline(c) + '</td>').join('') + '</tr>').join('') + '</tbody></table>');
+        continue;
+      }
+      if(/^\s*[-*+]\s+/.test(ln)){
+        const items = [];
+        while(i < lines.length && (m = /^\s*[-*+]\s+(.*)$/.exec(lines[i]))){ items.push(m[1]); i++; }
+        out.push('<ul class="aimdl">' + items.map(x => '<li dir="auto">' + mdInline(x) + '</li>').join('') + '</ul>');
+        continue;
+      }
+      if(/^\s*\d{1,3}[.)]\s+/.test(ln)){
+        const items = [];
+        while(i < lines.length && (m = /^\s*\d{1,3}[.)]\s+(.*)$/.exec(lines[i]))){ items.push(m[1]); i++; }
+        out.push('<ol class="aimdl">' + items.map(x => '<li dir="auto">' + mdInline(x) + '</li>').join('') + '</ol>');
+        continue;
+      }
+      out.push('<p dir="auto">' + mdInline(ln.trim()) + '</p>');
+      i++;
+    }
+    return out.join('');
+  }
+  /* ---- end safe Markdown ---- */
+  /* ---- multi-question parts (Eko-Chat) ----
+     A message of several questions comes back as parts, in the order asked: { question, status, answer, card?, as_of? }. Each part is a section
+     with its question as the heading, its own answer through the same safe Markdown as every answer, its own card, and, unless it was answered,
+     a status label. Every piece of text is escaped first; the status is checked against a fixed list before it is used as an attribute. */
+  const PART_STATUS = ['answered', 'unavailable', 'unsupported', 'failed'];
+  function partsHtml(parts, project){
+    if(!Array.isArray(parts) || !parts.length) return '';
+    return `<div class="aiparts">${parts.map((p, n) => {
+      if(!p || typeof p !== 'object') return '';
+      const st = PART_STATUS.includes(p.status) ? p.status : 'failed';
+      const label = st === 'answered' ? '' : `<span class="aipartst" data-status="${st}">${esc(t('ai.part.' + st))}</span>`;
+      const src = st === 'answered' && p.as_of ? `<p class="aisrc">${esc(t('ai.srcLive', { project: project || '', t: hhmm(p.as_of) }))}</p>` : '';
+      return `<section class="aipart" data-status="${st}"><h5 class="aiparth" dir="auto"><span class="aipartn">${n + 1}</span><span class="aipartq">${esc(String(p.question == null ? '' : p.question))}</span>${label}</h5>
+        <div class="aipartbody aitext">${mdHtml(p.answer)}</div>${st === 'answered' ? cardHtml(p.card) : ''}${src}</section>`;
+    }).join('')}</div>`;
+  }
+  /* ---- end multi-question parts ---- */
   function turnHtml(tr, i){
     const a = tr.a, streaming = S.streaming && S.streaming.turn === tr, text = streaming ? (a.shown || '') : (a.text || '');
-    const paras = text.split(/\n+/).filter(Boolean).map(p => `<p>${esc(p)}</p>`).join('');
-    const note = a.status === 'unreachable' ? t('ai.unreachable') : a.status === 'fallback' ? t('ai.fallback') : a.stopped ? t('ai.stopped') : a.status === 'regenerated' ? t('ai.regenerated') : '';
+    const paras = mdHtml(text);
+    const note = a.status === 'unreachable' ? t('ai.unreachable') : a.status === 'fallback' ? t('ai.fallback') : a.status === 'ungrounded' ? t('ai.notSupported') : a.stopped ? t('ai.stopped') : a.status === 'regenerated' ? t('ai.regenerated') : a.partial ? t('ai.partial') : '';
     const fb = a.feedback || null;
     const fbForm = S.fbOpen === i ? `<div class="aifb"><input class="aifbin" data-chg="aiFbNote" data-i="${i}" value="${esc((fb && fb.note) || '')}" placeholder="${esc(t('ai.fbNotePh'))}" maxlength="140"><button class="btnG btnSm" data-act="aiFbSave" data-i="${i}">${esc(t('saveW'))}</button></div>` : '';
     return `<div class="aiturn aiq"><div class="aibubble">${esc(tr.q.text)}</div><span class="aitime tMonoS">${esc(hhmm(tr.q.at))}</span></div>
       <div class="aiturn aia" data-status="${esc(a.status || '')}" data-i="${i}">
         <div class="aibubble">
           ${a.status === 'pending' ? `<div class="aityping" aria-label="${esc(t('ai.typing'))}"><span></span><span></span><span></span></div>` : ''}
-          ${a.status === 'error' ? `<p class="aierr">${esc(t('ai.error'))}</p><button class="btnG btnSm" data-act="aiRetry" data-i="${i}">${esc(t('ai.retry'))}</button>` : `<div class="aitext">${paras}${streaming ? '<span class="aicaret"></span>' : ''}</div>`}
-          ${!streaming && a.status !== 'pending' && a.status !== 'error' ? `${evidenceHtml(a.evidence)}${figsHtml(a.figures)}
+          ${toolsHtml(a)}
+          ${a.status === 'error' ? `<p class="aierr">${esc(errText(a))}</p><button class="btnG btnSm" data-act="aiRetry" data-i="${i}">${esc(t('ai.retry'))}</button>` : `<div class="aitext">${a.parts && !streaming ? partsHtml(a.parts, a.project) : paras}${streaming ? '<span class="aicaret"></span>' : ''}</div>`}
+          ${!streaming && a.status !== 'pending' && a.status !== 'error' ? `${cardHtml(a.card)}${evidenceHtml(a.evidence)}${figsHtml(a.figures)}
             ${a.sources ? `<p class="aisrc">${esc(a.sources)}</p>` : ''}
             ${a.actions && a.actions.length ? `<div class="aiacts2">${a.actions.map(x => `<button class="btnG btnSm" data-act="${esc(x.act)}" data-asset="${esc(x.asset)}">${esc(t(x.key))}</button>`).join('')}</div>` : ''}
             <div class="aimeta tCap"><span class="tMonoS">${esc(hhmm(a.at || tr.q.at))}</span>${a.window ? ` · ${esc(a.window)}` : ''}${note ? ` · <span class="ainote">${esc(note)}</span>` : ''}</div>` : ''}
@@ -274,7 +468,13 @@ window.EKO_AI = (function(){
     if(!c || !c.turns.length) return `<div class="aiempty"><span class="aiglyph">${icon('spark', 20)}</span><p>${esc(t('ai.empty'))}</p><p class="tCap">${esc(t('ai.onprem'))}</p></div>`;
     return c.turns.map(turnHtml).join('');
   }
-  function patchMsgs(){ const box = document.querySelector('#aipanel .aimsgs'); if(!box) return; box.innerHTML = msgsHtml(); box.scrollTop = box.scrollHeight; }
+  /* an answer streaming in follows the newest turn only while the reader is at the bottom; scrolled up, they stay where they are */
+  function patchMsgs(){
+    const box = document.querySelector('#aipanel .aimsgs'); if(!box) return;
+    const top = box.scrollTop, stick = nearBottom(box);
+    box.innerHTML = msgsHtml();
+    S.stick = stick; box.scrollTop = stick ? box.scrollHeight : top;
+  }
   function histHtml(){
     const list = convs();
     return `<div class="aihist"><div class="aihisth"><b>${esc(t('ai.history'))}</b><span class="grow"></span>${list.length ? `<button class="btnG btnSm" data-act="aiClear">${esc(t('ai.clearAll'))}</button>` : ''}<button class="iconbtn icon26" data-act="aiHist" aria-label="${esc(t('close'))}">${icon('x', 12)}</button></div>
@@ -284,6 +484,8 @@ window.EKO_AI = (function(){
     E = E || app;
     (window.DASHBOARD_ROOT||document.documentElement).toggleAttribute('data-ai-open', S.open);
     if(!S.open) return '';
+    const live = document.activeElement;   /* still the old input: the render below replaces it */
+    if(live && live.id === 'aiin'){ S.draft = live.value; S.caret = [live.selectionStart, live.selectionEnd]; } else S.caret = null;
     const c = cur(), chips = suggestions();
     return `<div class="aiscrim" aria-hidden="true"></div><aside id="aipanel" class="aipanel" role="dialog" aria-label="${esc(t('ai.title'))}" data-stale="${E.state.stale ? 1 : 0}" data-born="${E.state.born === 'ai' ? 1 : 0}">
       <div class="draghandle"></div>
@@ -297,7 +499,7 @@ window.EKO_AI = (function(){
       ${S.menu ? `<div class="aimenu" role="menu"><button role="menuitem" data-act="aiExport" data-v="md" ${c && c.turns.length ? '' : 'disabled'}>${icon('download', 13)} ${esc(t('ai.exportMd'))}</button><button role="menuitem" data-act="aiExport" data-v="pdf" ${c && c.turns.length ? '' : 'disabled'}>${icon('doc', 13)} ${esc(t('ai.exportPdf'))}</button><button role="menuitem" data-act="aiCopyConv" ${c && c.turns.length ? '' : 'disabled'}>${icon('copy', 13)} ${esc(t('ai.copyConv'))}</button></div>` : ''}
       ${S.hist ? histHtml() : ''}
       <div class="aimsgs" aria-live="polite">${msgsHtml()}</div>
-      <div class="aiinput" data-hint="${esc(E.state.askHint || '')}"><input id="aiin" autocomplete="off" placeholder="${esc(t(E.state.askHint === 'report' ? 'rpAskPh' : 'askPh'))}" aria-label="${esc(t('ai.title'))}">${S.streaming ? `<button class="btnG btnSm aistop" data-act="aiStop">${icon('x', 12)} ${esc(t('ai.stop'))}</button>` : `<button class="aisend" data-act="aiSend" aria-label="${esc(t('ai.send'))}">${icon('chevR', 16)}</button>`}</div>
+      <div class="aiinput" data-hint="${esc(E.state.askHint || '')}"><input id="aiin" autocomplete="off" value="${esc(S.draft)}" placeholder="${esc(t(E.state.askHint === 'report' ? 'rpAskPh' : 'askPh'))}" aria-label="${esc(t('ai.title'))}">${S.streaming ? `<button class="btnG btnSm aistop" data-act="aiStop">${icon('x', 12)} ${esc(t('ai.stop'))}</button>` : `<button class="aisend" data-act="aiSend" aria-label="${esc(t('ai.send'))}">${icon('chevR', 16)}</button>`}</div>
       ${(!(c && c.turns.length) || S.ctxFresh) ? `<div class="aichips">${chips.map(k => `<button class="chip" data-act="aiChip" data-k="${esc(k)}">${esc(t(k))}</button>`).join('')}</div>` : ''}
     </aside>`;
   }
@@ -315,17 +517,21 @@ window.EKO_AI = (function(){
     if(sm){ const r = sm.getBoundingClientRect(); p.style.setProperty('--aiTop', Math.round(r.top) + 'px'); }
     const foot = [document.getElementById('mobtabs')].find(x => x && x.getBoundingClientRect().height > 0);   /* the phone tabs when stacked */
     p.style.setProperty('--aiBottom', (foot ? Math.round(Math.max(0, window.innerHeight - foot.getBoundingClientRect().top)) : 0) + 'px');
-    const box = p.querySelector('.aimsgs'); if(box) box.scrollTop = box.scrollHeight;
-    if(S.opening){ S.opening = false; const inp = p.querySelector('#aiin');
+    const box = p.querySelector('.aimsgs'); if(box) box.scrollTop = S.stick ? box.scrollHeight : S.top;
+    const inp = p.querySelector('#aiin');
+    if(S.opening){ S.opening = false;
       if(window.innerWidth < 768){ if(inp && document.activeElement === inp) inp.blur(); }   /* the phone sheet opens at half, keyboard down */
       else if(inp) inp.focus({ preventScroll:true }); }
+    else if(S.caret && inp){   /* the render replaced the input the reader was typing in: same text, same caret */
+      inp.focus({ preventScroll:true }); try{ inp.setSelectionRange(S.caret[0], S.caret[1]); }catch(e){} }
+    S.caret = null;
   }
 
   /* -------------------------------- actions -------------------------------- */
   const ACTS = {
     aiOpen(el){ const ctx = el && el.dataset.aiLabel ? contextFrom(el) : null; open(ctx || (el && el.dataset.ai === 'bar' ? S.ctx : null)); if(window.EKO_SURF) window.EKO_SURF.noteOpener({ act:'aiOpen', v:'' }); E.set({ born:'ai' }); },
     aiClose(){ close(); E.set({}); },
-    aiSend(){ const inp = document.getElementById('aiin'); if(!inp || !inp.value.trim()) return; const q = inp.value.trim(); inp.value = ''; ask(q); },
+    aiSend(){ const inp = document.getElementById('aiin'); if(!inp || !inp.value.trim()) return; const q = inp.value.trim(); inp.value = ''; S.draft = ''; ask(q); },
     aiChip(el){ ask(t(el.dataset.k)); },
     aiStop(){ stop(); },
     aiRetry(el){ const c = cur(); const tr = c && c.turns[+el.dataset.i]; if(tr) ask(tr.q.text, { regenerateOf:+el.dataset.i }); },
@@ -334,9 +540,9 @@ window.EKO_AI = (function(){
     aiFb(el){ const c = cur(); const i = +el.dataset.i; const tr = c && c.turns[i]; if(!tr) return; tr.a.feedback = Object.assign({}, tr.a.feedback || {}, { v:el.dataset.v, at:new Date().toISOString() }); S.fbOpen = i; save(); persistFeedback(c, i); E.set({}); },
     aiFbNote(el){ const c = cur(); const tr = c && c.turns[+el.dataset.i]; if(tr){ tr.a.feedback = Object.assign({}, tr.a.feedback || {}, { note:el.value }); } },
     aiFbSave(el){ const c = cur(); const i = +el.dataset.i; if(c && c.turns[i]){ save(); persistFeedback(c, i); } S.fbOpen = null; if(window.EKO_FB) window.EKO_FB.toast({ text:t('ai.fbSaved'), tone:'ok' }); E.set({}); },
-    aiNew(){ if(S.streaming) stop(); const c = cur(); if(c && !c.turns.length){ E.set({}); return; } load().cur = null; S.ctx = null; S.hist = false; ensureConv(); E.set({}); },
+    aiNew(){ S.stick = true; if(S.streaming) stop(); const c = cur(); if(c && !c.turns.length){ E.set({}); return; } load().cur = null; S.ctx = null; S.hist = false; ensureConv(); E.set({}); },
     aiHist(){ S.hist = !S.hist; S.menu = false; E.set({}); },
-    aiHistOpen(el){ load().cur = el.dataset.id; S.hist = false; save(); E.set({}); },
+    aiHistOpen(el){ S.stick = true; load().cur = el.dataset.id; S.hist = false; save(); E.set({}); },
     aiClear(){ const s = load(); s.convs = []; s.cur = null; save(); S.hist = false; E.set({}); },
     aiMenu(){ S.menu = !S.menu; S.hist = false; E.set({}); },
     aiExport(el){ const c = cur(); S.menu = false; if(!c || !c.turns.length){ E.set({}); return; } if(el.dataset.v === 'pdf') exportPdf(c); else exportMd(c); E.set({}); },
@@ -351,9 +557,13 @@ window.EKO_AI = (function(){
   /* keyboard in the input, press-and-hold on a turn (touch) */
   function wire(app){
     E = app;
+    if(S.wired) return; S.wired = true;   /* one set of listeners, however often this is called */
     document.addEventListener('keydown', ev => {
-      if(ev.key === 'Enter' && ev.target && ev.target.id === 'aiin' && ev.target.value.trim()){ ev.preventDefault(); ACTS.aiSend(); }
+      if(ev.key === 'Enter' && !ev.isComposing && ev.target && ev.target.id === 'aiin' && ev.target.value.trim()){ ev.preventDefault(); ACTS.aiSend(); }
     });
+    document.addEventListener('input', ev => { if(ev.target && ev.target.id === 'aiin') S.draft = ev.target.value; });
+    /* scroll does not bubble: the capture phase hears the message list, wherever it is rebuilt */
+    document.addEventListener('scroll', ev => { const b = ev.target; if(b && b.classList && b.classList.contains('aimsgs')){ S.top = b.scrollTop; S.stick = nearBottom(b); } }, { capture:true, passive:true });
     /* the phone sheet: full while typing (the input sits above the keyboard), back to half when the user leaves the input —
        not when a re-render replaced it (the answer arriving must not shrink the sheet under the reader) */
     document.addEventListener('focusin', ev => { if(S.opening) return; if(ev.target && ev.target.id === 'aiin' && window.innerWidth < 768 && window.EKO_SHEET){ window.EKO_SHEET.heights.ai = 92; window.EKO_SHEET.sync(); } });
@@ -367,5 +577,5 @@ window.EKO_AI = (function(){
     ['pointerup', 'pointercancel', 'pointermove'].forEach(k => document.addEventListener(k, () => { if(hold){ clearTimeout(hold); hold = null; } }, true));
   }
 
-  return { ACTS, ask, open, close, isOpen, panel, launcher, setRoute, after, wire, stop, state:S, convs, cur, feedback:feedbackStore, log:() => S.log.slice(), contextFrom, suggestions, exportMd, exportPdf, get ctx(){ return S.ctx; } };
+  return { md: mdHtml, ACTS, ask, open, close, isOpen, panel, launcher, setRoute, after, wire, stop, state:S, convs, cur, feedback:feedbackStore, log:() => S.log.slice(), contextFrom, suggestions, exportMd, exportPdf, get ctx(){ return S.ctx; } };
 })();

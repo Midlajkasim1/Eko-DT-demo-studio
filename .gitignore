@@ -30,6 +30,7 @@ venv
 
 
 backend/__pycache__/
+backend/tests/__pycache__/
 CLAUDE.md
 *.md
 !README.md
@@ -63,3 +64,9 @@ map_export.md
 /tests
 
 
+
+# the operator's own backend settings (not part of any export)
+backend/config.local.json
+
+# Graphify generated output
+graphify-out/

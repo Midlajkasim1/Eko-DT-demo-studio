@@ -1,5 +1,5 @@
-import type { PowerBoard, ProjectApiSettings } from '@/types'
-import { MAPPING_CATALOG, boardKey, historyExpression, isStandardHistory, normalizeRef, pointRefOf } from '@/lib/finMappingCatalog'
+import type { MeterLink, PowerBoard, ProjectApiSettings } from '@/types'
+import { MAPPING_CATALOG, boardKey, historyExpression, isStandardHistory, meterHistoryKey, meterPrefixes, normalizeRef, pointRefOf } from '@/lib/finMappingCatalog'
 import type { JsonObject } from '@/lib/mappingRows'
 import { hospitalHvacEnabled } from '@/lib/hospitalHvac'
 
@@ -116,6 +116,9 @@ export function powerBoardRows(boards: PowerBoard[] | undefined): PowerBoardRow[
   }))
 }
 
+/** Read as meters even when their name lacks the meter profile's prefix */
+export const meterEquipNames = (s: ProjectApiSettings): string[] => (s.finMeters ?? []).map(m => m.equip.trim()).filter(Boolean)
+
 /** Live points and history queries with each board's own point added, for whatever polls FIN with them */
 export function pointsWithBoards(s: ProjectApiSettings): { live?: JsonObject; history?: JsonObject } {
   let live = s.finLivePoints
@@ -124,6 +127,9 @@ export function pointsWithBoards(s: ProjectApiSettings): { live?: JsonObject; hi
     if (!b.point || !b.liveKey) continue
     live = { ...(live ?? {}), [b.liveKey]: b.point }
     if (b.history && b.historyKey) history = { ...(history ?? {}), [b.historyKey]: b.history }
+  }
+  for (const m of s.finMeters ?? []) {
+    if (m.name && m.history) history = { ...(history ?? {}), [meterHistoryKey(m.name)]: m.history }
   }
   return { live, history }
 }
@@ -158,7 +164,10 @@ export function powerBoardsProblem(
   boards: PowerBoard[] | undefined,
   keys: { live: string[]; history: string[] },
   meterPrefix?: string,
+  meters?: MeterLink[],
 ): string | null {
+  const prefixes = meterPrefixes(meterPrefix ?? '')
+  const listed = new Set((meters ?? []).flatMap(m => [m.name, m.equip]).map(n => n.trim().toUpperCase()).filter(Boolean))
   const seen = new Set<string>()
   const keysSeen = new Set<string>()
   for (const [i, b] of (boards ?? []).entries()) {
@@ -177,8 +186,9 @@ export function powerBoardsProblem(
       if (!keys.live.includes(b.liveKey)) return `${at}: "${b.liveKey}" is not a key of this project's Live readings.`
       if (b.historyKey && !keys.history.includes(b.historyKey)) return `${at}: "${b.historyKey}" is not a key of this project's Chart history.`
     }
-    if (b.meter && meterPrefix && !b.meter.toUpperCase().startsWith(meterPrefix.toUpperCase())) {
-      return `${at}: meter "${b.meter}" does not match this project's meter prefix "${meterPrefix}".`
+    const meter = b.meter?.trim().toUpperCase()
+    if (meter && prefixes.length && !prefixes.some(p => meter.startsWith(p)) && ![...listed].some(n => n === meter || n.startsWith(meter + '_'))) {
+      return `${at}: meter "${b.meter}" matches no meter prefix (${prefixes.join(', ')}) and is not in Meters. Add it to Meters, or add its prefix in Meter Profile.`
     }
   }
   return null
@@ -220,6 +230,11 @@ export function dashboardProjectInfo(meta: { projectId: string; name: string; ap
     hospitalHvac: hospitalHvacEnabled(meta),
     /* the project's own boards; null = the built-in board keys, where the project maps them */
     powerBoards: Array.isArray(s.finPowerBoards) && s.finPowerBoards.length ? s.finPowerBoards : null,
+    /* the project's own meters; null = every meter FIN reports */
+    meters: Array.isArray(s.finMeters) && s.finMeters.length
+      ? s.finMeters.map(m => ({ name: m.name, equip: m.equip, his: m.history ? meterHistoryKey(m.name) : null, main: m.main === true }))
+      : null,
+    anomalyAllMeters: s.anomalyAllMeters === true,
     energyFromHourly: s.energyFromHourly === true,
     equipPoints: {
       ahuTemp: s.ahuTemp || '',
@@ -227,6 +242,7 @@ export function dashboardProjectInfo(meta: { projectId: string; name: string; ap
       fcuTemp: s.fcuTemp || '',
       fcuSetpoint: s.fcuSetpoint || '',
     },
+    pointControl: s.pointControl && typeof s.pointControl === 'object' ? s.pointControl : null,
     energyMonthOwn: pointRefOf(s.finLivePoints?.current_month || '') != null
       && pointRefOf(s.finEndpoints?.Hourly_Energy_Consumption_his || '') != null
       && pointRefOf(s.finLivePoints?.current_month || '') !== pointRefOf(s.finEndpoints?.Hourly_Energy_Consumption_his || ''),
@@ -292,6 +308,10 @@ export function exportedSiteConfig(cfg: JsonObject, settings: ProjectApiSettings
   if (s.finProjectName) out.project_name = s.finProjectName
   if (s.finBaseUrl) out.fin_server_url = s.finBaseUrl
   if (s.finInterval) out.polling = { ...(isObject(cfg.polling) ? cfg.polling : {}), live_ms: s.finInterval }
+  // The export's Start_Viewer_Windows.bat may set up the local AI assistant (Ollama) on the machine it runs on; chat.local_ai = "auto" is what allows that.
+  // An administrator's "off" stays off, and the other chat settings are the repo file's own.
+  const chat = isObject(cfg.chat) ? cfg.chat : {}
+  out.chat = { ...chat, local_ai: chat.local_ai ?? 'auto' }
   return out
 }
 
@@ -332,5 +352,6 @@ export function toBackendSettings(settings: ProjectApiSettings | undefined): Pro
     out.finEndpoints = { ...(out.finEndpoints || {}), Hourly_Energy_Consumption_his: historyExpression(energyRef) }
   }
   if (Array.isArray(s.finDocuments)) out.finDocuments = s.finDocuments
+  if (s.pointControl && typeof s.pointControl === 'object') out.pointControl = s.pointControl
   return out
 }

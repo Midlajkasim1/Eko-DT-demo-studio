@@ -14,6 +14,8 @@ const out = await build({
       "export * as THREE from 'three'",
       "export { createAhuSchematic, readAhuPoints } from '@/lib/ahuSchematic'",
       "export { createFcuSchematic, readFcuPoints } from '@/lib/fcuSchematic'",
+      "export { readEkoAhuPoints, createEkoAhuSchematic } from '@/lib/ekoAhuSchematic'",
+      "export { readEkoFahuPoints, createEkoFahuSchematic } from '@/lib/ekoFahuSchematic'",
       "export { createHvacLabels } from '@/lib/hvacLabels'",
       "export { defaultType } from '@/lib/assetLinks'",
     ].join('\n'),
@@ -22,7 +24,8 @@ const out = await build({
   bundle: true, format: 'esm', platform: 'node', write: false, alias: { '@': src }, logLevel: 'silent',
 })
 const L = await import('data:text/javascript;base64,' + Buffer.from(out.outputFiles[0].text).toString('base64'))
-const { THREE, createAhuSchematic, readAhuPoints, createFcuSchematic, readFcuPoints, createHvacLabels, defaultType } = L
+const { THREE, createAhuSchematic, readAhuPoints, createFcuSchematic, readFcuPoints, createHvacLabels, defaultType,
+  readEkoAhuPoints, createEkoAhuSchematic, readEkoFahuPoints, createEkoFahuSchematic } = L
 
 const pts = obj => Object.entries(obj).map(([navName, currentValue]) => ({ navName, currentValue }))
 const box = () => new THREE.Box3(new THREE.Vector3(-3, -0.6, -0.8), new THREE.Vector3(3, 0.6, 0.8))
@@ -101,7 +104,8 @@ test('FCU: the filter and the humidity probe are optional parts, so a unit witho
   const a = Object.fromEntries(s.anchors.map(x => [x.key, x]))
   assert.equal(a.filter.optional, true)
   assert.equal(a.zoneHum.optional, true)
-  for (const k of ['zoneTemp', 'valvePos', 'valveCmd', 'fanSpeed', 'fanRun']) assert.ok(a[k] && !a[k].optional, k)
+  for (const k of ['zoneTemp', 'valve', 'fanSpeed', 'fanRun']) assert.ok(a[k] && !a[k].optional, k)
+  assert.ok(a.valvePos.optional && !a.valveCmd, 'COOLING_VALVE replaces the command label; the position label shows only for its own point')
   const filterPart = s.group.getObjectByName('ekoFcuFilter')
   assert.ok(filterPart, 'the filter is built')
   s.apply([])
@@ -143,4 +147,128 @@ test('labels: an optional anchor with no value is not shown, and appears once it
   labels.setReading({ a: 'On', b: 'Clean' })
   labels.update(cam, canvas)
   assert.deepEqual(shown(), ['1', '1'])
+})
+
+// ── Eko Hospital dampers and FCU cooling valve ──
+// FIN names a damper by its air stream (ExhaustAirDamperPos, FreshAirDamperPos), as the FAHU's Analytics tab lists ExhaustAirDamperPos and
+// FreshAirTemp. The abbreviation spellings (EA_DAMPER_POS) keep working. Test inputs, not readings from the Hospital's FIN project.
+
+test('Eko AHU: EA, MA and OA dampers read by their long FIN names and their abbreviations alike, each from its own point', () => {
+  const long = readEkoAhuPoints(pts({ ExhaustAirDamperPos: '30', MixedAirDamperPos: '70', OutsideAirDamperPos: '45' }))
+  assert.deepEqual([long.eaDamper, long.maDamper, long.oaDamper], ['30 %', '70 %', '45 %'])
+  assert.deepEqual([long.eaDamperOpen, long.maDamperOpen, long.oaDamperOpen], [0.3, 0.7, 0.45])
+  const abbr = readEkoAhuPoints(pts({ EA_DAMPER_POS: '31', MA_DAMPER_POS: '71', OA_DAMPER_POS: '46' }))
+  assert.deepEqual([abbr.eaDamper, abbr.maDamper, abbr.oaDamper], ['31 %', '71 %', '46 %'])
+  const fresh = readEkoAhuPoints(pts({ FreshAirDamperPos: '12.5' }))
+  assert.equal(fresh.oaDamper, '12.5 %')
+  assert.equal(fresh.eaDamper, '—')
+})
+
+test('Eko AHU: a damper command, set-point or fault is not the damper position, and a missing one is "—"', () => {
+  const r = readEkoAhuPoints(pts({ ExhaustAirDamperCmd: '100', MixedAirDamperPosSP: '50', OutsideAirDamperFault: 'true' }))
+  assert.deepEqual([r.eaDamper, r.maDamper, r.oaDamper], ['—', '—', '—'])
+  assert.deepEqual([r.eaDamperOpen, r.maDamperOpen, r.oaDamperOpen], [null, null, null])
+  const both = readEkoAhuPoints(pts({ ExhaustAirDamperCmd: '100', ExhaustAirDamperPos: '30' }))
+  assert.equal(both.eaDamper, '30 %', 'the position, not the command beside it')
+})
+
+test('Eko FAHU: FA and EA dampers are separate points, read by long name or abbreviation', () => {
+  const r = readEkoFahuPoints(pts({ FreshAirDamperPos: '80', ExhaustAirDamperPos: '30' }))
+  assert.deepEqual([r.faDamper, r.eaDamper], ['80 %', '30 %'])
+  assert.deepEqual([r.faDamperOpen, r.eaDamperOpen], [0.8, 0.3])
+  assert.deepEqual([readEkoFahuPoints(pts({ ExhaustAirDamperPos: '30' })).faDamper, readEkoFahuPoints(pts({ FreshAirDamperPos: '80' })).eaDamper], ['—', '—'],
+    'one is never read for the other')
+  const abbr = readEkoFahuPoints(pts({ FA_DAMPER_POS: '81', EA_DAMPER_POS: '31' }))
+  assert.deepEqual([abbr.faDamper, abbr.eaDamper], ['81 %', '31 %'])
+  const cmd = readEkoFahuPoints(pts({ FreshAirDamperCmd: '100', ExhaustAirDamperSP: '10' }))
+  assert.deepEqual([cmd.faDamper, cmd.eaDamper], ['—', '—'])
+})
+
+test('Eko FAHU and AHU: the damper labels and their drawn blades follow the reading', () => {
+  const f = createEkoFahuSchematic(box(), new THREE.Matrix4(), undefined)
+  const r = f.apply(pts({ FreshAirDamperPos: '80', ExhaustAirDamperPos: '30' }))
+  assert.deepEqual([r.faDamper, r.eaDamper], ['80 %', '30 %'])
+  assert.ok(f.anchors.some(a => a.key === 'faDamper' && a.title === 'FA DAMPER'))
+  assert.ok(f.anchors.some(a => a.key === 'eaDamper' && a.title === 'EA DAMPER'))
+  assert.equal(f.apply([]).eaDamper, '—')
+  f.dispose()
+  const a = createEkoAhuSchematic(box(), new THREE.Matrix4(), undefined)
+  assert.deepEqual(['eaDamper', 'maDamper', 'oaDamper'].map(k => a.apply(pts({ ExhaustAirDamperPos: '30', MixedAirDamperPos: '70', OutsideAirDamperPos: '45' }))[k]), ['30 %', '70 %', '45 %'])
+  a.dispose()
+})
+
+test('Hospital FCU: COOLING_VALVE shows the FIN cooling valve point (COOLINGVALVE), not a command', () => {
+  const r = readFcuPoints(pts({ COOLINGVALVE: '100.00 %', COOLINGDEMAND: '99.02', ZONETEMP: '24.8' }), { hospitalHvac: true })
+  assert.equal(r.valve, '100.00 %')
+  assert.equal(r.valveOpen, 1, 'the coil colour follows the same point')
+  const cmdOnly = readFcuPoints(pts({ COOLING_VALVE_CMD: '60' }), { hospitalHvac: true })
+  assert.equal(cmdOnly.valve, '—', 'a command is not the valve position')
+  assert.equal(readFcuPoints([], { hospitalHvac: true }).valve, '—')
+  assert.equal(readFcuPoints(pts({ COOLING_VALVE_POS: '40' }), { hospitalHvac: true }).valve, '40 %', 'a position point is the valve value too')
+})
+
+test('Hospital FCU: the cooling valve label is COOLING_VALVE; a position label shows only for a distinct position point', () => {
+  const s = createFcuSchematic(box(), new THREE.Matrix4(), undefined, { hospitalHvac: true })
+  const a = Object.fromEntries(s.anchors.map(x => [x.key, x]))
+  assert.equal(a.valve.title, 'COOLING_VALVE')
+  assert.ok(!a.valve.optional)
+  assert.ok(!s.anchors.some(x => x.title === 'COOLING_VALVE_CMD'))
+  assert.equal(a.valvePos.optional, true)
+  assert.equal(s.apply(pts({ COOLINGVALVE: '100' })).valvePos, '—', 'no separate position point: no second label for the same value')
+  assert.equal(s.apply(pts({ COOLINGVALVE: '100', COOLING_VALVE_POS: '90' })).valvePos, '90 %')
+  s.dispose()
+})
+
+test('FCU without the Hospital feature keeps its COOLING_VALVE_CMD label and reading', () => {
+  const s = createFcuSchematic(box(), new THREE.Matrix4(), undefined)
+  assert.ok(s.anchors.some(x => x.key === 'valveCmd' && x.title === 'COOLING_VALVE_CMD'))
+  assert.ok(!s.anchors.some(x => x.key === 'valve'))
+  assert.equal(readFcuPoints(pts({ COOLING_VALVE_CMD: '60' })).valveCmd, '60 %')
+  assert.equal(readFcuPoints(pts({ COOLINGVALVE: '100' })).valvePos, '—', 'the baseline mapping is untouched')
+  s.dispose()
+})
+
+// ── Eko AHU: return-air fan status and mixed-air damper ──
+// Test inputs (FIN names by air stream), not readings from the Hospital's FIN project.
+
+test('Eko AHU: RA FAN STATUS reads the return air fan status by its long name, and never its trip, command or speed', () => {
+  for (const name of ['ReturnAirFanStatus', 'RA_FAN_STATUS', 'ReturnFanStatus', 'RAFanRunSts']) {
+    const r = readEkoAhuPoints(pts({ [name]: 'On' }))
+    assert.deepEqual([name, r.raFanStatus, r.raFanOn], [name, 'On', true])
+  }
+  const off = readEkoAhuPoints(pts({ ReturnAirFanStatus: 'Off' }))
+  assert.deepEqual([off.raFanStatus, off.raFanOn], ['Off', false])
+  const noise = readEkoAhuPoints(pts({ ReturnAirFanTripStatus: 'On', ReturnAirFanSpeedCmd: '60', ReturnAirFanCmd: 'Start', ReturnAirFanSpeedSP: '50' }))
+  assert.deepEqual([noise.raFanStatus, noise.raFanOn], ['—', null], 'a trip, command, speed or set-point is not the run status')
+  const both = readEkoAhuPoints(pts({ ReturnAirFanTripStatus: 'Off', ReturnAirFanStatus: 'On' }))
+  assert.equal(both.raFanStatus, 'On', 'the status, not the trip beside it')
+})
+
+test('Eko AHU: the return and supply fan statuses stay separate points', () => {
+  const r = readEkoAhuPoints(pts({ ReturnAirFanStatus: 'On', SupplyFanStatus: 'Off' }))
+  assert.deepEqual([r.raFanStatus, r.saFanStatus], ['On', 'Off'])
+  assert.deepEqual([readEkoAhuPoints(pts({ ReturnAirFanStatus: 'On' })).saFanStatus, readEkoAhuPoints(pts({ SupplyFanStatus: 'On' })).raFanStatus], ['—', '—'])
+})
+
+test('Eko AHU: MA DAMPER reads the mixed air damper position under any of its names, from its own point only', () => {
+  for (const name of ['MixedAirDamperPos', 'MixingAirDamperPos', 'MixAirDamperPos', 'MixingBoxDamperPos', 'MA_DAMPER_POS']) {
+    const r = readEkoAhuPoints(pts({ [name]: '70.00 %' }))
+    assert.deepEqual([name, r.maDamper, r.maDamperOpen], [name, '70.00 %', 0.7])
+    assert.deepEqual([r.eaDamper, r.oaDamper], ['—', '—'], 'the mixed air damper is neither the exhaust nor the outside one')
+  }
+  const cmd = readEkoAhuPoints(pts({ MixAirDamperCmd: '100', MixAirDamperPosSP: '50', MixAirDamperFault: 'true' }))
+  assert.deepEqual([cmd.maDamper, cmd.maDamperOpen], ['—', null], 'a command, set-point or fault is not the position')
+  assert.equal(readEkoAhuPoints(pts({ MixAirDamperCmd: '100', MixAirDamperPos: '70' })).maDamper, '70 %')
+})
+
+test('Eko AHU: EA and OA dampers are unchanged by the MA damper point being there', () => {
+  const r = readEkoAhuPoints(pts({ ExhaustAirDamperPos: '30', OutsideAirDamperPos: '45', MixAirDamperPos: '70' }))
+  assert.deepEqual([r.eaDamper, r.maDamper, r.oaDamper], ['30 %', '70 %', '45 %'])
+  const abbr = readEkoAhuPoints(pts({ EA_DAMPER_POS: '31', OA_DAMPER_POS: '46' }))
+  assert.deepEqual([abbr.eaDamper, abbr.maDamper, abbr.oaDamper], ['31 %', '—', '46 %'])
+})
+
+test('Eko FAHU: the AHU fan and damper rules did not move into the FAHU', () => {
+  const r = readEkoFahuPoints(pts({ ReturnAirFanStatus: 'On', MixAirDamperPos: '70' }))
+  assert.deepEqual([r.faDamper, r.eaDamper, r.efStatus, r.sfStatus], ['—', '—', '—', '—'])
 })

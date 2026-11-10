@@ -252,12 +252,12 @@ export function MeterProfileEditor({ value, onChange, results, suggestedKeys }: 
   return (
     <div>
       <div className="ds-field">
-        <label>Meter name prefix</label>
+        <label>Meter name prefixes</label>
         <div style={{ display: 'flex', gap: '8px' }}>
           <input
             type="text"
             value={prefix}
-            placeholder="e.g. PMU"
+            placeholder="e.g. PMU, EM, MSB"
             onChange={e => { setPrefix(e.target.value); emit(e.target.value, map) }}
           />
           {results?.prefix && <StatusBadge status={results.prefix.status} detail={results.prefix.detail} />}

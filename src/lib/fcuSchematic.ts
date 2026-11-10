@@ -6,6 +6,7 @@ import {
   resolveFrame, makeHvacCtx,
   buildCoil, buildValve, buildCentrifugalFan, buildPanelFilter, buildSensorProbe,
 } from '@/lib/hvacGeometry'
+import { pick, isCommand, isSetpoint, isFault } from '@/lib/ekoPointRules'
 
 export type FcuPoint = HvacPoint
 
@@ -13,6 +14,8 @@ export type FcuReading = {
   zoneTemp: string
   valvePos: string
   valveCmd: string
+  /** The Hospital's COOLING_VALVE label: its cooling valve point (COOLINGVALVE), never a command. "—" off the Hospital. */
+  valve:    string
   fanSpeed: string
   fanRun:   string
   /** Not every unit reports these: "—" when FIN sends none */
@@ -27,7 +30,7 @@ export type FcuReading = {
 }
 
 export type FcuAnchor = {
-  key:      'zoneTemp' | 'valvePos' | 'valveCmd' | 'fanSpeed' | 'fanRun' | 'zoneHum' | 'filter'
+  key:      'zoneTemp' | 'valvePos' | 'valveCmd' | 'valve' | 'fanSpeed' | 'fanRun' | 'zoneHum' | 'filter'
   /** The FIN point the label is for */
   title:    string
   position: THREE.Vector3
@@ -44,10 +47,17 @@ export type FcuSchematic = {
   dispose: () => void
 }
 
-export function readFcuPoints(points: FcuPoint[]): FcuReading {
+/** The Hospital's cooling valve point: named "cooling valve" (COOLINGVALVE), not a position-suffixed one (read as the position), command, set-point or fault */
+const hospitalValve = (k: string) =>
+  k.includes('coolingvalve') && !k.includes('pos') && !isCommand(k) && !isSetpoint(k) && !isFault(k)
+
+export function readFcuPoints(points: FcuPoint[], options: HvacSchematicOptions = {}): FcuReading {
+  const hospital = options.hospitalHvac === true
   const zone  = clean(findPoint(points, k => k.includes('zonetemp') && !k.includes('set') && !k.endsWith('sp'))?.currentValue)
   const pos   = clean(findPoint(points, k => k.includes('coolingvalvepos') || (k.includes('valve') && k.includes('pos') && !k.includes('cmd')))?.currentValue)
   const cmd   = clean(findPoint(points, k => k.includes('coolingvalvecmd') || (k.includes('valve') && (k.includes('cmd') || k.includes('command'))))?.currentValue)
+  // Hospital: the cooling valve's own point, else a valve position point (never the command)
+  const plain = hospital ? pick(points, [hospitalValve]) : null
   const speedPt = findPoint(points, k => k.includes('fanspeed'))
   const speed = clean(speedPt?.currentValue)
   // FAN_SPEED_MODE is a mode setting (a gear on the FIN page), not a speed: never a %, never a spin rate
@@ -58,10 +68,11 @@ export function readFcuPoints(points: FcuPoint[]): FcuReading {
   const filterRaw = clean(findPoint(points, k => k.endsWith('filter') || k.endsWith('filtersts') || k.endsWith('filterstatus'))?.currentValue)
   const filterDirty = dirtyOf(filterRaw)
 
-  const posN = numberOf(pos)
+  const openRaw = hospital ? pos ?? plain : pos
+  const posN = numberOf(openRaw)
   let valveOpen: number | null = null
   if (posN != null) {
-    const fraction = posN <= 1 && !pos!.includes('%')
+    const fraction = posN <= 1 && !openRaw!.includes('%')
     valveOpen = Math.min(1, Math.max(0, fraction ? posN : posN / 100))
   }
 
@@ -76,8 +87,10 @@ export function readFcuPoints(points: FcuPoint[]): FcuReading {
 
   return {
     zoneTemp: shown(zone,  ' °C'),
-    valvePos: shown(pos,   ' %'),
+    // Hospital: a position label for the same point as COOLING_VALVE would only repeat it
+    valvePos: shown(hospital && plain == null ? null : pos, ' %'),
     valveCmd: shown(cmd,   ' %'),
+    valve:    shown(hospital ? plain ?? pos : null, ' %'),
     fanSpeed: shown(speed, isMode ? '' : ' %'),
     fanRun:   shown(run,   ''),
     zoneHum:  shown(hum,   ' %RH'),
@@ -151,8 +164,11 @@ export function createFcuSchematic(
 
   const anchors: FcuAnchor[] = [
     { key: 'zoneTemp', title: 'ZONE_TEMP',          position: new THREE.Vector3(probeX, hy * 0.92,          0),     side: 'above' },
-    { key: 'valvePos', title: 'COOLING_VALVE_POS',  position: new THREE.Vector3(coilX,  hy * 0.92,          0),     side: 'above' },
-    { key: 'valveCmd', title: 'COOLING_VALVE_CMD',  position: new THREE.Vector3(valveX, actY - hy * 0.2, valveZ),   side: 'below' },
+    // Hospital: the valve below the coil is labelled COOLING_VALVE (its FIN point), not the command; the position label shows only for a distinct point
+    { key: 'valvePos', title: 'COOLING_VALVE_POS',  position: new THREE.Vector3(coilX,  hy * 0.92,          0),     side: 'above', optional: hospital },
+    hospital
+      ? { key: 'valve',    title: 'COOLING_VALVE',     position: new THREE.Vector3(valveX, actY - hy * 0.2, valveZ),   side: 'below' }
+      : { key: 'valveCmd', title: 'COOLING_VALVE_CMD',  position: new THREE.Vector3(valveX, actY - hy * 0.2, valveZ),   side: 'below' },
     { key: 'fanSpeed', title: 'FAN_SPEED',          position: new THREE.Vector3(fanX,   fanRadius * 1.2 + hy * 0.08, 0), side: 'above' },
     { key: 'fanRun',   title: 'FAN_RUN_STS',        position: new THREE.Vector3(fanX,  -fanRadius * 1.15,   0),     side: 'below' },
     ...(hospital ? [
@@ -163,7 +179,7 @@ export function createFcuSchematic(
 
   let rate = 0
   const apply = (points: FcuPoint[]) => {
-    const reading = readFcuPoints(points || [])
+    const reading = readFcuPoints(points || [], { hospitalHvac: hospital })
     if (reading.valveOpen == null) coilMat.color.copy(COIL_IDLE)
     else coilMat.color.copy(COIL_CLOSED).lerp(COIL_OPEN, reading.valveOpen)
     bladeMat.color.copy(reading.fanOn == null ? NO_DATA : reading.fanOn ? FAN_ON : FAN_OFF)

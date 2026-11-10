@@ -348,12 +348,18 @@ export interface ProjectApiSettings {
   ahuSetpoint?: string
   fcuTemp?: string
   fcuSetpoint?: string
+  /** Which FIN points the dashboard may write. Absent uses the standard roles and names. */
+  pointControl?: PointControlSettings
   /** Names the emission factor in the report basis, e.g. "DEWA grid 2025" */
   co2FactorName?: string
   /** The Power page's distribution boards. Absent: the built-in board keys, shown where the
    *  project maps them (Marsa Al Arab's six through config.json). Each board names Data Mapping
    *  keys, never a FIN point ID. */
   finPowerBoards?: PowerBoard[]
+  /** The meters on Energy › Anomalies. Absent: every meter FIN reports. */
+  finMeters?: MeterLink[]
+  /** PMU measurement: Anomalies leads with every meter, not only the main ones */
+  anomalyAllMeters?: boolean
   finBaseUrl?: string
   finProjectName?: string
   finDisplayName?: string
@@ -388,6 +394,25 @@ export interface ProjectApiSettings {
   heatmap?: HeatmapSetup
 }
 
+export type PointControlClass = 'fcu' | 'vav' | 'ahu' | 'fahu' | 'mahu'
+export type PointControlRole = 'setpoint' | 'status' | 'output' | 'choice'
+
+/** Per-project FIN write policy. A missing class keeps that equipment's standard roles.
+ *  Name fields add to the standard names; they do not replace them. */
+export interface PointControlSettings {
+  /** Absent means on. */
+  enabled?: boolean
+  equipment?: Partial<Record<PointControlClass, PointControlRole[]>>
+  /** Writable numbers that are not already named Sp or Setpoint. */
+  setpoints?: string
+  /** Writable on/off points to add, such as Occupancy. */
+  statusPoints?: string
+  /** Writable valve, damper, and speed commands to add. */
+  outputPoints?: string
+  /** Writable mode points to add. The point must have a FIN enum. */
+  choicePoints?: string
+}
+
 /** One distribution board on the Power page */
 export interface PowerBoard {
   name: string
@@ -401,6 +426,15 @@ export interface PowerBoard {
   point?: string
   /** The hisRead query for that point, read under historyKey */
   history?: string
+}
+
+export interface MeterLink {
+  name: string
+  equip: string
+  /** Its energy point, p:{project}:r:… */
+  point?: string
+  history?: string
+  main?: boolean
 }
 
 export interface ProjectModel extends ProjectModelEntry {

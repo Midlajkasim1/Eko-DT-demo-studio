@@ -27,6 +27,8 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import config_overlay
+import eko_chat
 from fin_client import (
     PROJECT_ID_RE,
     FinScramClient,
@@ -43,7 +45,7 @@ from fin_client import (
     safe_get,
 )
 from fdd_recommendations import recommend as fdd_recommend
-from point_control import control_for, encode_value, equipment_class, number_of
+from point_control import control_for, encode_value, equipment_class, merge_point_control, number_of
 from workorders import error_payload, live_payload, norm_id, orders_by_equipment
 import notifications
 
@@ -51,8 +53,17 @@ import notifications
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
-with open(CONFIG_PATH, "r") as f:
+with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
     BASE_CONFIG = json.load(f)
+
+# config.json is replaced by every update (the export writes it); config.local.json is the operator's file, which an update cannot touch (the export never
+# contains it), laid over it here. See config_overlay.py. A file that cannot be read keeps the AI assistant off.
+LOCAL_CONFIG_PATH = os.path.join(os.path.dirname(CONFIG_PATH), config_overlay.LOCAL_NAME)
+BASE_CONFIG, LOCAL_CONFIG_INFO = config_overlay.apply_local(BASE_CONFIG, LOCAL_CONFIG_PATH)
+if LOCAL_CONFIG_INFO["error"]:
+    print(f"[config] {LOCAL_CONFIG_INFO['error']}: it is ignored and the AI assistant is off until it is fixed")
+elif LOCAL_CONFIG_INFO["overridden"]:
+    print("[config] config.local.json overrides: " + ", ".join(LOCAL_CONFIG_INFO["overridden"]))
 
 # CONFIG is what the polling loops and parsers read. It starts as the file defaults and is
 # replaced by BASE_CONFIG overlaid with the open project's settings (see below). Whether
@@ -126,6 +137,9 @@ def project_overrides(settings: Optional[dict]) -> dict:
     # A saved list, including an empty one, replaces om-warranty.json. Absent keeps the file.
     if isinstance(settings.get("finDocuments"), list):
         out["document_families"] = clean_document_families(settings.get("finDocuments"))
+    # Roles and extra names only. The site's ranges and write level are not taken from the project.
+    if isinstance(settings.get("pointControl"), dict):
+        out["point_control"] = merge_point_control(BASE_CONFIG.get("point_control") or {}, settings.get("pointControl"))
     return out
 
 
@@ -159,12 +173,15 @@ def merge_project_settings(base: dict, settings: Optional[dict], isolated: bool 
     A project value replaces the default whole (never a key-by-key merge, so one
     site's point IDs cannot leak into another's). With `isolated`, the five FIN mapping
     blocks start empty instead of from config.json: a block the project did not set is
-    not configured, and config.json's own site mappings are never used for it.
+    not configured, and config.json's own site mappings are never used for it. The same
+    goes for config.json's distribution boards (power_boards, which Eko-Chat reads): they
+    are its own site's, and no project brings its own to the backend.
     """
     merged = copy.deepcopy(base)
     if isolated:
         for key in PROJECT_DICT_SETTINGS.values():
             merged[key] = {}
+        merged["power_boards"] = []
         # config.json's work-order query reads its own site's table (workOrderMarsa)
         merged["workorder_expr"] = ""
     for key, value in project_overrides(settings).items():
@@ -359,11 +376,14 @@ def _pdf_filename(name: str) -> str:
     return cleaned
 
 
-def load_documents() -> dict:
+def load_documents(project: Optional[str] = None) -> dict:
     """Re-read the catalog each call so an edit shows up on the next poll.
 
     A project that saved its own list does not read om-warranty.json. A manual is a record of
-    ONE FIN project, so only the active project's are listed."""
+    ONE FIN project, so only that project's are listed: another project's equipment is never
+    matched to this site's manuals. `project` is the validated FIN project of the request (see
+    _documents_project); without one, the backend's active project."""
+    wanted = PROJECT_NAME if project is None else project
     families = []
     for fam in _stored_document_families():
         if not isinstance(fam, dict):
@@ -382,7 +402,7 @@ def load_documents() -> dict:
                 continue
             ref = str(doc["ref"])
             had_doc = True
-            if _ref_project(ref) != PROJECT_NAME:
+            if _ref_project(ref) != wanted:
                 continue
             item[kind] = {
                 "name": str(doc.get("name") or ""),
@@ -407,6 +427,7 @@ cached_building_data: dict = {}
 cached_sensor_avg: dict = {"temp": None, "humidity": None, "co2": None}
 cached_power_history: dict = {}
 cached_point_units: dict = {}
+cached_power_history_at: Optional[str] = None   # when cached_power_history was last read from FIN: the cache itself carries no time
 cached_fdd_summary: list = []
 cached_meter_data: dict = {}
 cached_alarm_data: dict = {}
@@ -418,7 +439,7 @@ cached_workorders: dict = {}
 
 async def realtime_loop():
     """Fetch equipment, alarms, histories, and derived summaries."""
-    global cached_equip_data, cached_building_data, cached_power_history
+    global cached_equip_data, cached_building_data, cached_power_history, cached_power_history_at
     global cached_fdd_summary, cached_meter_data, cached_alarm_data, cached_facility
 
     rt_endpoints = CONFIG.get("realtime_endpoints", {})
@@ -426,13 +447,17 @@ async def realtime_loop():
     interval = CONFIG.get("polling", {}).get("realtime_ms", 30000) / 1000
 
     while client and client.is_authenticated:
-        if not _dashboard_open():
+        if not _polling_wanted():
             return
         try:
             realtime = await client.fetch_realtime_data(rt_endpoints)
+            excluded: list = []
             cached_equip_data = {
                 "timestamp": datetime.now().isoformat(),
-                "equipment": _flatten_equip(realtime),
+                "equipment": _flatten_equip(realtime, excluded),
+                # what the name rule below leaves out (energy meters, KPI calculations), kept apart so no existing reader sees it.
+                # The Hospital Live Twin reads it to show its energy meters as unverified candidates.
+                "excluded": excluded,
             }
             await refresh_workorders()
             _compute_sensor_averages(realtime)
@@ -443,6 +468,7 @@ async def realtime_loop():
                                   getattr(client, "last_alarm_read_ok", False))
             cached_facility = _compute_facility_services(realtime)
             cached_power_history, hist_units = await client.fetch_power_histories(pw_endpoints)
+            cached_power_history_at = datetime.now().isoformat()
             for key, unit in hist_units.items():
                 if unit:
                     cached_point_units[key] = unit
@@ -465,6 +491,33 @@ async def realtime_loop():
                 return
 
 
+async def alarm_loop():
+    """Alarms are a heavy FIN read, so they refresh on their own, slower than the live points."""
+    global cached_alarm_data
+    alarm_ep = (CONFIG.get("realtime_endpoints") or {}).get("alarms")
+    if not isinstance(alarm_ep, str) or not alarm_ep.startswith("/"):
+        return
+    while client and client.is_authenticated:
+        if not _polling_wanted():
+            return
+        try:
+            await client.refresh_alarms(alarm_ep)
+            cached_alarm_data = _flatten_alarms(
+                client.last_alarm_rows, CONFIG.get("severity_bands", {})
+            )
+            _note_critical_alarms(
+                client.project_name,
+                cached_alarm_data["alarms"],
+                getattr(client, "last_alarm_read_ok", False),
+            )
+            if not await _sleep_while_watched(15):
+                return
+        except Exception as e:
+            print(f"[FIN] alarm poll error: {e}")
+            if not await _sleep_while_watched(15):
+                return
+
+
 async def live_loop():
     """Poll configured live points; failed reads stay null, never a fake 0."""
     global cached_power_data
@@ -477,7 +530,7 @@ async def live_loop():
     interval = CONFIG.get("polling", {}).get("live_ms", 5000) / 1000
 
     while client and client.is_authenticated:
-        if not _dashboard_open():
+        if not _polling_wanted():
             return
         try:
             values = await asyncio.gather(
@@ -531,10 +584,21 @@ def _build_fdd_summary(realtime: dict) -> list[dict]:
     return summary
 
 
+def _meter_prefixes(profile: dict) -> list:
+    return [p.strip().upper() for p in re.split(r"[,;]", str(profile.get("prefix") or "")) if p.strip()]
+
+
+def _is_meter(eq: dict, prefixes: list) -> bool:
+    """Its name starts with a profile prefix ("PMU, EM"), or FIN tags it an electricity meter."""
+    name = str(eq.get("name", "")).upper()
+    tags = eq.get("tags") or []
+    return any(name.startswith(p) for p in prefixes) or "elecMeter" in tags or ("meter" in tags and "elec" in tags)
+
+
 def _extract_meters(realtime: dict, profile: dict) -> dict:
-    prefix = str(profile.get("prefix", "")).upper()
+    prefixes = _meter_prefixes(profile)
     point_map = profile.get("point_map", {})
-    if not prefix or not point_map:
+    if not point_map:
         return {}
 
     meters: dict = {}
@@ -545,7 +609,7 @@ def _extract_meters(realtime: dict, profile: dict) -> dict:
                 continue
             for eq in items:
                 name = str(eq.get("name", ""))
-                if not name.upper().startswith(prefix):
+                if not _is_meter(eq, prefixes):
                     continue
                 metrics: dict = {key: None for key in point_map}
                 for pt in eq.get("points", []):
@@ -658,6 +722,8 @@ def _flatten_alarms(rows: list, bands: dict) -> dict:
             # FIN's own record id, as sent (None when FIN sends none: never made up)
             "id": safe_get(row.get("id"), "val") or None,
             "source": safe_get(source, "dis") or safe_get(source, "val") or "",
+            # FIN's id of the record the alarm is on, the key the equipment list counts alarms by (never shown by Eko-Chat)
+            "source_id": _alarm_source(row) or None,
             "message": message,
             "detail": detail,
             "priority": priority,
@@ -679,8 +745,9 @@ def _flatten_alarms(rows: list, bands: dict) -> dict:
     }
 
 
-def _flatten_equip(realtime: dict) -> list[dict]:
-    """Flatten floor-wise equipment into a single list for the frontend."""
+def _flatten_equip(realtime: dict, excluded: Optional[list] = None) -> list[dict]:
+    """Flatten floor-wise equipment into a single list for the frontend. Equipment the name rule skips goes to `excluded`
+    when given, in the same shape (the list itself is unchanged)."""
     classes = CONFIG.get("equipment_classes", {})
     system_tags = set(classes.get("system_tags") or [])
     equip_list = []
@@ -690,11 +757,12 @@ def _flatten_equip(realtime: dict) -> list[dict]:
                 continue
             for eq in items:
                 eq_name = eq.get("name", "")
-                if any(x in eq_name.upper() for x in ["ENERGY", "USAGE", "CALC"]):
+                skipped = any(x in eq_name.upper() for x in ["ENERGY", "USAGE", "CALC"])
+                if skipped and excluded is None:
                     continue
                 alarms = eq.get("alarms", [])
                 tags = eq.get("tags") or []
-                equip_list.append({
+                (excluded if skipped else equip_list).append({
                     "name": eq_name,
                     "floor": floor_name,
                     "category": category,
@@ -779,6 +847,7 @@ def _compute_facility_services(realtime: dict) -> dict:
     total_maintenance = 0
     total_equipment = 0
     online_equipment = 0
+    online_names: list[str] = []
     all_equipment = 0
     by_type: dict[str, int] = {}
 
@@ -835,6 +904,7 @@ def _compute_facility_services(realtime: dict) -> dict:
             
             if is_system and has_connectivity and not is_faulty:
                 online_equipment += 1
+                online_names.append(str(equipment.get('name') or ''))
 
     uptime = 99.8
     if total_equipment > 0:
@@ -848,12 +918,23 @@ def _compute_facility_services(realtime: dict) -> dict:
         'avgUptime': round(uptime, 1),
         'totalEquipment': total_equipment,      # systems only (AHU/FCU/pumps)
         'onlineEquipment': online_equipment,
+        'onlineNames': online_names,            # which systems that count is made of (Eko-Chat names them)
         'allEquipment': all_equipment,          # every equip record in the project
         'byType': by_type,
     }
 
 
 # ─── FastAPI App ─────────────────────────────────────────────────────────────
+
+def _notification_db_line() -> str:
+    """Which notification database this backend will use and why: for the operator, and creates nothing."""
+    configured = BASE_CONFIG.get("notification_db_path")
+    why = "EKO_NOTIFICATION_DB" if os.environ.get("EKO_NOTIFICATION_DB") else "notification_db_path" if configured else "default for this account"
+    try:
+        return f"[notifications] database: {notifications.resolve_db_path(configured)} (from {why})"
+    except ValueError as exc:
+        return f"[notifications] database path refused: {exc}"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -863,6 +944,7 @@ async def lifespan(app: FastAPI):
     apply_project_settings(*_bundled_project())
     # a deployment setting, never a project's: projects cannot point the history elsewhere
     notifications.configure(BASE_CONFIG.get("notification_db_path"))
+    print(_notification_db_line())
     yield
     # Cleanup
     global polling_tasks, client
@@ -902,6 +984,7 @@ def _start_polling():
     polling_tasks = [
         asyncio.create_task(realtime_loop()),
         asyncio.create_task(live_loop()),
+        asyncio.create_task(alarm_loop()),
     ]
 
 
@@ -910,6 +993,9 @@ def _start_polling():
 # loops stop when the last one leaves, or when its refresh goes quiet (a closed tab).
 watchers: dict[str, float] = {}
 WATCH_STALE_S = 20
+# Sign-in starts the loops for one pass, so the dashboard that opens next finds FIN data already read
+SIGN_IN_READ_S = 2
+sign_in_read_until = 0.0
 
 
 def _prune_watchers() -> int:
@@ -920,8 +1006,14 @@ def _prune_watchers() -> int:
     return len(watchers)
 
 
-def _dashboard_open() -> bool:
-    return _prune_watchers() > 0
+def _polling_wanted() -> bool:
+    return _prune_watchers() > 0 or time.monotonic() < sign_in_read_until
+
+
+def _read_after_sign_in():
+    global sign_in_read_until
+    sign_in_read_until = time.monotonic() + SIGN_IN_READ_S
+    _ensure_polling()
 
 
 def _polling_alive() -> bool:
@@ -930,7 +1022,7 @@ def _polling_alive() -> bool:
 
 def _ensure_polling():
     """Start the FIN loops when a dashboard is open, and stop them when none is."""
-    if _dashboard_open() and client and client.is_authenticated and PROJECT_NAME:
+    if _polling_wanted() and client and client.is_authenticated and PROJECT_NAME:
         if not _polling_alive():
             _start_polling()
     elif _polling_alive():
@@ -941,18 +1033,18 @@ async def _sleep_while_watched(seconds: float) -> bool:
     """Sleep in short steps so a closed dashboard stops the loop without waiting out the interval."""
     left = seconds
     while left > 0:
-        if not _dashboard_open():
+        if not _polling_wanted():
             return False
         chunk = 1.0 if left > 1 else left
         await asyncio.sleep(chunk)
         left -= chunk
-    return _dashboard_open()
+    return _polling_wanted()
 
 
 def _reset_caches():
     """Drop data polled under the previous configuration so it is never served for the next."""
     global cached_equip_data, cached_power_data, cached_building_data, cached_sensor_avg
-    global cached_power_history, cached_point_units, cached_fdd_summary, cached_meter_data, cached_alarm_data
+    global cached_power_history, cached_power_history_at, cached_point_units, cached_fdd_summary, cached_meter_data, cached_alarm_data
     global cached_facility, cached_workorders
     cached_equip_data = {}
     cached_power_data = {}
@@ -960,6 +1052,7 @@ def _reset_caches():
     cached_sensor_avg = {"temp": None, "humidity": None, "co2": None}
     cached_power_history = {}
     cached_point_units = {}
+    cached_power_history_at = None
     cached_fdd_summary = []
     cached_meter_data = {}
     cached_alarm_data = {}
@@ -1004,11 +1097,14 @@ app.add_middleware(
 # /models/*: those are already-compressed or huge, and deflating them costs
 # seconds of the single uvicorn worker for a few percent.
 COMPRESSIBLE_PREFIXES = ("/api/", "/assets/")
+# Eko-Chat streams Server-Sent Events; gzip would hold them back until its buffer fills
+UNCOMPRESSED_PATHS = ("/api/chat",)
 
 
 class PathScopedGZipMiddleware(GZipMiddleware):
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or not scope["path"].startswith(COMPRESSIBLE_PREFIXES):
+        if scope["type"] != "http" or not scope["path"].startswith(COMPRESSIBLE_PREFIXES) \
+                or scope["path"] in UNCOMPRESSED_PATHS:
             await self.app(scope, receive, send)
             return
         await super().__call__(scope, receive, send)
@@ -1061,6 +1157,12 @@ class ValidateMappingRequest(BaseModel):
 # What the last sign-in / project switch found. FIN does not return a project name, so
 # `source` records where the name in use came from.
 PROJECT_CHECK: dict = {"validated": None, "source": None}
+# The Studio project and settings the last sign-in or switch applied
+APPLIED_SWITCH: Optional[str] = None
+
+
+def _switch_key(settings: Optional[dict], project_id: Optional[str]) -> str:
+    return json.dumps([project_id or None, settings or {}], sort_keys=True, default=str)
 
 
 def _is_error_grid(text: str) -> bool:
@@ -1228,8 +1330,9 @@ async def _install_login(req, request: Request, response: Response, candidate, m
                          server_url: str, project: str):
     """FIN accepted the sign-in: only now does anything shared change. Runs under _fin_lock, so no other sign-in, project
     switch or sign-out changes the client, the project or the polling while this one is part way through."""
-    global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK, TYPED_NAME, STANDARD_VERIFIED, POLL_OWNER
+    global client, FIN_SERVER_URL, PROJECT_NAME, PROJECT_CHECK, TYPED_NAME, STANDARD_VERIFIED, POLL_OWNER, APPLIED_SWITCH
     STANDARD_VERIFIED = None   # a new session proves the standard site again (below), or not at all
+    APPLIED_SWITCH = None
     if managed:
         # its own mappings until the signed-in session proves it reads config.json's site (below)
         apply_studio_settings(req.settings, req.project_id, standard=False)
@@ -1252,9 +1355,14 @@ async def _install_login(req, request: Request, response: Response, candidate, m
         if managed and await _serves_standard_site(client):
             apply_studio_settings(req.settings, req.project_id, standard=True)
             FIN_SERVER_URL, PROJECT_NAME = server_url, project   # the session's, not config.json's
-        _ensure_polling()   # a dashboard already open keeps its feed; sign-in alone does not start one
+        if PROJECT_CHECK["validated"] is True:
+            _read_after_sign_in()
+        else:
+            _ensure_polling()
     else:
         PROJECT_CHECK = {"validated": None, "source": name_source}
+    if managed:
+        APPLIED_SWITCH = _switch_key(req.settings, req.project_id)
     _open_session(request, response, req.username, candidate.project_name or "")   # this sign-in's own project
 
     return {
@@ -1276,6 +1384,9 @@ async def set_project_settings(req: ProjectSettingsRequest, request: Request):
     _require_user(request)
     async with _fin_lock():
         _require_client()   # a sign-out while this waited for its turn
+        # A page reload sends the project it already has: its polling and the data read so far stay
+        if APPLIED_SWITCH == _switch_key(req.settings, req.project_id) and PROJECT_CHECK["validated"] is True:
+            return _same_project(req, request)
         # The old polling stops first: a poll still running while the project changes would read the new project's name
         # for the old project's answer, and record its alarms and notifications under the wrong project
         _cancel_polling()
@@ -1287,8 +1398,24 @@ async def set_project_settings(req: ProjectSettingsRequest, request: Request):
             raise
 
 
+def _same_project(req: ProjectSettingsRequest, request: Request) -> dict:
+    _ensure_polling()
+    mine, _ = _session_of(request)
+    if mine and mine["user_id"] == POLL_OWNER:
+        mine["site"] = client.project_name or ""
+    wanted_url = str(req.settings.get("finBaseUrl") or "").strip().rstrip("/")
+    return {
+        "status": "success",
+        "project": PROJECT_NAME,
+        "reconnect_required": bool(wanted_url) and wanted_url != client.base_url,
+        "project_validated": PROJECT_CHECK["validated"],
+        "project_source": PROJECT_CHECK["source"],
+    }
+
+
 async def _switch_project(req: ProjectSettingsRequest, request: Request):
-    global FIN_SERVER_URL, PROJECT_CHECK, PROJECT_NAME, TYPED_NAME
+    global FIN_SERVER_URL, PROJECT_CHECK, PROJECT_NAME, TYPED_NAME, APPLIED_SWITCH
+    APPLIED_SWITCH = None
 
     # A project without its own FIN Project Name is unconfigured, except for the name typed at
     # sign-in for this same project. Never the config.json default, never another project's name.
@@ -1306,6 +1433,7 @@ async def _switch_project(req: ProjectSettingsRequest, request: Request):
     # Rows read for the previous project feed /his-points and the alarm views until the next poll
     client.last_alarm_rows = []
     client.last_point_rows = []
+    client.last_alarm_read_ok = None   # the previous project's "FIN answered" says nothing about this one
     name_source = _name_source(bool(kept) and "project_name" not in ACTIVE_OVERRIDES)
     PROJECT_CHECK = {
         "validated": await _validate_project(client) if PROJECT_NAME else None,
@@ -1319,6 +1447,7 @@ async def _switch_project(req: ProjectSettingsRequest, request: Request):
     _reset_caches()
     if PROJECT_NAME:
         _ensure_polling()
+    APPLIED_SWITCH = _switch_key(req.settings, req.project_id)
     # The switch was validated with the polling session's FIN credentials: only their owner's own
     # user session moves to the new site. Anyone else's stays on the site they signed in for.
     mine, _ = _session_of(request)
@@ -1422,10 +1551,11 @@ def _meter_items(profile: dict) -> dict:
     meters = _extract_meters(realtime, {"prefix": prefix, "point_map": point_map}) if prefix and point_map else {}
     items: dict = {}
     if prefix:
-        found = any(str(eq.get("name", "")).upper().startswith(prefix.upper())
+        wanted = _meter_prefixes({"prefix": prefix})
+        found = any(str(eq.get("name", "")).upper().startswith(tuple(wanted))
                     for fd in realtime.values() if isinstance(fd, dict)
                     for eq in fd.get("hvac", []) if isinstance(eq, dict))
-        items["prefix"] = _item("valid") if found else _item("not_found", f"No equipment name starts with {prefix}.")
+        items["prefix"] = _item("valid") if found else _item("not_found", f"No equipment name starts with {', '.join(wanted)}.")
     for key in point_map:
         if not meters:
             items[key] = _item("cannot_validate", "No meter matched the prefix to read this metric from.")
@@ -1527,7 +1657,9 @@ async def get_fin_projects(request: Request):
     endpoint and expression come from config.json `project_discovery`.
     """
     _require_user(request)
-    cfg = CONFIG.get("project_discovery") or {}
+    cfg = CONFIG.get("project_discovery")
+    if not isinstance(cfg, dict):
+        cfg = {}
     endpoint = str(cfg.get("endpoint") or "").strip()
     expr = str(cfg.get("expr") or "").strip()
     if not endpoint or not expr or str(cfg.get("method") or "GET").upper() != "GET":
@@ -1757,13 +1889,15 @@ def _severity_bands_configured() -> bool:
 
 def _notification_setup(site: str) -> dict:
     """What the notification panel needs to tell "not set up" from "off" from "nothing yet", and nothing
-    that is a secret: the critical-alarm state, whether alarms can be graded, whether work orders are read."""
+    that is a secret: the critical-alarm state, whether alarms can be graded, whether work orders are read, and
+    whether FIN's last alarm read worked (None before the first one), so a failed read is not shown as "no alarms"."""
     try:
         critical = _critical_alarms_state(notifications.store(), site)
     except (notifications.StoreError, sqlite3.Error, ValueError):
         critical = "unknown"
     return {"critical_alarms": critical, "severity_bands": _severity_bands_configured(),
-            "workorders": bool((CONFIG.get("workorder_expr") or "").strip())}
+            "workorders": bool((CONFIG.get("workorder_expr") or "").strip()),
+            "alarms_read": getattr(client, "last_alarm_read_ok", None)}
 
 
 def _note_critical_alarms(site: str, alarms: list, read_ok: bool) -> None:
@@ -1951,6 +2085,16 @@ async def notifications_dismiss_opened(request: Request, response: Response):
     return {"updated": _notif_call(lambda s: s.dismiss_opened(who, site))}
 
 
+def _notification_admin(request: Request) -> tuple[str, str]:
+    """(user id, site) for a request that changes a SITE setting. The same session and project checks as every notification
+    route, then the server's own role for this user on this site must be the administrator's. A frontend role label, a
+    header or a body field is never consulted."""
+    who, site = _notification_scope(request)
+    if _notif_call(lambda s: s.role_of(site, who)) != notifications.ADMIN_ROLE:
+        raise NotificationApiError(403, "forbidden", "Only a superuser of this project can change its notification settings.")
+    return who, site
+
+
 def _preferences_answer(who: str, site: str) -> dict:
     """The signed-in user's own preferences, plus read-only facts about the SITE next to them so the
     page can tell the two apart. site.critical_alarms is true/false, or null when it cannot be read
@@ -1960,7 +2104,11 @@ def _preferences_answer(who: str, site: str) -> dict:
         enabled = _critical_alarms_enabled(notifications.store(), site)
     except (notifications.StoreError, sqlite3.Error, ValueError):
         enabled = None
-    answer["site"] = {"critical_alarms": enabled}
+    try:   # lets the panel offer the site switch to the one role that may use it; the server still decides on every request
+        admin = notifications.store().role_of(site, who) == notifications.ADMIN_ROLE
+    except (notifications.StoreError, sqlite3.Error, ValueError):
+        admin = None
+    answer["site"] = {"critical_alarms": enabled, "can_administer": admin}
     return answer
 
 
@@ -1983,6 +2131,22 @@ async def notifications_preferences_update(request: Request, response: Response)
         raise NotificationApiError(400, "invalid_input", "Only master_enabled and types can be set.")
     _notif_call(lambda s: s.update_preferences(who, site, master_enabled=body.get("master_enabled"), types=body.get("types")))
     return _preferences_answer(who, site)
+
+
+@app.put(NOTIF_BASE + "/site-settings")
+async def notifications_site_settings(request: Request, response: Response):
+    """A superuser of this project switches its critical-alarm notifications on or off for everyone on it. The site comes from
+    the session, never the request; only the site's baseline alarm.critical row changes, and the change is audited."""
+    who, site = _notification_admin(request)
+    _stamp(response)
+    try:
+        body = await request.json()
+    except ValueError:
+        raise NotificationApiError(400, "invalid_input", "The body must be JSON.")
+    if not isinstance(body, dict) or set(body) != {"critical_alarms"} or not isinstance(body["critical_alarms"], bool):
+        raise NotificationApiError(400, "invalid_input", "The body must be exactly {\"critical_alarms\": true | false}.")
+    _notif_call(lambda s: s.set_site_critical(site, body["critical_alarms"], who))
+    return {"site": _preferences_answer(who, site)["site"], "setup": _notification_setup(site)}
 
 
 @app.get("/api/fin/workorders")
@@ -2126,7 +2290,8 @@ async def write_point(req: PointWriteRequest):
     if req.action not in ("set", "auto"):
         raise HTTPException(status_code=400, detail="action is set or auto")
     eq, point = _controlled_point(point_id)
-    control = point.get("control")
+    policy = CONFIG.get("point_control") or {}
+    control = control_for(point, equipment_class(str(eq.get("name") or ""), eq.get("tags") or [], policy), policy)
     if not control:
         raise HTTPException(status_code=403, detail=f"{point.get('navName')} on {eq.get('name')} cannot be changed from the dashboard.")
     try:
@@ -2308,7 +2473,7 @@ async def fin_unwatch(req: WatchRequest, request: Request):
     wid = (req.id or "").strip()
     if wid:
         watchers.pop(wid, None)
-    _ensure_polling()
+    # Not cancelled: a reload's next watch keeps the read in progress, and without one the loops end after it
     return {"polling": _polling_alive()}
 
 
@@ -2316,7 +2481,7 @@ async def fin_unwatch(req: WatchRequest, request: Request):
 async def logout(request: Request, response: Response):
     """End this browser's user session. The shared FIN session closes only when no other user is
     still signed in. The server process stays up so the operator can sign in again."""
-    global client, PROJECT_CHECK, STANDARD_VERIFIED, POLL_OWNER
+    global client, PROJECT_CHECK, STANDARD_VERIFIED, POLL_OWNER, APPLIED_SWITCH
     _close_session(request, response)
     async with _fin_lock():   # not while a sign-in or a project switch is part way through changing the shared connection
         _drop_expired()
@@ -2324,6 +2489,7 @@ async def logout(request: Request, response: Response):
             return {"status": "signed_out", "fin": "connected for other users"}
         POLL_OWNER = None
         STANDARD_VERIFIED = None
+        APPLIED_SWITCH = None
         watchers.clear()
         _cancel_polling()
         # Drop the reference before the await so a second sign-out does not close the same client twice.
@@ -2338,11 +2504,24 @@ async def logout(request: Request, response: Response):
         return {"status": "disconnected"}
 
 
+def _documents_project(request: Request) -> str:
+    """The FIN project whose manuals this request may list: the one the backend serves, that FIN validated, and that THIS browser's session
+    signed in for. Same session and project checks as the notification and chat routes; nothing the request states is read."""
+    user = _require_user(request)
+    site = client.project_name or ""
+    if not site or PROJECT_CHECK.get("validated") is not True:
+        raise HTTPException(status_code=409, detail="The open project is not validated on FIN.")
+    if user.get("site") != site:
+        raise HTTPException(status_code=409, detail="You signed in for another project. Sign in again for this one.")
+    return site
+
+
 @app.get("/api/fin/documents")
-async def get_documents(response: Response):
-    """O&M and warranty manuals. Each link stays on this server."""
+async def get_documents(request: Request, response: Response):
+    """O&M and warranty manuals of the signed-in user's own project. Each link stays on this server."""
+    project = _documents_project(request)
     _stamp(response)
-    return load_documents()
+    return load_documents(project)
 
 
 @app.get("/api/fin/file")
@@ -2579,6 +2758,91 @@ async def serve_viewer():
             headers={"Cache-Control": "no-store, must-revalidate"},
         )
     return {"error": "Viewer not found. Make sure static/ folder is present."}
+
+
+# ─── Eko-Chat ────────────────────────────────────────────────────────────────
+# Read-only tools over the caches above; registered before the static mount so it is reachable.
+
+def _chat_view() -> eko_chat.DataView:
+    """What the chat tools may read, taken from the current globals (never the FIN client itself)."""
+    return eko_chat.DataView(
+        authenticated=bool(client and client.is_authenticated),
+        project_id=ACTIVE_PROJECT_ID,
+        project_name=PROJECT_NAME,
+        power=cached_power_data,
+        equipment=cached_equip_data,
+        alarms=cached_alarm_data,
+        facility=cached_facility,
+        fdd=cached_fdd_summary,
+        sensor_avg=cached_sensor_avg,
+        notifications=_chat_notifications,
+        alarm_records=_chat_alarm_records,
+        power_history=cached_power_history,
+        power_history_at=cached_power_history_at,
+        power_boards=CONFIG.get("power_boards") or [],
+        mapped=_chat_mapped(),
+    )
+
+
+def _chat_mapped() -> dict:
+    """The Data Mapping NAMES the open project has, for Eko-Chat's capability report: key names and yes/no, never a point ID or an expression."""
+    def keys(block: str) -> list:
+        value = CONFIG.get(block)
+        return sorted(k for k in value if isinstance(k, str) and not k.startswith("_")) if isinstance(value, dict) else []
+    bands = CONFIG.get("severity_bands") if isinstance(CONFIG.get("severity_bands"), dict) else {}
+    number = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)   # noqa: E731
+    return {"finLivePoints": keys("live_point_ids"), "finEndpoints": keys("power_endpoints"),
+            "finEquipmentClasses": bool(keys("equipment_classes")), "finMeterProfile": bool(keys("meter_profile")),
+            "equipmentTypes": bool((CONFIG.get("equipment_classes") or {}).get("type_priority")),
+            "finSeverityBands": number(bands.get("critical")) or number(bands.get("warning"))}
+
+
+def _chat_alarm_records() -> list:
+    """The newest alarm records, open or cleared, of the last FIN alarm read, graded by the configured bands. It is what that
+    read returned (the same grid the open-alarm list is made from), not an archive."""
+    bands = CONFIG.get("severity_bands", {})
+    out = []
+    for row in (client.last_alarm_rows if client else None) or []:
+        if not row or row.get("alarm") is not True:
+            continue
+        source = row.get("sourceRef")
+        priority = row.get("priority") if isinstance(row.get("priority"), (int, float)) else None
+        out.append({"source": safe_get(source, "dis") or safe_get(source, "val") or "", "source_id": _alarm_source(row) or None,
+                    "message": clip_decimals(str(row.get("message") or "")), "priority": priority,
+                    "severity": severity_for(priority, bands), "occurred": row.get("occurred") or row.get("created"),
+                    "state": row.get("state"), "open": alarm_is_open(row)})
+    out.sort(key=lambda a: str(a.get("occurred") or ""), reverse=True)
+    return out[:eko_chat.ALARM_RECORDS_CAP]
+
+
+def _chat_notifications(user: str, site: str, **filters) -> dict:
+    """The signed-in user's notifications on their project for the chat tool; read-only, same store as the bell."""
+    s = notifications.store()
+    page = s.list_notifications(user, site, **{k: v for k, v in filters.items() if v is not None})
+    return {"items": page["items"], "more": page["next_cursor"] is not None, "unread": s.unread_count(user, site)}
+
+
+def _chat_guard(request: Request) -> tuple[str, str]:
+    """Who may use Eko-Chat: the signed-in user of the open project, nobody else. The same checks as every notification
+    route (the FIN connection, this browser's own session cookie, the X-Eko-Project header against the project the backend
+    serves, and the project the session signed in for), re-raised in the {"error", "message"} shape the chat client reads.
+    Nothing a request says about who it is or which site it wants is trusted: the user and site come from the session.
+    Any project that passes those checks may use chat; it reads that project's own caches and mappings (_chat_view). An
+    operator can still narrow chat to some projects with chat.allowed_projects (FIN project names). Absent means no
+    narrowing; present it must be a list that names the project, so a list that is empty or not a list admits no one."""
+    try:
+        user, site = _notification_scope(request)
+    except NotificationApiError as exc:
+        code = "fin_not_connected" if exc.code == "unauthenticated" else exc.code
+        raise HTTPException(status_code=exc.status, detail={"error": code, "message": exc.message})
+    allowed = (CONFIG.get("chat") or {}).get("allowed_projects")
+    if allowed is not None and not (isinstance(allowed, list) and site in allowed):
+        raise HTTPException(status_code=403, detail={"error": "project_not_supported",
+                                                     "message": "Eko-Chat is not available for this project yet."})
+    return user, site
+
+
+app.include_router(eko_chat.build_router(_chat_view, lambda: CONFIG.get("chat") or {}, _chat_guard))
 
 
 if os.path.exists(STATIC_DIR):

@@ -150,12 +150,14 @@ export function FinDocumentsEditor({ value, finProject, finConnected, onChange }
 
   const importCsv = async (file: File) => {
     const result = importDocumentsCsv(await file.text(), finProject)
-    if (result.error) {
+    if (!result.drafts.length) {
       setNotice(`Not imported: ${result.error}`)
       return
     }
     commit(result.drafts.map(withKey))
-    setNotice(`Imported ${result.drafts.length} ${result.drafts.length === 1 ? 'group' : 'groups'} from ${file.name}. Save Settings to keep them.`)
+    setNotice(result.error
+      ? `Imported ${result.drafts.length} ${result.drafts.length === 1 ? 'group' : 'groups'}, which cannot be saved yet. ${result.error}`
+      : `Imported ${result.drafts.length} ${result.drafts.length === 1 ? 'group' : 'groups'} from ${file.name}. Save Settings to keep them.`)
   }
 
   const shown = (files?.items ?? []).filter(file => {

@@ -8,7 +8,7 @@ import {
   buildDamper, buildPanelFilter, buildBagFilter, buildSensorProbe,
 } from '@/lib/hvacGeometry'
 import { createAhuSchematic } from '@/lib/ahuSchematic'
-import { pick, sensor, statusOf, part, filterOf } from '@/lib/ekoPointRules'
+import { pick, sensor, statusOf, part, filterOf, damper } from '@/lib/ekoPointRules'
 import type { PointRules } from '@/lib/ekoPointRules'
 
 /**
@@ -39,12 +39,12 @@ export type EkoAhuKey =
 /** What each reading looks for in the asset's points: flexible on spelling, never a set-point, command or trip */
 export type EkoAhuPointRules = PointRules<EkoAhuKey>
 
-const RA_FAN = part([], ['rafan', 'returnfan'])
+const RA_FAN = part([], ['rafan', 'returnfan', 'returnairfan'])
 const SA_FAN = part([], ['safan', 'supplyfan'])
 export const EKO_AHU_POINT_RULES: EkoAhuPointRules = {
-  oaDamper: [sensor('oadamper')],
-  maDamper: [sensor('madamper')],
-  eaDamper: [sensor('eadamper')],
+  oaDamper: damper(['oa'], ['outsideair', 'outdoorair', 'freshair']),
+  maDamper: damper(['ma'], ['mix']),   // MixedAir, MixingAir, MixAir, MixingBox: every spelling of the mixing section's damper
+  eaDamper: damper(['ea'], ['exhaust']),
   raFanStatus: [statusOf(RA_FAN)],
   saFanStatus: [statusOf(SA_FAN)],
   preFilter: [filterOf('prefilter')],

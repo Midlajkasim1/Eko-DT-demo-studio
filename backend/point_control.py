@@ -1,8 +1,10 @@
 """
 Point control policy: which FIN points the dashboard may write, and how a requested value
-becomes a Zinc literal. The policy is config.json `point_control`.
+becomes a Zinc literal. The policy is config.json `point_control`. A project's
+`pointControl` settings can turn a role off for one equipment class and add point names.
 """
 
+import copy
 import math
 import re
 from typing import Any, Optional
@@ -16,10 +18,101 @@ LIFE_SAFETY_RE = re.compile(r"fire|smoke|life|emergency", re.IGNORECASE)
 NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
 # A FIN number written with its unit glued on: 16°C, 800ppm, 250Pa, 30Hz.
 MEAS_RE = re.compile(r"^(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(°C|°F|%RH|ppm|Pa|kPa|Hz|%)$")
+GENERIC_SP = frozenset({"sp", "setpoint", "setpt", "stpt"})
+ROLES = ("setpoint", "status", "output", "choice")
+CLASSES = ("fcu", "vav", "ahu", "mahu", "fahu")
 
 
 def fold(name: Any) -> str:
     return re.sub(r"[^a-z0-9]", "", str(name or "").lower())
+
+
+def name_list(value: Any) -> list:
+    """Comma, semicolon, or newline separated point names. At most 40, each at most 80 characters."""
+    if isinstance(value, str):
+        value = re.split(r"[,;\n]+", value)
+    if not isinstance(value, list):
+        return []
+    out = []
+    for item in value:
+        text = " ".join(str(item).split())
+        if not text or len(text) > 80 or text in out:
+            continue
+        out.append(text)
+        if len(out) >= 40:
+            break
+    return out
+
+
+def extra_hit(folded: str, words: list) -> bool:
+    """A project-added name matches inside the point name. The word `sp` does not."""
+    for word in words or []:
+        w = fold(word)
+        if len(w) < 4 or w in GENERIC_SP:
+            continue
+        if w in folded:
+            return True
+    return False
+
+
+def is_setpoint(name: Any, point: dict, extra: list) -> bool:
+    """Haystack `sp`, a Sp / Setpoint / Setpt / Stpt suffix, or a name this project added."""
+    if point.get("sp") is True:
+        return True
+    folded = fold(name)
+    if folded.endswith("setpoint") or folded.endswith("setpt") or folded.endswith("stpt") or folded.endswith("sp"):
+        return True
+    return extra_hit(folded, extra)
+
+
+def merge_point_control(base: dict, raw: Any) -> dict:
+    """The site policy plus one project's switches and extra names. Ranges and the write level stay the site's."""
+    policy = copy.deepcopy(base if isinstance(base, dict) else {})
+    if not isinstance(raw, dict):
+        return policy
+    if isinstance(raw.get("enabled"), bool):
+        policy["enabled"] = raw["enabled"]
+    equip = raw.get("equipment")
+    if isinstance(equip, dict):
+        policy.setdefault("equipment", {})
+        for cls in CLASSES:
+            got = equip.get(cls)
+            if not isinstance(got, list):
+                continue
+            kept = []
+            for role in got:
+                name = str(role).lower()
+                if name in ROLES and name not in kept:
+                    kept.append(name)
+            policy["equipment"][cls] = kept
+    policy["setpoint_extra"] = name_list(raw.get("setpoints"))
+    policy["status_extra"] = name_list(raw.get("statusPoints"))
+    policy["output_extra"] = name_list(raw.get("outputPoints"))
+    policy["choice_extra"] = name_list(raw.get("choicePoints"))
+    return policy
+
+
+def canon_unit(unit: Any) -> str:
+    """The range-table key for a FIN unit. `degC` and `C` are °C."""
+    key = str(unit or "").strip().replace(" ", "").replace("º", "°").replace("˚", "°")
+    low = key.lower()
+    if key in ("°C", "°c") or low in ("c", "degc", "celsius", "celcius"):
+        return "°C"
+    if key in ("°F", "°f") or low in ("f", "degf", "fahrenheit"):
+        return "°F"
+    if key == "%" or low in ("percent", "pct"):
+        return "%"
+    if low in ("%rh", "rh"):
+        return "%RH"
+    if low == "ppm":
+        return "ppm"
+    if low == "pa":
+        return "Pa"
+    if low == "kpa":
+        return "kPa"
+    if low == "hz":
+        return "Hz"
+    return key
 
 
 def number_of(value: Any) -> Optional[float]:
@@ -47,11 +140,11 @@ def _kind(point: dict) -> str:
     """FIN's kind tag, else the display kind. A unit glued on the value is still a number."""
     kind = point.get("pointKind")
     if isinstance(kind, str) and kind:
-        return kind
+        return kind.lower()
     if _glued_unit(point.get("curVal")) or _glued_unit(point.get("currentValue")):
-        return "Number"
+        return "number"
     kind = point.get("kind")
-    return kind if isinstance(kind, str) else ""
+    return kind.lower() if isinstance(kind, str) else ""
 
 
 def _glued_unit(value: Any) -> str:
@@ -63,13 +156,13 @@ def _glued_unit(value: Any) -> str:
 
 def _unit(point: dict, role: str) -> str:
     """The unit tag, else the unit glued onto the value, else a guess from the point name."""
-    unit = str(point.get("unit") or "").strip()
+    unit = canon_unit(point.get("unit"))
     if unit:
         return unit
     for key in ("curVal", "currentValue"):
         found = _glued_unit(point.get(key))
         if found:
-            return found
+            return canon_unit(found)
     folded = fold(point.get("navName"))
     if role == "output":
         if any(part in folded for part in ("damper", "coil", "valve")):
@@ -92,6 +185,11 @@ def _enum_words(point: dict) -> list:
     return words if len(words) >= 2 and all(words) else []
 
 
+def _named(folded: str, policy: dict, exact_key: str, extra_key: str) -> bool:
+    exact = {fold(n) for n in policy.get(exact_key) or []}
+    return folded in exact or extra_hit(folded, policy.get(extra_key) or [])
+
+
 def point_role(point: dict, roles: list, policy: dict) -> Optional[str]:
     """setpoint, status, output or choice when the point is one of those and its class allows it."""
     name = str(point.get("navName") or "")
@@ -99,14 +197,13 @@ def point_role(point: dict, roles: list, policy: dict) -> Optional[str]:
         return None
     folded = fold(name)
     kind = _kind(point)
-    names = lambda key: {fold(n) for n in policy.get(key) or []}
-    if "status" in roles and kind == "Bool" and folded in names("status_points"):
+    if "status" in roles and kind == "bool" and _named(folded, policy, "status_points", "status_extra"):
         return "status"
-    if "choice" in roles and kind == "Str" and folded in names("choice_points") and _enum_words(point):
+    if "choice" in roles and kind == "str" and _named(folded, policy, "choice_points", "choice_extra") and _enum_words(point):
         return "choice"
-    if "setpoint" in roles and kind == "Number" and (point.get("sp") or folded.endswith("sp")):
+    if "setpoint" in roles and kind == "number" and is_setpoint(name, point, policy.get("setpoint_extra") or []):
         return "setpoint"
-    if "output" in roles and kind == "Number" and folded in names("output_points"):
+    if "output" in roles and kind == "number" and _named(folded, policy, "output_points", "output_extra"):
         return "output"
     return None
 
@@ -130,7 +227,7 @@ def control_for(point: dict, eq_class: Optional[str], policy: dict) -> Optional[
     if role == "choice":
         return {"role": "choice", "options": [{"value": w, "label": w} for w in _enum_words(point)],
                 "level": level, "manual": manual}
-    unit = _unit(point, role)
+    unit = canon_unit(_unit(point, role))
     preset = (policy.get("setpoint_ranges") or {}).get(unit) or {}
     own_low, own_high = number_of(point.get("minVal")), number_of(point.get("maxVal"))
     site_low, site_high = number_of(preset.get("min")), number_of(preset.get("max"))

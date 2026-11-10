@@ -14,6 +14,10 @@
   const ss = { get(k){ try{return sessionStorage.getItem(k)}catch(e){return null} },
                set(k,v){ try{sessionStorage.setItem(k,v)}catch(e){} },
                del(k){ try{sessionStorage.removeItem(k)}catch(e){} } };
+  /* The rail's collapsed state: kept for the browser session inside the Studio (the page is shared by every project, and a collapse made once must not greet every later session
+     with an icon-only rail); kept for good on the standalone dashboard. An earlier Studio session's saved collapse is dropped. */
+  const navStore = window.INJECTED_PROJECT_CONFIG ? ss : ls;
+  if(window.INJECTED_PROJECT_CONFIG){ try{ localStorage.removeItem('eko-nav'); }catch(e){} }
 
   /* A pack path (assets/scene/...) served from the Studio dashboard. */
   function dashAsset(p){
@@ -54,6 +58,10 @@
       ? { esg: 'active', maintenance: 'active', security: 'active', 'systems.life': 'hidden', 'systems.security': 'hidden' }
       : { esg: 'available', maintenance: 'available', security: 'available' };
     ['systems.other', 'systems.data', 'spaces.occ', 'security.evac', 'security.nurse'].forEach(v => { states[v] = extended ? 'active' : 'hidden'; });
+    if(window.INJECTED_PROJECT_CONFIG) states['energy.anom'] = 'active';   /* every Studio project: its meters, the sample's, or none yet */
+    states['systems.twin'] = cfg.hospitalHvac === true ? 'active' : 'hidden';   /* Systems > Live Twin (layouts/hospital-twin.js): the Eko Hospital project only, as the roof schematic */
+    /* Ask EKO asks the backend's Eko-Chat for every Studio and exported project, whatever sample data it shows */
+    if(window.INJECTED_PROJECT_CONFIG && D.marsa) D.marsa.features = Object.assign({}, D.marsa.features, { ask: 'eko-chat' });
     if(D.marsa){ D.marsa.entitlements = D.marsa.entitlements || {}; D.marsa.entitlements.modules = Object.assign({}, D.marsa.entitlements.modules, states); }
     /* every site hands over between its shifts (wall.shifts); a site without its own settings gets the prototype's, with no stand-in handovers */
     if(D.marsa && !D.marsa.handover) D.marsa.handover = { server: { api: '/api/handover', pollSec: 30, retention: { days: null } }, prepareBeforeMin: 90, emailRelay: null, onCall: 'the duty engineer' };
@@ -123,6 +131,8 @@
     return ids;
   }
 
+  let roofHost = null;   /* the kept element of the Hospital roof schematic view (openRoofView) */
+  let twinHost = null;   /* the kept element of the Live Twin page (Systems > Live Twin): its camera, floor and selection survive every render */
   const E = window.EKO = {
     data: window.EKO_DATA.marsa,
     nav: window.EKO_LAYOUTS.nav,
@@ -131,11 +141,13 @@
     lang: ls.get('eko-lang') || 'en',
     state: {
       pageId: 'marsa-overview', module: 'overview', sub: null,
+      roofView: false,   /* the Hospital roof schematic is showing in the content area instead of the page (openRoofView) */
       rolePreview: ss.get('eko-role-preview') || null,     /* D105: demo-only role preview, session-scoped */
       disclose: {},                                        /* D105: per-user progressive-disclosure overrides (loaded per role) */
       themeMode: ls.get('eko-theme-mode') || 'auto',
-      navMin: ls.get('eko-nav') === 'min',
+      navMin: navStore.get('eko-nav') === 'min',
       exp: {},   /* exclusive accordion (D28): at most one module open */
+      navCollapsed: null,   /* the active module whose items the person folded away; any navigation shows them again */
       alarmF: { sev: new Set(), sys: new Set() },
       triageOpen: {}, alHistOpen: {},   /* alarm id -> its history is expanded */
       assetSel: null, apTab: 'alarms',
@@ -333,7 +345,9 @@
       if(gate){ this.set({ born:'dlg', teaserKey: gate, dlg:'teaser', mobMore:false }); return; }
       if(pageId !== this.state.pageId) this.state._prev = { pageId: this.state.pageId, module: this.state.module, sub: this.state.sub };
       this.state.locFocus = null;   /* any navigation (the logo, a module, search, Back) ends Locate-in-3D focus */
+      this.state.navCollapsed = null;
       if(pageId !== 'sec') this.state.secLocated = null;
+      if(this.state.roofView) closeRoofView();   /* ...and the Hospital roof schematic, which stands in the content area */
       if(window.EKO_SURF) window.EKO_SURF.closeAll();          /* R4 (D67) */
       const targetModule = module ?? this.state.module;
       const targetSub = sub ?? null;
@@ -607,8 +621,9 @@
     const mods = E.nav.modules.filter(navVisible).map(m => {
       const on = E.state.module === m.id ? (E.state.sub ? 'contains' : 'page') : 'none';
       const hasSubs = m.subs && m.subs.length;
-      const open = !!E.state.exp[m.id] || E.state.module === m.id;   /* D117: the active module shows its sub-items, as the mockup does */
-      const subs = hasSubs && open && !E.state.navMin ? `<div class="nsubs" data-born="${E.state.born==='nsub:'+m.id?1:0}">${m.subs.filter(s => !s.hidden).map(s =>
+      /* D117: the active module shows its sub-items, as the mockup does, until the person folds them away. The collapsed rail shows them as a flyout, only for the module just opened. */
+      const open = E.state.navMin ? !!E.state.exp[m.id] : (E.state.navCollapsed !== m.id && (!!E.state.exp[m.id] || E.state.module === m.id));
+      const subs = hasSubs && open ? `<div class="nsubs" data-born="${E.state.born==='nsub:'+m.id?1:0}">${m.subs.filter(s => !s.hidden).map(s =>
         s.locked
         ? `<button class="nsub" data-lock="true" data-act="teaser" data-teaser="${esc(s.teaser||s.label)}" data-mod="${m.id}">
              <span class="grow taS">${esc(E.t(s.label))}</span>${icon('lock',12)}</button>`
@@ -616,7 +631,7 @@
            <span class="grow taS">${esc(E.t(s.label))}</span>
            ${s.dot?`<span class="ndot" style="background:var(--sev${s.dot[0].toUpperCase()+s.dot.slice(1)})"></span>`:''}</button>`).join('')}</div>` : '';
       return `<div>
-        <button class="nvi" data-on="${on}" data-lock="${!!m.locked}" ${E.state.navMin?`data-tip="${esc(E.t(m.label))}" data-tipat="end"`:''}
+        <button class="nvi" data-on="${on}" data-lock="${!!m.locked}" ${E.state.navMin && !subs?`data-tip="${esc(E.t(m.label))}" data-tipat="end"`:''}
           data-act="${m.locked?'teaser':'goMod'}" data-mod="${m.id}" ${m.teaser?`data-teaser="${m.teaser}"`:''} data-page="${esc(m.pageId||'')}">
           <span class="nvib"></span><span class="nvic">${icon(m.icon,17)}</span>
           <span class="nlbl">${esc(E.t(m.label))}</span>
@@ -733,7 +748,7 @@
       /* D85/D107: the account MENU — headed sections, a description under every setting. */
       const seg = (grp, v, lbl, on, tip) => `<button class="seg" data-on="${on}" data-act="${grp}" data-v="${v}" aria-pressed="${on}"${tip ? ` data-tip="${esc(tip)}"` : ''}>${esc(lbl)}</button>`;
       const u = E.data.user || {};
-      const roleKey = { technician:'roleTechnician', engineer:'roleEngineer', executive:'roleExecutive', security:'roleSecurity', manager:'roleManager' }[E.role()] || 'roleTechnician';
+      const roleKey = { superuser:'roleSuperUser', technician:'roleTechnician', engineer:'roleEngineer', executive:'roleExecutive', security:'roleSecurity', manager:'roleManager' }[E.role()] || 'roleTechnician';
       const previewing = !!E.state.rolePreview && E.state.rolePreview !== u.role;
       /* D129: the account menu is IDENTITY and ACCOUNT ACTIONS — name and role, Sign out — plus the demo
          section in demo builds. Theme is the top-bar toggle and Settings › Appearance; language is the
@@ -749,6 +764,7 @@
         <div class="accid"><span class="avatar accavatar" aria-hidden="true">${esc(E.initials() || '·')}</span><div class="col accwho"><b>${esc(E.lang==='ar' ? (u.nameAr||u.name||'') : (u.name||''))}</b><span class="accrole">${esc(E.t(roleKey))}${previewing ? ` <span class="accprev">${esc(E.t('rolePreviewTag'))}</span>` : ''}</span></div></div>
         ${demo ? `<div class="accdemobox" data-tip="${esc(E.t('demoRoleNote'))}"><span class="accdemolbl"><span class="accdemotag">${esc(E.t('menuDemo'))}</span>${esc(E.t(window.EKO_PERSONA ? 'per.viewAs' : 'demoRole'))}</span>
           ${window.EKO_PERSONA ? window.EKO_PERSONA.menu(E) : `<div class="segbox row accsegs">${['technician','engineer','executive'].map(r => seg('rolePreview', r, E.t({ technician:'roleTechnician', engineer:'roleEngineer', executive:'roleExecutive' }[r]), E.role() === r)).join('')}</div>`}
+          ${(E.data.roles || {}).superuser ? `<div class="segbox row accsegs">${seg('rolePreview', 'superuser', E.t('roleSuperUser'), E.role() === 'superuser')}</div>` : ''}
           ${(E.data.demoUsers || []).length && window.EKO_HO && window.EKO_HO.enabled() ? `<span class="accdemolbl accdemolbl2" data-tip="${esc(E.t('demoUserTip'))}">${esc(E.t('demoUser'))}</span>
           <div class="segbox row accsegs accsegwrap">${E.data.demoUsers.map(p => seg('previewUser', p.name, E.lang === 'ar' ? (p.nameAr || p.name) : E.person(p.name, 'bare'), u.name === p.name, E.t('demoUserTip'))).join('')}</div>
           <span class="accdemolbl accdemolbl2" data-tip="${esc(E.t('demoClockTip'))}">${esc(E.t('demoClock'))}</span>
@@ -1054,14 +1070,31 @@
       : E.state.born === 'navx' ? 'x'
       : (E.state.born === 'nav' || /^nsub:/.test(E.state.born || '')) ? '1' : '0');
     $('ekonav').innerHTML = navRail();
-    /* E15 port: the page frame (headline, how-to-read line, tiles, tabs) on every page of a project on the extended module set (the Hospital). A project on the standard module set, Marsa Al Arab included, keeps its own page layouts. */
-    const framed = window.EKO_FRAME && window.EKO_MODULES === 'extended';
-    $('mount').innerHTML = NB((stacked ? pagehead() : '') + (framed ? window.EKO_FRAME.apply(E, P.renderPage(E)) : P.renderPage(E)));
-    /* E17: on a phone or a tablet the page's active sub-tab is scrolled into view when the page changes */
-    if(stacked){ const k = E.state.pageId + '/' + (E.state.sub || ''); if(render._phOn !== k){ render._phOn = k;
-      const on = $('mount').querySelector('#pagehead .phsub[data-on="1"]'), strip = on && on.parentElement;
-      if(on && strip && strip.scrollWidth > strip.clientWidth){ const sr = strip.getBoundingClientRect(), r = on.getBoundingClientRect();
-        if(r.left < sr.left) strip.scrollLeft -= sr.left - r.left + 24; else if(r.right > sr.right) strip.scrollLeft += r.right - sr.right + 24; } } }
+    { const fl = E.state.navMin && document.querySelector('#ekonav .nsubs');   /* the collapsed rail's flyout: beside its icon, kept inside the window */
+      if(fl){ const top = fl.parentNode.getBoundingClientRect().top; fl.style.top = Math.max(8, Math.min(top, window.innerHeight - fl.offsetHeight - 8)) + 'px'; } }
+    if(twinHost && E.state.pageId !== 'live-twin' && window.EKO_TWIN) window.EKO_TWIN.release(twinHost);   /* the Live Twin's highlight in the model is its own page's */
+    if(E.state.roofView && roofHost){
+      const m = $('mount');
+      if(m.firstElementChild !== roofHost || m.childElementCount !== 1) m.replaceChildren(roofHost);   /* only when it is not already there: moving it restarts what is turning */
+      window.EKO_ROOF.update(roofHost, E);
+    } else if(E.state.pageId === 'live-twin' && window.EKO_TWIN && window.EKO_TWIN_MAP){   /* the mapping is published only for the Hospital project (hospital-twin-map.js) */
+      /* the Live Twin is built once and kept, like the roof: render() only puts it back and updates it. A new language builds it again. */
+      if(!twinHost || twinHost.dataset.lang !== E.lang){ twinHost = window.EKO_TWIN.create(E); twinHost.dataset.lang = E.lang; }
+      const m = $('mount');
+      if(m.lastElementChild !== twinHost) m.replaceChildren(twinHost);
+      while(m.firstElementChild !== twinHost) m.firstElementChild.remove();
+      if(stacked) twinHost.insertAdjacentHTML('beforebegin', NB(pagehead()));   /* tablet and phone: the page header carries the Systems sub-tabs */
+      window.EKO_TWIN.update(twinHost, E);
+    } else {
+      /* E15 port: the page frame (headline, how-to-read line, tiles, tabs) on every page of a project on the extended module set (the Hospital). A project on the standard module set, Marsa Al Arab included, keeps its own page layouts. */
+      const framed = window.EKO_FRAME && window.EKO_MODULES === 'extended';
+      $('mount').innerHTML = NB((stacked ? pagehead() : '') + (framed ? window.EKO_FRAME.apply(E, P.renderPage(E)) : P.renderPage(E)));
+      /* E17: on a phone or a tablet the page's active sub-tab is scrolled into view when the page changes */
+      if(stacked){ const k = E.state.pageId + '/' + (E.state.sub || ''); if(render._phOn !== k){ render._phOn = k;
+        const on = $('mount').querySelector('#pagehead .phsub[data-on="1"]'), strip = on && on.parentElement;
+        if(on && strip && strip.scrollWidth > strip.clientWidth){ const sr = strip.getBoundingClientRect(), r = on.getBoundingClientRect();
+          if(r.left < sr.left) strip.scrollLeft -= sr.left - r.left + 24; else if(r.right > sr.right) strip.scrollLeft += r.right - sr.right + 24; } } }
+    }
     const fresh = document.getElementById('enginehost');
     if(fresh && keptHost) fresh.replaceWith(keptHost);
     $('mobtabs').innerHTML = mobtabs();
@@ -1284,12 +1317,71 @@
     }, NO_SEL));
   }
 
+  /* The popup frame for a document (O&M and warranty PDFs): #docov, so the surface manager closes it on Escape and navigation.
+     `download` adds the download link; `tab` the open-in-a-new-tab link. */
+  function openFramePopup(o){
+    const title = o.title || '';
+    const dl = C.esc(E.t('docDownload'));
+    const tab = C.esc(E.t('docOpenLarge'));
+    ACTS.docClose();
+    const ov = document.createElement('div');
+    ov.id = 'docov';
+    ov.innerHTML = `<div class="docbox" role="dialog" aria-modal="true" aria-label="${C.esc(title)}">
+        <div class="dochead">
+          <h2 class="doctitle">${C.esc(title)}</h2>
+          <div class="docacts">
+            ${o.download ? `<a class="iconbtn tipU" href="${C.esc(o.download)}" download data-tip="${dl}" aria-label="${dl}">${C.icon('download', 15)}</a>` : ''}
+            ${o.tab ? `<a class="iconbtn tipU" href="${C.esc(o.tab)}" target="_blank" rel="noopener noreferrer" data-tip="${tab}" aria-label="${tab}">${C.icon('external', 15)}</a>` : ''}
+          </div>
+          <button type="button" class="wmaxx docx" data-act="docClose" aria-label="${C.esc(E.t('close'))}">✕</button>
+        </div>
+        <iframe class="docframe" title="${C.esc(title)}"></iframe>
+      </div>`;
+    ov.addEventListener('click', ev => { if (ev.target === ov) ACTS.docClose(); });
+    const frame = ov.querySelector('.docframe');
+    const armed = new WeakSet();
+    /* The PDF viewer keeps its own key presses, so Escape has to be read inside the frame. */
+    const armFrame = () => {
+      try {
+        const win = frame.contentWindow;
+        if (!win || armed.has(win)) return;
+        armed.add(win);
+        win.addEventListener('keydown', ev => {
+          if (ev.key !== 'Escape') return;
+          ev.preventDefault();
+          if (window.EKO_SURF) window.EKO_SURF.escape();
+          else ACTS.docClose();
+        });
+      } catch (e) {}
+    };
+    frame.addEventListener('load', armFrame);
+    frame.src = o.src;
+    (window.DASHBOARD_ROOT || document.body).appendChild(ov);
+    armFrame();
+    ov.querySelector('.docx').focus();
+  }
+  /* The Hospital roof schematic (layouts/hospital-roof.js) fills the main content area (#mount) in place of the dashboard page, with a Back to
+     Dashboard button. It is not a dialog: no overlay, no backdrop. render() rebuilds #mount on every state change and live data changes state every
+     few seconds, so the view's element is KEPT (roofHost), put back as it is, and only its values are updated: what is turning keeps turning. */
+  function openRoofView(){
+    roofHost = window.EKO_ROOF.create(E);
+    if (window.EKO_SURF) window.EKO_SURF.closeAll();
+    E.set({ roofView: true, assetSel: null, dlg: null, mobMore: false });
+  }
+  function closeRoofView(){ roofHost = null; E.state.roofView = false; }
   const ACTS = {
     goMod(el){ const m = E.nav.modules.find(x=>x.id===el.dataset.mod);
+      /* the module's own page is already open with its items showing: a second click folds them away (the chevron does the same) */
+      if(m.subs && m.subs.length && E.state.module === m.id){
+        /* collapsed rail: the icon of the page you are on opens or closes its flyout (which shows the active item) without leaving the page */
+        if(E.state.navMin){ E.state.exp = E.state.exp[m.id] ? {} : { [m.id]: true }; render(); return; }
+        if(!E.state.sub && E.state.navCollapsed !== m.id){ E.state.navCollapsed = m.id; E.state.exp = {}; render(); return; }
+      }
       if(!E.state.exp[m.id]) E.state.born = 'nsub:'+m.id;
       E.state.exp = { [m.id]: true }; E.state.moduleLabel = m.label;
       E.go(el.dataset.page || 'stub', m.id, null); },
-    goSub(el){ E.go(el.dataset.page || 'stub', el.dataset.mod, el.dataset.sub); },
+    goSub(el){ if(E.state.navMin) E.state.exp = {};   /* the collapsed rail's flyout closes on a choice */
+      E.go(el.dataset.page || 'stub', el.dataset.mod, el.dataset.sub); },
     /* D94: page-header sub tabs; model mode; the ask dialog on the stacked shell */
     phGo(el){ E.go(el.dataset.page || 'stub', el.dataset.mod, el.dataset.sub || null); },
     modelFs(){ E.set({ modelFs: !E.state.modelFs, born: E.state.modelFs ? null : 'dlg', mkPop:null }); },
@@ -1374,45 +1466,12 @@
           download = url + '&download=1';
         } else return;
       } catch (e) { return; }
-      const title = el.dataset.title || 'PDF';
-      const dl = C.esc(E.t('docDownload'));
-      const tab = C.esc(E.t('docOpenLarge'));
-      ACTS.docClose();
-      const ov = document.createElement('div');
-      ov.id = 'docov';
-      ov.innerHTML = `<div class="docbox" role="dialog" aria-modal="true" aria-label="${C.esc(title)}">
-        <div class="dochead">
-          <h2 class="doctitle">${C.esc(title)}</h2>
-          <div class="docacts">
-            <a class="iconbtn tipU" href="${C.esc(download)}" download data-tip="${dl}" aria-label="${dl}">${C.icon('download', 15)}</a>
-            <a class="iconbtn tipU" href="${C.esc(url)}" target="_blank" rel="noopener noreferrer" data-tip="${tab}" aria-label="${tab}">${C.icon('external', 15)}</a>
-          </div>
-          <button type="button" class="wmaxx docx" data-act="docClose" aria-label="${C.esc(E.t('close'))}">✕</button>
-        </div>
-        <iframe class="docframe" title="${C.esc(title)}" src="${C.esc(url)}"></iframe>
-      </div>`;
-      ov.addEventListener('click', ev => { if (ev.target === ov) ACTS.docClose(); });
-      const frame = ov.querySelector('.docframe');
-      const armed = new WeakSet();
-      /* The PDF viewer keeps its own key presses, so Escape has to be read inside the frame. */
-      const armFrame = () => {
-        try {
-          const win = frame.contentWindow;
-          if (!win || armed.has(win)) return;
-          armed.add(win);
-          win.addEventListener('keydown', ev => {
-            if (ev.key !== 'Escape') return;
-            ev.preventDefault();
-            if (window.EKO_SURF) window.EKO_SURF.escape();
-            else ACTS.docClose();
-          });
-        } catch (e) {}
-      };
-      frame.addEventListener('load', armFrame);
-      (window.DASHBOARD_ROOT || document.body).appendChild(ov);
-      armFrame();
-      ov.querySelector('.docx').focus();
+      openFramePopup({ title: el.dataset.title || 'PDF', src: url, download, tab: url });
     },
+    /* The Eko Hospital roof schematic, listed in the Assets register for that project only. It opens in the main content area (not a popup) with a
+       Back to Dashboard button, and reads the same live FIN equipment feed as every asset panel. */
+    roofOpen(){ openRoofView(); },
+    roofBack(){ closeRoofView(); E.set({}); },
     docClose(){ const ov = document.getElementById('docov'); if (ov) ov.remove(); },
     /* Asset panel wide mode: a real state toggle (not a snapshot) so the
        tabs, work-order buttons and live values keep working while wide. */
@@ -1428,12 +1487,13 @@
     addonShow(el){ window.EKO_ADDONS.setOption(E, 'showAddOns', el.dataset.v === '1'); render(); },
     addonReset(){ window.EKO_ADDONS.reset(); render(); },
     navExp(el, ev){ ev.stopPropagation(); const id = el.dataset.mod;
-      const willOpen = !E.state.exp[id];
+      const willOpen = E.state.navCollapsed === id || !(E.state.exp[id] || E.state.module === id);   /* what the rail shows now: the active module is open unless folded away */
+      E.state.navCollapsed = willOpen ? null : id;
       E.state.exp = willOpen ? { [id]: true } : {};
       if(willOpen) E.state.born = 'nsub:'+id;
       render(); },
     navMin(){ E.state.navMin = !E.state.navMin; if(!E.state.navMin) E.state.born = 'navx';
-      ls.set('eko-nav', E.state.navMin?'min':'full'); render(); },
+      navStore.set('eko-nav', E.state.navMin?'min':'full'); render(); },
     sysExpTgl(el, ev){ ev.stopPropagation(); const g = el.dataset.v;
       E.state.sysExp[g] = E.state.sysExp[g] === false; render(); },
     ovpMin(){ if(window.EKO_SCN && window.EKO_SCN.on(E)){ E.state.scnOvpOpen = !E.state.scnOvpOpen; render(); return; }   /* E15 port (D182): the scenario's own setting, the user's choice kept */
