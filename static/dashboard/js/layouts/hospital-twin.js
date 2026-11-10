@@ -127,8 +127,8 @@
   PI('hw_boiler_riser', 'hw', 'BOILER_01', [[49.8, 11.4, RZ + 1.4], [52, 11.4, RZ + 1.4], [52, 15.2, RZ + 1.4]]);
   /* risers (one segment per floor gap is cut from these when the scene is drawn) */
   var RISERS = [
-    { sys: 'chws', src: 'CHILLED_WATER_PUMP_01', x: 51.0, y: 15.2, top: RZ + 1.2, bottom: 4.6 }, { sys: 'chwr', src: 'CHILLED_WATER_PUMP_01', x: 50.2, y: 15.2, top: RZ + 0.9, bottom: 4.9 },
-    { sys: 'hw', src: 'BOILER_01', x: 52.0, y: 15.2, top: RZ + 1.4, bottom: 4.2 }, { sys: 'dcw', src: 'BOOSTER_PUMP', x: 13.6, y: 10.6, top: LZ.L3 + 1.8, bottom: 1.6 },
+    { sys: 'chws', src: 'CHILLED_WATER_PUMP_01', x: 51.0, y: 15.2, top: RZ + 1.2, bottom: 4.6, down: true }, { sys: 'chwr', src: 'CHILLED_WATER_PUMP_01', x: 50.2, y: 15.2, top: RZ + 0.9, bottom: 4.9 },
+    { sys: 'hw', src: 'BOILER_01', x: 52.0, y: 15.2, top: RZ + 1.4, bottom: 4.2, down: true }, { sys: 'dcw', src: 'BOOSTER_PUMP', x: 13.6, y: 10.6, top: LZ.L3 + 1.8, bottom: 1.6 },
     { sys: 'o2', src: 'OXYGEN_PLANT_01', x: 24.4, y: 15.2, top: LZ.L3 + 3.2, bottom: 3.2 }, { sys: 'ma', src: 'MEDICAL_AIR_COMPRESSOR_01', x: 25.1, y: 15.2, top: LZ.L3 + 3.6, bottom: 3.6 },
     { sys: 'pwr', src: 'MDB', x: 5.6, y: 15.5, top: RZ + 3.6, bottom: 3.9, kind: 'cable' }
   ];
@@ -248,6 +248,8 @@
   /* the Studio's BIM bridge, read only through its existing methods (DashboardOverlay.tsx); absent outside the Studio */
   function host3d() { return typeof window !== 'undefined' && window.EKO_HOST_ENGINE ? window.EKO_HOST_ENGINE : null; }
   function call3d(name) { var h = host3d(); try { return h && typeof h[name] === 'function' ? h[name].apply(h, [].slice.call(arguments, 1)) : undefined; } catch (e) { return undefined; } }
+  /* the rotors of one machine, found once per drawing */
+  function rotorsOf(s, id) { return s.rot[id] || (s.rot[id] = [].slice.call(s.eqs[id].querySelectorAll('.rotor'))); }
   function feedStale(E) { return MAP.feedStale(E && E.data && E.data.equipmentAt, Date.now()); }
   /* everything the panel and the BIM link read, for the dashboard's current data */
   function current(E) {
@@ -352,11 +354,11 @@
     var m = [(ux[0] - o[0]) * r, (ux[1] - o[1]) * r, (vy[0] - o[0]) * r, (vy[1] - o[1]) * r, o[0], o[1]];
     return el('g', { transform: 'matrix(' + m.map(fmt).join(',') + ')' }, g);
   }
-  /* a fan or a heat wheel, drawn still: Phase 1 shows no running state */
-  function rotor(g, cx, cy, cz, r, plane, blades, style) {
+  /* a fan, pump impeller or heat wheel, drawn still; update() turns it (data-spin) only while FIN says the part is running. role: a part with its own status (a pump of a set, the heat wheel). */
+  function rotor(g, cx, cy, cz, r, plane, blades, style, role) {
     var pg = planeGroup(g, cx, cy, cz, r, plane);
     el('circle', { r: 1, 'class': 'rotor-house', 'vector-effect': 'non-scaling-stroke' }, pg);
-    var rot = el('g', { 'class': 'rotor' }, pg), i, a;
+    var rot = el('g', role ? { 'class': 'rotor', 'data-role': role } : { 'class': 'rotor' }, pg), i, a;
     if (style === 'wheel') {
       el('circle', { r: 0.96, 'class': 'wheel-face', 'vector-effect': 'non-scaling-stroke' }, rot);
       for (i = 0; i < 12; i++) { a = i / 12 * Math.PI * 2; el('line', { x1: 0, y1: 0, x2: Math.cos(a) * 0.95, y2: Math.sin(a) * 0.95, 'class': 'spoke', 'vector-effect': 'non-scaling-stroke' }, rot); }
@@ -428,11 +430,11 @@
   DRAW.PUMPSET = function (g, e) {
     var x = e.x, y = e.y, z = e.z, w = e.w;
     box(g, x, y, z, w, 3, 0.3, 'dark');
-    [y + 2.15, y + 0.85].forEach(function (yy) {
+    [y + 2.15, y + 0.85].forEach(function (yy, pi) {
       box(g, x + 0.5, yy - 0.55, z + 0.3, 1.3, 1.1, 1.0, 'steel');
       cylV(g, x + 1.15, yy, z + 1.3, 0.3, 0.5, 'steel');
       cylX(g, x + 1.8, x + 4.6, yy, z + 0.9, 0.52, 'blue');
-      rotor(g, x + 4.62, yy, z + 0.9, 0.42, 'yz', 7);
+      rotor(g, x + 4.62, yy, z + 0.9, 0.42, 'yz', 7, null, 'p' + (pi + 1));
       lamp(g, x + 5.2, yy - 0.5, z + 0.35, 2.6);
     });
     lcd(g, x + 5.1, y, z + 1.1, 0.85, 0.55);
@@ -460,7 +462,7 @@
     face(g, [[fx, y - 0.01, fz], [fx + 1.6, y - 0.01, fz], [fx + 1.6, y - 0.01, fz + 2.3], [fx, y - 0.01, fz + 2.3]], 'url(#twhatch)', 'filter-panel');
     face(g, [[cx0, y - 0.01, fz], [cx0 + 1.5, y - 0.01, fz], [cx0 + 1.5, y - 0.01, fz + 2.3], [cx0, y - 0.01, fz + 2.3]], 'url(#twfins)', 'coil-panel');
     if (isFahu) {
-      rotor(g, x + 3.1, y - 0.03, z + 1.85, 1.2, 'xz', 0, 'wheel');
+      rotor(g, x + 3.1, y - 0.03, z + 1.85, 1.2, 'xz', 0, 'wheel', 'wheel');
       rotor(g, x + 7.3, y - 0.03, z + 1.85, 1.05, 'xz', 6);
     } else rotor(g, x + 6.6, y - 0.03, z + 1.85, 1.15, 'xz', 6);
     lcd(g, x + w + 0.01, y + 0.4, z + 2.2, 2.0, 0.7, 'yz');
@@ -612,10 +614,10 @@
     var x = e.x, y = e.y, z = e.z;
     box(g, x, y, z, 6, 4, 0.3, 'dark');
     cylV(g, x + 1.2, y + 2.6, z + 0.3, 0.95, 2.8, 'blue');
-    [x + 4.6, x + 3.2].forEach(function (px) {
+    [x + 4.6, x + 3.2].forEach(function (px, pi) {
       cylV(g, px, y + 1.2, z + 0.3, 0.32, 1.7, 'steel');
       cylV(g, px, y + 1.2, z + 2.0, 0.45, 0.85, 'blue');
-      rotor(g, px, y + 1.2, z + 2.86, 0.38, 'xy', 5);
+      rotor(g, px, y + 1.2, z + 2.86, 0.38, 'xy', 5, null, 'p' + (pi + 1));
       lamp(g, px + 0.5, y + 0.7, z + 0.4, 2.4);
     });
     lcd(g, x + 3.4, y - 0.01, z + 0.9, 1.6, 0.5);
@@ -686,7 +688,8 @@
   }
   function pathD(pts) { return pts.map(function (q, i) { var p = P(q[0], q[1], q[2]); return (i ? 'L' : 'M') + fmt(p[0]) + ',' + fmt(p[1]); }).join(' '); }
   /* one pipe, duct or cable. data-src: the machine the reference ties it to (selection highlights it). The .flow overlay is drawn once; update() only sets
-     data-flow (measured · running · stopped · unknown, MAP.flowState) and CSS animates measured flow alone. */
+     data-flow (measured · running · stopped · tripped · stale · offline · unknown, MAP.flowState) and CSS animates measured and running flow only. The path runs the way the
+     fluid, air or current goes, so the moving dashes show the direction. */
   function drawPipe(g, p, refs) {
     var d = pathD(p.pts), grp = el('g', { 'class': 'pipe k-' + p.kind, 'data-pipe': p.id, 'data-sys': p.sys, 'data-layer': SYSTEMS[p.sys][1], 'data-src': p.src, 'data-flow': 'unknown' }, g);
     el('path', { d: d, 'class': 'casing' }, grp);
@@ -728,7 +731,7 @@
         t.textContent = T('twinLv.' + lv).toUpperCase();
         RISERS.forEach(function (r) {
           var up = { L1: LZ.L2, L2: LZ.L3, L3: LZ.RF, RF: 999 }[lv], a = Math.max(r.bottom, z), b = Math.min(r.top, up - 0.7);
-          if (b > a + 0.2) drawPipe(g, { id: 'riser_' + r.sys + '_' + lv, sys: r.sys, src: r.src, kind: r.kind || 'pipe', pts: [[r.x, r.y, a], [r.x, r.y, b]] }, refs);
+          if (b > a + 0.2) drawPipe(g, { id: 'riser_' + r.sys + '_' + lv, sys: r.sys, src: r.src, kind: r.kind || 'pipe', pts: r.down ? [[r.x, r.y, b], [r.x, r.y, a]] : [[r.x, r.y, a], [r.x, r.y, b]] }, refs);
         });
       }
       var floorTop = LZ[lv === 'EXT' ? 'L1' : lv] + 3.2;
@@ -949,7 +952,7 @@
           return '<div data-layer="' + l + '"><dt>' + esc(tr(E, 'twinLayer.' + l)) + '</dt>' + Object.keys(SYSTEMS).filter(function (k) { return SYSTEMS[k][1] === l; }).map(function (k) {
             return '<dd><i class="twkey" data-sys="' + k + '" style="background:' + SYSTEMS[k][0] + '"></i>' + esc(tr(E, 'twinSys.' + k)) + '</dd>';
           }).join('') + '</div>';
-        }).join('') + '</dl><h3 class="twsub">' + esc(tr(E, 'twinFlowT')) + '</h3><ul class="twflowkey">' + ['measured', 'running', 'stopped', 'unknown'].map(function (k) {
+        }).join('') + '</dl><h3 class="twsub">' + esc(tr(E, 'twinFlowT')) + '</h3><ul class="twflowkey">' + ['measured', 'running', 'stopped', 'tripped', 'stale', 'offline', 'unknown'].map(function (k) {
           return '<li><i class="twfk" data-flow="' + k + '"></i>' + esc(tr(E, 'twinFlow.' + k)) + '</li>';
         }).join('') + '</ul><p class="twnote">' + esc(tr(E, 'twinLayoutNote')) + '</p>';
     }
@@ -1045,7 +1048,7 @@
       '<button type="button" role="tab" data-tw="tab" data-tab="wo" aria-selected="false"></button></div><div class="twpane" aria-live="polite"></div></aside></div>';
     var stage = host.querySelector('.twstage');
     var svg = el('svg', { 'class': 'twsvg', role: 'img', 'aria-label': tr(E, 'twinTitle'), dir: 'ltr', 'data-level': 'ALL', 'data-labels': ex.labels, preserveAspectRatio: 'xMidYMid meet' }, stage);
-    var s = { E: E, host: host, view: null, cam: 'fit', turnMode: false, tagKs: null, svg: svg, side: host.querySelector('.twpane'), tabs: host.querySelectorAll('.twtabs button'), tab: 'alarms', ex: ex, flows: [], zones: [], run: {}, seen: {}, opened: Date.now(), lastUser: 0, status: host.querySelector('.twstatus'), sel: null, level: 'ALL', eqs: {}, tags: {}, pipes: {}, vb: null, home: null, panel: '',
+    var s = { E: E, host: host, view: null, cam: 'fit', turnMode: false, tagKs: null, svg: svg, side: host.querySelector('.twpane'), tabs: host.querySelectorAll('.twtabs button'), tab: 'alarms', ex: ex, flows: [], zones: [], run: {}, seen: {}, opened: Date.now(), lastUser: 0, status: host.querySelector('.twstatus'), sel: null, level: 'ALL', eqs: {}, tags: {}, pipes: {}, rot: {}, vb: null, home: null, panel: '',
       graph: MAP.graph(EQUIP), trace: null, traceBar: host.querySelector('.twtrace'), res: {}, alIdx: { by: {}, unlinked: [] }, fdd: {}, faults: {},
       bim: { by: {}, guid: {} }, cands: {}, stale: false, lit: null, picked: null };
     LAYERS.forEach(function (l) { if (HIDDEN[l]) svg.classList.add('hide-' + l); });
@@ -1142,11 +1145,12 @@
      and label's state attributes, the selection, the trace marks, each pipe's flow state, the room patches, the keyboard focus. ── */
   var SNAP = ['data-fin', 'data-bim', 'data-al', 'data-run', 'data-tr'];
   function snapshot(s) {
-    var o = { eqs: {}, pipes: {}, zones: s.zones.map(function (z) { return [z.poly.getAttribute('class'), z.tt.textContent]; }) };
+    var o = { eqs: {}, pipes: {}, rot: {}, zones: s.zones.map(function (z) { return [z.poly.getAttribute('class'), z.tt.textContent]; }) };
     Object.keys(s.eqs).forEach(function (id) {
       var one = function (n) { var a = {}; SNAP.forEach(function (k) { if (n.hasAttribute(k)) a[k] = n.getAttribute(k); }); a.sel = n.classList.contains('sel'); return a; };
       o.eqs[id] = [one(s.eqs[id]), one(s.tags[id])];
     });
+    Object.keys(s.eqs).forEach(function (id) { o.rot[id] = rotorsOf(s, id).map(function (r) { return r.getAttribute('data-spin'); }); });
     Object.keys(s.pipes).forEach(function (k) { o.pipes[k] = s.pipes[k].map(function (g) { return [g.getAttribute('data-flow'), g.classList.contains('conn'), g.classList.contains('tr-on')]; }); });
     return o;
   }
@@ -1155,11 +1159,12 @@
       [s.eqs[id], s.tags[id]].forEach(function (n, i) { var a = o.eqs[id][i]; SNAP.forEach(function (k) { if (k in a) n.setAttribute(k, a[k]); else n.removeAttribute(k); }); n.classList.toggle('sel', a.sel); });
     });
     Object.keys(o.pipes).forEach(function (k) { (s.pipes[k] || []).forEach(function (g, i) { var a = o.pipes[k][i]; if (!a) return; g.setAttribute('data-flow', a[0]); g.classList.toggle('conn', a[1]); g.classList.toggle('tr-on', a[2]); }); });
+    Object.keys(o.rot).forEach(function (id) { rotorsOf(s, id).forEach(function (r, i) { if (o.rot[id][i]) r.setAttribute('data-spin', o.rot[id][i]); }); });
     s.zones.forEach(function (z, i) { if (o.zones[i]) { z.poly.setAttribute('class', o.zones[i][0]); z.tt.textContent = o.zones[i][1]; } });
   }
   function rebuild(s) {
     var snap = snapshot(s), ae = document.activeElement, fe = ae && s.svg.contains(ae) && ae.closest ? ae.closest('.equip') : null, fid = fe ? fe.getAttribute('data-id') : null;
-    s.eqs = {}; s.tags = {}; s.pipes = {}; s.flows = []; s.zones = []; s.tagKs = null;
+    s.eqs = {}; s.tags = {}; s.pipes = {}; s.flows = []; s.zones = []; s.rot = {}; s.tagKs = null;
     /* built apart from the page and put in with one replace: the browser styles and paints the new drawing once, not as it is made */
     var fresh = document.createElementNS(NS, 'svg');
     scene(fresh, function (k) { return tr(s.E, k); }, s);
@@ -1413,7 +1418,9 @@
     s.flows.forEach(function (f) { var st = MAP.flowState(f.rule, res, connected); if (f.g.getAttribute('data-flow') !== st) f.g.setAttribute('data-flow', st); });
     EQUIP.forEach(function (e) {
       var rs = MAP.runState(e.id, e.type, res, connected); s.run[e.id] = rs;
-      if (s.eqs[e.id].getAttribute('data-run') !== rs) { if (rs) s.eqs[e.id].setAttribute('data-run', rs); else s.eqs[e.id].removeAttribute('data-run'); }
+      if (s.eqs[e.id].getAttribute('data-run') !== rs) { var tg = s.tags[e.id]; if (rs) { s.eqs[e.id].setAttribute('data-run', rs); tg.setAttribute('data-run', rs); } else { s.eqs[e.id].removeAttribute('data-run'); tg.removeAttribute('data-run'); } }
+      /* each rotor turns only while the status that drives it says on: the machine's own, or its part's (a pump of a set, the heat wheel) */
+      rotorsOf(s, e.id).forEach(function (r) { var role = r.getAttribute('data-role'), st = role ? MAP.rotorState(e.id, e.type, role, res, connected) : rs, v = st === 'on' ? 'on' : null; if (r.getAttribute('data-spin') !== v) { if (v) r.setAttribute('data-spin', v); else r.removeAttribute('data-spin'); } });
     });
     /* room temperature under each ceiling unit, as that unit reports it; without a live setpoint the patch is tinted neutral (no judgement is made) */
     s.zones.forEach(function (z) {

@@ -1092,17 +1092,28 @@
   var RUNPTS = { PUMPSET: ['Pump01RunStatus', 'Pump02RunStatus'], BOOSTER: ['Pump01RunStatus', 'Pump02RunStatus'], SUMP: ['Pump01RunStatus', 'Pump02RunStatus'],
     BOILER: ['RunStatus'], CHILLER: ['RunStatus'], AHU: ['SA Fan Status'], FAHU: ['SupplyFanStatus'], EF: ['EF_Run_Sts'], CT: ['FanRunStatus'], FCU: ['FanRunStatus'],
     VAV: ['Status'], O2: ['RunStatus'], MAC: ['RunStatus'], ATS: ['NormalSupplySts', 'EmergencySupplySts'], SMDB: ['Incomer_ON_OFF_Status'] };
+  /* the FIN Bool points that say an item has tripped (true = tripped: their enums read Normal,Trip · NORMAL,ALARM). Nothing else is read as a trip. */
+  var TRIPPTS = { PUMPSET: ['Pump01Trip', 'Pump02Trip'], BOOSTER: ['Pump01Trip', 'Pump02Trip'], SUMP: ['Pump01Trip', 'Pump02Trip'], CT: ['FanTrip'], EF: ['EF_Trip'],
+    FAHU: ['SupplyFanTripStatus'], SMDB: ['Incomer_Trip_Status'], AHU: ['AlarmStatus'], FCU: ['AlarmStatus'], VAV: ['AlarmStatus'], CHILLER: ['AlarmStatus'], BOILER: ['AlarmStatus'],
+    O2: ['AlarmStatus'], MAC: ['AlarmStatus'] };
+  /* items with several drive units: one running unit is enough, a trip counts only when none runs. Everything else stops on a trip. */
+  var MULTI = { PUMPSET: 1, BOOSTER: 1, SUMP: 1, ATS: 1 };
+  /* a part of a machine that has its own run status: [run point, trip point]. Which drawn pump is Pump01 is the drawing's order (illustrative), not surveyed. */
+  var ROLES = { PUMPSET: { p1: ['Pump01RunStatus', 'Pump01Trip'], p2: ['Pump02RunStatus', 'Pump02Trip'] }, BOOSTER: { p1: ['Pump01RunStatus', 'Pump01Trip'], p2: ['Pump02RunStatus', 'Pump02Trip'] },
+    FAHU: { wheel: ['HeatRecoveryWheelRunStatus', 'HeatRecoveryWheelTripStatus'] } };
+  /* what each pipe, duct or cable reads: measure (a live meter), run (the run status of what drives it), by (the machine whose trip stops it) */
   function flowRule(p, EQ) {
-    var t = EQ[p.src] && EQ[p.src].type, M = [], R = [];
+    var t = EQ[p.src] && EQ[p.src].type, M = [], R = [], by = [];
     var run = function (id) { (RUNPTS[EQ[id] && EQ[id].type] || []).forEach(function (n) { R.push([id, n]); }); };
     if (p.sys === 'chws' || p.sys === 'chwr') { if (t === 'PUMPSET') { M.push(['BTU_01', 'CHWFlow']); run(p.src); } }
     else if (t === 'WM') M.push([p.src, 'FlowRate']);
     else if (t === 'VAV') M.push([p.src, 'Airflow']);
     else if (t === 'O2' || t === 'MAC') M.push([p.src, 'Flow']);
-    else if (p.src === 'DEWA_SUPPLY' || t === 'PMU') M.push(['PMU_Main', 'ActivePower']);
+    else if (p.src === 'DEWA_SUPPLY' || t === 'PMU') { M.push(['PMU_Main', 'ActivePower']); R.push(['AUTOMATIC_TRANSFER_SWITCH_01', 'NormalSupplySts']); }
     else if (p.src === 'GENERATOR') R.push(['AUTOMATIC_TRANSFER_SWITCH_01', 'EmergencySupplySts']);
     else run(p.src);
-    return { measure: M, run: R };
+    if (t && TRIPPTS[t]) by.push([p.src, t]);
+    return { measure: M, run: R, by: by };
   }
   /* a point of a confirmed (mapped, not stale) machine, read live; else null */
   function liveReading(r, name) {
@@ -1111,20 +1122,52 @@
     for (var i = 0; i < pts.length; i++) if (pts[i] && fold(pts[i].navName) === k) { var x = readPoint(pts[i], { connected: true }); return x.state === 'live' ? x : null; }
     return null;
   }
-  /* measured: a live meter reads above 0 · running: only a run status is on · stopped: the meter reads 0, or every run status is off · unknown: nothing live */
+  function boolOf(r, name) { var x = liveReading(r, name); return x && x.type === 'bool' ? x.value : null; }
+  /* one machine's drive: 'on' · 'off' · 'tripped' · null (nothing live). A Bool is read by its own value, never by its text. */
+  function driveOf(r, type, runNames, tripNames) {
+    var on = null, off = false, trip = false, i, v;
+    for (i = 0; i < runNames.length; i++) { v = boolOf(r, runNames[i]); if (v === true) on = true; else if (v === false) off = true; }
+    for (i = 0; i < tripNames.length; i++) if (boolOf(r, tripNames[i]) === true) trip = true;
+    if (MULTI[type]) return on ? 'on' : trip ? 'tripped' : off ? 'off' : null;
+    return trip ? 'tripped' : on ? 'on' : off ? 'off' : null;
+  }
+  /* the central motion state of one machine (all of its drive): on · off · tripped · stale · offline · null (unknown). Only 'on' moves. */
+  function runState(id, type, res, connected) {
+    if (!RUNPTS[type] && !TRIPPTS[type]) return null;
+    if (connected === false) return 'offline';
+    var r = res[id];
+    if (r && r.state === 'stale') return 'stale';
+    return driveOf(r, type, RUNPTS[type] || [], TRIPPTS[type] || []);
+  }
+  /* the same for one part with its own status (a pump of a set, a heat wheel); null when the machine has no such part */
+  function rotorState(id, type, role, res, connected) {
+    var q = ROLES[type] && ROLES[type][role]; if (!q) return null;
+    if (connected === false) return 'offline';
+    var r = res[id];
+    if (r && r.state === 'stale') return 'stale';
+    var d = driveOf(r, 'ONE', [q[0]], [q[1]]);
+    return d;
+  }
+  /* The central motion state of a pipe, duct or cable:
+       measured  a live meter reads above 0                                   moves
+       running   the machine that drives it reports running (no flow meter)  moves
+       stopped   the meter reads 0, or every run status is off                still
+       tripped   the machine that drives it has tripped                       still, marked
+       stale     the feed is old: nothing is claimed                          still
+       offline   FIN is not connected                                          still
+       unknown   no verified reading                                           still
+     A trip wins: a tripped machine is not shown moving, whatever a meter or run status says. */
   function flowState(rule, res, connected) {
-    if (connected === false || !rule) return 'unknown';
+    if (!rule) return 'unknown';
+    if (connected === false) return 'offline';
+    var by = rule.by || [], i, d;
+    for (i = 0; i < by.length; i++) { d = driveOf(res[by[i][0]], by[i][1], RUNPTS[by[i][1]] || [], TRIPPTS[by[i][1]] || []); if (d === 'tripped') return 'tripped'; }
     var m = rule.measure.map(function (q) { return liveReading(res[q[0]], q[1]); }).filter(function (x) { return x && x.type === 'number'; });
     if (m.length) return m.some(function (x) { return x.value > 0; }) ? 'measured' : 'stopped';
     var rr = rule.run.map(function (q) { return liveReading(res[q[0]], q[1]); }).filter(function (x) { return x && x.type === 'bool'; });
-    if (!rr.length) return 'unknown';
-    return rr.some(function (x) { return x.value; }) ? 'running' : rr.length === rule.run.length ? 'stopped' : 'unknown';
-  }
-  /* a machine's own run status: on · off · null (none live) */
-  function runState(id, type, res, connected) {
-    if (connected === false) return null;
-    var rr = (RUNPTS[type] || []).map(function (n) { return liveReading(res[id], n); }).filter(function (x) { return x && x.type === 'bool'; });
-    return rr.length ? (rr.some(function (x) { return x.value; }) ? 'on' : 'off') : null;
+    if (rr.length) return rr.some(function (x) { return x.value; }) ? 'running' : rr.length === rule.run.length ? 'stopped' : 'unknown';
+    var involved = rule.measure.concat(rule.run).map(function (q) { return res[q[0]]; });
+    return involved.some(function (r) { return r && r.state === 'stale'; }) ? 'stale' : 'unknown';
   }
 
   return { REF: REF, PIN: PIN, PROVISIONAL: PROVISIONAL, TYPE_TAG: TYPE_TAG, LEVELS: LEVELS, LEGACY_LEVELS: LEGACY_LEVELS, NAME_ONLY: NAME_ONLY,
@@ -1132,5 +1175,5 @@
     index: index, resolve: resolve, readPoint: readPoint, pointRows: pointRows, alarmPointOf: alarmPointOf, alarmsFor: alarmsFor, alarmIndex: alarmIndex,
     isActive: isActive, fddRows: fddRows, buildLinks: buildLinks, graph: graph, evidence: evidence, floorCheck: floorCheck,
     bimLinks: bimLinks, modelLevel: modelLevel, candidateFor: candidateFor, feedStale: feedStale, STALE_MS: STALE_MS,
-    RUNPTS: RUNPTS, flowRule: flowRule, flowState: flowState, runState: runState, liveReading: liveReading };
+    RUNPTS: RUNPTS, TRIPPTS: TRIPPTS, ROLES: ROLES, flowRule: flowRule, flowState: flowState, runState: runState, rotorState: rotorState, liveReading: liveReading };
 });
