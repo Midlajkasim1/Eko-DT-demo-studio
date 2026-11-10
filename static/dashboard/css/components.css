@@ -17257,6 +17257,37 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   min-height:36px
 }
 
+.dashboard-native-container .dlgpoint .pcmenu {
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  gap:6px;
+  padding:0;
+  overflow:visible;
+  border-radius:0;
+  background:transparent;
+  border:0
+}
+
+.dashboard-native-container .dlgpoint .pcmenu .seg {
+  justify-content:flex-start;
+  padding:8px 12px;
+  border:1px solid var(--bd2);
+  border-radius:8px;
+  background:var(--s2);
+  color:var(--t1)
+}
+
+.dashboard-native-container .dlgpoint .pcmenu .seg+.seg {
+  border-inline-start:0
+}
+
+.dashboard-native-container .dlgpoint .pcmenu .seg[data-on="true"] {
+  background:var(--accT);
+  color:var(--acc);
+  border-color:var(--acc)
+}
+
 .dashboard-native-container .pcresult {
   padding:8px 10px;
   border-radius:8px;

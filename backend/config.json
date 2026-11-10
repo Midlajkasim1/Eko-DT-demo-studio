@@ -119,7 +119,7 @@
     "expr": "secureEval(projs())"
   },
   "point_control": {
-    "_comment": "Points the dashboard may write, per equipment class. setpoint: writable Number tagged sp, or named *Sp, *Setpoint, *Setpt, or *Stpt. status: writable Bool named below (fan run feedback and alarms are not in the list). output: writable Number commands named below (AHU family only, until a project turns it on). choice: writable Str points named below, limited to their FIN enum. Dashboard Settings can turn a role off per equipment class and add names. A number's range is setpoint_ranges for its unit, narrowed (never widened) by the point's own minVal/maxVal; a unit with no entry needs both tags, or the number is not offered. Writes are FIN priority level write_level, like FIN's Manual Set; 'Return to auto' clears that level.",
+    "_comment": "Points the dashboard may write, per equipment class. setpoint: writable Number tagged sp, or named *Sp, *Setpoint, *Setpt, or *Stpt. status: writable Bool named below (Fan_Run_Sts feedback and alarms stay off the list). output: writable Number commands named below (AHU family only, until a project turns it on). choice: writable Str points named below, limited to their FIN enum. Dashboard Settings can turn a role off per equipment class and add names. A number's range is setpoint_ranges for its unit, narrowed (never widened) by the point's own minVal/maxVal; a unit with no entry needs both tags, or the number is not offered. Writes are FIN priority level write_level, like FIN's Manual Set; 'Return to auto' clears that level.",
     "enabled": true,
     "write_level": 8,
     "equipment": {
@@ -135,6 +135,7 @@
       "SA Fan Cmd", "RA Fan Cmd", "SupplyFanCmd", "ExhaustFanCmd",
       "SF_VFD_Cmd", "EF_VFD_Cmd", "HRW_Cmd", "Sensible_Cmd",
       "Enable_Cmd", "EnableCmd", "FanEnableCmd",
+      "FanRunStatus",
       "Status", "Effective_Occupancy"
     ],
     "output_points": [

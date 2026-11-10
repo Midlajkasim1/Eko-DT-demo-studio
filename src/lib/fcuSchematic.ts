@@ -51,6 +51,21 @@ export type FcuSchematic = {
 const hospitalValve = (k: string) =>
   k.includes('coolingvalve') && !k.includes('pos') && !isCommand(k) && !isSetpoint(k) && !isFault(k)
 
+/** 0–1 from Low, Medium, High or a percent. Auto and an unknown word stay unset. */
+function fanStep(raw: string | null): number | null {
+  if (!raw) return null
+  const word = raw.trim().toLowerCase()
+  if (word === 'low') return 1 / 3
+  if (word === 'medium' || word === 'med') return 2 / 3
+  if (word === 'high') return 1
+  if (word === 'off' || word === 'stop' || word === 'stopped') return 0
+  if (word === 'auto') return null
+  const n = numberOf(raw)
+  if (n == null) return null
+  const pct = n > 1 ? n : n * 100
+  return Math.min(1, Math.max(0, pct / 100))
+}
+
 export function readFcuPoints(points: FcuPoint[], options: HvacSchematicOptions = {}): FcuReading {
   const hospital = options.hospitalHvac === true
   const zone  = clean(findPoint(points, k => k.includes('zonetemp') && !k.includes('set') && !k.endsWith('sp'))?.currentValue)
@@ -60,7 +75,6 @@ export function readFcuPoints(points: FcuPoint[], options: HvacSchematicOptions 
   const plain = hospital ? pick(points, [hospitalValve]) : null
   const speedPt = findPoint(points, k => k.includes('fanspeed'))
   const speed = clean(speedPt?.currentValue)
-  // FAN_SPEED_MODE is a mode setting (a gear on the FIN page), not a speed: never a %, never a spin rate
   const isMode = keyOf(speedPt?.navName || '').includes('mode')
   const isCmd = (k: string) => k.includes('cmd') || k.includes('command')
   const run   = clean(findPoint(points, k => (k.includes('fanrun') || k.endsWith('fanstatus') || k.endsWith('fansts')) && !isCmd(k))?.currentValue)
@@ -76,14 +90,10 @@ export function readFcuPoints(points: FcuPoint[], options: HvacSchematicOptions 
     valveOpen = Math.min(1, Math.max(0, fraction ? posN : posN / 100))
   }
 
-  const on     = stateOf(run)
-  const speedN = isMode ? null : numberOf(speed)
-  let fanRate  = 0
-  if (on) {
-    fanRate = speedN == null
-      ? 1.6
-      : 0.5 + 2.6 * (Math.min(100, Math.max(0, speedN > 1 ? speedN : speedN * 100)) / 100)
-  }
+  const on   = stateOf(run)
+  const step = fanStep(speed)
+  let fanRate = 0
+  if (on && step !== 0) fanRate = step == null ? 1.6 : 0.5 + 2.6 * step
 
   return {
     zoneTemp: shown(zone,  ' °C'),
