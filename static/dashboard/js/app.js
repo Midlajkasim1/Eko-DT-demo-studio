@@ -14,6 +14,10 @@
   const ss = { get(k){ try{return sessionStorage.getItem(k)}catch(e){return null} },
                set(k,v){ try{sessionStorage.setItem(k,v)}catch(e){} },
                del(k){ try{sessionStorage.removeItem(k)}catch(e){} } };
+  /* The rail's collapsed state: kept for the browser session inside the Studio (the page is shared by every project, and a collapse made once must not greet every later session
+     with an icon-only rail); kept for good on the standalone dashboard. An earlier Studio session's saved collapse is dropped. */
+  const navStore = window.INJECTED_PROJECT_CONFIG ? ss : ls;
+  if(window.INJECTED_PROJECT_CONFIG){ try{ localStorage.removeItem('eko-nav'); }catch(e){} }
 
   /* A pack path (assets/scene/...) served from the Studio dashboard. */
   function dashAsset(p){
@@ -141,7 +145,7 @@
       rolePreview: ss.get('eko-role-preview') || null,     /* D105: demo-only role preview, session-scoped */
       disclose: {},                                        /* D105: per-user progressive-disclosure overrides (loaded per role) */
       themeMode: ls.get('eko-theme-mode') || 'auto',
-      navMin: ls.get('eko-nav') === 'min',
+      navMin: navStore.get('eko-nav') === 'min',
       exp: {},   /* exclusive accordion (D28): at most one module open */
       navCollapsed: null,   /* the active module whose items the person folded away; any navigation shows them again */
       alarmF: { sev: new Set(), sys: new Set() },
@@ -1489,7 +1493,7 @@
       if(willOpen) E.state.born = 'nsub:'+id;
       render(); },
     navMin(){ E.state.navMin = !E.state.navMin; if(!E.state.navMin) E.state.born = 'navx';
-      ls.set('eko-nav', E.state.navMin?'min':'full'); render(); },
+      navStore.set('eko-nav', E.state.navMin?'min':'full'); render(); },
     sysExpTgl(el, ev){ ev.stopPropagation(); const g = el.dataset.v;
       E.state.sysExp[g] = E.state.sysExp[g] === false; render(); },
     ovpMin(){ if(window.EKO_SCN && window.EKO_SCN.on(E)){ E.state.scnOvpOpen = !E.state.scnOvpOpen; render(); return; }   /* E15 port (D182): the scenario's own setting, the user's choice kept */

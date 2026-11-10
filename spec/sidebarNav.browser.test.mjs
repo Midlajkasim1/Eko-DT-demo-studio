@@ -220,3 +220,21 @@ test('sections without items are plain links, and locked or hidden ones expose n
   }
 })
 after(() => { for (const r of REPORT) console.log('AUDIT', r.join(' | ')) })
+
+test('inside the Studio a collapse saved by an earlier session is not restored; a collapse made now lasts the session only', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } }), page = await ctx.newPage()
+  try {
+    await page.addInitScript(cfg => { window.INJECTED_PROJECT_CONFIG = { ...cfg }; try { if (!sessionStorage.getItem('__seeded')) { localStorage.setItem('eko-nav', 'min'); sessionStorage.setItem('__seeded', '1') } } catch (e) {} }, CONFIGS.eko)
+    await page.goto(base + '/'); await page.waitForFunction(() => window.EKO && document.querySelector('#ekonav .nvi'))
+    const nav = () => page.locator('.dashboard-native-container').getAttribute('data-nav')
+    assert.equal(await nav(), 'full', 'a stale saved collapse does not give an icon-only rail')
+    assert.equal(await page.evaluate(() => localStorage.getItem('eko-nav')), null, 'the stale value is dropped')
+    await row(page, 'systems').click(); await settle(page)
+    assert.deepEqual((await items(page)).map(i => i.text), ['HVAC & Mechanical', 'Electrical', 'Other systems', 'Data health', 'Schematic'])
+    assert.equal(await page.locator('#ekonav .nsubs').evaluate(n => getComputedStyle(n).position), 'static', 'inline in the rail, not a flyout')
+    await page.locator('#ekonav [data-act="navMin"]').click(); await settle(page)
+    assert.equal(await nav(), 'min'); assert.equal(await page.evaluate(() => localStorage.getItem('eko-nav')), null, 'not saved for later sessions')
+    await page.reload(); await page.waitForFunction(() => window.EKO && document.querySelector('#ekonav .nvi'))
+    assert.equal(await nav(), 'min', 'kept for this session')
+  } finally { await ctx.close() }
+})
