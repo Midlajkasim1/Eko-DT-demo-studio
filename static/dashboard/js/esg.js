@@ -1094,7 +1094,7 @@ window.EKO_ESG = (function(){
   /* deep links (ruling 2): ?page=esg and ?page=esg&view=<sub-view> */
   const VIEWS = { 'target-vs-actual': ['esg-tva', 'tva'], 'net-zero': ['esg-nz', 'nz'], 'utility-bills': ['esg-bills', 'bills'], 'air-quality-ieq': ['esg-ieq', 'ieq'], 'reporting': ['esg-rep', 'rep'] };
   function deepLink(E2, u){ use(E2); if(u.searchParams.get('page') !== 'esg' || !active(E)) return false;
-    const v = VIEWS[u.searchParams.get('view') || ''] || ['esg', null]; E.state.pageId = v[0]; E.state.module = 'esg'; E.state.sub = v[1]; E.state.exp = { esg: true }; E.state.moduleLabel = 'modEsg'; return true; }
+    const v = VIEWS[u.searchParams.get('view') || ''] || ['esg', null]; E.state.pageId = v[0]; E.state.module = 'esg'; E.state.sub = v[1]; E.state.exp = { esg: true }; E.state.navCollapsed = null; E.state.moduleLabel = 'modEsg'; return true; }
 
   /* the self-check's hooks (no UI): the pack file's content and the pack in force */
   return { summary, panel, tvaPage, factorPop, moneyOk, partnerDenied, netZeroPage, billsPage, ieqPage, reportingPage, dialog, settingsBody, portfolioStrip, deepLink, ACTS, active,

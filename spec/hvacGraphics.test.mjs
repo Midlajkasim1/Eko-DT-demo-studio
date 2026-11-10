@@ -227,3 +227,48 @@ test('FCU without the Hospital feature keeps its COOLING_VALVE_CMD label and rea
   assert.equal(readFcuPoints(pts({ COOLINGVALVE: '100' })).valvePos, '—', 'the baseline mapping is untouched')
   s.dispose()
 })
+
+// ── Eko AHU: return-air fan status and mixed-air damper ──
+// Test inputs (FIN names by air stream), not readings from the Hospital's FIN project.
+
+test('Eko AHU: RA FAN STATUS reads the return air fan status by its long name, and never its trip, command or speed', () => {
+  for (const name of ['ReturnAirFanStatus', 'RA_FAN_STATUS', 'ReturnFanStatus', 'RAFanRunSts']) {
+    const r = readEkoAhuPoints(pts({ [name]: 'On' }))
+    assert.deepEqual([name, r.raFanStatus, r.raFanOn], [name, 'On', true])
+  }
+  const off = readEkoAhuPoints(pts({ ReturnAirFanStatus: 'Off' }))
+  assert.deepEqual([off.raFanStatus, off.raFanOn], ['Off', false])
+  const noise = readEkoAhuPoints(pts({ ReturnAirFanTripStatus: 'On', ReturnAirFanSpeedCmd: '60', ReturnAirFanCmd: 'Start', ReturnAirFanSpeedSP: '50' }))
+  assert.deepEqual([noise.raFanStatus, noise.raFanOn], ['—', null], 'a trip, command, speed or set-point is not the run status')
+  const both = readEkoAhuPoints(pts({ ReturnAirFanTripStatus: 'Off', ReturnAirFanStatus: 'On' }))
+  assert.equal(both.raFanStatus, 'On', 'the status, not the trip beside it')
+})
+
+test('Eko AHU: the return and supply fan statuses stay separate points', () => {
+  const r = readEkoAhuPoints(pts({ ReturnAirFanStatus: 'On', SupplyFanStatus: 'Off' }))
+  assert.deepEqual([r.raFanStatus, r.saFanStatus], ['On', 'Off'])
+  assert.deepEqual([readEkoAhuPoints(pts({ ReturnAirFanStatus: 'On' })).saFanStatus, readEkoAhuPoints(pts({ SupplyFanStatus: 'On' })).raFanStatus], ['—', '—'])
+})
+
+test('Eko AHU: MA DAMPER reads the mixed air damper position under any of its names, from its own point only', () => {
+  for (const name of ['MixedAirDamperPos', 'MixingAirDamperPos', 'MixAirDamperPos', 'MixingBoxDamperPos', 'MA_DAMPER_POS']) {
+    const r = readEkoAhuPoints(pts({ [name]: '70.00 %' }))
+    assert.deepEqual([name, r.maDamper, r.maDamperOpen], [name, '70.00 %', 0.7])
+    assert.deepEqual([r.eaDamper, r.oaDamper], ['—', '—'], 'the mixed air damper is neither the exhaust nor the outside one')
+  }
+  const cmd = readEkoAhuPoints(pts({ MixAirDamperCmd: '100', MixAirDamperPosSP: '50', MixAirDamperFault: 'true' }))
+  assert.deepEqual([cmd.maDamper, cmd.maDamperOpen], ['—', null], 'a command, set-point or fault is not the position')
+  assert.equal(readEkoAhuPoints(pts({ MixAirDamperCmd: '100', MixAirDamperPos: '70' })).maDamper, '70 %')
+})
+
+test('Eko AHU: EA and OA dampers are unchanged by the MA damper point being there', () => {
+  const r = readEkoAhuPoints(pts({ ExhaustAirDamperPos: '30', OutsideAirDamperPos: '45', MixAirDamperPos: '70' }))
+  assert.deepEqual([r.eaDamper, r.maDamper, r.oaDamper], ['30 %', '70 %', '45 %'])
+  const abbr = readEkoAhuPoints(pts({ EA_DAMPER_POS: '31', OA_DAMPER_POS: '46' }))
+  assert.deepEqual([abbr.eaDamper, abbr.maDamper, abbr.oaDamper], ['31 %', '—', '46 %'])
+})
+
+test('Eko FAHU: the AHU fan and damper rules did not move into the FAHU', () => {
+  const r = readEkoFahuPoints(pts({ ReturnAirFanStatus: 'On', MixAirDamperPos: '70' }))
+  assert.deepEqual([r.faDamper, r.eaDamper, r.efStatus, r.sfStatus], ['—', '—', '—', '—'])
+})

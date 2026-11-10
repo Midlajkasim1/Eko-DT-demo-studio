@@ -76,7 +76,7 @@
     id:'assets', titleKey:'regTitle', exportName:'asset-register', rowKey:'id', rowAct:{ act:'openAsset', attr:'asset', tab:'alarms' }, searchKeys:['id', 'type', 'zone'],
     isSelectedRow:(E2, r) => E2.state.assetSel === r.id,
     rows: E2 => regRows(E2), pageSize: 50,
-    /* The Eko Hospital roof graphic (the client's FIN screen, opened by roofOpen in the content area): not an asset, so no record, nothing in
+    /* The Eko Hospital roof schematic (layouts/hospital-roof.js, opened by roofOpen in the content area): not an asset, so no record, nothing in
        E.data.assets to count, sort or export. One pinned row, only for a project whose Hospital graphics are on (the Studio sets hospitalHvac
        for the ekoHospital FIN project). */
     pinned:(E2, q, span) => {
@@ -85,7 +85,7 @@
       if(q && !title.toLowerCase().includes(String(q).toLowerCase())) return '';
       return `<tr class="dgroof"><td colspan="${span}"><div class="dgroofw">${C().icon('monitor', 14)}<span class="dgroofn">${esc(title)}</span>
         <span class="tCap">${esc(E2.t('roofKind'))}</span>
-        <button type="button" class="btnG btnSm dgroofb" data-act="roofOpen" aria-haspopup="dialog">${esc(E2.t('roofBtn'))}</button></div></td></tr>`;
+        <button type="button" class="btnG btnSm dgroofb" data-act="roofOpen">${esc(E2.t('roofBtn'))}</button></div></td></tr>`;
     },
     groups:[{ id:'identity', labelKey:'dgg.identity' }, { id:'condition', labelKey:'dgg.condition' }, { id:'maintenance', labelKey:'dgg.maintenance' }, { id:'reference', labelKey:'dgg.reference' }],
     rowMenu, expand,

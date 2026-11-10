@@ -67,3 +67,6 @@ map_export.md
 
 # the operator's own backend settings (not part of any export)
 backend/config.local.json
+
+# Graphify generated output
+graphify-out/

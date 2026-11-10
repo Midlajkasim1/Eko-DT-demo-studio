@@ -1,0 +1,1174 @@
+{
+  "timestamp": "2026-11-06T16:57:30.839936",
+  "points": [
+    {
+      "id": "p:ekoHospital:r:3263834f-4de8a609",
+      "dis": "HOSPITAL 1F_ENERGY FF_ENERGY_CONSUMPTION",
+      "navName": "FF_ENERGY_CONSUMPTION",
+      "equip": "HOSPITAL 1F_ENERGY",
+      "unit": "kW"
+    },
+    {
+      "id": "p:ekoHospital:r:327edbb3-0e5e558e",
+      "dis": "HOSPITAL 1F_ENERGY HOURLY_ENERGY_CONSUMPTION",
+      "navName": "HOURLY_ENERGY_CONSUMPTION",
+      "equip": "HOSPITAL 1F_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:3263834f-1964d2e4",
+      "dis": "HOSPITAL 1F_ENERGY HVAC_ENERGY",
+      "navName": "HVAC_ENERGY",
+      "equip": "HOSPITAL 1F_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:3263834f-66e0486a",
+      "dis": "HOSPITAL 1F_ENERGY LIGHTING_ENERGY",
+      "navName": "LIGHTING_ENERGY",
+      "equip": "HOSPITAL 1F_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:3263834f-25aeafd4",
+      "dis": "HOSPITAL 1F_ENERGY SMALL_POWER_ENERGY",
+      "navName": "SMALL_POWER_ENERGY",
+      "equip": "HOSPITAL 1F_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:3263834f-76b43db4",
+      "dis": "HOSPITAL 2F_ENERGY 2F_ENERGY_CONSUMPTION",
+      "navName": "2F_ENERGY_CONSUMPTION",
+      "equip": "HOSPITAL 2F_ENERGY",
+      "unit": "kW"
+    },
+    {
+      "id": "p:ekoHospital:r:327edbd5-24935f76",
+      "dis": "HOSPITAL 2F_ENERGY HOURLY_ENERGY_CONSUMPTION",
+      "navName": "HOURLY_ENERGY_CONSUMPTION",
+      "equip": "HOSPITAL 2F_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:3263834f-0f89d4ba",
+      "dis": "HOSPITAL 2F_ENERGY HVAC_ENERGY",
+      "navName": "HVAC_ENERGY",
+      "equip": "HOSPITAL 2F_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:3263834f-c174f568",
+      "dis": "HOSPITAL 2F_ENERGY LIGHTING_ENERGY",
+      "navName": "LIGHTING_ENERGY",
+      "equip": "HOSPITAL 2F_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:3263834f-a5383c4b",
+      "dis": "HOSPITAL 2F_ENERGY SMALL_POWER_ENERGY",
+      "navName": "SMALL_POWER_ENERGY",
+      "equip": "HOSPITAL 2F_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:3264a59d-ea6d168a",
+      "dis": "HOSPITAL AHU_01 RA CO2",
+      "navName": "RA CO2",
+      "equip": "HOSPITAL AHU_01",
+      "unit": "ppm"
+    },
+    {
+      "id": "p:ekoHospital:r:3264a5ec-fa6bfe6d",
+      "dis": "HOSPITAL AHU_01 RA Temp",
+      "navName": "RA Temp",
+      "equip": "HOSPITAL AHU_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3264d1b9-62aef822",
+      "dis": "\\$pointRef MA Temp",
+      "navName": "MA Temp",
+      "equip": "HOSPITAL AHU_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3264d517-d58f8f8d",
+      "dis": "\\$pointRef OA Humidity",
+      "navName": "OA Humidity",
+      "equip": "HOSPITAL AHU_01",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3264d538-083e4965",
+      "dis": "\\$pointRef OA Temp",
+      "navName": "OA Temp",
+      "equip": "HOSPITAL AHU_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3264d32e-862759a9",
+      "dis": "\\$pointRef OperatingHours",
+      "navName": "OperatingHours",
+      "equip": "HOSPITAL AHU_01",
+      "unit": "h"
+    },
+    {
+      "id": "p:ekoHospital:r:3264a5c9-60874112",
+      "dis": "\\$pointRef RA Humidity",
+      "navName": "RA Humidity",
+      "equip": "HOSPITAL AHU_01",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3264d24b-06192647",
+      "dis": "\\$pointRef SA Humidity",
+      "navName": "SA Humidity",
+      "equip": "HOSPITAL AHU_01",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3264d268-63a92263",
+      "dis": "\\$pointRef SA Pressure",
+      "navName": "SA Pressure",
+      "equip": "HOSPITAL AHU_01",
+      "unit": "Pa"
+    },
+    {
+      "id": "p:ekoHospital:r:3264d2b5-1925f805",
+      "dis": "\\$pointRef SA Temp",
+      "navName": "SA Temp",
+      "equip": "HOSPITAL AHU_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedc-eb2cce33",
+      "dis": "HOSPITAL AHU_02 RA CO2",
+      "navName": "RA CO2",
+      "equip": "HOSPITAL AHU_02",
+      "unit": "ppm"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedc-df567fc9",
+      "dis": "HOSPITAL AHU_02 RA Temp",
+      "navName": "RA Temp",
+      "equip": "HOSPITAL AHU_02",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedc-2a8eb975",
+      "dis": "\\$pointRef MA Temp",
+      "navName": "MA Temp",
+      "equip": "HOSPITAL AHU_02",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedc-1aee751b",
+      "dis": "\\$pointRef OA Humidity",
+      "navName": "OA Humidity",
+      "equip": "HOSPITAL AHU_02",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedc-c2b255ab",
+      "dis": "\\$pointRef OA Temp",
+      "navName": "OA Temp",
+      "equip": "HOSPITAL AHU_02",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedc-284f3b5b",
+      "dis": "\\$pointRef OperatingHours",
+      "navName": "OperatingHours",
+      "equip": "HOSPITAL AHU_02",
+      "unit": "h"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedc-2a08f336",
+      "dis": "\\$pointRef RA Humidity",
+      "navName": "RA Humidity",
+      "equip": "HOSPITAL AHU_02",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedc-228c5f91",
+      "dis": "\\$pointRef SA Humidity",
+      "navName": "SA Humidity",
+      "equip": "HOSPITAL AHU_02",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedc-4d633371",
+      "dis": "\\$pointRef SA Pressure",
+      "navName": "SA Pressure",
+      "equip": "HOSPITAL AHU_02",
+      "unit": "Pa"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedd-62231697",
+      "dis": "\\$pointRef SA Temp",
+      "navName": "SA Temp",
+      "equip": "HOSPITAL AHU_02",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedb-a56f2728",
+      "dis": "HOSPITAL AHU_03 RA CO2",
+      "navName": "RA CO2",
+      "equip": "HOSPITAL AHU_03",
+      "unit": "ppm"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedb-4de1a955",
+      "dis": "HOSPITAL AHU_03 RA Temp",
+      "navName": "RA Temp",
+      "equip": "HOSPITAL AHU_03",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedb-29febabb",
+      "dis": "\\$pointRef MA Temp",
+      "navName": "MA Temp",
+      "equip": "HOSPITAL AHU_03",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedb-b84fcc67",
+      "dis": "\\$pointRef OA Humidity",
+      "navName": "OA Humidity",
+      "equip": "HOSPITAL AHU_03",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedb-5292b716",
+      "dis": "\\$pointRef OA Temp",
+      "navName": "OA Temp",
+      "equip": "HOSPITAL AHU_03",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedb-a6f7d6d6",
+      "dis": "\\$pointRef OperatingHours",
+      "navName": "OperatingHours",
+      "equip": "HOSPITAL AHU_03",
+      "unit": "h"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedb-9e1f7d5b",
+      "dis": "\\$pointRef RA Humidity",
+      "navName": "RA Humidity",
+      "equip": "HOSPITAL AHU_03",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedb-a3422abc",
+      "dis": "\\$pointRef SA Humidity",
+      "navName": "SA Humidity",
+      "equip": "HOSPITAL AHU_03",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedb-0b83fb09",
+      "dis": "\\$pointRef SA Pressure",
+      "navName": "SA Pressure",
+      "equip": "HOSPITAL AHU_03",
+      "unit": "Pa"
+    },
+    {
+      "id": "p:ekoHospital:r:3271bedc-fedd5cbe",
+      "dis": "\\$pointRef SA Temp",
+      "navName": "SA Temp",
+      "equip": "HOSPITAL AHU_03",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3268757c-cdb86658",
+      "dis": "\\$pointRef HWRTemp",
+      "navName": "HWRTemp",
+      "equip": "HOSPITAL BOILER_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3268757c-272f6f5e",
+      "dis": "\\$pointRef HWSTemp",
+      "navName": "HWSTemp",
+      "equip": "HOSPITAL BOILER_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3268757c-30a90f6d",
+      "dis": "\\$pointRef OperatingHours",
+      "navName": "OperatingHours",
+      "equip": "HOSPITAL BOILER_01",
+      "unit": "h"
+    },
+    {
+      "id": "p:ekoHospital:r:3268757c-ee58d159",
+      "dis": "\\$pointRef Power",
+      "navName": "Power",
+      "equip": "HOSPITAL BOILER_01",
+      "unit": "kW"
+    },
+    {
+      "id": "p:ekoHospital:r:32686fa6-01792831",
+      "dis": "\\$pointRef CHWFlow",
+      "navName": "CHWFlow",
+      "equip": "HOSPITAL BTU_01",
+      "unit": "L/s"
+    },
+    {
+      "id": "p:ekoHospital:r:32686e8e-1a7543dd",
+      "dis": "\\$pointRef CHWReturnTemp",
+      "navName": "CHWReturnTemp",
+      "equip": "HOSPITAL BTU_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32686e8e-0292a818",
+      "dis": "\\$pointRef CHWSupplyTemp",
+      "navName": "CHWSupplyTemp",
+      "equip": "HOSPITAL BTU_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32686e8e-dd310046",
+      "dis": "\\$pointRef CoolingPower",
+      "navName": "CoolingPower",
+      "equip": "HOSPITAL BTU_01",
+      "unit": "kW"
+    },
+    {
+      "id": "p:ekoHospital:r:32747d4b-f1244586",
+      "dis": "HOSPITAL CHILLED_WATER_PUMP DifferentialPressure",
+      "navName": "DifferentialPressure",
+      "equip": "HOSPITAL CHILLED_WATER_PUMP",
+      "unit": "kPa"
+    },
+    {
+      "id": "p:ekoHospital:r:3260ac9b-af0337f2",
+      "dis": "\\$pointRef CHWRTemp",
+      "navName": "CHWRTemp",
+      "equip": "HOSPITAL CHILLER_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3260ac7f-fd4f29af",
+      "dis": "\\$pointRef CHWSTemp",
+      "navName": "CHWSTemp",
+      "equip": "HOSPITAL CHILLER_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3260ad0c-204a38b5",
+      "dis": "\\$pointRef OperatingHours",
+      "navName": "OperatingHours",
+      "equip": "HOSPITAL CHILLER_01",
+      "unit": "h"
+    },
+    {
+      "id": "p:ekoHospital:r:3260accf-66ad023f",
+      "dis": "\\$pointRef Power",
+      "navName": "Power",
+      "equip": "HOSPITAL CHILLER_01",
+      "unit": "kW"
+    },
+    {
+      "id": "p:ekoHospital:r:3264da3e-2a3f0e09",
+      "dis": "\\$pointRef CHWEnteringTemp",
+      "navName": "CHWEnteringTemp",
+      "equip": "HOSPITAL COOLING_TOWER_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3264da3e-bc59bee6",
+      "dis": "\\$pointRef CHWLeavingTemp",
+      "navName": "CHWLeavingTemp",
+      "equip": "HOSPITAL COOLING_TOWER_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3275d6d8-1f981a15",
+      "dis": "\\$pointRef OperatingHours",
+      "navName": "OperatingHours",
+      "equip": "HOSPITAL COOLING_TOWER_01",
+      "unit": "h"
+    },
+    {
+      "id": "p:ekoHospital:r:32689185-004be6fa",
+      "dis": "HOSPITAL FAHU_01 HeatRecoveryWheelAirTemp",
+      "navName": "HeatRecoveryWheelAirTemp",
+      "equip": "HOSPITAL FAHU_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3268931d-866272d9",
+      "dis": "HOSPITAL FAHU_01 ReturnAirTemp",
+      "navName": "ReturnAirTemp",
+      "equip": "HOSPITAL FAHU_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3268921b-ed484117",
+      "dis": "\\$pointRef FreshAirHumidity",
+      "navName": "FreshAirHumidity",
+      "equip": "HOSPITAL FAHU_01",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:326891f1-1f907ed5",
+      "dis": "\\$pointRef FreshAirTemp",
+      "navName": "FreshAirTemp",
+      "equip": "HOSPITAL FAHU_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:326891a6-ea36d1f2",
+      "dis": "\\$pointRef HeatRecoveryWheelAirHumidity",
+      "navName": "HeatRecoveryWheelAirHumidity",
+      "equip": "HOSPITAL FAHU_01",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:32689426-fd94aade",
+      "dis": "\\$pointRef OperatingHours",
+      "navName": "OperatingHours",
+      "equip": "HOSPITAL FAHU_01",
+      "unit": "h"
+    },
+    {
+      "id": "p:ekoHospital:r:3268933e-d46716b3",
+      "dis": "\\$pointRef ReturnAirHumidity",
+      "navName": "ReturnAirHumidity",
+      "equip": "HOSPITAL FAHU_01",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3268928c-13349320",
+      "dis": "\\$pointRef SupplyAirHumidity",
+      "navName": "SupplyAirHumidity",
+      "equip": "HOSPITAL FAHU_01",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:32689242-f785feae",
+      "dis": "\\$pointRef SupplyAirTemp",
+      "navName": "SupplyAirTemp",
+      "equip": "HOSPITAL FAHU_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f12-68d2c26c",
+      "dis": "HOSPITAL FAHU_02 HeatRecoveryWheelAirTemp",
+      "navName": "HeatRecoveryWheelAirTemp",
+      "equip": "HOSPITAL FAHU_02",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f13-48d938ae",
+      "dis": "HOSPITAL FAHU_02 ReturnAirTemp",
+      "navName": "ReturnAirTemp",
+      "equip": "HOSPITAL FAHU_02",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f10-89d15890",
+      "dis": "\\$pointRef FreshAirHumidity",
+      "navName": "FreshAirHumidity",
+      "equip": "HOSPITAL FAHU_02",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f11-5067f09c",
+      "dis": "\\$pointRef FreshAirTemp",
+      "navName": "FreshAirTemp",
+      "equip": "HOSPITAL FAHU_02",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f12-82586844",
+      "dis": "\\$pointRef HeatRecoveryWheelAirHumidity",
+      "navName": "HeatRecoveryWheelAirHumidity",
+      "equip": "HOSPITAL FAHU_02",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f12-5fef2775",
+      "dis": "\\$pointRef OperatingHours",
+      "navName": "OperatingHours",
+      "equip": "HOSPITAL FAHU_02",
+      "unit": "h"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f13-d9626fac",
+      "dis": "\\$pointRef ReturnAirHumidity",
+      "navName": "ReturnAirHumidity",
+      "equip": "HOSPITAL FAHU_02",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f13-91b3785f",
+      "dis": "\\$pointRef SupplyAirHumidity",
+      "navName": "SupplyAirHumidity",
+      "equip": "HOSPITAL FAHU_02",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f13-81bed323",
+      "dis": "\\$pointRef SupplyAirTemp",
+      "navName": "SupplyAirTemp",
+      "equip": "HOSPITAL FAHU_02",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f0e-cf3ecc8b",
+      "dis": "HOSPITAL FAHU_03 HeatRecoveryWheelAirTemp",
+      "navName": "HeatRecoveryWheelAirTemp",
+      "equip": "HOSPITAL FAHU_03",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f0e-c82d1dfb",
+      "dis": "HOSPITAL FAHU_03 ReturnAirTemp",
+      "navName": "ReturnAirTemp",
+      "equip": "HOSPITAL FAHU_03",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f0e-2dd028b7",
+      "dis": "\\$pointRef FreshAirHumidity",
+      "navName": "FreshAirHumidity",
+      "equip": "HOSPITAL FAHU_03",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f0e-c24906d1",
+      "dis": "\\$pointRef FreshAirTemp",
+      "navName": "FreshAirTemp",
+      "equip": "HOSPITAL FAHU_03",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f0e-d7104933",
+      "dis": "\\$pointRef HeatRecoveryWheelAirHumidity",
+      "navName": "HeatRecoveryWheelAirHumidity",
+      "equip": "HOSPITAL FAHU_03",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f0e-a7750f0b",
+      "dis": "\\$pointRef OperatingHours",
+      "navName": "OperatingHours",
+      "equip": "HOSPITAL FAHU_03",
+      "unit": "h"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f0e-e4a8ca8c",
+      "dis": "\\$pointRef ReturnAirHumidity",
+      "navName": "ReturnAirHumidity",
+      "equip": "HOSPITAL FAHU_03",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f0f-a1b739ed",
+      "dis": "\\$pointRef SupplyAirHumidity",
+      "navName": "SupplyAirHumidity",
+      "equip": "HOSPITAL FAHU_03",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:32689f0f-8a7e500f",
+      "dis": "\\$pointRef SupplyAirTemp",
+      "navName": "SupplyAirTemp",
+      "equip": "HOSPITAL FAHU_03",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bbff-0845dfa5",
+      "dis": "\\$pointRef OperatingHours",
+      "navName": "OperatingHours",
+      "equip": "HOSPITAL FCU_01",
+      "unit": "h"
+    },
+    {
+      "id": "p:ekoHospital:r:32730428-079b8ab6",
+      "dis": "\\$pointRef ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL FCU_01",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bb56-266e0a4d",
+      "dis": "\\$pointRef ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL FCU_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bc89-6f58ac6a",
+      "dis": "\\$pointRef OperatingHours",
+      "navName": "OperatingHours",
+      "equip": "HOSPITAL FCU_02",
+      "unit": "h"
+    },
+    {
+      "id": "p:ekoHospital:r:32730515-0e435c28",
+      "dis": "\\$pointRef ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL FCU_02",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bc89-e289563b",
+      "dis": "\\$pointRef ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL FCU_02",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bc88-abe5447d",
+      "dis": "HOSPITAL FCU_03 Occupancy",
+      "navName": "Occupancy",
+      "equip": "HOSPITAL FCU_03",
+      "unit": ""
+    },
+    {
+      "id": "p:ekoHospital:r:3260bc88-d8fb8d3f",
+      "dis": "\\$pointRef OperatingHours",
+      "navName": "OperatingHours",
+      "equip": "HOSPITAL FCU_03",
+      "unit": "h"
+    },
+    {
+      "id": "p:ekoHospital:r:32730515-ec8d554f",
+      "dis": "\\$pointRef ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL FCU_03",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bc88-c24728dd",
+      "dis": "\\$pointRef ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL FCU_03",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bc8a-cea413a1",
+      "dis": "\\$pointRef OperatingHours",
+      "navName": "OperatingHours",
+      "equip": "HOSPITAL FCU_04",
+      "unit": "h"
+    },
+    {
+      "id": "p:ekoHospital:r:32730515-fa1add15",
+      "dis": "\\$pointRef ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL FCU_04",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bc8a-d90a5c2a",
+      "dis": "\\$pointRef ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL FCU_04",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32631e63-f109ffa3",
+      "dis": "\\$pointRef OperatingHours",
+      "navName": "OperatingHours",
+      "equip": "HOSPITAL FCU_05",
+      "unit": "h"
+    },
+    {
+      "id": "p:ekoHospital:r:32730515-4635c134",
+      "dis": "\\$pointRef ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL FCU_05",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:32631e63-ad345fc8",
+      "dis": "\\$pointRef ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL FCU_05",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32631e63-a553aa3f",
+      "dis": "HOSPITAL FCU_06 Occupancy",
+      "navName": "Occupancy",
+      "equip": "HOSPITAL FCU_06",
+      "unit": ""
+    },
+    {
+      "id": "p:ekoHospital:r:32631e63-11aed5d6",
+      "dis": "\\$pointRef OperatingHours",
+      "navName": "OperatingHours",
+      "equip": "HOSPITAL FCU_06",
+      "unit": "h"
+    },
+    {
+      "id": "p:ekoHospital:r:32730515-5c4b5154",
+      "dis": "\\$pointRef ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL FCU_06",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:32631e63-b74c81c4",
+      "dis": "\\$pointRef ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL FCU_06",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:3263710a-ba498204",
+      "dis": "HOSPITAL GF_ENERGY GF_ENERGY_CONSUMPTION",
+      "navName": "GF_ENERGY_CONSUMPTION",
+      "equip": "HOSPITAL GF_ENERGY",
+      "unit": "kW"
+    },
+    {
+      "id": "p:ekoHospital:r:32636ba5-2180cc97",
+      "dis": "HOSPITAL GF_ENERGY HVAC_ENERGY",
+      "navName": "HVAC_ENERGY",
+      "equip": "HOSPITAL GF_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:32636bf3-62a5558c",
+      "dis": "HOSPITAL GF_ENERGY LIGHTING_ENERGY",
+      "navName": "LIGHTING_ENERGY",
+      "equip": "HOSPITAL GF_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:32636bf3-c9c82aa9",
+      "dis": "HOSPITAL GF_ENERGY SMALL_POWER_ENERGY",
+      "navName": "SMALL_POWER_ENERGY",
+      "equip": "HOSPITAL GF_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:327edb45-8d0528e1",
+      "dis": "\\$pointRef HOURLY_ENERGY_CONSUMPTION",
+      "navName": "HOURLY_ENERGY_CONSUMPTION",
+      "equip": "HOSPITAL GF_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:32687a3a-546e769b",
+      "dis": "HOSPITAL KPI_CALCULATION CarbonEmissions",
+      "navName": "CarbonEmissions",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": "kg"
+    },
+    {
+      "id": "p:ekoHospital:r:3268820a-93237db9",
+      "dis": "HOSPITAL KPI_CALCULATION ChillerCOP",
+      "navName": "ChillerCOP",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": ""
+    },
+    {
+      "id": "p:ekoHospital:r:327db795-1661b9ef",
+      "dis": "HOSPITAL KPI_CALCULATION CoolingEnergyConsumption",
+      "navName": "CoolingEnergyConsumption",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": ""
+    },
+    {
+      "id": "p:ekoHospital:r:327dbb1c-9b48feb8",
+      "dis": "HOSPITAL KPI_CALCULATION CoolingLoad",
+      "navName": "CoolingLoad",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": ""
+    },
+    {
+      "id": "p:ekoHospital:r:32687e60-ff833033",
+      "dis": "HOSPITAL KPI_CALCULATION ElectricalLoadFactor",
+      "navName": "ElectricalLoadFactor",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": "%"
+    },
+    {
+      "id": "p:ekoHospital:r:32687a00-e2ed9080",
+      "dis": "HOSPITAL KPI_CALCULATION EnergyDeviation",
+      "navName": "EnergyDeviation",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": "%"
+    },
+    {
+      "id": "p:ekoHospital:r:32687a8e-21338ea9",
+      "dis": "HOSPITAL KPI_CALCULATION HVAC_EUI",
+      "navName": "HVAC_EUI",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": "kWh/m²"
+    },
+    {
+      "id": "p:ekoHospital:r:327c689b-08191d70",
+      "dis": "HOSPITAL KPI_CALCULATION HVAC_Load",
+      "navName": "HVAC_Load",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:32687e60-21c8d937",
+      "dis": "HOSPITAL KPI_CALCULATION HourlyEnergyConsumption",
+      "navName": "HourlyEnergyConsumption",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:327dd230-c8bd92cb",
+      "dis": "HOSPITAL KPI_CALCULATION HourlyHvacEnergy",
+      "navName": "HourlyHvacEnergy",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": ""
+    },
+    {
+      "id": "p:ekoHospital:r:327dd23f-dbf7635d",
+      "dis": "HOSPITAL KPI_CALCULATION HourlyLightingEnergy",
+      "navName": "HourlyLightingEnergy",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": ""
+    },
+    {
+      "id": "p:ekoHospital:r:327dd24c-4cbf7197",
+      "dis": "HOSPITAL KPI_CALCULATION HourlySmallPowerEnergy",
+      "navName": "HourlySmallPowerEnergy",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": ""
+    },
+    {
+      "id": "p:ekoHospital:r:327dca85-9639b88d",
+      "dis": "HOSPITAL KPI_CALCULATION HourlyWaterConsumption",
+      "navName": "HourlyWaterConsumption",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": "m³"
+    },
+    {
+      "id": "p:ekoHospital:r:327d79b3-66d5b8ba",
+      "dis": "HOSPITAL KPI_CALCULATION PeakDemand",
+      "navName": "PeakDemand",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": "kW"
+    },
+    {
+      "id": "p:ekoHospital:r:32687e60-f6f9c461",
+      "dis": "HOSPITAL KPI_CALCULATION ThermalComfortCompliance",
+      "navName": "ThermalComfortCompliance",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": "%"
+    },
+    {
+      "id": "p:ekoHospital:r:3268820a-0263f4fa",
+      "dis": "HOSPITAL KPI_CALCULATION WaterConsumption",
+      "navName": "WaterConsumption",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": "m³"
+    },
+    {
+      "id": "p:ekoHospital:r:327c67e5-3e4d882d",
+      "dis": "\\$pointRef IAQIndex",
+      "navName": "IAQIndex",
+      "equip": "HOSPITAL KPI_CALCULATION",
+      "unit": ""
+    },
+    {
+      "id": "p:ekoHospital:r:3260ce2f-594b58bc",
+      "dis": "HOSPITAL MEDICAL_AIR_COMPRESSOR_01 Current",
+      "navName": "Current",
+      "equip": "HOSPITAL MEDICAL_AIR_COMPRESSOR_01",
+      "unit": "A"
+    },
+    {
+      "id": "p:ekoHospital:r:3260ce20-bc8cfc20",
+      "dis": "\\$pointRef Flow",
+      "navName": "Flow",
+      "equip": "HOSPITAL MEDICAL_AIR_COMPRESSOR_01",
+      "unit": "L/min"
+    },
+    {
+      "id": "p:ekoHospital:r:3260ce20-9412be72",
+      "dis": "\\$pointRef Pressure",
+      "navName": "Pressure",
+      "equip": "HOSPITAL MEDICAL_AIR_COMPRESSOR_01",
+      "unit": "bar"
+    },
+    {
+      "id": "p:ekoHospital:r:3260cd24-305f81cb",
+      "dis": "\\$pointRef Flow",
+      "navName": "Flow",
+      "equip": "HOSPITAL OXYGEN_PLANT_01",
+      "unit": "L/min"
+    },
+    {
+      "id": "p:ekoHospital:r:3260cd0a-c1b4ddfc",
+      "dis": "\\$pointRef Pressure",
+      "navName": "Pressure",
+      "equip": "HOSPITAL OXYGEN_PLANT_01",
+      "unit": "bar"
+    },
+    {
+      "id": "p:ekoHospital:r:3260cd66-4886f823",
+      "dis": "\\$pointRef Purity",
+      "navName": "Purity",
+      "equip": "HOSPITAL OXYGEN_PLANT_01",
+      "unit": "%"
+    },
+    {
+      "id": "p:ekoHospital:r:32635b5c-940d1f1c",
+      "dis": "HOSPITAL PMU_Main ActivePower",
+      "navName": "ActivePower",
+      "equip": "HOSPITAL PMU_Main",
+      "unit": "kW"
+    },
+    {
+      "id": "p:ekoHospital:r:32635b69-d2c47ca4",
+      "dis": "HOSPITAL PMU_Main TotalEnergy",
+      "navName": "TotalEnergy",
+      "equip": "HOSPITAL PMU_Main",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:32638d3b-b1032101",
+      "dis": "HOSPITAL RF_ENERGY HVAC_ENERGY",
+      "navName": "HVAC_ENERGY",
+      "equip": "HOSPITAL RF_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:32638d3b-e0358595",
+      "dis": "HOSPITAL RF_ENERGY LIGHTING_ENERGY",
+      "navName": "LIGHTING_ENERGY",
+      "equip": "HOSPITAL RF_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:32638d3b-74d5e7bd",
+      "dis": "HOSPITAL RF_ENERGY RF_ENERGY_CONSUMPTION",
+      "navName": "RF_ENERGY_CONSUMPTION",
+      "equip": "HOSPITAL RF_ENERGY",
+      "unit": "kW"
+    },
+    {
+      "id": "p:ekoHospital:r:32638d3b-2a4025ea",
+      "dis": "HOSPITAL RF_ENERGY SMALL_POWER_ENERGY",
+      "navName": "SMALL_POWER_ENERGY",
+      "equip": "HOSPITAL RF_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:327edada-15872621",
+      "dis": "\\$pointRef HOURLY_ENERGY_CONSUMPTION",
+      "navName": "HOURLY_ENERGY_CONSUMPTION",
+      "equip": "HOSPITAL RF_ENERGY",
+      "unit": "kWh"
+    },
+    {
+      "id": "p:ekoHospital:r:32732486-d6e2018e",
+      "dis": "HOSPITAL VAV_01 ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL VAV_01",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bd69-dc5f7d75",
+      "dis": "HOSPITAL VAV_01 ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL VAV_01",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32732a8c-0989bffe",
+      "dis": "HOSPITAL VAV_02 ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL VAV_02",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bf13-79ec316b",
+      "dis": "HOSPITAL VAV_02 ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL VAV_02",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32732a8c-a36a8972",
+      "dis": "HOSPITAL VAV_03 ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL VAV_03",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bf15-5756285b",
+      "dis": "HOSPITAL VAV_03 ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL VAV_03",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32732a8c-24246423",
+      "dis": "HOSPITAL VAV_04 ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL VAV_04",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bf13-b9059ea0",
+      "dis": "HOSPITAL VAV_04 ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL VAV_04",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32732a8c-6a8e644d",
+      "dis": "HOSPITAL VAV_05 ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL VAV_05",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bf14-f10e65ac",
+      "dis": "HOSPITAL VAV_05 ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL VAV_05",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32732a8c-b2738dc3",
+      "dis": "HOSPITAL VAV_06 ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL VAV_06",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bf14-b29a54c9",
+      "dis": "HOSPITAL VAV_06 ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL VAV_06",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32732a8c-a6335cde",
+      "dis": "HOSPITAL VAV_07 ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL VAV_07",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bf15-5edbc059",
+      "dis": "HOSPITAL VAV_07 ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL VAV_07",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32732a8c-df9bd9c5",
+      "dis": "HOSPITAL VAV_08 ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL VAV_08",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bf15-721f129f",
+      "dis": "HOSPITAL VAV_08 ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL VAV_08",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32732a8c-fad801ae",
+      "dis": "HOSPITAL VAV_09 ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL VAV_09",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bf16-90fff68b",
+      "dis": "HOSPITAL VAV_09 ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL VAV_09",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32732a8c-5cbc6eb0",
+      "dis": "HOSPITAL VAV_10 ZoneHumidity",
+      "navName": "ZoneHumidity",
+      "equip": "HOSPITAL VAV_10",
+      "unit": "%RH"
+    },
+    {
+      "id": "p:ekoHospital:r:3260bf17-75a6b251",
+      "dis": "HOSPITAL VAV_10 ZoneTemp",
+      "navName": "ZoneTemp",
+      "equip": "HOSPITAL VAV_10",
+      "unit": "°C"
+    },
+    {
+      "id": "p:ekoHospital:r:32639079-3ea60fde",
+      "dis": "HOSPITAL WATER_METER_01 FlowRate",
+      "navName": "FlowRate",
+      "equip": "HOSPITAL WATER_METER_01",
+      "unit": "m³/h"
+    },
+    {
+      "id": "p:ekoHospital:r:327dc8e4-a5073a39",
+      "dis": "HOSPITAL WATER_METER_01 HourlyWaterConsumption",
+      "navName": "HourlyWaterConsumption",
+      "equip": "HOSPITAL WATER_METER_01",
+      "unit": "m³"
+    },
+    {
+      "id": "p:ekoHospital:r:32639002-bac65544",
+      "dis": "HOSPITAL WATER_METER_01 WaterConsumption",
+      "navName": "WaterConsumption",
+      "equip": "HOSPITAL WATER_METER_01",
+      "unit": "m³"
+    },
+    {
+      "id": "p:ekoHospital:r:326480fb-fcb621f4",
+      "dis": "HOSPITAL WATER_METER_02 FlowRate",
+      "navName": "FlowRate",
+      "equip": "HOSPITAL WATER_METER_02",
+      "unit": "m³/h"
+    },
+    {
+      "id": "p:ekoHospital:r:327dca34-99056be1",
+      "dis": "HOSPITAL WATER_METER_02 HourlyWaterConsumption",
+      "navName": "HourlyWaterConsumption",
+      "equip": "HOSPITAL WATER_METER_02",
+      "unit": "m³"
+    },
+    {
+      "id": "p:ekoHospital:r:326480fb-99bc7276",
+      "dis": "HOSPITAL WATER_METER_02 WaterConsumption",
+      "navName": "WaterConsumption",
+      "equip": "HOSPITAL WATER_METER_02",
+      "unit": "m³"
+    },
+    {
+      "id": "p:ekoHospital:r:326480fb-19218516",
+      "dis": "HOSPITAL WATER_METER_03 FlowRate",
+      "navName": "FlowRate",
+      "equip": "HOSPITAL WATER_METER_03",
+      "unit": "m³/h"
+    },
+    {
+      "id": "p:ekoHospital:r:327dca4f-80910e3c",
+      "dis": "HOSPITAL WATER_METER_03 HourlyWaterConsumption",
+      "navName": "HourlyWaterConsumption",
+      "equip": "HOSPITAL WATER_METER_03",
+      "unit": "m³"
+    },
+    {
+      "id": "p:ekoHospital:r:326480fb-2512053c",
+      "dis": "HOSPITAL WATER_METER_03 WaterConsumption",
+      "navName": "WaterConsumption",
+      "equip": "HOSPITAL WATER_METER_03",
+      "unit": "m³"
+    }
+  ]
+}

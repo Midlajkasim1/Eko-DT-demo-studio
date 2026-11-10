@@ -451,9 +451,13 @@ async def realtime_loop():
             return
         try:
             realtime = await client.fetch_realtime_data(rt_endpoints)
+            excluded: list = []
             cached_equip_data = {
                 "timestamp": datetime.now().isoformat(),
-                "equipment": _flatten_equip(realtime),
+                "equipment": _flatten_equip(realtime, excluded),
+                # what the name rule below leaves out (energy meters, KPI calculations), kept apart so no existing reader sees it.
+                # The Hospital Live Twin reads it to show its energy meters as unverified candidates.
+                "excluded": excluded,
             }
             await refresh_workorders()
             _compute_sensor_averages(realtime)
@@ -741,8 +745,9 @@ def _flatten_alarms(rows: list, bands: dict) -> dict:
     }
 
 
-def _flatten_equip(realtime: dict) -> list[dict]:
-    """Flatten floor-wise equipment into a single list for the frontend."""
+def _flatten_equip(realtime: dict, excluded: Optional[list] = None) -> list[dict]:
+    """Flatten floor-wise equipment into a single list for the frontend. Equipment the name rule skips goes to `excluded`
+    when given, in the same shape (the list itself is unchanged)."""
     classes = CONFIG.get("equipment_classes", {})
     system_tags = set(classes.get("system_tags") or [])
     equip_list = []
@@ -752,11 +757,12 @@ def _flatten_equip(realtime: dict) -> list[dict]:
                 continue
             for eq in items:
                 eq_name = eq.get("name", "")
-                if any(x in eq_name.upper() for x in ["ENERGY", "USAGE", "CALC"]):
+                skipped = any(x in eq_name.upper() for x in ["ENERGY", "USAGE", "CALC"])
+                if skipped and excluded is None:
                     continue
                 alarms = eq.get("alarms", [])
                 tags = eq.get("tags") or []
-                equip_list.append({
+                (excluded if skipped else equip_list).append({
                     "name": eq_name,
                     "floor": floor_name,
                     "category": category,

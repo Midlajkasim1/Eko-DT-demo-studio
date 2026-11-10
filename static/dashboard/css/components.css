@@ -661,7 +661,7 @@
   opacity:0
 }
 
-.dashboard-native-container[data-nav="min"] .nsubs,.dashboard-native-container[data-nav="min"] .nchevb {
+.dashboard-native-container[data-nav="min"] .nchevb {
   display:none
 }
 
@@ -6115,20 +6115,13 @@
   background:var(--s1)
 }
 
-.dashboard-native-container .roofbody {
-  flex:1;
-  min-height:0;
-  display:flex;
-  background:#e9ecf0
-}
-
 .dashboard-native-container .roofview {
   flex:1 1 auto;
   min-width:0;
   min-height:0;
   display:flex;
   flex-direction:column;
-  background:#fff
+  background:#f3f4f5
 }
 
 .dashboard-native-container #mount > .roofview {
@@ -6138,8 +6131,9 @@
 .dashboard-native-container .roofbar {
   flex:none;
   display:flex;
+  flex-wrap:wrap;
   align-items:center;
-  gap:14px;
+  gap:6px 14px;
   padding:8px 14px;
   background:var(--s1);
   border-block-end:1px solid var(--bd2)
@@ -6151,52 +6145,369 @@
   color:var(--t1)
 }
 
+.dashboard-native-container .roofmeta {
+  margin-inline-start:auto;
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px 14px;
+  font-size:12px;
+  color:var(--t2)
+}
+
+.dashboard-native-container .roofleg {
+  display:inline-flex;
+  align-items:center;
+  gap:6px
+}
+
+.dashboard-native-container .roofleg::before {
+  content:"";
+  width:18px;
+  height:5px;
+  border-radius:1px;
+  background:#39b83f
+}
+
+.dashboard-native-container .roofleg[data-loop="chw"]::before {
+  background:#1c8ae6
+}
+
+.dashboard-native-container .roofleg[data-loop="hw"]::before {
+  background:#e0232b
+}
+
+.dashboard-native-container .roofstatus {
+  padding:2px 8px;
+  border-radius:3px;
+  font-weight:600;
+  color:#fff;
+  background:#6b7280
+}
+
+.dashboard-native-container .roofstatus[data-st="live"] {
+  background:#0b249b
+}
+
 .dashboard-native-container .roofstage {
   position:relative;
   flex:1;
   min-height:0;
+  overflow:auto;
   display:flex;
-  flex-direction:column;
-  background:#fff
+  background:#e7e9ea
 }
 
-.dashboard-native-container .roofframe {
-  flex:1 1 850px;
-  min-height:0;
+.dashboard-native-container .roofsvg {
+  flex:1 1 auto;
   width:100%;
-  height:850px;
-  border:0;
-  display:block
+  height:100%;
+  min-width:0;
+  min-height:0;
+  display:block;
+  direction:ltr;
+  user-select:none;
+  /* the dashboard's own unhinted webfont: Arial Bold at this size makes an S read as an 8 on a 1x screen */
+  text-rendering:geometricPrecision
 }
 
-.dashboard-native-container .roofload {
-  position:absolute;
-  inset:0;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:10px;
-  color:#4b5563;
-  background:#fff;
-  pointer-events:none
+@media (max-width:860px) {
+  /* the drawing keeps a readable size on a phone and pans inside the stage: never a page scroll */
+  .dashboard-native-container .roofsvg {
+    flex:none;
+    width:860px;
+    height:456px
+  }
 }
 
-.dashboard-native-container .roofnone {
-  margin:auto;
-  max-width:460px;
-  padding:20px;
-  text-align:center;
-  color:#4b5563;
-  background:#fff
+/* The dashes that run along the pipes are the one thing here redrawn on every frame, so they sit in their own layer (will-change): only that layer is
+   repainted, never the machines or the pipes under it. They move only while their pipe's flow is On. */
+.dashboard-native-container .rf-flows {
+  will-change:transform
 }
 
-.dashboard-native-container .roofnone b {
-  color:#111827
+.dashboard-native-container .rf-flowline {
+  stroke-dasharray:16 22;
+  opacity:.72
 }
 
-.dashboard-native-container .roofnone p {
-  margin:10px 0 0;
-  line-height:1.5
+.dashboard-native-container .rf-flowline[data-flow="on"] {
+  opacity:.95;
+  animation:rf-flow 1.1s linear infinite
+}
+
+@keyframes rf-flow {
+  to { stroke-dashoffset:-38 }
+}
+
+/* What moves: every animation below runs only while FIN says so. data-run is set by EKO_ROOF.update from the machine's own status. */
+.dashboard-native-container .rf-rot {
+  transform-box:fill-box;
+  transform-origin:center;
+  animation:rf-spin 1.4s linear infinite;
+  animation-play-state:paused
+}
+
+.dashboard-native-container .rf-rot[data-run="running"] {
+  animation-play-state:running
+}
+
+@keyframes rf-spin {
+  to { transform:rotate(360deg) }
+}
+
+.dashboard-native-container .rf-flame,
+.dashboard-native-container .rf-smoke,
+.dashboard-native-container .rf-vapor {
+  display:none
+}
+
+.dashboard-native-container .rf-flame[data-run="running"],
+.dashboard-native-container .rf-smoke[data-run="running"],
+.dashboard-native-container .rf-vapor[data-run="running"] {
+  display:inline
+}
+
+.dashboard-native-container .rf-flame path {
+  transform-box:fill-box;
+  transform-origin:bottom;
+  animation:rf-flick .9s ease-in-out infinite alternate
+}
+
+@keyframes rf-flick {
+  from { transform:scaleY(.68); opacity:.86 }
+  to { transform:scaleY(1.08); opacity:1 }
+}
+
+.dashboard-native-container .rf-smoke circle {
+  animation:rf-rise 2.6s ease-out infinite
+}
+
+.dashboard-native-container .rf-smoke circle:nth-child(2) {
+  animation-delay:-.9s
+}
+
+.dashboard-native-container .rf-smoke circle:nth-child(3) {
+  animation-delay:-1.7s
+}
+
+@keyframes rf-rise {
+  from { transform:translateY(18px); opacity:.2 }
+  35% { opacity:.9 }
+  to { transform:translateY(-22px); opacity:0 }
+}
+
+.dashboard-native-container .rf-vapor {
+  opacity:.28
+}
+
+.dashboard-native-container .rf-bars rect {
+  fill:#2c4a36;
+  transform-box:fill-box;
+  transform-origin:bottom
+}
+
+.dashboard-native-container .rf-bars[data-run="running"] rect {
+  fill:#35e06c;
+  animation:rf-bar 1.5s steps(5) infinite alternate
+}
+
+@keyframes rf-bar {
+  from { transform:scaleY(.55) }
+  to { transform:scaleY(1.1) }
+}
+
+.dashboard-native-container .rf-needle {
+  transform-box:fill-box;
+  transform-origin:center
+}
+
+.dashboard-native-container .rf-needle[data-run="running"] {
+  animation:rf-sway 2.4s ease-in-out infinite alternate
+}
+
+@keyframes rf-sway {
+  from { transform:rotate(-16deg) }
+  to { transform:rotate(26deg) }
+}
+
+.dashboard-native-container .rf-lamp {
+  fill:#55585c
+}
+
+.dashboard-native-container .rf-lamp[data-run="running"] {
+  fill:var(--on,#8b8f93)
+}
+
+.dashboard-native-container .rf-lamp[data-run="fault"],
+.dashboard-native-container .rf-lamp-stop[data-run="stopped"] {
+  fill:#e1251b
+}
+
+.dashboard-native-container .rf-lamp-blink[data-run="running"] {
+  animation:rf-blink 1.2s steps(2) infinite
+}
+
+@keyframes rf-blink {
+  to { opacity:.25 }
+}
+
+.dashboard-native-container .rf-eqtext {
+  fill:#f4f5f6;
+  font-family:var(--fB),sans-serif;
+  font-weight:700;
+  text-anchor:middle
+}
+
+.dashboard-native-container .rf-eq[data-act] {
+  cursor:pointer
+}
+
+.dashboard-native-container .rf-eq[data-act]:hover {
+  /* not a filter: a filter re-draws the whole machine, rotors and all, on every frame while the pointer is over it */
+  opacity:.9
+}
+
+.dashboard-native-container .rf-eq:focus-visible {
+  outline:2px solid var(--acc);
+  outline-offset:2px
+}
+
+.dashboard-native-container .rf-bcw {
+  fill:#4c9fe2
+}
+
+.dashboard-native-container .rf-bhw {
+  fill:#e8574a
+}
+
+.dashboard-native-container .rf-bldg {
+  fill:#0a2358;
+  font:700 11px var(--fB),sans-serif;
+  letter-spacing:.2px;
+  text-anchor:middle
+}
+
+.dashboard-native-container .rf-snow {
+  fill:none;
+  stroke:#eef8ff;
+  stroke-width:2.4;
+  stroke-linecap:round
+}
+
+.dashboard-native-container .rf-drop {
+  fill:#fbd2bd;
+  fill-rule:evenodd
+}
+
+.dashboard-native-container .rf-flowname {
+  fill:#4b5563;
+  font:600 10.5px var(--fB),sans-serif;
+  text-anchor:start
+}
+
+.dashboard-native-container .rf-tagcap {
+  fill:#e4e6e8;
+  stroke:#cdd0d3;
+  stroke-width:.6
+}
+
+.dashboard-native-container .rf-tagicon {
+  fill:none;
+  stroke:#37518f;
+  stroke-width:1.2
+}
+
+.dashboard-native-container .rf-tagicon circle {
+  fill:#e4e6e8
+}
+
+.dashboard-native-container .rf-tagname {
+  fill:#14171a;
+  font:700 10px var(--fB),sans-serif;
+  text-anchor:start
+}
+
+/* A value band says what state its reading is in before its text does: only a live one is blue with the green edge. */
+.dashboard-native-container .rf-tagval {
+  fill:#6b7280
+}
+
+.dashboard-native-container .rf-tagedge {
+  fill:#4b5563
+}
+
+.dashboard-native-container .rf-tag[data-st="live"] .rf-tagval {
+  fill:#0b249b
+}
+
+.dashboard-native-container .rf-tag[data-st="live"] .rf-tagedge {
+  fill:#45c24b
+}
+
+.dashboard-native-container .rf-tag[data-st="disconnected"] .rf-tagval {
+  fill:#374151
+}
+
+.dashboard-native-container .rf-tag[data-st="stale"] .rf-tagval {
+  fill:#b45309
+}
+
+.dashboard-native-container .rf-tag[data-st="not-reporting"] .rf-tagval {
+  fill:#4e6a7d
+}
+
+.dashboard-native-container .rf-tag[data-st="invalid"] .rf-tagval {
+  fill:#7c2d92
+}
+
+.dashboard-native-container .rf-tag[data-hot][data-on] .rf-tagval,
+.dashboard-native-container .rf-tag[data-st="fault"] .rf-tagval {
+  fill:#c4141c
+}
+
+.dashboard-native-container .rf-tag[data-hot][data-on] .rf-tagedge,
+.dashboard-native-container .rf-tag[data-st="fault"] .rf-tagedge {
+  fill:#8d0d13
+}
+
+.dashboard-native-container .rf-tagtxt {
+  fill:#fff;
+  font:700 14px var(--fB),sans-serif;
+  letter-spacing:.3px;
+  text-anchor:middle
+}
+
+/* a word for a state is longer than a reading, and must fit the narrowest tag */
+.dashboard-native-container .rf-tag:not([data-st="live"]) .rf-tagtxt {
+  font-size:12px
+}
+
+/* the LIVE mark says only what is true: FIN connected and at least one reading live */
+.dashboard-native-container .rf-live[data-on="0"] {
+  display:none
+}
+
+.dashboard-native-container .rf-live circle {
+  fill:#d7141c
+}
+
+.dashboard-native-container .rf-live text {
+  fill:#1f2328;
+  font:700 12px var(--fB),sans-serif;
+  letter-spacing:.6px
+}
+
+@media (prefers-reduced-motion:reduce) {
+  .dashboard-native-container .rf-rot,
+  .dashboard-native-container .rf-flame path,
+  .dashboard-native-container .rf-smoke circle,
+  .dashboard-native-container .rf-bars rect,
+  .dashboard-native-container .rf-needle,
+  .dashboard-native-container .rf-lamp,
+  .dashboard-native-container .rf-flowline[data-flow="on"] {
+    animation:none !important
+  }
 }
 
 .dashboard-native-container .docframe {
@@ -17161,3 +17472,316 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .mtmore:hover {
   text-decoration:underline
 }
+
+/* ── Live Twin (layouts/hospital-twin.js): the Studio's bar and side panel around the reference's dark cutaway of the hospital ── */
+.dashboard-native-container .twinview { flex:1 1 auto; min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--s1) }
+.dashboard-native-container #mount > .twinview { flex:1 1 auto }
+.dashboard-native-container .twbar { flex:none; display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; padding:8px 14px; background:var(--s1); border-block-end:1px solid var(--bd2) }
+.dashboard-native-container .twttl { margin:0; font-size:15px; color:var(--t1) }
+.dashboard-native-container .twseg { display:inline-flex; border:1px solid var(--bd2); border-radius:6px; overflow:hidden }
+.dashboard-native-container .twseg button { border:0; background:none; padding:5px 11px; font:inherit; font-size:12px; font-weight:600; color:var(--t2); cursor:pointer }
+.dashboard-native-container .twseg button + button { border-inline-start:1px solid var(--bd2) }
+.dashboard-native-container .twseg button:hover { color:var(--t1); background:var(--acc8) }
+.dashboard-native-container .twseg button[aria-pressed="true"] { background:var(--acc); color:var(--onAcc) }
+.dashboard-native-container .twseg button:focus-visible { outline:2px solid var(--acc); outline-offset:-2px }
+.dashboard-native-container .twmeta { margin-inline-start:auto; display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; font-size:12px; color:var(--t2) }
+.dashboard-native-container .twillus { padding:2px 8px; border:1px dashed var(--bd2); border-radius:3px }
+.dashboard-native-container .twstatus { padding:2px 8px; border-radius:3px; font-weight:600; color:#fff; background:#6b7280 }
+.dashboard-native-container .twstatus[data-st="live"] { background:#0b249b }
+.dashboard-native-container .twbody { flex:1; min-height:0; display:flex }
+.dashboard-native-container .twstage { position:relative; flex:1 1 auto; min-width:0; min-height:0; display:flex; background:radial-gradient(1200px 700px at 55% 40%,#0d1621 0%,#070b10 70%) }
+.dashboard-native-container .twside { flex:none; width:320px; overflow:auto; padding:12px 14px 18px; background:var(--s1); border-inline-start:1px solid var(--bd2); font-size:13px; color:var(--t1) }
+.dashboard-native-container .twpick { margin:0 0 10px; color:var(--t2) }
+.dashboard-native-container .twsub { margin:14px 0 6px; font-size:11.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--t2) }
+.dashboard-native-container .twlegend { margin:0; display:grid; gap:8px }
+.dashboard-native-container .twlegend dt { font-weight:600; font-size:12px; color:var(--t1) }
+.dashboard-native-container .twlegend dd, .dashboard-native-container .twnets li { margin:2px 0 0; display:flex; align-items:center; gap:8px; font-size:12px; color:var(--t2) }
+.dashboard-native-container .twnets { list-style:none; margin:0; padding:0 }
+.dashboard-native-container .twkey { flex:none; width:16px; height:5px; border-radius:2px; box-shadow:inset 0 0 0 1px rgba(0,0,0,.25) }
+.dashboard-native-container .twlayers { flex:none; display:flex; flex-wrap:wrap; gap:6px; padding:6px 14px; background:var(--s1); border-block-end:1px solid var(--bd2) }
+.dashboard-native-container .twlayers button { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border:1px solid var(--bd2); border-radius:999px; background:none; font:inherit; font-size:12px; color:var(--t1); cursor:pointer }
+.dashboard-native-container .twlayers button[aria-pressed="false"] { color:var(--t2); text-decoration:line-through; opacity:.7 }
+.dashboard-native-container .twlayers button[aria-pressed="false"] .twsw { filter:grayscale(1) }
+.dashboard-native-container .twlayers button:focus-visible { outline:2px solid var(--acc); outline-offset:1px }
+.dashboard-native-container .twsw { display:inline-flex; gap:2px; min-width:36px }
+.dashboard-native-container .twsw i { width:9px; height:9px; border-radius:2px; box-shadow:inset 0 0 0 1px rgba(0,0,0,.25) }
+.dashboard-native-container .twnote { margin:12px 0 0; font-size:12px; color:var(--t2) }
+.dashboard-native-container .twdh { display:flex; justify-content:space-between; align-items:flex-start; gap:8px }
+.dashboard-native-container .twdt { margin:0; font-size:17px; color:var(--t1) }
+.dashboard-native-container .twdid { font-size:11.5px; color:var(--t2); overflow-wrap:anywhere }
+.dashboard-native-container .twchip { display:inline-block; margin:8px 0 4px; padding:2px 8px; border-radius:3px; font-size:11.5px; font-weight:600; background:#e5e7eb; color:#374151 }
+.dashboard-native-container .twchip[data-fin="mapped"] { background:var(--accT); color:var(--link) }
+.dashboard-native-container .twchip[data-fin="missing"], .dashboard-native-container .twchip[data-fin="ambiguous"] { background:#fee2e2; color:#991b1b }
+.dashboard-native-container .twchip[data-fin="unmapped"] { background:transparent; color:var(--t2); box-shadow:inset 0 0 0 1px var(--bd2) }
+.dashboard-native-container .twchip[data-fin="stale"] { background:#fef3c7; color:#92400e }
+.dashboard-native-container .twdl { margin:8px 0 0; display:grid; gap:4px }
+.dashboard-native-container .twdl div { display:flex; justify-content:space-between; gap:12px }
+.dashboard-native-container .twdl dt { color:var(--t2) }
+.dashboard-native-container .twdl dd { margin:0; text-align:end }
+.dashboard-native-container .twpts { width:100%; border-collapse:collapse; font-size:12.5px }
+.dashboard-native-container .twpts th { text-align:start; font-weight:400; color:var(--t2); padding:3px 0; border-block-end:1px solid var(--bd1) }
+.dashboard-native-container .twpts td { text-align:end; font-variant-numeric:tabular-nums; padding:3px 0; border-block-end:1px solid var(--bd1); overflow-wrap:anywhere }
+.dashboard-native-container .twpts tr:not([data-st="live"]) td { color:var(--t2); font-style:italic }
+.dashboard-native-container .twpts tr[data-st="stale"] td, .dashboard-native-container .twpts tr[data-st="unavailable"] td { color:#92400e }
+.dashboard-native-container .twflag { margin-inline-start:5px; padding:0 3px; border-radius:2px; font-size:9.5px; font-weight:700; text-decoration:none; color:var(--t2); box-shadow:inset 0 0 0 1px var(--bd2); cursor:help }
+.dashboard-native-container .twflag[data-k="al"] { color:#991b1b; box-shadow:inset 0 0 0 1px #fca5a5 }
+.dashboard-native-container .twfloors dd { color:var(--t2) }
+.dashboard-native-container .twfloors div[data-conflict="1"] dd { color:#991b1b; font-weight:600 }
+.dashboard-native-container .twwarn { color:#991b1b }
+.dashboard-native-container .twalarms { list-style:none; margin:0; padding:0; display:grid; gap:6px }
+.dashboard-native-container .twalarms li { display:flex; flex-direction:column; gap:2px; padding:6px 8px; border-radius:4px; border-inline-start:3px solid #f59e0b; background:var(--acc8) }
+.dashboard-native-container .twalarms li[data-sev="critical"], .dashboard-native-container .twalarms li[data-sev="high"] { border-inline-start-color:#dc2626 }
+.dashboard-native-container .twalarms b { font-weight:600; font-size:12.5px }
+.dashboard-native-container .twalarms span { font-size:11.5px; color:var(--t2) }
+
+.dashboard-native-container .twsvg { flex:1 1 auto; width:100%; height:100%; min-width:0; min-height:0; display:block; direction:ltr; touch-action:none; user-select:none; cursor:grab }
+.dashboard-native-container .twsvg .face { stroke-width:.45; stroke-linejoin:round }
+.dashboard-native-container .twsvg .grid { stroke:rgba(90,120,150,.07); stroke-width:.6 }
+.dashboard-native-container .twsvg .floor-grid { stroke:rgba(120,150,180,.08); stroke-width:.6 }
+.dashboard-native-container .twsvg .wall { stroke:rgba(91,126,166,.22); stroke-width:.6 }
+.dashboard-native-container .twsvg .level-name { fill:#6f88a6; font-size:15px; font-weight:600; letter-spacing:.16em }
+.dashboard-native-container .twsvg .slat { stroke:#1d2732; stroke-width:.7 }
+.dashboard-native-container .twsvg .seam { stroke:rgba(0,0,0,.35); stroke-width:.7 }
+.dashboard-native-container .twsvg .fin { stroke:#2c4a36; stroke-width:.8 }
+.dashboard-native-container .twsvg .hanger { stroke:#45576b; stroke-width:.8 }
+.dashboard-native-container .twsvg .breaker { stroke:#0b0f14; stroke-width:.3 }
+.dashboard-native-container .twsvg .lcd { stroke-width:.6 }
+.dashboard-native-container .twsvg .face-lbl { fill:#b7c6d6; font-weight:600 }
+.dashboard-native-container .twsvg .nozzle { stroke:#06090d; stroke-width:.8 }
+.dashboard-native-container .twsvg .rotor-house { fill:#0b1118; stroke:#6c7f94; stroke-width:1 }
+.dashboard-native-container .twsvg .blade { fill:#a7bbcf }
+.dashboard-native-container .twsvg .hub { fill:#dbe5ef }
+.dashboard-native-container .twsvg .wheel-face { fill:#2e4255; stroke:#7a93ab; stroke-width:.8 }
+.dashboard-native-container .twsvg .spoke { stroke:#8aa3bb; stroke-width:.6 }
+.dashboard-native-container .twsvg .lamp { fill:#3d4654; stroke:#06090d; stroke-width:.6 }
+.dashboard-native-container .twsvg .flame-window { fill:#1b0f0a; stroke:#c2410c; stroke-width:1 }
+.dashboard-native-container .twsvg .damper-ring { fill:#0c1218; stroke:#8aa0b6; stroke-width:.8 }
+.dashboard-native-container .twsvg .damper-blade { stroke:#e2e8f0; stroke-width:1.6; stroke-linecap:round }
+.dashboard-native-container .twsvg .halo { fill:transparent }
+.dashboard-native-container .twsvg .pipe { pointer-events:none }
+.dashboard-native-container .twsvg .pipe path { fill:none; stroke-linecap:round; stroke-linejoin:round }
+.dashboard-native-container .twsvg.hide-chw .pipe[data-layer="chw"], .dashboard-native-container .twsvg.hide-cw .pipe[data-layer="cw"], .dashboard-native-container .twsvg.hide-air .pipe[data-layer="air"], .dashboard-native-container .twsvg.hide-water .pipe[data-layer="water"], .dashboard-native-container .twsvg.hide-power .pipe[data-layer="power"], .dashboard-native-container .twsvg.hide-gas .pipe[data-layer="gas"] { display:none }
+.dashboard-native-container .twsvg.hide-chw .pipe[data-layer="chw"] .flow, .dashboard-native-container .twsvg.hide-cw .pipe[data-layer="cw"] .flow, .dashboard-native-container .twsvg.hide-air .pipe[data-layer="air"] .flow, .dashboard-native-container .twsvg.hide-water .pipe[data-layer="water"] .flow, .dashboard-native-container .twsvg.hide-power .pipe[data-layer="power"] .flow, .dashboard-native-container .twsvg.hide-gas .pipe[data-layer="gas"] .flow { animation:none }
+.dashboard-native-container .twsvg[data-conn="1"] .pipe:not(.conn) { opacity:.3 }
+.dashboard-native-container .twsvg .pipe.conn .core { opacity:1 }
+.dashboard-native-container .twsvg .k-pipe.conn .core { stroke-width:3.4 }
+.dashboard-native-container .twsvg .k-cable.conn .core { stroke-width:2.2 }
+.dashboard-native-container .twsvg .k-duct.conn .core { opacity:.75 }
+.dashboard-native-container .twsvg .k-pipe .casing { stroke:#05080c; stroke-width:4.6 }
+.dashboard-native-container .twsvg .k-pipe .core { stroke-width:2.6; opacity:.75 }
+.dashboard-native-container .twsvg .k-duct .casing { stroke:#0b1017; stroke-width:9 }
+.dashboard-native-container .twsvg .k-duct .core { stroke-width:6.6; opacity:.35 }
+.dashboard-native-container .twsvg .k-cable .casing { stroke:#05080c; stroke-width:3 }
+.dashboard-native-container .twsvg .k-cable .core { stroke-width:1.5; opacity:.75 }
+.dashboard-native-container .twsvg .equip { cursor:pointer; outline:none }
+.dashboard-native-container .twsvg .equip:hover .face { filter:brightness(1.18) }
+.dashboard-native-container .twsvg .equip.sel .halo { fill:url(#twglowS); stroke:#7dd3fc; stroke-width:1.2; stroke-dasharray:4 3 }
+.dashboard-native-container .twsvg .equip:focus-visible .halo { stroke:#7dd3fc; stroke-width:1.4 }
+/* a picked floor: the others fade, the outside stays with the ground floor */
+.dashboard-native-container .twsvg .tw-level { transition:opacity .3s }
+.dashboard-native-container .twsvg[data-level="RF"] .tw-level:not([data-level="RF"]),
+.dashboard-native-container .twsvg[data-level="L3"] .tw-level:not([data-level="L3"]),
+.dashboard-native-container .twsvg[data-level="L2"] .tw-level:not([data-level="L2"]),
+.dashboard-native-container .twsvg[data-level="L1"] .tw-level:not([data-level="L1"]) { opacity:.16; pointer-events:none }
+.dashboard-native-container .twsvg[data-level="RF"] .tag:not([data-level="RF"]),
+.dashboard-native-container .twsvg[data-level="L3"] .tag:not([data-level="L3"]),
+.dashboard-native-container .twsvg[data-level="L2"] .tag:not([data-level="L2"]),
+.dashboard-native-container .twsvg[data-level="L1"] .tag:not([data-level="L1"]) { display:none }
+.dashboard-native-container .twsvg .tag { pointer-events:none }
+.dashboard-native-container .twsvg .tag-bg { fill:rgba(8,13,20,.88); stroke:#2a3b50; stroke-width:.7 }
+.dashboard-native-container .twsvg .tag-stem { stroke:#3b4d63; stroke-width:.7 }
+.dashboard-native-container .twsvg .tag-name { fill:#e6eef7; font-size:6.4px; font-weight:600 }
+.dashboard-native-container .twsvg .tag-dot { fill:#5a6779 }
+.dashboard-native-container .twsvg .tag[data-fin="mapped"] .tag-dot { fill:#5cc8ff }
+.dashboard-native-container .twsvg .tag[data-fin="missing"] .tag-dot, .dashboard-native-container .twsvg .tag[data-fin="ambiguous"] .tag-dot { fill:#ff6b7a }
+.dashboard-native-container .twsvg .tag[data-fin="unmapped"] .tag-dot { fill:transparent; stroke:#8a9bb0; stroke-width:.7 }
+/* the mapping's own state, before any live data: an unmapped item is outlined grey and dimmed, a provisional one amber dotted; a mapped item with no FIN points has a dotted dot */
+.dashboard-native-container .twsvg .equip[data-map="unmapped"] { opacity:.62 }
+.dashboard-native-container .twsvg .equip[data-map="unmapped"] .halo { stroke:#8a9bb0; stroke-width:.9; stroke-dasharray:2 3 }
+.dashboard-native-container .twsvg .equip[data-map="provisional"] .halo { stroke:#fbbf24; stroke-width:.9; stroke-dasharray:1 3 }
+.dashboard-native-container .twsvg .tag[data-map="unmapped"] .tag-name { opacity:.75 }
+.dashboard-native-container .twsvg .tag[data-map="provisional"] .tag-bg { stroke:#fbbf24; stroke-dasharray:2 2 }
+.dashboard-native-container .twchip[data-prov] { background:#fef3c7; color:#92400e }
+.dashboard-native-container .twsvg .tag[data-fin="stale"] .tag-dot { fill:#fbbf24 }
+.dashboard-native-container .twsvg .tag.sel .tag-bg { stroke:#7dd3fc }
+/* Auto: the labels that fit (tagLayout marks the rest data-hide); Always: all of them; Off: none */
+.dashboard-native-container .twsvg[data-labels="auto"] .tag[data-hide="1"]:not(.sel) { display:none }
+.dashboard-native-container .twsvg .tag-in { pointer-events:none }
+.dashboard-native-container .twsvg .tag-bg { fill:rgba(8,13,20,.92) }
+.dashboard-native-container .twsvg[data-labels="off"] .tag { display:none }
+
+/* a trace: the machine traced from (white), upstream (violet), downstream (red: would stop · amber: values would change); the rest step back */
+.dashboard-native-container .twsvg.tracing .equip:not([data-tr]) { opacity:.22 }
+.dashboard-native-container .twsvg.tracing .tag:not([data-tr]):not(.sel) { display:none }
+.dashboard-native-container .twsvg.tracing .pipe:not(.tr-on) { opacity:.14 }
+.dashboard-native-container .twsvg.tracing .pipe.tr-on .core { opacity:1 }
+.dashboard-native-container .twsvg .equip[data-tr] .halo { stroke-width:1.4 }
+.dashboard-native-container .twsvg .equip[data-tr="src"] .halo { stroke:#f8fafc; stroke-width:1.8 }
+.dashboard-native-container .twsvg .equip[data-tr^="up-"] .halo { stroke:#a78bfa }
+.dashboard-native-container .twsvg .equip[data-tr^="down-stop"] .halo { stroke:#f87171 }
+.dashboard-native-container .twsvg .equip[data-tr^="down-shift"] .halo { stroke:#fbbf24 }
+.dashboard-native-container .twsvg .equip[data-tr$="-shift"] .halo, .dashboard-native-container .twsvg .equip[data-tr$="-weak"] .halo { stroke-dasharray:3 2 }
+.dashboard-native-container .twsvg .tag[data-tr^="up-"] .tag-bg { stroke:#a78bfa }
+.dashboard-native-container .twsvg .tag[data-tr^="down-stop"] .tag-bg { stroke:#f87171 }
+.dashboard-native-container .twsvg .tag[data-tr^="down-shift"] .tag-bg { stroke:#fbbf24 }
+.dashboard-native-container .twsvg .tag[data-tr="src"] .tag-bg { stroke:#f8fafc }
+.dashboard-native-container .twsvg .tag[data-al="alarm"] .tag-name { fill:#fca5a5 }
+.dashboard-native-container .twsvg .tag[data-al="fault"] .tag-name { fill:#fcd34d }
+.dashboard-native-container .twtrace { position:absolute; inset-block-start:10px; inset-inline:10px; z-index:2; display:flex; align-items:center; gap:10px; padding:6px 10px; border-radius:6px; background:rgba(8,13,20,.9); border:1px solid #2a3b50; color:#e6eef7; font-size:12px }
+.dashboard-native-container .twtrace[hidden] { display:none }
+.dashboard-native-container .twtrace button { flex:none; color:#e6eef7; border-color:#4b5f78; background:rgba(255,255,255,.06) }
+.dashboard-native-container .twtrace .twtracet { flex:1 1 auto; min-width:0 }
+.dashboard-native-container .twacts { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 }
+.dashboard-native-container .twacts button[aria-pressed="true"] { border-color:var(--acc); color:var(--acc) }
+.dashboard-native-container .twgo { display:inline; padding:0; border:0; background:none; font:inherit; color:var(--acc); text-align:start; cursor:pointer }
+.dashboard-native-container .twgo:hover, .dashboard-native-container .twgo:focus-visible { text-decoration:underline }
+.dashboard-native-container .twallist .twgo, .dashboard-native-container .twcleared .twgo { display:flex; flex-direction:column; gap:2px; color:inherit; width:100% }
+.dashboard-native-container .twallist .twgo b, .dashboard-native-container .twcleared .twgo b { color:var(--t1) }
+.dashboard-native-container .twalarms li[data-linked="0"] { border-inline-start-color:var(--bd2) }
+.dashboard-native-container .twaldl { margin-block-start:4px }
+.dashboard-native-container .twfdd, .dashboard-native-container .twrel, .dashboard-native-container .twev ul { list-style:none; margin:0; padding:0; display:grid; gap:5px; font-size:12px }
+.dashboard-native-container .twfdd li { display:flex; flex-direction:column; gap:2px; padding:5px 8px; border-radius:4px; background:var(--acc8); border-inline-start:3px solid var(--bd2) }
+.dashboard-native-container .twfdd li[data-st="fault"] { border-inline-start-color:#f59e0b }
+.dashboard-native-container .twfdd li[data-st="unavailable"] { opacity:.75; font-style:italic }
+.dashboard-native-container .twfdd li > div { display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px }
+.dashboard-native-container .twfdd .twfddst, .dashboard-native-container .twfdd em, .dashboard-native-container .twrel em, .dashboard-native-container .twev li > span { color:var(--t2); font-size:11.5px }
+.dashboard-native-container .twrel li { display:flex; flex-wrap:wrap; gap:2px 6px }
+.dashboard-native-container .twrel em { flex-basis:100% }
+.dashboard-native-container .twev h4 { margin:8px 0 4px; font-size:11.5px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; padding-inline-start:6px; border-inline-start:3px solid var(--bd2) }
+.dashboard-native-container .twev h4[data-k="confirmed"] { border-inline-start-color:#dc2626 }
+.dashboard-native-container .twev h4[data-k="reference"] { border-inline-start-color:#64748b }
+.dashboard-native-container .twev h4[data-k="possible"] { border-inline-start-color:#a78bfa }
+.dashboard-native-container .twev h4[data-k="impact"] { border-inline-start-color:#fbbf24 }
+.dashboard-native-container .twev li { display:flex; flex-wrap:wrap; gap:2px 6px }
+.dashboard-native-container .twev .twevfact { flex-basis:100% }
+.dashboard-native-container .twev .twmore { color:var(--t2) }
+
+/* Phase 5: the BIM link and the feed's age */
+.dashboard-native-container .twstatus[data-st="stale"] { background:#92400e }
+.dashboard-native-container .twchip[data-bim] { margin-block-end:4px }
+.dashboard-native-container .twchip[data-bim="verified"] { background:#dcfce7; color:#166534 }
+.dashboard-native-container .twchip[data-bim="shared"], .dashboard-native-container .twchip[data-bim="conflict"] { background:#fee2e2; color:#991b1b }
+.dashboard-native-container .twchip[data-bim="missing"], .dashboard-native-container .twchip[data-bim="unconfirmed"] { background:var(--acc8); color:var(--t2) }
+.dashboard-native-container .twcand { margin-block-start:6px; padding:6px 8px; border:1px dashed var(--bd2); border-radius:6px }
+
+/* live flow: measured flow moves (dashes along the route's direction); running equipment without a flow meter shows still dashes; stopped dims; no data stays plain */
+.dashboard-native-container .twsvg .pipe .flow { fill:none; stroke-linecap:round; opacity:0; stroke-width:1.4; stroke-dasharray:1.6 6.5 }
+.dashboard-native-container .twsvg .k-duct .flow { stroke-width:2.2; stroke-dasharray:3 12 }
+.dashboard-native-container .twsvg .k-cable .flow { stroke-width:1.2; stroke-dasharray:2 9 }
+.dashboard-native-container .twsvg .pipe[data-flow="measured"] .flow { opacity:1; filter:brightness(1.6); animation:twflow 1s linear infinite }
+.dashboard-native-container .twsvg .k-duct[data-flow="measured"] .flow { animation-duration:1.6s }
+.dashboard-native-container .twsvg .pipe[data-flow="measured"] .core, .dashboard-native-container .twsvg .pipe[data-flow="running"] .core { opacity:1 }
+.dashboard-native-container .twsvg .pipe[data-flow="running"] .flow { opacity:.55 }
+.dashboard-native-container .twsvg .pipe[data-flow="stopped"] .core { opacity:.22 }
+@keyframes twflow { to { stroke-dashoffset:-16.2 } }
+/* fans and pumps turn only while their own run status is on */
+.dashboard-native-container .twsvg .equip[data-run="on"] .rotor { animation:twspin 1.6s linear infinite }
+@keyframes twspin { to { transform:rotate(360deg) } }
+/* nothing moves on a faded floor, in a hidden browser tab */
+.dashboard-native-container .twsvg.paused .flow, .dashboard-native-container .twsvg.paused .rotor,
+.dashboard-native-container .twsvg[data-level="RF"] .tw-level:not([data-level="RF"]) :is(.flow,.rotor),
+.dashboard-native-container .twsvg[data-level="L3"] .tw-level:not([data-level="L3"]) :is(.flow,.rotor),
+.dashboard-native-container .twsvg[data-level="L2"] .tw-level:not([data-level="L2"]) :is(.flow,.rotor),
+.dashboard-native-container .twsvg[data-level="L1"] .tw-level:not([data-level="L1"]) :is(.flow,.rotor) { animation-play-state:paused }
+/* right sidebar: Alarms and Equipment tabs */
+.dashboard-native-container .twside { display:flex; flex-direction:column; padding:0 }
+.dashboard-native-container .twtabs { flex:none; display:flex; border-block-end:1px solid var(--bd2); position:sticky; top:0; background:var(--s1); z-index:1 }
+.dashboard-native-container .twtabs button { flex:1; padding:10px 0 8px; border:0; border-block-end:2px solid transparent; background:none; font:inherit; font-weight:600; font-size:12.5px; color:var(--t2); cursor:pointer }
+.dashboard-native-container .twtabs button[aria-selected="true"] { color:var(--t1); border-block-end-color:var(--acc) }
+.dashboard-native-container .twpane { flex:1; min-height:0; overflow:auto; padding:12px 14px }
+.dashboard-native-container .twaldet { display:block; font-size:11.5px; color:var(--t2); margin-block-start:2px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical }
+.dashboard-native-container .twcleared li { opacity:.7; border-inline-start-color:var(--bd2) }
+/* Exhibition controls in the systems row */
+.dashboard-native-container .twex { display:inline-flex; flex-wrap:wrap; align-items:center; gap:4px 12px; margin-inline-start:auto; font-size:12px; color:var(--t1) }
+.dashboard-native-container .twex b { font-weight:600; color:var(--t2); text-transform:uppercase; letter-spacing:.06em; font-size:11px }
+.dashboard-native-container .twex label { display:inline-flex; align-items:center; gap:5px; cursor:pointer }
+.dashboard-native-container .twex select { font:inherit; font-size:12px; padding:2px 4px; border:1px solid var(--bd2); border-radius:4px; background:var(--s1); color:var(--t1) }
+.dashboard-native-container .twex .twexoff { color:var(--t2); cursor:not-allowed }
+.dashboard-native-container .twex .twexoff small { font-size:11px }
+.dashboard-native-container .twflowkey { list-style:none; margin:0; padding:0; display:grid; gap:4px; font-size:12px; color:var(--t2) }
+.dashboard-native-container .twflowkey li { display:flex; align-items:center; gap:8px }
+.dashboard-native-container .twfk { flex:none; width:22px; height:0; border-block-start:3px solid #5b7ea6 }
+.dashboard-native-container .twfk[data-flow="measured"] { border-block-start-style:dashed; border-color:#5cc8ff }
+.dashboard-native-container .twfk[data-flow="running"] { border-block-start-style:dotted }
+.dashboard-native-container .twfk[data-flow="stopped"] { opacity:.3 }
+.dashboard-native-container .twchip[data-run="on"] { background:#dcfce7; color:#166534 }
+.dashboard-native-container .twchip[data-run="off"] { background:#e5e7eb; color:#374151 }
+.dashboard-native-container .twchip[data-run="unknown"] { background:transparent; color:var(--t2); box-shadow:inset 0 0 0 1px var(--bd2) }
+
+/* the 3D view controls: top right of the stage, under the trace bar while one is shown. Never at the bottom, where the toast and the Ask button are. */
+.dashboard-native-container .twcam { position:absolute; inset-block-start:10px; inset-inline-end:10px; z-index:2; display:flex; flex-direction:column; align-items:flex-end; gap:5px; padding:6px; border-radius:8px; background:rgba(9,14,21,.72); border:1px solid #1d2a39; color:#9fb0c3; font-size:11.5px }
+.dashboard-native-container .twtrace:not([hidden]) ~ .twcam { inset-block-start:56px }
+.dashboard-native-container .twcamt { display:none }
+.dashboard-native-container .twcamh { font-weight:600; letter-spacing:.06em; text-transform:uppercase; font-size:10.5px }
+.dashboard-native-container .twcamh b { margin-inline-start:6px; font-weight:500; letter-spacing:0; color:#dce6f1; font-variant-numeric:tabular-nums }
+.dashboard-native-container .twcamrow { display:flex; gap:5px }
+.dashboard-native-container .twcamb { min-width:32px; min-height:32px; padding:3px 8px; border:1px solid #2a3a4e; border-radius:6px; background:#111924; color:#dce6f1; font:inherit; font-size:14px; cursor:pointer }
+.dashboard-native-container .twcamb.twcamw { font-size:11.5px; padding:3px 9px }
+.dashboard-native-container .twcamb:hover:not(:disabled) { border-color:#3d5470 }
+.dashboard-native-container .twcamb:disabled { opacity:.38; cursor:default }
+.dashboard-native-container .twcamb[aria-pressed="true"] { background:#13263a; border-color:#2f5a80 }
+.dashboard-native-container .twcamb:focus-visible { outline:2px solid var(--acc); outline-offset:1px }
+.dashboard-native-container .twsvg.turnmode { cursor:ew-resize }
+
+/* tablet and phone: the controls take one row each, the building stays in view (the stage sticks to the top while the panel is read), the panel goes under it */
+@media (max-width:860px) {
+  .dashboard-native-container .twbody { flex:none; flex-direction:column }
+  .dashboard-native-container .twbar { gap:4px 8px; padding:6px 10px }
+  .dashboard-native-container .twttl { flex:1 0 100%; margin:0; font-size:14px }
+  .dashboard-native-container .twlayers { flex-wrap:nowrap; overflow-x:auto; gap:6px; padding:6px 10px; scrollbar-width:none; -webkit-overflow-scrolling:touch }
+  .dashboard-native-container .twlayers::-webkit-scrollbar { display:none }
+  .dashboard-native-container .twlayers > *, .dashboard-native-container .twex > * { flex:none; white-space:nowrap }
+  .dashboard-native-container .twex { flex-wrap:nowrap; margin-inline-start:6px; padding-inline-end:10px }
+  .dashboard-native-container .twstage { position:sticky; inset-block-start:0; z-index:3; flex:none; min-height:0; height:clamp(220px, min(46dvh, calc(100dvh - 400px)), 520px) }
+  .dashboard-native-container .twside { width:auto; max-height:none; overflow:visible; border-inline-start:0; border-block-start:1px solid var(--bd2) }
+  .dashboard-native-container .twmeta { margin-inline-start:0 }
+  /* one "3D" button in the corner; it opens the controls as a small grid (two columns, so it stays clear of the Ask button), the word buttons become glyphs
+     (their names stay as the accessible label) */
+  .dashboard-native-container .twcam { inset-block-start:4px; inset-inline-end:4px; padding:3px; gap:3px; background:rgba(9,14,21,.6) }
+  .dashboard-native-container .twcamt { display:inline-flex; align-items:center; justify-content:center; font-size:12px; font-weight:700 }
+  .dashboard-native-container .twcam:not([data-open="1"]) .twcamrow { display:none }
+  .dashboard-native-container .twcam[data-open="1"] { display:grid; grid-template-columns:repeat(2, 38px); background:rgba(9,14,21,.82) }
+  .dashboard-native-container .twcam[data-open="1"] .twcamt { grid-column:1 / -1 }
+  .dashboard-native-container .twcamh { display:none }
+  .dashboard-native-container .twcamrow { display:contents }
+  .dashboard-native-container .twcamb { min-width:38px; min-height:38px; padding:2px }
+  .dashboard-native-container .twcamb.twcamw { font-size:0 }
+  .dashboard-native-container .twcamb.twcamw::before { content:attr(data-g); font-size:16px }
+  .dashboard-native-container .twtrace:not([hidden]) ~ .twcam { inset-block-start:52px }
+}
+@media (prefers-reduced-motion:reduce) {
+  .dashboard-native-container .twsvg .tw-level { transition:none }
+  .dashboard-native-container .twsvg .pipe[data-flow="measured"] .flow { animation:none; stroke-dasharray:none; opacity:.85 }
+  .dashboard-native-container .twsvg .equip[data-run="on"] .rotor { animation:none }
+}
+
+/* Schematic: the supply-air cone under a running ceiling unit, room-temperature floor patches, the Work orders tab */
+.dashboard-native-container .twsvg .aircone { fill:#7cc4ff; opacity:0; pointer-events:none; transition:opacity .6s }
+.dashboard-native-container .twsvg .equip[data-run="on"] .aircone { opacity:.4 }
+.dashboard-native-container .twsvg.hide-air .aircone { display:none }
+.dashboard-native-container .twsvg .zone { stroke:none; fill-opacity:.2; pointer-events:none; transition:fill .8s }
+.dashboard-native-container .twsvg .z-none { fill:#475569; fill-opacity:.1 }
+.dashboard-native-container .twsvg .z-temp { fill:#64748b; fill-opacity:.22 }
+.dashboard-native-container .twsvg .z-ok { fill:#14b8a6 }
+.dashboard-native-container .twsvg .z-cold { fill:#3b82f6 }
+.dashboard-native-container .twsvg .z-warm { fill:#f59e0b; fill-opacity:.32 }
+.dashboard-native-container .twsvg .z-hot { fill:#ef4444; fill-opacity:.38 }
+.dashboard-native-container .twsvg .z-bad { fill:#a855f7; fill-opacity:.3 }
+.dashboard-native-container .twsvg .zone-t { fill:rgba(220,232,244,.78); font:600 7.5px var(--mono, monospace); pointer-events:none }
+.dashboard-native-container .twwo { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px }
+.dashboard-native-container .twwo li { border:1px solid var(--bd2); border-inline-start-width:4px; border-radius:6px }
+.dashboard-native-container .twwo li .twgo { display:grid; gap:2px; width:100%; text-align:start; padding:7px 9px }
+.dashboard-native-container .twwo .twwoid { font-size:11.5px; color:var(--t2) }
+.dashboard-native-container .twwo .twwod { font-size:12.5px }
+.dashboard-native-container .twwo small { color:var(--t2) }
+.dashboard-native-container .twwo em { font-style:normal; font-size:11px; font-weight:700; letter-spacing:.02em }
+.dashboard-native-container .twwo li[data-wo="over"] { border-inline-start-color:#dc2626 }
+.dashboard-native-container .twwo li[data-wo="over"] em { color:#dc2626 }
+.dashboard-native-container .twwo li[data-wo="due"] { border-inline-start-color:#d97706 }
+.dashboard-native-container .twwo li[data-wo="due"] em { color:#b45309 }
+.dashboard-native-container .twwo li[data-wo="sched"] { border-inline-start-color:var(--bd2) }
+
+/* The collapsed rail shows a module's items as a flyout beside its icon (the rail has no room for them inline) */
+.dashboard-native-container[data-nav="min"] #ekonav > div { position:relative }
+.dashboard-native-container[data-nav="min"] .nsubs { position:fixed; inset-inline-start:calc(var(--navw) + 4px); z-index:50; min-width:190px; padding:6px; gap:1px;
+  background:var(--chrome-bg); border:1px solid var(--chrome-edge); border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.25) }

@@ -1,0 +1,769 @@
+import { test, before, after } from 'node:test'
+import assert from 'node:assert/strict'
+import http from 'node:http'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { chromium } from 'playwright'
+
+// The real dashboard (templates/index.html + static/dashboard) in a browser, with the project settings the Studio injects before the dashboard's scripts:
+// Systems > Live Twin opens in the content area, its floors and equipment selection work, it survives the shell's re-renders, it is absent on other projects,
+// and the Hospital roof schematic still opens. The FIN feed below is a test input written into E.data.assets: no FIN server is involved.
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' }
+let server, browser, base
+
+before(async () => {
+  server = http.createServer((req, res) => {
+    const p = decodeURIComponent(new URL(req.url, 'http://x').pathname)
+    const file = p === '/' ? path.join(root, 'templates/index.html') : path.join(root, p)
+    if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404).end(); return }
+    res.writeHead(200, { 'content-type': types[path.extname(file)] || 'application/octet-stream' })
+    fs.createReadStream(file).pipe(res)
+  })
+  await new Promise(r => server.listen(0, '127.0.0.1', r))
+  base = `http://localhost:${server.address().port}`
+  browser = await chromium.launch({ channel: 'msedge', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
+})
+after(async () => {
+  await browser?.close()
+  server?.closeAllConnections?.(); await new Promise(r => server?.close(r))
+})
+
+const CONFIGS = {
+  eko: { projectId: 'p-eko', demo: false, hospitalHvac: true, site: { name: 'Eko Hospital', finProject: 'ekoHospital', timezone: 'Asia/Dubai' }, basis: {} },
+  marsa: { projectId: 'p-marsa', demo: true, hospitalHvac: false, site: { name: 'Marsa Al Arab', finProject: 'marsaAlArab', timezone: 'Asia/Dubai' }, basis: {} },
+}
+async function openFor(kind, viewport = { width: 1440, height: 900 }) {
+  const ctx = await browser.newContext({ viewport })
+  const page = await ctx.newPage()
+  page.once('close', () => { ctx.close().catch(() => {}) })
+  page.errors = []
+  page.on('pageerror', e => page.errors.push(String(e)))
+  await page.addInitScript(cfg => { window.INJECTED_PROJECT_CONFIG = { ...cfg } }, CONFIGS[kind])
+  await page.goto(base + '/')
+  await page.waitForFunction(() => window.EKO && window.EKO.data && document.querySelector('#ekonav .nvi'))
+  return page
+}
+const openTwin = async page => {
+  await page.locator('#ekonav .nvi[data-mod="systems"]').click()
+  await page.locator('#ekonav .nsub[data-sub="twin"]').click()
+  await page.locator('#mount > .twinview').waitFor()
+  // the view frames itself once its stage has a size: wait for that before measuring or tapping
+  await page.waitForFunction(() => { const s = document.querySelector('.twsvg'), v = s && s.viewBox.baseVal, r = s && s.getBoundingClientRect()
+    return v && r.width && Math.abs(v.height / v.width - r.height / r.width) < 0.01 })
+}
+/* a tap on a machine, as a pointer: the view selects on pointer up */
+const tap = async (page, id) => {
+  const b = await page.locator(`.twsvg .equip[data-id="${id}"]`).boundingBox()
+  await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2)
+}
+const viewBox = page => page.locator('.twsvg').getAttribute('viewBox')
+
+test('Systems > Live Twin opens the four-floor building in the content area', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    assert.equal(await page.locator('#ekonav .nsub[data-sub="twin"]').innerText(), 'Schematic')
+    assert.equal(await page.locator('#ekonav .nsub[data-sub="twin"]').getAttribute('data-on'), 'true')
+    assert.equal(await page.locator('#mount').evaluate(m => m.childElementCount), 1, 'the twin stands alone in #mount: no iframe, no second layout')
+    assert.equal(await page.locator('.twinview iframe').count(), 0)
+    assert.equal(await page.locator('.twsvg .tw-level').count(), 5, 'roof, L2, L1, outside, ground floor')
+    assert.equal(await page.locator('.twsvg .equip').count(), await page.evaluate(() => window.EKO_TWIN.EQUIP.length), 'every machine is drawn')
+    assert.deepEqual(await page.locator('.twseg button').allInnerTexts(), ['All', 'Roof', 'L3', 'L2', 'L1'])
+    await page.locator('.twtabs [data-tab="equip"]').click(); assert.ok((await page.locator('.twside').innerText()).includes('Select equipment'))
+    assert.equal(await page.locator('.twstatus').innerText(), 'Live data not connected', 'no live data here: nothing claimed')
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+})
+
+test('each floor button frames that floor and fades the others; All goes back', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    const home = await viewBox(page), seen = new Set([home])
+    for (const [lv, label] of [['RF', 'Roof'], ['L3', 'L3'], ['L2', 'L2'], ['L1', 'L1']]) {
+      await page.locator('.twseg button', { hasText: new RegExp('^' + label + '$') }).click()
+      assert.equal(await page.locator('.twsvg').getAttribute('data-level'), lv)
+      assert.equal(await page.locator(`.twseg button[data-lv="${lv}"]`).getAttribute('aria-pressed'), 'true')
+      await page.waitForFunction(l => [...document.querySelectorAll('.twsvg .tw-level')].every(g => (g.dataset.level === l) === (+getComputedStyle(g).opacity > 0.5)), lv)   // the others fade (a 0.3 s transition)
+      const vb = await viewBox(page); assert.ok(!seen.has(vb), lv + ' has its own frame'); seen.add(vb)
+    }
+    await page.locator('.twseg button[data-lv="ALL"]').click()
+    assert.equal(await viewBox(page), home)
+    await page.locator('.twseg button[data-lv="L2"]').click()
+    await page.locator('.twbar button[data-tw="home"]').click()
+    assert.equal(await page.locator('.twsvg').getAttribute('data-level'), 'ALL', 'Whole building')
+  } finally { await page.close() }
+})
+
+test('selecting equipment shows its mapping and points; the FIN feed is read as it is; the view survives re-renders', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    await page.evaluate(() => { window.DashboardData = window.DashboardData || {}; Object.defineProperty(window.DashboardData, 'connected', { get: () => true, configurable: true }); window.EKO.set({}) })   // stands for a FIN connection
+    await page.locator('.twseg button[data-lv="RF"]').click()
+    await tap(page, 'CHILLER_01')
+    assert.equal(await page.locator('.twsvg .equip.sel').getAttribute('data-id'), 'CHILLER_01')
+    assert.equal(await page.locator('.twdt').innerText(), 'Chiller 01')
+    assert.equal(await page.locator('.twchip[data-fin]').innerText(), 'Missing from the live feed')
+    // a test feed in the dashboard's own data (as data-map.js shapes it: the chiller's FIN id, tags and floor as the export has them), then a re-render
+    const vb = await viewBox(page)
+    await page.evaluate(() => {
+      window.EKO.data.assets = [{ id: 'CHILLER_01', finId: 'p:ekoHospital:r:3260ac07-19aa0e85', bimId: '@p:ekoHospital:r:3260ac07-19aa0e85', floor: 'ROOF', tags: ['chiller', 'hvac'], typeEn: 'CHILLER', st: 'ok', points: [
+        { navName: 'CHWSTemp', currentValue: '6.9°C', unit: '°C', kind: 'Number', pointKind: 'Number', his: true, reporting: true, status: 'ok', bool: null },
+        { navName: 'RunStatus', currentValue: 'On', kind: 'Bool', pointKind: 'Bool', bool: true, text: 'true', reporting: true, status: 'ok' },
+        { navName: 'AlarmStatus', currentValue: 'Off', kind: 'Bool', pointKind: 'Bool', bool: false, text: 'Normal', enum: 'Normal,Trip', reporting: true, status: 'ok' },
+        { navName: 'Power', currentValue: '—', unit: 'kW', his: true, reporting: false, bool: null }] }]
+      window.EKO.set({})
+    })
+    assert.equal(await page.locator('.twchip[data-fin]').innerText(), 'Mapped · in the live feed')
+    const rows = await page.locator('.twpts tr').evaluateAll(trs => trs.map(t => [t.querySelector('th').firstChild.textContent, t.querySelector('td').textContent, t.dataset.st]))
+    assert.deepEqual(rows, [['CHWSTemp', '6.9 °C', 'live'], ['Power', 'No data', 'not-reporting'], ['CHWSTempSp', 'Missing', 'missing'], ['RunStatus', 'On', 'live'],
+      ['AlarmStatus', 'Normal', 'live'], ['EnableCmd', 'Missing', 'missing'], ['CHWRTemp', 'Missing', 'missing'], ['OperatingHours', 'Missing', 'missing']])
+    assert.equal(await page.locator('.twpts tr:has-text("CHWSTempSp") .twflag').innerText(), 'S', 'the export marks it a setpoint')
+    assert.equal(await page.locator('.twpts tr:has-text("AlarmStatus") td').getAttribute('title'), 'Possible values: Normal,Trip')
+    const dl = await page.locator('.twdl div').evaluateAll(ds => Object.fromEntries(ds.map(d => [d.querySelector('dt').textContent, d.querySelector('dd').textContent])))
+    assert.deepEqual([dl['Equipment name'], dl['Equipment id'], dl['Reported type'], dl['Reported floor'], dl['BIM id']], ['CHILLER_01', 'p:ekoHospital:r:3260ac07-19aa0e85', 'CHILLER', 'ROOF', '—'])
+    assert.equal(await viewBox(page), vb, 'the camera is kept')
+    assert.equal(await page.locator('.twsvg').getAttribute('data-level'), 'RF', 'the floor is kept')
+    assert.equal(await page.locator('.twsvg .tag[data-id="CHILLER_01"]').getAttribute('data-fin'), 'mapped')
+    assert.equal(await page.locator('.twstatus').innerText(), '1 of 63 mapped equipment in the live feed')
+    // a feed item whose FIN id is not the export's is not read
+    await page.evaluate(() => { window.EKO.data.assets[0].finId = 'p:ekoHospital:r:00000000-00000000'; window.EKO.set({}) })
+    assert.equal(await page.locator('.twchip[data-fin]').innerText(), 'Ambiguous match')
+    assert.equal(await page.locator('.twpts').count(), 0)
+    // an item the exports do not establish stays unmapped
+    await page.locator('.twsvg .equip[data-id="MCC_02"]').focus()
+    await page.keyboard.press('Enter')
+    assert.equal(await page.locator('.twchip[data-fin]').innerText(), 'Unmapped')
+    assert.match(await page.locator('.twside').innerText(), /not in the saved equipment exports, so it is not mapped/)
+    // keyboard: Enter selects, Escape clears; the floor mapping shows with nothing selected
+    await page.locator('.twsvg .equip[data-id="BOILER_01"]').focus()
+    await page.keyboard.press('Enter')
+    assert.equal(await page.locator('.twdt').innerText(), 'Boiler 01')
+    await page.keyboard.press('Escape')
+    assert.equal(await page.locator('.twsvg .equip.sel').count(), 0)
+    assert.match(await page.locator('.twfloors').innerText(), /Level 1\s+LEVEL-01/)
+    // the close button, and a context item that is not FIN equipment
+    await page.locator('.twseg button[data-lv="ALL"]').click()
+    await tap(page, 'GENERATOR')
+    assert.equal(await page.locator('.twchip[data-fin]').innerText(), 'Shown for context')
+    await page.locator('.twside [data-tw="close"]').click()
+    await page.locator('.twtabs [data-tab="equip"]').click(); assert.ok((await page.locator('.twside').innerText()).includes('Select equipment'))
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+})
+
+test('the saved FIN exports as the feed: all 63 mapped, floors agree, alarms on their equipment and points', async () => {
+  const fx = n => JSON.parse(fs.readFileSync(path.join(root, 'spec/fixtures/eko-hospital', n), 'utf8'))
+  // as data-map.js builds E.data.assets and E.data.alarms from the backend's equipment and alarm payloads
+  const assets = fx('equipment.json').equipment.map(e => ({ id: e.name, finId: e.finId, bimId: e.bimId, floor: e.floor, tags: e.tags, typeEn: String(e.type).toUpperCase(), st: 'ok', points: e.points }))
+  const alarms = fx('alarms.json').alarms.map(a => ({ id: a.id, sourceId: a.source_id, state: a.state, plainEn: a.message, sev: a.severity }))
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    await page.evaluate(([a, al]) => { window.DashboardData = window.DashboardData || {}; Object.defineProperty(window.DashboardData, 'connected', { get: () => true, configurable: true }); window.EKO.data.assets = a; window.EKO.data.alarms = al; window.EKO.set({}) }, [assets, alarms])
+    assert.equal(await page.locator('.twstatus').innerText(), '63 of 63 mapped equipment in the live feed')
+    const count = st => page.locator(`.twsvg .equip[data-fin="${st}"]`).count()
+    assert.deepEqual([await count('mapped'), await count('missing'), await count('ambiguous'), await count('unmapped'), await count('not-fin')], [63, 0, 0, 6, 3])
+    assert.equal(await page.locator('.twfloors div[data-conflict="1"]').count(), 0)
+    await page.locator('.twsvg .equip[data-id="AHU_01"]').focus()
+    await page.keyboard.press('Enter')
+    assert.deepEqual(await page.locator('.twalarms li > b').allInnerTexts(), ['Cooling Coil is Overcooling', 'Sensor Fault'])
+    assert.deepEqual(await page.locator('.twalarms .twaldl div:has(dt:text-is("Alarm point")) dd').allInnerTexts(), ['FD&D_4_Overcooling', 'FD&D_2_Sensor_Fault'])
+    assert.equal(await page.locator('.twdl div:has(dt:text-is("BIM id")) dd').innerText(), '2wLf9$IGsICFYFjFAcUnf2')
+    await page.locator('.twsvg .equip[data-id="VAV_10"]').focus()
+    await page.keyboard.press('Enter')
+    assert.match(await page.locator('.twdl div:has(dt:text-is("BIM id")) dd').innerText(), /shared with another equipment/)
+    await page.locator('.twsvg .equip[data-id="SUMP_PUMP"]').focus()
+    await page.keyboard.press('Enter')
+    assert.equal(await page.locator('.twdl div:has(dt:text-is("Equipment name")) dd').innerText(), 'SUMP_PUMP')
+    assert.equal(await page.locator('.twalarms').count(), 0)
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+})
+
+test('networks: every system drawn still; layer chips hide one layer each, through floors, zoom and re-renders; a selection lights its own pipes', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    const pipes = page.locator('.twsvg .pipe')
+    const total = await pipes.count()
+    assert.ok(total >= 91, total + ' pipe and riser segments')
+    assert.deepEqual(await page.evaluate(() => [...new Set([...document.querySelectorAll('.twsvg .pipe')].map(g => g.dataset.sys))].sort()),
+      ['chwr', 'chws', 'cwr', 'cws', 'dcw', 'drn', 'ea', 'fa', 'gen', 'hw', 'ma', 'o2', 'pwr', 'sa'])
+    assert.equal(await page.evaluate(() => document.querySelector('.twsvg').getAnimations({ subtree: true }).length), 0, 'nothing moves: no flow is shown')
+    assert.equal(await page.locator('.twsvg .flowline').count(), 0)
+    assert.deepEqual(await page.locator('.twlayers button').allInnerTexts(), ['Chilled water', 'Condenser water', 'Air', 'Water & drainage', 'Power', 'Medical gas'])
+    await page.locator('.twtabs [data-tab="equip"]').click(); assert.equal(await page.locator('.twlegend dd').count(), 14, 'every system in the legend')
+    assert.match(await page.locator('.twside').innerText(), /Building layout and service routes are illustrative and require engineering verification\./)
+    assert.doesNotMatch(await page.locator('.twside').innerText(), /no flow is shown|not surveyed/)
+    const shown = l => page.evaluate(l => [...document.querySelectorAll(`.twsvg .pipe[data-layer="${l}"]`)].filter(g => getComputedStyle(g).display !== 'none').length, l)
+    const equipShown = () => page.evaluate(() => [...document.querySelectorAll('.twsvg .equip')].every(g => getComputedStyle(g).display !== 'none'))
+    // each chip hides its own layer and nothing else
+    for (const l of ['chw', 'cw', 'air', 'water', 'power', 'gas']) {
+      const before = await shown(l)
+      assert.ok(before > 0, l)
+      await page.locator(`.twlayers button[data-layer="${l}"]`).click()
+      assert.equal(await page.locator(`.twlayers button[data-layer="${l}"]`).getAttribute('aria-pressed'), 'false')
+      assert.equal(await shown(l), 0, l + ' hidden')
+      assert.ok(await equipShown(), 'machines stay')
+      await page.locator(`.twlayers button[data-layer="${l}"]`).click()
+      assert.equal(await shown(l), before, l + ' back')
+    }
+    // a hidden layer stays hidden through a floor, the whole building, a zoom and a data re-render
+    await page.locator('.twlayers button[data-layer="air"]').click()
+    await page.locator('.twseg button[data-lv="L2"]').click()
+    await page.mouse.move(700, 450); await page.mouse.wheel(0, -400)
+    await page.evaluate(() => window.EKO.set({}))
+    assert.equal(await shown('air'), 0)
+    assert.ok(await shown('chw') > 0)
+    // floors: L1's networks are at full strength, the others fade with their floor
+    await page.waitForFunction(() => [...document.querySelectorAll('.twsvg .pipe[data-sys="chws"]')].every(g => (g.closest('.tw-level').dataset.level === 'L2') === (+getComputedStyle(g.closest('.tw-level')).opacity > 0.5)))
+    await page.locator('.twbar button[data-tw="home"]').click()
+    await page.locator('.twlayers button[data-layer="air"]').click()
+    // selection: AHU 01's own pipes stand out (chilled water drop, supply air), the rest step back
+    await page.locator('.twsvg .equip[data-id="AHU_01"]').focus()
+    await page.keyboard.press('Enter')
+    assert.equal(await page.locator('.twsvg').getAttribute('data-conn'), '1')
+    assert.deepEqual(await page.locator('.twsvg .pipe.conn').evaluateAll(gs => gs.map(g => g.dataset.pipe).sort()), ['chws_ahu_L1', 'sa_main2_L1', 'sa_main_L1'])
+    assert.ok(+(await page.locator('.twsvg .pipe[data-pipe="chws_hdr_L1"]').evaluate(g => getComputedStyle(g).opacity)) < 0.5)
+    assert.deepEqual(await page.locator('.twnets li').allInnerTexts(), ['Chilled water supply (CHWS)', 'Supply air (SA)'])
+    // a machine the reference ties no pipe to: nothing is dimmed, no network listed
+    await page.locator('.twsvg .equip[data-id="BTU_01"]').focus()
+    await page.keyboard.press('Enter')
+    assert.deepEqual([await page.locator('.twsvg').getAttribute('data-conn'), await page.locator('.twsvg .pipe.conn').count(), await page.locator('.twnets').count()], ['0', 0, 0])
+    await page.keyboard.press('Escape')
+    assert.equal(await page.locator('.twsvg').getAttribute('data-conn'), '0')
+    // pipes never take a click: a tap on a machine drawn under a ceiling pipe selects the machine
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.twsvg .pipe')).pointerEvents), 'none')
+    await page.locator('.twseg button[data-lv="L1"]').click()
+    await tap(page, 'FCU_01')
+    assert.equal(await page.locator('.twdt').innerText(), 'FCU 01')
+    // a data re-render leaves the pipes alone (same elements, nothing rewritten)
+    const before = await page.evaluate(() => { window.__p = document.querySelector('.twsvg .pipe[data-pipe="chws_hdr_L1"] .core'); return window.__p.getAttribute('d') })
+    await page.evaluate(() => window.EKO.set({}))
+    assert.deepEqual(await page.evaluate(() => { const p = document.querySelector('.twsvg .pipe[data-pipe="chws_hdr_L1"] .core'); return [p === window.__p, p.getAttribute('d')] }), [true, before])
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+})
+
+test('equipment intelligence: alarms go to their equipment; traces up and down across floors; evidence kept apart; layers and selection unharmed', async () => {
+  const fx = n => JSON.parse(fs.readFileSync(path.join(root, 'spec/fixtures/eko-hospital', n), 'utf8'))
+  const assets = fx('equipment.json').equipment.map(e => ({ id: e.name, finId: e.finId, bimId: e.bimId, floor: e.floor, tags: e.tags, typeEn: String(e.type).toUpperCase(), st: 'ok', points: e.points }))
+  const alarms = fx('alarms.json').alarms.map(a => ({ id: a.id, sourceId: a.source_id, state: a.state, plainEn: a.message, techEn: a.detail, sev: a.severity,
+    finSeverity: a.severity, priority: a.priority, locEn: a.source, hist: a.history.map(h => ({ open: h.open })) }))
+  // a cleared record and an alarm on undrawn FIN equipment: the first is never listed, the second is listed without a link
+  alarms.push({ id: 'rtn', sourceId: alarms[0].sourceId, state: alarms[0].state, plainEn: 'Return to normal', sev: 'info' },
+    { id: 'cctv', sourceId: 'p:ekoHospital:r:cctv', plainEn: 'Camera offline', locEn: 'HOSPITAL CCTV_01', sev: 'info' })
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    await page.evaluate(([a, al]) => { window.DashboardData = window.DashboardData || {}; Object.defineProperty(window.DashboardData, 'connected', { get: () => true, configurable: true }); window.EKO.data.assets = a; window.EKO.data.alarms = al; window.EKO.set({}) }, [assets, alarms])
+    // nothing selected: every open FIN alarm, the cleared record left out
+    assert.match(await page.locator('.twside h3.twsub').first().innerText(), /Open alarms in the hospital \(11\)/i)
+    assert.equal(await page.locator('.twallist li').count(), 11)
+    assert.equal(await page.locator('.twallist li:has-text("Return to normal")').count(), 0)
+    assert.match(await page.locator('.twallist li[data-linked="0"]').innerText(), /Camera offline\nHOSPITAL CCTV_01 · not on drawn equipment/)
+    assert.equal(await page.locator('.twallist li[data-linked="0"] button').count(), 0, 'an alarm off the drawing does not pretend to a place')
+    assert.equal(await page.locator('.twsvg .equip[data-al="alarm"]').count(), 9, 'the nine machines with an open alarm are marked')
+    // an alarm takes you to its machine, on its floor
+    await page.locator('.twallist li:has-text("Cooling Performance Fault"):has-text("FCU 03") button').click()
+    assert.equal(await page.locator('.twdt').innerText(), 'FCU 03')
+    assert.equal(await page.locator('.twsvg').getAttribute('data-level'), 'L2')
+    assert.equal(await page.locator('.twsvg .equip.sel').getAttribute('data-id'), 'FCU_03')
+    assert.match(await page.locator('.twfdd li[data-st="fault"]').innerText(), /FD&D_1_Cooling_Performance\nFault · open alarm/)
+    // trace downstream from AHU 01: its five VAV boxes would stop, three items (the chilled-water pumps, its MCC and its DB) would only see values change
+    await page.locator('.twsvg .equip[data-id="AHU_01"]').focus()
+    await page.keyboard.press('Enter')
+    await page.locator('.twacts button[data-dir="down"]').click()
+    const tr = () => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.twsvg .equip[data-tr]')].map(g => [g.dataset.id, g.dataset.tr])))
+    assert.deepEqual(await tr(), { AHU_01: 'src', VAV_01: 'down-stop', VAV_02: 'down-stop', VAV_03: 'down-stop', VAV_04: 'down-stop', VAV_05: 'down-stop',
+      CHILLED_WATER_PUMP_01: 'down-shift-weak', MCC_01: 'down-shift-weak', DB_01: 'down-shift-weak' })
+    assert.equal(await page.locator('.twtrace').innerText().then(t => t.split('\n')[0]), 'Downstream of AHU 01: 5 would stop · 3 would change values')
+    assert.equal(await page.locator('.twsvg').getAttribute('data-level'), 'ALL', 'the trace reaches the roof: the whole building shows')
+    assert.ok(+(await page.locator('.twsvg .equip[data-id="BOILER_01"]').evaluate(g => getComputedStyle(g).opacity)) < 0.5, 'unrelated machines step back')
+    assert.ok(await page.locator('.twsvg .pipe.tr-on').count() > 0)
+    assert.ok(await page.locator('.twsvg .pipe.tr-on[data-src="CHILLED_WATER_PUMP_01"]').count() > 0, 'pipes of traced machines stand out')
+    assert.equal(await page.locator('.twsvg .pipe.tr-on[data-src="BOILER_01"]').count(), 0)
+    assert.equal(await page.locator('.twacts button[data-dir="down"]').getAttribute('aria-pressed'), 'true')
+    // evidence: confirmed, reference, possible, impact under their own headings
+    assert.deepEqual(await page.locator('.twev h4').evaluateAll(hs => hs.map(h => h.dataset.k)), ['confirmed', 'reference', 'possible', 'impact'])
+    assert.match(await page.locator('.twev').innerText(), /No upstream equipment has an open alarm or FDD fault/)
+    // a layer hidden mid-trace stays hidden; the trace survives a data re-render
+    await page.locator('.twlayers button[data-layer="air"]').click()
+    await page.evaluate(() => window.EKO.set({}))
+    assert.equal(await page.evaluate(() => [...document.querySelectorAll('.twsvg .pipe[data-layer="air"]')].every(g => getComputedStyle(g).display === 'none')), true)
+    assert.equal((await tr()).VAV_03, 'down-stop')
+    await page.locator('.twlayers button[data-layer="air"]').click()
+    // trace upstream from VAV 02, across floors: AHU 01 is the one possible cause, with its own FIN alarms
+    await page.locator('.twev a, .twev button[data-id="VAV_02"]').first().click()
+    assert.equal(await page.locator('.twdt').innerText(), 'VAV 02')
+    assert.deepEqual(await tr(), {}, 'selecting another machine ends the trace')
+    assert.equal(await page.locator('.twtrace').isHidden(), true)
+    await page.locator('.twacts button[data-dir="up"]').click()
+    const up = await tr()
+    /* the power chain (DEWA, ATS, MDB, SMDB, MCC, DB) is upstream of the VAV box: 14 reference relationships up */
+    assert.deepEqual([up.VAV_02, up.AHU_01, up.SMDB_01, up.CHILLER_01, up.DEWA_SUPPLY], ['src', 'up-stop', 'up-stop', 'up-shift', 'up-shift'])
+    assert.equal(Object.keys(up).length, 15)
+    assert.deepEqual(await page.locator('.twev h4[data-k="possible"] + ul > li > button').allInnerTexts(), ['AHU 01'])
+    assert.match(await page.locator('.twev h4[data-k="possible"] + ul').innerText(), /Alarm: Cooling Coil is Overcooling/)
+    // Escape clears the trace first, then the selection
+    await page.keyboard.press('Escape')
+    assert.deepEqual(await tr(), {})
+    assert.equal(await page.locator('.twdt').innerText(), 'VAV 02')
+    assert.equal(await page.locator('.twsvg').getAttribute('class').then(c => /tracing/.test(c)), false)
+    // the Clear button in the trace bar
+    await page.locator('.twacts button[data-dir="down"]').click()
+    await page.locator('.twtrace button[data-tw="untrace"]').click()
+    assert.deepEqual(await tr(), {})
+    // selection and its own pipes still work after a trace
+    await page.locator('.twsvg .equip[data-id="AHU_01"]').focus()
+    await page.keyboard.press('Enter')
+    assert.deepEqual(await page.locator('.twsvg .pipe.conn').evaluateAll(gs => gs.map(g => g.dataset.pipe).sort()), ['chws_ahu_L1', 'sa_main2_L1', 'sa_main_L1'])
+    await page.keyboard.press('Escape')
+    assert.equal(await page.locator('.twinview').getAttribute('data-sel'), '0')
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+})
+
+test('a new language rebuilds the view in that language; the same language keeps it', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    await page.evaluate(() => { window.__tw = document.querySelector('.twinview'); window.EKO.set({}) })
+    assert.equal(await page.evaluate(() => document.querySelector('.twinview') === window.__tw), true)
+    await page.locator('#topbar [data-act="lang"][data-v="ar"]').first().click()
+    await page.waitForFunction(() => document.querySelector('.twinview') !== window.__tw)
+    assert.equal(await page.locator('.twttl').innerText(), 'مستشفى EKO – المخطط')
+    assert.equal(await page.locator('.twsvg').getAttribute('dir'), 'ltr', 'the drawing stays left to right')
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+})
+
+test('leaving and coming back; other projects have no Live Twin; the roof schematic still opens', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    await page.locator('#ekonav .nsub[data-sub="hvac"]').click()
+    await page.waitForFunction(() => !document.querySelector('#mount > .twinview'))
+    await page.locator('#ekonav .nsub[data-sub="twin"]').click()
+    await page.locator('#mount > .twinview').waitFor()
+    await page.evaluate(() => window.EKO.go('assets-register', 'assets', 'reg'))
+    await page.locator('tr.dgroof button[data-act="roofOpen"]').click()
+    await page.locator('#mount > .roofview').waitFor()
+    assert.equal(await page.locator('.twinview').count(), 0)
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+  const marsa = await openFor('marsa')
+  try {
+    await marsa.locator('#ekonav .nvi[data-mod="systems"]').click()
+    await marsa.locator('#ekonav .nsub').first().waitFor()
+    assert.equal(await marsa.locator('#ekonav .nsub[data-sub="twin"]').count(), 0)
+    assert.equal(await marsa.evaluate(() => typeof window.EKO_TWIN_MAP), 'undefined', 'no Hospital mapping in another project')
+    assert.equal(await marsa.evaluate(() => typeof window.EKO_TWIN), 'undefined', 'no Hospital relationships or traces in another project')
+    await marsa.evaluate(() => window.EKO.go('live-twin', 'systems', 'twin'))
+    assert.equal(await marsa.locator('.twinview').count(), 0, 'a direct route goes to the Overview')
+  } finally { await marsa.close() }
+})
+
+/* Phase 5: the Studio's BIM bridge is not in this harness (no model, no Studio). A stand-in with the same method names records what the twin asks of it. */
+const HOST_STUB = () => {
+  window.__calls = []
+  const rec = n => (...a) => { window.__calls.push([n, ...a]) }
+  window.EKO_HOST_ENGINE = { highlightAsset: rec('highlightAsset'), clearHighlight: rec('clearHighlight'), flyToAsset: rec('flyToAsset'), isolateLevel: rec('isolateLevel'),
+    listMapped: () => [], listLevels: () => [{ id: 'LEVEL-01', name: 'LEVEL-01' }], inModel: g => g === '2wLf9$IGsICFYFjFAcUnf2' }
+}
+const fixtureFeed = () => {
+  const fx = n => JSON.parse(fs.readFileSync(path.join(root, 'spec/fixtures/eko-hospital', n), 'utf8'))
+  return fx('equipment.json').equipment.map(e => ({ id: e.name, finId: e.finId, bimId: e.bimId, floor: e.floor, tags: e.tags, typeEn: String(e.type).toUpperCase(), st: 'ok', points: e.points }))
+}
+const feedIn = (page, assets, extra = {}) => page.evaluate(([a, x]) => { window.DashboardData = window.DashboardData || {}
+  Object.defineProperty(window.DashboardData, 'connected', { get: () => true, configurable: true }); window.EKO.data.assets = a; Object.assign(window.EKO.data, x); window.EKO.set({}) }, [assets, extra])
+const calls = page => page.evaluate(() => window.__calls.filter(c => c[0] === 'highlightAsset' || c[0] === 'clearHighlight'))
+
+test('BIM: a verified GlobalId is highlighted on selection; a shared one never; a pick in the model finds its machine; Show in BIM model goes to the model', async () => {
+  const page = await openFor('eko')
+  try {
+    await page.evaluate(HOST_STUB)
+    await openTwin(page)
+    await feedIn(page, fixtureFeed(), { equipmentAt: new Date().toISOString() })
+    await page.locator('.twtabs [data-tab="equip"]').click(); assert.match(await page.locator('.twside').innerText(), /40 with a verified BIM element · 21 without one · 2 on a shared id · 0 in conflict · 6 not checked/)
+    assert.match(await page.locator('.twside').innerText(), /Shared BIM ID: VAV_07 · VAV_10\. These assets cannot be linked to the model/)
+    assert.equal(await page.locator('.twsvg .equip[data-bim="verified"]').count(), 40)
+    await page.evaluate(() => { window.__calls = [] })
+    await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'AHU_01'))
+    assert.deepEqual(await calls(page), [['highlightAsset', '2wLf9$IGsICFYFjFAcUnf2']], 'by the GlobalId itself, not the asset id')
+    assert.equal(await page.locator('.twchip[data-bim]').innerText(), 'BIM element verified')
+    assert.match(await page.locator('.twside').innerText(), /IFC GlobalId\n2wLf9\$IGsICFYFjFAcUnf2\nFrom\nEquipment record\nLoaded model\nElement found\nModel storey\nLEVEL-01/)
+    // a data refresh does not highlight again
+    await page.evaluate(() => window.EKO.set({}))
+    assert.equal((await calls(page)).length, 1)
+    // VAV 07: FIN shares its id with VAV 10: nothing highlighted, the issue said
+    await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'VAV_07'))
+    assert.deepEqual((await calls(page)).slice(1), [['clearHighlight']])
+    assert.equal(await page.locator('.twchip[data-bim]').innerText(), 'BIM id shared · not linked')
+    assert.match(await page.locator('.twside').innerText(), /shared with VAV_10/)
+    assert.equal(await page.locator('[data-tw="bim"]').count(), 0)
+    // no BIM id in FIN (BTU 01): nothing guessed
+    await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'BTU_01'))
+    assert.equal(await page.locator('.twchip[data-bim]').innerText(), 'No BIM element')
+    // a pick in the model while elsewhere: the Live Twin opens on that machine; a pick on the shared id finds nothing
+    await page.evaluate(() => window.EKO.go(window.EKO.overviewId(), 'overview', null))
+    assert.deepEqual((await calls(page)).slice(-1), [['clearHighlight']], 'leaving the twin ends its highlight')
+    const vav07 = await page.evaluate(() => String(window.EKO.data.assets.find(a => a.id === 'VAV_07').bimId).replace(/\\\$/g, '$'))
+    assert.equal(await page.evaluate(g => window.EKO_TWIN.machineForBim(window.EKO, g), vav07), null)
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('viewer-command', { detail: { action: 'openAssetByBimId', bimId: '1bdVDp2sfD5mmOxkY5qzYy' } })))
+    await page.locator('#ekonav .nvi[data-mod="systems"]').click()
+    await page.locator('#ekonav .nsub[data-sub="twin"]').click()
+    await page.locator('#mount > .twinview').waitFor()
+    assert.equal(await page.locator('.twdt').innerText(), 'VAV 03')
+    assert.equal(await page.locator('.twsvg').getAttribute('data-level'), 'L1')
+    assert.match(await page.locator('.twside').innerText(), /Selected from the BIM model \(element 1bdVDp2sfD5mmOxkY5qzYy\)/)
+    // Show in BIM model: the Overview's model, the floor of that FIN name when the model has one
+    await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'AHU_01'))
+    await page.locator('[data-tw="bim"]').click()
+    await page.waitForFunction(() => window.EKO.state.pageId === window.EKO.overviewId())
+    assert.equal(await page.evaluate(() => window.EKO.state.dock.level), 'LEVEL-01')
+    assert.equal(await page.locator('.twinview').count(), 0)
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+})
+
+test('live feed: an old equipment read is stale on every machine, and nothing reads as current', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    await feedIn(page, fixtureFeed(), { equipmentAt: new Date().toISOString() })
+    assert.equal(await page.locator('.twstatus').innerText(), '63 of 63 mapped equipment in the live feed')
+    // the backend stops reading FIN: its last list grows old
+    await page.evaluate(() => { window.EKO.data.equipmentAt = new Date(Date.now() - 10 * 60000).toISOString(); window.EKO.set({}) })
+    assert.match(await page.locator('.twstatus').innerText(), /^Live data stale · last read /)
+    assert.equal(await page.locator('.twsvg .equip[data-fin="stale"]').count(), 63)
+    await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'CHILLER_01'))
+    assert.ok(await page.locator('.twpts tr').count() > 0)
+    assert.equal(await page.locator('.twpts tr:not([data-st="stale"])').count(), 0, 'no value shown as current')
+    // disconnected
+    await page.evaluate(() => { Object.defineProperty(window.DashboardData, 'connected', { get: () => false, configurable: true }); window.EKO.set({}) })
+    assert.equal(await page.locator('.twstatus').innerText(), 'Live data not connected')
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+})
+
+test('switching projects in the same tab leaves nothing of the Hospital behind', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const page = await ctx.newPage()
+  const errors = []; page.on('pageerror', e => errors.push(String(e)))
+  try {
+    await page.addInitScript(cfgs => { window.INJECTED_PROJECT_CONFIG = { ...cfgs[sessionStorage.getItem('kind') || 'eko'] } }, CONFIGS)
+    await page.goto(base + '/')
+    await page.waitForFunction(() => window.EKO && document.querySelector('#ekonav .nvi'))
+    await openTwin(page)
+    await page.evaluate(() => sessionStorage.setItem('kind', 'marsa'))
+    await page.reload()
+    await page.waitForFunction(() => window.EKO && document.querySelector('#ekonav .nvi'))
+    assert.deepEqual(await page.evaluate(() => [typeof window.EKO_TWIN, typeof window.EKO_TWIN_MAP]), ['undefined', 'undefined'])
+    await page.locator('#ekonav .nvi[data-mod="systems"]').click()
+    assert.equal(await page.locator('#ekonav .nsub[data-sub="twin"]').count(), 0)
+    // a pick in Marsa's model is the dashboard's own: the twin does nothing
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('viewer-command', { detail: { action: 'openAssetByBimId', bimId: '2wLf9$IGsICFYFjFAcUnf2' } })))
+    assert.equal(await page.locator('.twinview').count(), 0)
+    assert.deepEqual(errors, [])
+  } finally { await ctx.close() }
+})
+
+/* the alarm export as data-map.js keeps it: FIN's time and its cleared records */
+const fixtureAlarms = (raisedAt = Date.parse('2026-11-06T12:00:00Z')) => JSON.parse(fs.readFileSync(path.join(root, 'spec/fixtures/eko-hospital/alarms.json'), 'utf8')).alarms
+  .map(a => ({ id: a.id, sourceId: a.source_id, state: a.state, plainEn: a.message, techEn: a.detail, sev: a.severity, finSeverity: a.severity, priority: a.priority, raisedAt,
+    hist: a.history.map(h => ({ id: h.id, msg: h.message, tech: h.detail, open: h.open, at: raisedAt - 3600e3, state: h.state })) }))
+const newAlarm = (finId, id, at) => ({ id, sourceId: finId, state: 'x_AlarmStatus', plainEn: 'Test alarm ' + id, sev: 'info', raisedAt: at })
+const flowOf = page => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.twsvg .pipe')].map(g => [g.dataset.pipe, g.dataset.flow])))
+/* what is animating: the flow state of each animated pipe, 'rotor' for a turning fan or pump */
+const animating = page => page.evaluate(() => document.querySelector('.twsvg').getAnimations({ subtree: true }).filter(a => a instanceof CSSAnimation).map(a => {
+  const t = a.effect.target, pipe = t.closest('.pipe'); return { kind: pipe ? pipe.dataset.flow : 'rotor:' + t.closest('.equip').dataset.run, layer: pipe ? pipe.dataset.layer : null,
+    level: t.closest('.tw-level').dataset.level, state: a.playState } }))
+
+test('exhibition and sidebar: tabs, fly to new alarms, labels, settings kept; no word FIN on screen', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    const [alTab, eqTab] = await page.locator('.twtabs button').allInnerTexts()
+    assert.match(alTab, /^Alarms \(\d+\)$/); assert.equal(eqTab, 'Equipment')
+    assert.equal(await page.locator('.twtabs [data-tab="alarms"]').getAttribute('aria-selected'), 'true')
+    assert.equal(await page.locator('[data-tw-ex="fly"]').isChecked(), true, 'on by default, as in the reference')
+    assert.equal(await page.locator('.twexoff input').isDisabled(), true, 'no random faults in the live view')
+    assert.match(await page.locator('.twexoff').innerText(), /Random faults and repairs\s+Not available in the live view: no simulated faults are created\./)
+    const assets = fixtureFeed(), base = fixtureAlarms()
+    await feedIn(page, assets, { equipmentAt: new Date().toISOString(), alarms: base })
+    assert.equal(await page.locator('.twinview').getAttribute('data-sel'), '0', 'alarms present when the view opened are not flown to')
+    assert.equal(await page.locator('.twtabs button').first().innerText(), 'Alarms (10)')
+    assert.match(await page.locator('.twallist li').first().innerText(), /AHU 01 · Level 1 · Open · severity info · priority 150 · /)
+    assert.ok(await page.locator('.twcleared li').count() > 0, 'recently cleared records listed')
+    assert.equal(await page.locator('.twcleared li').filter({ hasText: 'Returned to normal' }).count(), await page.locator('.twcleared li').count())
+    assert.equal(await page.locator('.twallist li').filter({ hasText: 'Return to normal' }).count(), 0, 'a cleared record is never active')
+    // a new alarm (raised now) takes the view to its machine, on its floor, once
+    const ahu2 = assets.find(a => a.id === 'AHU_02').finId
+    await page.evaluate(al => { window.EKO.data.alarms = al; window.EKO.set({}) }, [...base, newAlarm(ahu2, 'n1', Date.now() + 1000)])
+    assert.equal(await page.locator('.twdt').innerText(), 'AHU 02')
+    assert.equal(await page.locator('.twsvg').getAttribute('data-level'), 'L2')
+    assert.equal(await page.locator('.twtabs [data-tab="equip"]').getAttribute('aria-selected'), 'true')
+    // not while another machine is being looked at
+    await page.evaluate(() => window.EKO_TWIN.select(document.querySelector('.twinview'), 'BOILER_01'))
+    const fcu3 = assets.find(a => a.id === 'FCU_03').finId
+    await page.evaluate(al => { window.EKO.data.alarms = al; window.EKO.set({}) }, [...base, newAlarm(ahu2, 'n1', Date.now()), newAlarm(fcu3, 'n2', Date.now() + 1000)])
+    assert.equal(await page.locator('.twdt').innerText(), 'Boiler 01')
+    // switched off: never
+    await page.evaluate(() => { window.EKO_TWIN.select(document.querySelector('.twinview'), null); const c = document.querySelector('[data-tw-ex="fly"]'); c.checked = false; c.dispatchEvent(new Event('change', { bubbles: true })) })
+    await page.evaluate(al => { window.EKO.data.alarms = al; window.EKO.set({}) }, [...base, newAlarm(fcu3, 'n3', Date.now() + 1000)])
+    assert.equal(await page.locator('.twinview').getAttribute('data-sel'), '0')
+    // an alarm click selects its machine, shows its floor and the Equipment tab
+    await page.locator('.twtabs [data-tab="alarms"]').click()
+    await page.locator('.twallist li:has-text("Cooling Performance Fault"):has-text("FCU 05") button').click()
+    assert.equal(await page.locator('.twdt').innerText(), 'FCU 05')
+    assert.equal(await page.locator('.twsvg').getAttribute('data-level'), 'L3')
+    assert.match(await page.locator('.twpane').innerText(), /Running|Stopped|Run status unavailable/)
+    // live points update in place
+    await page.evaluate(() => { const a = window.EKO.data.assets.find(x => x.id === 'FCU_05'); a.points.find(p => p.navName === 'FanSpeed').currentValue = 'Low'; a.points.find(p => p.navName === 'FanSpeed').text = 'Low'; window.EKO.set({}) })
+    assert.equal(await page.locator('.twpts tr:has(th:text-is("FanSpeed")) td').innerText(), 'Low')
+    // labels: Off hides them all, Always shows every label on the floors in view, Auto follows the zoom
+    await page.locator('.twbar button[data-tw="home"]').click()
+    const shownTags = () => page.evaluate(() => [...document.querySelectorAll('.twsvg .tag')].filter(t => getComputedStyle(t).display !== 'none').length)
+    const total = await page.locator('.twsvg .tag').count()
+    await page.locator('[data-tw-ex="labels"]').selectOption('off')
+    assert.equal(await shownTags(), 0)
+    await page.locator('[data-tw-ex="labels"]').selectOption('always')
+    assert.equal(await shownTags(), total)
+    await page.locator('[data-tw-ex="labels"]').selectOption('auto')
+    assert.ok(await shownTags() < total, 'far zoom: labels thin out')
+    // settings kept for the project through a reload in this session
+    await page.locator('[data-tw-ex="labels"]').selectOption('always')
+    await page.reload()
+    await page.waitForFunction(() => window.EKO && document.querySelector('#ekonav .nvi'))
+    await openTwin(page)
+    assert.deepEqual([await page.locator('[data-tw-ex="labels"]').inputValue(), await page.locator('[data-tw-ex="fly"]').isChecked()], ['always', false])
+    assert.equal(await page.locator('.twsvg').getAttribute('data-labels'), 'always')
+    // the word FIN is nowhere on screen, in either tab, with a machine selected or not
+    await feedIn(page, assets, { equipmentAt: new Date().toISOString(), alarms: base })
+    for (const id of [null, 'AHU_01', 'VAV_07', 'MDB', 'SMDB_01', 'MCC_02', 'DEWA_SUPPLY']) {
+      await page.evaluate(id => window.EKO_TWIN.select(document.querySelector('.twinview'), id), id)
+      for (const tab of ['alarms', 'equip']) {
+        await page.locator(`.twtabs [data-tab="${tab}"]`).click()
+        assert.doesNotMatch(await page.locator('.twinview').innerText(), /\bFIN\b/, `${id} ${tab}`)
+      }
+    }
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+})
+
+test('live flow: only metered flow moves, running equipment never claims flow, nothing moves without data; layers, floors, polling, reduced motion', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    assert.equal(await page.locator('.twsvg .pipe:not([data-flow="unknown"])').count(), 0, 'no feed: every network unknown')
+    assert.deepEqual(await animating(page), [], 'and still')
+    await feedIn(page, fixtureFeed(), { equipmentAt: new Date().toISOString() })
+    const f = await flowOf(page)
+    assert.deepEqual([f.chws_hdr_L1, f.dcw_L2, f.sa_vav_06, f.o2_L1, f.ma_L1, f.pwr_dewa_ats], ['measured', 'measured', 'measured', 'measured', 'measured', 'measured'])
+    assert.deepEqual([f.cws_ct_cwp, f.cwr_ch_ct, f.fa_in_L1, f.sa_main_L1, f.hw_boiler_riser, f.ea_01], ['running', 'running', 'running', 'running', 'running', 'running'], 'pumps and fans running: status only')
+    assert.deepEqual([f.chws_ahu_L1, f.gen_ats], ['unknown', 'stopped'])
+    const kinds = [...new Set((await animating(page)).map(a => a.kind))].sort()
+    assert.deepEqual(kinds, ['measured', 'rotor:on'], 'only measured flow and running fans and pumps move')
+    // polling keeps the drawing: same elements, no rebuild
+    await page.evaluate(() => { window.__p = document.querySelector('.twsvg .pipe[data-pipe="chws_hdr_L1"]'); window.__svg = document.querySelector('.twsvg'); window.EKO.set({}); window.EKO.set({}) })
+    assert.deepEqual(await page.evaluate(() => [document.querySelector('.twsvg .pipe[data-pipe="chws_hdr_L1"]') === window.__p, document.querySelector('.twsvg') === window.__svg]), [true, true])
+    // a hidden layer does not animate
+    await page.locator('.twlayers button[data-layer="chw"]').click()
+    assert.equal((await animating(page)).filter(a => a.layer === 'chw').length, 0)
+    await page.locator('.twlayers button[data-layer="chw"]').click()
+    assert.ok((await animating(page)).some(a => a.layer === 'chw'))
+    // a picked floor: the faded floors pause
+    await page.locator('.twseg button[data-lv="L2"]').click()
+    const byLevel = await animating(page)
+    assert.ok(byLevel.filter(a => a.level !== 'L2').every(a => a.state === 'paused') && byLevel.some(a => a.level === 'L2' && a.state === 'running'))
+    await page.locator('.twbar button[data-tw="home"]').click()
+    // the meter at 0 stops the chilled water flow; its pumps still running say nothing of the water
+    await page.evaluate(() => { const p = window.EKO.data.assets.find(x => x.id === 'BTU_01').points.find(q => q.navName === 'CHWFlow'); p.currentValue = '0L/s'; window.EKO.set({}) })
+    assert.equal((await flowOf(page)).chws_hdr_L1, 'stopped')
+    // disconnected or stale: nothing flows, nothing turns
+    await page.evaluate(() => { window.EKO.data.equipmentAt = new Date(Date.now() - 10 * 60000).toISOString(); window.EKO.set({}) })
+    assert.equal(await page.locator('.twsvg .pipe:not([data-flow="unknown"])').count(), 0, 'stale')
+    await page.evaluate(() => { window.EKO.data.equipmentAt = new Date().toISOString(); Object.defineProperty(window.DashboardData, 'connected', { get: () => false, configurable: true }); window.EKO.set({}) })
+    assert.equal(await page.locator('.twsvg .pipe:not([data-flow="unknown"])').count(), 0, 'disconnected')
+    assert.deepEqual(await animating(page), [])
+    // reduced motion: states still shown, nothing moves
+    await page.evaluate(() => { Object.defineProperty(window.DashboardData, 'connected', { get: () => true, configurable: true }); window.EKO.set({}) })
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    assert.ok(await page.locator('.twsvg .pipe[data-flow="measured"]').count() > 0)
+    assert.deepEqual(await animating(page), [])
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+})
+
+test('phone width: page header with the Systems tabs, details under the building, no sideways scroll', async () => {
+  const page = await openFor('eko', { width: 390, height: 844 })
+  try {
+    await page.evaluate(() => window.EKO.go('live-twin', 'systems', 'twin'))
+    await page.locator('#mount > .twinview').waitFor()
+    assert.equal(await page.locator('#mount > #pagehead .phsub[data-sub="twin"]').getAttribute('data-on'), '1')
+    const side = await page.locator('.twside').boundingBox(), stage = await page.locator('.twstage').boundingBox()
+    assert.ok(side.y >= stage.y + stage.height - 1, 'the panel is under the stage')
+    assert.ok(stage.width > 300)
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  } finally { await page.close() }
+})
+
+test('Schematic: title, air cones and room temperatures only from live data, Work orders from the work-order feed, one colour per system', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    assert.equal(await page.locator('.twttl').innerText(), 'EKO Hospital – Schematic')
+    assert.equal(await page.locator('.twsvg').getAttribute('aria-label'), 'EKO Hospital – Schematic')
+    assert.equal(await page.evaluate(() => document.body.innerText.includes('Live Twin') || document.body.innerText.includes('Live twin')), false, 'the old name is gone')
+    // nothing live: no cone, no temperature, no work order
+    const cones = () => page.locator('.twsvg .aircone').evaluateAll(cs => cs.map(c => +getComputedStyle(c).opacity))
+    assert.equal((await cones()).length, await page.evaluate(() => window.EKO_TWIN.EQUIP.filter(e => e.type === 'FCU' || e.type === 'VAV').length), 'one cone per ceiling unit')
+    assert.ok((await cones()).every(o => o === 0), 'no unit is known to run: no cone')
+    assert.equal(await page.locator('.twsvg .zone-t').evaluateAll(ts => ts.every(t => t.textContent === '')), true, 'no temperature is invented')
+    await page.locator('.twtabs [data-tab="wo"]').click()
+    assert.equal(await page.locator('.twtabs [data-tab="wo"]').innerText(), 'Work orders (—)')
+    assert.ok((await page.locator('.twside').innerText()).includes('not connected'))
+    // a live feed: FCU 01 runs at 22.4 against 22, FCU 02 is stopped; FCU 01 has an overdue work order
+    await page.evaluate(() => {
+      window.DashboardData = window.DashboardData || {}; Object.defineProperty(window.DashboardData, 'connected', { get: () => true, configurable: true })
+      const pt = (navName, v, o) => Object.assign({ navName, currentValue: String(v), reporting: true, status: 'ok', bool: null }, o)
+      const fcu = (id, finId, run, t) => ({ id, finId, floor: 'LEVEL-01', tags: ['fcu', 'hvac', 'left'], typeEn: 'FCU', st: 'ok', points: [
+        pt('FanRunStatus', run, { kind: 'Bool', pointKind: 'Bool', bool: run, text: String(run) }), pt('ZoneTemp', t, { unit: '°C', kind: 'Number', pointKind: 'Number' }), pt('ZoneTempSp', 22, { unit: '°C', kind: 'Number', pointKind: 'Number', sp: true })] })
+      const a = fcu('FCU_01', 'p:ekoHospital:r:3260bab0-fdffa381', true, 22.4)
+      a.workOrders = [{ id: '9001', equipment: '55', description: 'Replace filters', dueDate: '1/2/2026', dueIso: '2026-01-02', type: 'PM', status: 'over' },
+        { id: '9002', equipment: '55', description: 'Inspect coil', dueDate: '1/2/2099', dueIso: '2099-01-02', type: 'PM', status: 'sched' }]
+      window.EKO.data.assets = [a, fcu('FCU_02', 'p:ekoHospital:r:3260bab9-4b8768f5', false, 26.3)]
+      window.EKO.data.workOrderState = 'ok'
+      window.EKO.set({})
+    })
+    await page.waitForFunction(() => document.querySelector('.twsvg .equip[data-id="FCU_01"]').getAttribute('data-run') === 'on' && +getComputedStyle(document.querySelector('.twsvg .equip[data-id="FCU_01"] .aircone')).opacity > 0.3)   // the cone fades in (0.6 s)
+    const on = await page.evaluate(() => [...document.querySelectorAll('.twsvg .equip')].filter(g => g.querySelector('.aircone') && +getComputedStyle(g.querySelector('.aircone')).opacity > 0).map(g => g.dataset.id))
+    assert.deepEqual(on, ['FCU_01'], 'only the unit whose run status reads on blows')
+    const zones = await page.evaluate(() => window.EKO_TWIN.EQUIP && [...document.querySelectorAll('.twsvg .zone')].map(p => [p.getAttribute('class'), p.nextElementSibling.textContent]).filter(z => z[1]))
+    assert.deepEqual(zones.map(z => z[1]).sort(), ['22.4°C', '26.3°C'])
+    assert.deepEqual(zones.map(z => z[0]).sort(), ['zone z-hot', 'zone z-ok'], 'on target, and 4.3 above its setpoint')
+    // work orders: the two real ones, overdue first, labelled by the machine; a click goes to it
+    assert.equal(await page.locator('.twtabs [data-tab="wo"]').innerText(), 'Work orders (2)')
+    const items = await page.locator('.twwo li').evaluateAll(l => l.map(x => [x.dataset.wo, x.querySelector('b').textContent, x.querySelector('.twwod').textContent, x.querySelector('em').textContent]))
+    assert.deepEqual(items, [['over', 'FCU 01', 'Replace filters', 'Overdue'], ['sched', 'FCU 01', 'Inspect coil', 'Scheduled']])
+    assert.equal(await page.locator('.twwo li small').first().innerText(), 'Due 1/2/2026 · PM')
+    assert.ok((await page.locator('.twside').innerText()).includes('not provided'), 'it says what the feed does not carry')
+    assert.equal(await page.locator('.twside').innerText().then(t => /FIN/.test(t)), false)
+    await page.locator('.twwo li button').first().click()
+    assert.equal(await page.locator('.twsvg .equip.sel').getAttribute('data-id'), 'FCU_01')
+    for (const [st, text] of [['off', 'No work-order query'], ['pending', 'still being read'], ['error', 'read failed']]) {
+      await page.evaluate(s => { window.EKO.data.workOrderState = s; window.EKO.set({}) }, st)
+      await page.locator('.twtabs [data-tab="wo"]').click()
+      assert.ok((await page.locator('.twside').innerText()).includes(text), st); assert.equal(await page.locator('.twwo li').count(), 0)
+    }
+    // colour: the legend, the layer chips and the routes read one table, on every floor and with layers toggled
+    const col = async () => page.evaluate(() => { const out = {}; document.querySelectorAll('.twsvg .pipe .core').forEach(c => { const g = c.parentNode, k = g.getAttribute('data-sys'); (out[k] = out[k] || new Set()).add(c.getAttribute('stroke')) })
+      return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, [...v]])) })
+    const want = await page.evaluate(() => Object.fromEntries(Object.entries(window.EKO_TWIN.SYSTEMS).map(([k, v]) => [k, v[0]])))
+    const base = await col()
+    for (const [k, v] of Object.entries(base)) assert.deepEqual(v, [want[k]], k + ' route colour = its system colour')
+    for (const lv of ['RF', 'L3', 'L2', 'L1', 'ALL']) { await page.locator(`.twseg button[data-lv="${lv}"]`).click(); assert.deepEqual(await col(), base, 'same colours on ' + lv) }
+    await page.locator('.twlayers [data-layer="air"]').click()
+    assert.equal(await page.locator('.twsvg').evaluate(s => s.classList.contains('hide-air')), true)
+    assert.equal(await page.locator('.twsvg .aircone').first().evaluate(c => getComputedStyle(c).display), 'none', 'the air layer hides the cones too')
+    await page.locator('.twlayers [data-layer="air"]').click()
+    const chips = await page.locator('.twlayers button[data-layer] .twsw i').evaluateAll(is => is.map(i => i.style.background))
+    assert.equal(chips.length, 14); assert.ok(chips.every(c => c))
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+})
+
+test('Phase 3: the V2 layout draws 72 items on L1 to RF; provisional, unmapped and point-less items are marked; the MDB shows PMU_Main\'s readings by name', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    assert.equal(await page.locator('.twsvg .equip').count(), 72)
+    assert.equal(await page.locator('.twsvg .tag').count(), 72)
+    assert.deepEqual(await page.locator('.twseg button').allInnerTexts(), ['All', 'Roof', 'L3', 'L2', 'L1'])
+    const n = a => page.locator(`.twsvg .equip[${a}]`).count()
+    assert.deepEqual([await n('data-map="unmapped"'), await n('data-map="provisional"'), await n('data-map="not-fin"'), await n('data-nopts')], [6, 3, 3, 18], 'marked from the mapping alone, before any data')
+    assert.equal(await page.locator('.twsvg .equip[data-id="DB_04"]').count(), 0, 'no DB on the roof')
+    for (const id of ['SMDB_04', 'MCC_04']) assert.equal(await page.locator(`.twsvg .equip[data-id="${id}"]`).getAttribute('data-level'), 'RF')
+    // a floor keeps only its own items bright
+    await page.locator('.twseg button[data-lv="L2"]').click()
+    assert.equal(await page.locator('.twsvg').getAttribute('data-level'), 'L2')
+    await page.locator('.twseg button[data-lv="ALL"]').click()
+    // MCC_01 is provisional: the chip and its note say so
+    await feedIn(page, fixtureFeed(), { equipmentAt: new Date().toISOString() })
+    await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'MCC_01'))
+    assert.equal(await page.locator('.twchip[data-prov]').innerText(), 'Provisional mapping')
+    assert.match(await page.locator('.twside').innerText(), /assumed to be MCC_GF/)
+    assert.equal(await page.locator('.twpts').count(), 0, 'no points in the export: no rows made up')
+    // MDB: PMU_Main's six readings, labelled, not MDB points
+    await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'MDB'))
+    assert.equal(await page.locator('.twchip[data-prov]').count(), 0)
+    const rows = await page.locator('.twborrow tr').evaluateAll(trs => trs.map(t => [t.querySelector('th').firstChild.textContent, t.dataset.src, t.dataset.st]))
+    assert.deepEqual(rows.map(x => x[0]), ['Voltage', 'Frequency', 'Current', 'ActivePower', 'TotalEnergy', 'DEWA_SupplyLost'])
+    assert.ok(rows.every(x => x[1] === 'PMU_Main'))
+    assert.match(await page.locator('.twborrow').innerText(), /not MDB measurements/)
+    assert.equal(await page.locator('.twpts:not(.twborrow .twpts)').count(), 0, 'the MDB itself has no points')
+    // PMU_Main absent from the feed: every reading is unavailable
+    await feedIn(page, fixtureFeed().filter(a => a.id !== 'PMU_Main'), { equipmentAt: new Date().toISOString() })
+    await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'MDB'))
+    assert.deepEqual(await page.locator('.twborrow tr').evaluateAll(trs => trs.map(t => t.dataset.st)), Array(6).fill('unavailable'))
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+})
+
+test('Phase 4: the MDB panel shows the ATS as one edge with the generator note; a merged FCU edge shows both explanations; an unmapped board shows its reference relationships and stays unmapped', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    await feedIn(page, fixtureFeed(), { equipmentAt: new Date().toISOString() })
+    await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'MDB'))
+    const ups = await page.locator('.twrel').first().locator('li').allInnerTexts()
+    assert.equal(ups.filter(t => /^ATS 01/.test(t)).length, 1, 'one ATS edge into the MDB')
+    assert.match(ups.find(t => /^ATS 01/.test(t)), /Supply to the main board \(PowerAvailable\)[\s\S]*Also: On generator → building meters read 0/)
+    assert.match(await page.locator('.twside').innerText(), /Reference relationships from the client\u0027s design, not verified engineering/)
+    await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'FCU_01'))
+    const rel = await page.locator('.twrel').nth(1).innerText()
+    assert.match(rel, /DB 01[\s\S]*ActiveLoad \(kW\)[\s\S]*Also: Occupancy → lighting and small power/)
+    assert.equal((rel.match(/DB 01/g) || []).length, 1, 'one edge to DB 01')
+    await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'MCC_02'))
+    assert.equal(await page.locator('.twchip[data-fin]').innerText(), 'Unmapped')
+    assert.equal(await page.locator('.twsvg .equip[data-id="MCC_02"]').getAttribute('data-map'), 'unmapped')
+    assert.ok((await page.locator('.twrel li').count()) > 5, 'MCC_02 has relationships')
+    assert.match(await page.locator('.twside').innerText(), /depends on \(4\)/i)
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+})
+
+test('Phase 5: default view unchanged; turning keeps floor, selection and trace and the building inside the view; reset returns home; toast clear of the camera controls', async () => {
+  const page = await openFor('eko')
+  try {
+    await openTwin(page)
+    const T = () => page.evaluate(() => { const h = document.querySelector('.twinview'); return { v: window.EKO_TWIN.getView(h), sel: (h.querySelector('.equip.sel') || {}).dataset?.id, trace: h.querySelectorAll('.twsvg [data-trace]').length } })
+    const home = await T(); assert.deepEqual([home.v.yaw, home.v.tilt], [0, 1])
+    await page.evaluate(() => window.EKO_TWIN.goTo(document.querySelector('.twinview'), 'AHU_01'))
+    await page.evaluate(() => window.EKO_TWIN.view(document.querySelector('.twinview'), -20, 1.2))
+    const turned = await T(); assert.deepEqual([turned.v.yaw, turned.v.tilt], [-20, 1.2]); assert.equal(turned.sel, 'AHU_01')
+    for (const [y, t] of [[-40, 0.6], [15, 1.55], [-30, 1.4], [10, 0.8]]) {
+      await page.evaluate(([y, t]) => window.EKO_TWIN.view(document.querySelector('.twinview'), y, t), [y, t])
+      const out = await page.evaluate(() => { const sv = document.querySelector('.twsvg'), v = sv.viewBox.baseVal, g = sv.firstElementChild.getBBox ? sv.getBoundingClientRect() : null
+        const st = document.querySelector('.twstage').getBoundingClientRect(), eq = [...sv.querySelectorAll('.equip')].map(e => e.getBoundingClientRect())
+        return { aspectOk: Math.abs(v.height / v.width - g.height / g.width) < 0.02, n: eq.length, inside: eq.filter(r => r.right < st.left - 1 || r.left > st.right + 1 || r.bottom < st.top - 1 || r.top > st.bottom + 1).length } })
+      assert.ok(out.aspectOk && out.n === 72, `view ${y}/${t}`)
+      await page.waitForTimeout(150)
+      const px = await page.evaluate(() => { const t = [...document.querySelectorAll('.twsvg .tag')].find(x => getComputedStyle(x).display !== 'none'), n = t.querySelector('.tag-name'); return parseFloat(getComputedStyle(n).fontSize) * n.getScreenCTM().a })
+      assert.ok(px >= 10.4, `label text ${px.toFixed(1)}px at view ${y}/${t}`)
+    }
+    await page.evaluate(() => window.EKO_TWIN.resetView(document.querySelector('.twinview')))
+    await page.waitForFunction(() => { const v = window.EKO_TWIN.getView(); return v.yaw === 0 && v.tilt === 1 })
+    assert.equal((await T()).sel, 'AHU_01', 'selection survives the reset')
+    await page.evaluate(() => window.EKO.toast && window.EKO.toast('Alarm test', 'warn'))
+    const ov = await page.evaluate(() => { const t = document.querySelector('#ekotoast'), c = document.querySelector('.twcam'); if (!t || !c) return null; const a = t.getBoundingClientRect(), b = c.getBoundingClientRect(); return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top })
+    assert.notEqual(ov, true, 'toast never covers the camera controls')
+    assert.deepEqual(page.errors, [])
+  } finally { await page.close() }
+})

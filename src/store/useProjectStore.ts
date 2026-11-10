@@ -4,6 +4,7 @@ import {
   createProjectInFolder,
   openProjectFolder,
   loadProjectFromHandle,
+  loadProjectDetailed,
   loadModelsFromProject,
   saveProjectMeta,
   saveModelToProject,
@@ -173,14 +174,32 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   openRecentProject: async (handle: FileSystemDirectoryHandle) => {
     const ok = await verifyHandlePermission(handle)
     if (!ok) {
-      alert("Permission to read this project folder was denied. Grant access and try again.")
+      alert(`Access to the folder "${handle.name}" was not granted. Click the project again and choose Allow to re-authorize it.`)
       return null
     }
-    const meta = await loadProjectFromHandle(handle)
-    if (!meta) {
-      alert("Could not read project.json in this folder. It may have been moved, renamed or deleted.")
+    const read = await loadProjectDetailed(handle)
+    if (!('meta' in read)) {
+      // the error kind only: never the file's content or settings
+      console.warn('[project] could not open a recent project:', read.problem, read.errorName)
+      if (read.problem === 'missing') {
+        // the folder was moved, renamed or deleted: let the person point at it again. Open Folder only reads an existing project.json
+        const relink = confirm(`project.json was not found in the folder "${handle.name}". The folder may have been moved, renamed or deleted.\n\n`
+          + 'Choose the project folder\'s current location now? Nothing will be created or changed.')
+        if (!relink) return null
+        try {
+          return await get().openProject()
+        } catch (err) {
+          console.warn('[project] relink failed:', (err as { name?: string })?.name)
+          alert('The chosen folder has no readable project.json. Nothing was changed. Choose the folder that contains the project\'s project.json.')
+          return null
+        }
+      }
+      alert(read.problem === 'invalid'
+        ? `project.json in the folder "${handle.name}" is not a valid project file (${read.errorName}). Nothing was changed. Restore project.json from a backup or an earlier project export, then open it again.`
+        : `project.json in the folder "${handle.name}" could not be read (${read.errorName}). Make sure the folder is available (not on a disconnected drive or an offline cloud folder), then try again.`)
       return null
     }
+    const meta = read.meta
 
     await cacheHandle(meta.projectId, handle, meta, meta.thumbnail)
 

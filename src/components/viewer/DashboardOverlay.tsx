@@ -32,7 +32,7 @@ import { createMauSchematic } from '@/lib/mauSchematic'
 import { createEcoSchematic } from '@/lib/ecoSchematic'
 import { createHvacLabels } from '@/lib/hvacLabels'
 import type { HvacSchematic } from '@/lib/hvacGeometry'
-import { hospitalHvacEnabled, hospitalRoofGraphic, isLiveSchematic } from '@/lib/hospitalHvac'
+import { hospitalHvacEnabled, isLiveSchematic } from '@/lib/hospitalHvac'
 import { useFinStore } from '@/store/useFinStore'
 import type { ProjectApiSettings } from '@/types'
 import { dashboardProjectInfo, meterEquipNames, pointsWithBoards } from '@/lib/finSettings'
@@ -3152,12 +3152,6 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         // The project open now: its id (answers stamped for another project are dropped), site and basis
         if (currentProject && (window as any).INJECTED_PROJECT_CONFIG) {
           Object.assign((window as any).INJECTED_PROJECT_CONFIG, dashboardProjectInfo(currentProject))
-          // The Hospital roof graphic (Eko Hospital only): its URL is read from the FIN server this session is connected to when it is
-          // opened, so the address is never copied or kept here and a new FIN address is used after the next connection.
-          ;(window as any).INJECTED_PROJECT_CONFIG.roofGraphic = hospitalRoofGraphic(currentProject, () => {
-            const fin = useFinStore.getState()
-            return fin.isConnected && fin.status?.connected ? fin.status.server_url : null
-          })
         }
         // The backend serves this project before the dashboard's first poll is trusted
         void useFinStore.getState().syncProjectSettings()

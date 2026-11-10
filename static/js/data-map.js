@@ -235,7 +235,11 @@
       fam: 'sys',
       asset: matchedAsset ? matchedAsset.id : asset,
       bimId: matchedAsset ? matchedAsset.bimId : null,
+      sourceId: a.source_id || null,   // FIN's id of the equipment the alarm is on: the Live Twin matches alarms by it, never by name
+      state: a.state == null ? null : String(a.state),   // FIN's alarm state (names the rule point), for the Live Twin's alarm-point link
       sev: sev(a.severity),
+      finSeverity: a.severity ? String(a.severity) : null,   // FIN's own severity word and priority, shown as sent by the Live Twin
+      priority: typeof a.priority === 'number' ? a.priority : null,
       cat: a.diagnosed ? 'fdd' : 'sys',
       sys: classifySys(src + ' ' + msg, matchedAsset),
       ack: null,
@@ -1558,7 +1562,11 @@
     if (changed) paint();
   }
 
+  /* One FIN push can change several things (the equipment, the integration's point count, its heartbeat): each asks for a repaint, and every
+     repaint rebuilds the whole shell. While a push is being applied they are collected and the dashboard is painted once, as the push ends. */
+  var paintHeld = 0, paintAsked = false;
   function paint() {
+    if (paintHeld) { paintAsked = true; return; }
     var E = window.EKO;
     if (E && typeof E.set === 'function') E.set({});
   }
@@ -1929,6 +1937,12 @@
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     var list = payload && payload.equipment;
     if (!site || !Array.isArray(list)) return;
+    // when the backend last read FIN's equipment (it keeps the old list when a read fails): the Live Twin marks data stale by it
+    site.equipmentAt = payload.timestamp || null;
+    // what the backend's name rule keeps out of the list (energy meters...): only the Hospital Live Twin reads it, as unverified candidates
+    site.finExcluded = (Array.isArray(payload.excluded) ? payload.excluded : []).map(function (eq) {
+      return { id: eq.name, finId: eq.finId || '', bimId: eq.bimId, floor: eq.floor, tags: eq.tags || [], typeEn: String(eq.type || '').toUpperCase(), st: 'ok', points: eq.points || [] };
+    });
     if (Object.prototype.hasOwnProperty.call(payload, 'workOrderError')) {
       site.workOrderError = payload.workOrderError || '';
       site.workOrderState = payload.workOrderState || '';
@@ -1995,6 +2009,7 @@
       var assetData = {
         id: eq.name,
         bimId: eq.bimId,
+        finId: eq.finId || "",   // FIN's own record id (backend _flatten_equip); the Live Twin checks its mapping against it
         sys: sys,
         crit: crit,
         wtyStart: wtyStart,
@@ -2910,6 +2925,8 @@
 window.addEventListener('dashboard-data', function onData(e) {
     if (!current()) { window.removeEventListener('dashboard-data', onData); return; }
     var d = e.detail || {};
+    paintHeld++;
+    try {
     if (d.type === 'alarms') applyAlarms(d.data);
     if (d.type === 'power') applyPower(d.data);
     if (d.type === 'meters') applyMeters(d.data);
@@ -2922,6 +2939,10 @@ window.addEventListener('dashboard-data', function onData(e) {
     if (d.type === 'equipment' && d.data && Array.isArray(d.data.equipment)) {
       var pts = d.data.equipment.reduce(function (n, eq) { return n + ((eq && eq.points) || []).length; }, 0);
       finIntegration({ pts: pts + (pts === 1 ? ' point' : ' points'), hb: hhmm() });
+    }
+    } finally {
+      paintHeld--;
+      if (!paintHeld && paintAsked) { paintAsked = false; paint(); }
     }
   });
 

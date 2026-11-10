@@ -199,7 +199,13 @@ def _num(value: Any) -> Any:
 
 def _equipment_list(view: DataView) -> list:
     items = view.equipment.get("equipment") if isinstance(view.equipment, dict) else None
-    return items if isinstance(items, list) else []
+    if not isinstance(items, list):
+        return []
+    if view.mapped and not view.mapped.get("equipmentTypes"):
+        # The dashboard falls back to an item's own FIN marker as its type when no type priority is mapped. Eko-Chat does not present
+        # that as a classification: the type stays "other" (the item's tags are still listed and still match a type word).
+        return [{**e, "type": "other"} if isinstance(e, dict) else e for e in items]
+    return items
 
 
 def _bim_id(eq: dict) -> Optional[str]:
