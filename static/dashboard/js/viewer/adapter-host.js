@@ -115,7 +115,8 @@
       },
       outlineLevel: function (assetId) {
         var h = window.EKO_HOST_ENGINE;
-        if (h && h.outlineFloorOf) h.outlineFloorOf(assetId || null);
+        if (assetId) return;
+        if (h && h.outlineFloorOf) h.outlineFloorOf(null);
       },
 
       setStyle: function (mode) {

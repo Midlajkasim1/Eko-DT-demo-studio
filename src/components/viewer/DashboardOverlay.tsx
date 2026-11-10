@@ -1378,10 +1378,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     let outlineSeq = 0
     const outlineFloorOf = async (assetIdOrBimId: string | null) => {
-      const seq = ++outlineSeq
       const wake = engine.world?.renderer as { needsUpdate?: boolean } | undefined
       dropOutline()
       if (wake) wake.needsUpdate = true
+      // The storey box is off. A call only clears one that is already drawn.
+      return
+      const seq = ++outlineSeq
       const bimId = assetIdOrBimId ? toBimId(assetIdOrBimId) : null
       const floorId = bimId ? await floorOf(bimId) : null
       if (!floorId || seq !== outlineSeq) return
