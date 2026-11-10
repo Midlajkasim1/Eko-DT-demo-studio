@@ -99,6 +99,16 @@ test('FCU: zone humidity and filter are read when sent, "—" when not; the zone
   assert.equal(readFcuPoints(pts({ FILTER: 'Dirty' })).filterDirty, true)
 })
 
+test('FCU: the fan spins faster from Low to Medium to High, and stops when it is not running', () => {
+  const rate = speed => readFcuPoints(pts({ FANRUNSTATUS: 'On', FANSPEED: speed })).fanRate
+  const low = rate('Low'), med = rate('Medium'), high = rate('High')
+  assert.ok(low < med && med < high, `${low} < ${med} < ${high}`)
+  assert.equal(rate('Auto'), 1.6, 'Auto keeps one rate while the fan is running')
+  assert.equal(readFcuPoints(pts({ FANRUNSTATUS: 'Off', FANSPEED: 'High' })).fanRate, 0)
+  assert.equal(readFcuPoints(pts({ FAN_SPEED_MODE: 'Low', FAN_RUN_STS: 'On' })).fanRate, low)
+  assert.equal(readFcuPoints(pts({ FANSPEED: '40', FANRUNSTATUS: 'On' })).fanSpeed, '40 %')
+})
+
 test('FCU: the filter and the humidity probe are optional parts, so a unit without those points looks as before', () => {
   const s = createFcuSchematic(box(), new THREE.Matrix4(), undefined, { hospitalHvac: true })
   const a = Object.fromEntries(s.anchors.map(x => [x.key, x]))
