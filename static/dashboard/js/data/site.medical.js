@@ -125,7 +125,7 @@ window.EKO_DATA.medical = {
  ],
  "integrations": [
   {
-   "name": "BMS (FIN Framework, BACnet)",
+   "name": "BMS (EKO, BACnet)",
    "proto": "REST · read-only",
    "st": "Live",
    "hb": "3 s ago",
@@ -465,7 +465,7 @@ window.EKO_DATA.medical = {
     "afterMin": 10
    },
    "points": {
-    "BMS (FIN Framework, BACnet)": 4200
+    "BMS (EKO, BACnet)": 4200
    }
   }
  },
@@ -102820,7 +102820,7 @@ window.EKO_DATA.medical = {
   "demo": true,
   "integrations": [
    {
-    "name": "BMS (FIN Framework, BACnet)"
+    "name": "BMS (EKO, BACnet)"
    },
    {
     "name": "CMMS"

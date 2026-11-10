@@ -162,7 +162,7 @@
     'No equipment reported yet': 'لا معدات مسجلة بعد',
     'No points reporting': 'لا نقاط مسجلة',
     'No historized points on this equipment': 'لا نقاط ذات سجل لهذه المعدة',
-    'No historized points reported by FIN': 'لم تُبلّغ FIN عن نقاط ذات سجل',
+    'No historized points reported by EKO': 'لم تُبلّغ EKO عن نقاط ذات سجل',
     'No meter history yet': 'لا يوجد سجل للعدادات بعد',
     'EQUIPMENT IN ALARM': 'المعدات في حالة إنذار',
     'ALARMS': 'التنبيهات',
@@ -175,10 +175,10 @@
     'Active alarm list': 'قائمة التنبيهات النشطة',
     'Live alarms and equipment health': 'التنبيهات المباشرة وحالة المعدات',
     'Configured historians': 'السجلات المهيأة',
-    'FIN historized points': 'نقاط FIN ذات السجل',
-    'Loading FIN point list…': 'جارٍ تحميل قائمة نقاط FIN…',
+    'EKO historized points': 'نقاط EKO ذات السجل',
+    'Loading EKO point list…': 'جارٍ تحميل قائمة نقاط EKO…',
     'Events by day': 'الأحداث حسب اليوم',
-    'Today only — FIN retains no alarm history for this range': 'اليوم فقط — لا تحتفظ FIN بسجل تنبيهات لهذه الفترة',
+    'Today only — EKO retains no alarm history for this range': 'اليوم فقط — لا تحتفظ EKO بسجل تنبيهات لهذه الفترة',
     'Channel': 'القناة',
     'last': 'آخر قراءة',
     'WATER': 'المياه',
@@ -1464,7 +1464,7 @@
     };
     const byEquip = new Map();
     (finPoints || []).forEach((p) => {
-      const k = p.equip || t('FIN historized points');
+      const k = p.equip || t('EKO historized points');
       if (!byEquip.has(k)) byEquip.set(k, []);
       byEquip.get(k).push(p);
     });
@@ -1474,7 +1474,7 @@
     ).join('');
 
     if (!cfgOpts.length && !(finPoints || []).length) {
-      return emptyBox(t('No historized points reported by FIN'));
+      return emptyBox(t('No historized points reported by EKO'));
     }
     if (!histchPointId) histchPointId = cfgOpts.length ? 'cfg:' + cfgKeys[0] : 'pt:' + finPoints[0].id;
 
@@ -1501,7 +1501,7 @@
         <div style="font-family:var(--fH),sans-serif;font-size:12px;font-weight:600;color:var(--t1);margin-block-end:10px">${esc(label)}</div>
         ${series == null ? loadingBox() : seriesLineChartHtml(series, null, unit)}
       </div>
-      ${pending$.hisPoints ? `<div style="font-size:10px;color:var(--t3)">${t('Loading FIN point list…')}</div>` : ''}`;
+      ${pending$.hisPoints ? `<div style="font-size:10px;color:var(--t3)">${t('Loading EKO point list…')}</div>` : ''}`;
   }
 
   /* ── Utilities: water + gas metering, and the reference for the four states ── */
@@ -1852,7 +1852,7 @@
     if (!hist) {
       trend = loadingBox();
     } else if (!hist.retained || !hist.byDay.length) {
-      trend = `<div style="padding:12px;border:1px dashed var(--bd1);border-radius:8px;font-size:11.5px;color:var(--t3);text-align:center">${t('Today only — FIN retains no alarm history for this range')}</div>`;
+      trend = `<div style="padding:12px;border:1px dashed var(--bd1);border-radius:8px;font-size:11.5px;color:var(--t3);text-align:center">${t('Today only — EKO retains no alarm history for this range')}</div>`;
     } else {
       const max = Math.max(...hist.byDay.map((d) => d.critical + d.warning + d.info)) || 1;
       const w = 288 / hist.byDay.length;

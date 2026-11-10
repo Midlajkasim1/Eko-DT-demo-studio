@@ -3758,6 +3758,83 @@
   color:var(--t1)
 }
 
+.dashboard-native-container .hmlevel {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  width:100%;
+  margin-top:4px;
+  padding:6px 8px;
+  border-radius:6px;
+  background:var(--s2);
+  color:var(--t1);
+  font-size:var(--txCapSz);
+  font-weight:600;
+  text-align:start
+}
+
+.dashboard-native-container .hmlevel:hover {
+  background:var(--s3)
+}
+
+.dashboard-native-container .hmlevel[data-on="true"] {
+  position:relative;
+  background:color-mix(in srgb, var(--acc) 16%, var(--s2))
+}
+
+.dashboard-native-container .hmlevel[data-on="true"]::before {
+  content:"";
+  position:absolute;
+  inset-inline-start:0;
+  inset-block:6px;
+  width:3px;
+  border-radius:2px;
+  background:var(--acc)
+}
+
+.dashboard-native-container .hmhere {
+  flex:none;
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:var(--acc)
+}
+
+.dashboard-native-container .hmroom {
+  padding-inline-start:22px
+}
+
+.dashboard-native-container .hmrooms {
+  max-height:min(52vh, 520px);
+  overflow:auto
+}
+
+.dashboard-native-container .hmrooms > .hmlevel,
+.dashboard-native-container .hmrooms > .hmwin {
+  flex:0 0 auto
+}
+
+.dashboard-native-container .hmwin {
+  position:relative;
+  overflow:hidden
+}
+
+.dashboard-native-container .hmwin .hmroom {
+  position:absolute;
+  inset-inline:0;
+  height:32px;
+  min-height:0;
+  white-space:nowrap
+}
+
+.dashboard-native-container .hmwin .hmroom .grow {
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+
 .dashboard-native-container .hmrbar {
   flex:0 0 64px;
   height:5px;
@@ -4065,7 +4142,8 @@
 }
 
 .dashboard-native-container .hmwrap .alcardh {
-  margin-block-end:2px
+  margin-block-end:2px;
+  flex-wrap:wrap
 }
 
 .dashboard-native-container .hmzone {
@@ -9907,9 +9985,43 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .dlgalerts > .achead {
   position:static;
   flex:none;
+  flex-wrap:wrap;
   margin:0;
   padding:14px 18px 10px;
   border-block-end:1px solid var(--bd1)
+}
+
+.dashboard-native-container .acsnd {
+  flex:1 0 100%;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-top:8px
+}
+
+.dashboard-native-container .acsnd-on {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  color:var(--t2);
+  font-size:var(--txCapSz);
+  cursor:pointer
+}
+
+.dashboard-native-container .acsnd-on input {
+  width:auto;
+  margin:0
+}
+
+.dashboard-native-container .acsnd-pick {
+  height:28px;
+  border-radius:8px;
+  border:1px solid var(--bd1);
+  background:var(--s2);
+  color:var(--t1);
+  font-family:var(--fB),sans-serif;
+  font-size:var(--txCapSz);
+  padding:0 8px
 }
 
 .dashboard-native-container .acmeta {

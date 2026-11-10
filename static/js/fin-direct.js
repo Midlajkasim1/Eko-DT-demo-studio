@@ -960,10 +960,10 @@
   }
 
   function finError(text) {
-    if (!text) return 'FIN returned an empty work-order read';
+    if (!text) return 'EKO returned an empty work-order read';
     if (text.indexOf('errType') < 0 && text.indexOf('Unknown symbol') < 0) return '';
     var match = text.match(/dis:"([^"]+)"/);
-    return match ? match[1].slice(0, 240) : 'FIN work-order read failed';
+    return match ? match[1].slice(0, 240) : 'EKO work-order read failed';
   }
 
   function liveWorkorderPayload(text) {
@@ -1166,11 +1166,11 @@
     this.facility = facilityServices(built.floors, cfg.equipmentClasses);
     var woText = reads[3];
     if (unauth(woText)) {
-      this.workorderPayload = { timestamp: nowIso(), source: 'fin', orders: [], error: 'FIN session ended' };
+      this.workorderPayload = { timestamp: nowIso(), source: 'fin', orders: [], error: 'EKO session ended' };
     } else if (typeof woText === 'string') {
       this.workorderPayload = liveWorkorderPayload(woText);
     } else {
-      this.workorderPayload = { timestamp: nowIso(), source: 'fin', orders: [], error: 'FIN work-order read failed' };
+      this.workorderPayload = { timestamp: nowIso(), source: 'fin', orders: [], error: 'EKO work-order read failed' };
     }
     var equipment = {
       timestamp: nowIso(),

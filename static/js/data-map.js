@@ -55,7 +55,7 @@
      - sites: only this project; the sample estate (other sites' figures) is empty */
   function clearFixtureServices(site) {
     site.user = Object.assign({}, site.user, { name: '', nameAr: '' });
-    site.integrations = [{ name: 'FIN Framework' + (siteInfo().finProject ? ' · ' + siteInfo().finProject : ''), proto: '', st: 'Connecting', hb: '', pts: '' }];
+    site.integrations = [{ name: 'EKO' + (siteInfo().finProject ? ' · ' + siteInfo().finProject : ''), proto: '', st: 'Connecting', hb: '', pts: '' }];
     var D = window.EKO_DATA || {};
     // the top bar reads the 'marsa' row, which a sample data set's site takes over
     if (Array.isArray(D.portfolio)) D.portfolio = D.portfolio.filter(function (p) { return p.key === site.key || p.key === 'marsa'; });
@@ -177,7 +177,7 @@
   function assetId(source) {
     var s = String(source || '').trim();
     var m = s.match(/\b([A-Z]{2,}[-_A-Z0-9.]+)\b/);
-    return m ? m[1] : (s.slice(0, 40) || 'FIN');
+    return m ? m[1] : (s.slice(0, 40) || 'EKO');
   }
 
   /* Systems overlay groups key on these labels: HVAC, Electrical, Life safety, Security. */
@@ -326,6 +326,7 @@
     site.alarms = payload.alarms.map(mapAlarm);
     site.alarms.forEach(function (a) { if (acked[a.id]) a.ack = acked[a.id]; });
     linkAlarms(site);
+    if (window.EKO && typeof window.EKO.noteAlarms === 'function') window.EKO.noteAlarms(site.alarms);
     if (window.EKO_HOST_ENGINE && typeof window.EKO_HOST_ENGINE.resolveAllAssetPositions === 'function') {
       window.EKO_HOST_ENGINE.resolveAllAssetPositions();
     }
@@ -2424,6 +2425,44 @@
     return { id: '', value: null };
   }
 
+  function navFold(n) {
+    return String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  /* A setpoint ends in sp / setpoint. The letters sp inside SpaceTemp are not one. */
+  function spName(n) {
+    return /(?:setpoint|setpt|stpt|sp)$/.test(navFold(n));
+  }
+
+  function bestPoint(eq, tests) {
+    var pts = (eq && eq.points) || [];
+    for (var t = 0; t < tests.length; t++) {
+      for (var i = 0; i < pts.length; i++) {
+        var nav = String(pts[i].navName || '');
+        if (spName(nav) || !tests[t](navFold(nav))) continue;
+        var n = parseFloat(String(pts[i].currentValue == null ? '' : pts[i].currentValue).replace(/[^0-9.\-]/g, ''));
+        return { id: pts[i].id || '', value: isFinite(n) ? n : null };
+      }
+    }
+    return { id: '', value: null };
+  }
+
+  /* A room named after a FIN unit, not an IS/IAQ sensor, shows that unit's air reading. */
+  function equipAir(eq) {
+    return {
+      temp: bestPoint(eq, [
+        function (f) { return f.indexOf('zonetemp') >= 0 || f.indexOf('spacetemp') >= 0 || f.indexOf('roomtemp') >= 0; },
+        function (f) { return f === 'satemp' || f.indexOf('supplyairtemp') >= 0; }
+      ]),
+      rh: bestPoint(eq, [
+        function (f) { return f.indexOf('zonehumid') >= 0 || f.indexOf('spacehumid') >= 0 || f.indexOf('roomhumid') >= 0; }
+      ]),
+      co2: bestPoint(eq, [
+        function (f) { return f.indexOf('co2') >= 0; }
+      ])
+    };
+  }
+
   var heatEquip = null;
   var heatRange = 'today';
   var heatStep = null;
@@ -2565,11 +2604,25 @@
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     var zones = site && site.heat && site.heat.zones;
     if (!zones) return;
+    var byName = {};
     zones.forEach(function (z) {
       z.tempC = sliceValue(z.tempId, z.liveTemp);
       z.rh = sliceValue(z.rhId, z.liveRh);
       z.co2 = sliceValue(z.co2Id, z.liveCo2);
       z.hours = hourBands(shownId(z), heatRange);
+      byName[z.nameEn] = z;
+    });
+    (site.heat.rooms || []).forEach(function (r) {
+      if (r.own) {
+        r.tempC = sliceValue(r.tempId, r.liveTemp);
+        r.rh = sliceValue(r.rhId, r.liveRh);
+        r.co2 = sliceValue(r.co2Id, r.liveCo2);
+        return;
+      }
+      var z = byName[r.zone];
+      r.tempC = z ? z.tempC : null;
+      r.rh = z ? z.rh : null;
+      r.co2 = z ? z.co2 : null;
     });
   }
 
@@ -2793,7 +2846,44 @@
     var spaceNames = {};
     linkedSpaces.forEach(function (l) { if (l && l.guid) spaceNames[l.guid] = l.name || ''; });
     site.heat.spaceNames = spaceNames;
+    var byGuidZone = {};
+    zones.forEach(function (z) {
+      (z.bimIds || []).forEach(function (id) { if (id) byGuidZone[id] = z; });
+      if (z.bimId) byGuidZone[z.bimId] = z;
+    });
+    var equipByFold = {};
+    (Array.isArray(list) ? list : []).forEach(function (eq) {
+      if (eq && eq.name) equipByFold[foldId(eq.name)] = eq;
+    });
+    site.heat.rooms = linkedSpaces.map(function (l) {
+      var z = byGuidZone[l.guid];
+      var named = sensorKey(l.name) ? null : equipByFold[foldId(l.name)];
+      var air = named ? equipAir(named) : null;
+      var own = !!(air && (air.temp.id || finiteNum(air.temp.value) || air.rh.id || finiteNum(air.rh.value) || air.co2.id || finiteNum(air.co2.value)));
+      var room = {
+        guid: l.guid,
+        name: l.element || l.name || l.guid,
+        sensor: l.name || '',
+        level: l.level || (named && named.floor) || '',
+        zone: z ? z.nameEn : '',
+        own: own
+      };
+      if (own) {
+        room.tempId = air.temp.id; room.liveTemp = air.temp.value;
+        room.rhId = air.rh.id; room.liveRh = air.rh.value;
+        room.co2Id = air.co2.id; room.liveCo2 = air.co2.value;
+      }
+      return room;
+    });
+    site.heat.rooms.sort(function (a, b) {
+      return String(a.level).localeCompare(String(b.level), undefined, { numeric: true })
+        || String(a.name).localeCompare(String(b.name), undefined, { numeric: true });
+    });
     zones.forEach(function (z) { ensureHistory(z.tempId); ensureHistory(z.rhId); ensureHistory(z.co2Id); });
+    site.heat.rooms.forEach(function (r) {
+      if (!r.own) return;
+      ensureHistory(r.tempId); ensureHistory(r.rhId); ensureHistory(r.co2Id);
+    });
     applyShown();
   }
 

@@ -293,6 +293,12 @@ export interface HeatmapSetup {
    * An empty list means nobody walks while stillRooms is on.
    */
   walkRooms?: string[]
+  /**
+   * What the heatmap's right panel lists. Absent is sensors, the zone ranking.
+   * rooms lists each linked room, grouped by level and collapsed.
+   * both puts a Sensors / Rooms switch on that panel.
+   */
+  panel?: 'sensors' | 'rooms' | 'both'
 }
 
 /** One O&M or warranty PDF. `ref` is the FIN record, "@p:project:r:id". */

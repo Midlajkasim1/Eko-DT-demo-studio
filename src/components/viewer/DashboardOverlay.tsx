@@ -20,6 +20,7 @@ import {
 } from '@/lib/layerGroups'
 import { runIfcDiagnostics } from '@/lib/ifcDiagnostics' // TEMPORARY, with EKO_IFC_DIAGNOSTICS below
 import { HVAC_GENERIC, HVAC_SPECIFIC, floorFilterSkips, isCeilingType, levelHides, reportLevel, type LevelIndex, type MechanicalInfo } from '@/lib/floorPolicy'
+import { choosePlate, plateLoops, platePrism, type XzTri } from '@/lib/floorOutline'
 import { setHidden, isHidden, onVisibilityApplied } from '@/lib/visibilityCoordinator'
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
@@ -1310,17 +1311,135 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       floorOutline.geometry.dispose()
       floorOutline = null
     }
+    const meshMatrix = (g: any) => g.transform instanceof THREE.Matrix4
+      ? g.transform as THREE.Matrix4
+      : new THREE.Matrix4().fromArray(g.transform?.elements ?? g.transform ?? new THREE.Matrix4().elements)
+    const planTris = async (model: any, ids: number[]) => {
+      const tris: XzTri[] = []
+      if (!ids.length || typeof model.getItemsGeometry !== 'function') return tris
+      model.object.updateMatrixWorld(true)
+      const world = model.object.matrixWorld as THREE.Matrix4
+      let res: any[][] = []
+      try { res = await model.getItemsGeometry(ids) } catch { return tris }
+      const v = new THREE.Vector3()
+      const take = (p: ArrayLike<number>, i: number, t: THREE.Matrix4) => {
+        v.set(Number(p[i * 3]) || 0, Number(p[i * 3 + 1]) || 0, Number(p[i * 3 + 2]) || 0).applyMatrix4(t).applyMatrix4(world)
+        return { x: v.x, z: v.z }
+      }
+      for (let n = 0; n < ids.length && tris.length < 120000; n++) {
+        for (const g of res?.[n] || []) {
+          if (!g?.positions || tris.length >= 120000) continue
+          const t = meshMatrix(g)
+          const p = g.positions as ArrayLike<number>
+          const idx = g.indices as ArrayLike<number> | undefined
+          const count = idx ? idx.length : p.length / 3
+          for (let i = 0; i + 2 < count && tris.length < 120000; i += 3) {
+            const ia = idx ? idx[i] : i, ib = idx ? idx[i + 1] : i + 1, ic = idx ? idx[i + 2] : i + 2
+            const a = take(p, ia, t), b = take(p, ib, t), c = take(p, ic, t)
+            const abx = b.x - a.x, abz = b.z - a.z, acx = c.x - a.x, acz = c.z - a.z
+            if (Math.abs(abx * acz - abz * acx) < 0.04) continue
+            tris.push({ ax: a.x, az: a.z, bx: b.x, bz: b.z, cx: c.x, cz: c.z })
+          }
+        }
+      }
+      return tris
+    }
+    /* Floor slabs first. Rooms are the plate when the slab is only a rectangle around them. */
+    const plateIds = async (model: any, floorId: string, kind: 'slab' | 'space') => {
+      const onFloor = new Set<number>((await indexModel(model)).byFloor.get(floorId) || [])
+      if (!onFloor.size || typeof model.getItemsOfCategories !== 'function') return [] as number[]
+      const found = await model.getItemsOfCategories([kind === 'slab' ? /^IFCSLAB$/i : /^IFCSPACE$/i])
+      let ids = (Object.values(found || {}).flat() as number[]).filter(id => onFloor.has(id))
+      if (!ids.length) return []
+      if (kind === 'slab' && typeof model.getItemsData === 'function') {
+        try {
+          const rows = await model.getItemsData(ids, {
+            attributesDefault: false, attributes: ['PredefinedType'], relationsDefault: { attributes: false, relations: false },
+          })
+          ids = ids.filter((_, i) => !/ROOF|LANDING/.test(attrText(rows[i], 'PredefinedType').toUpperCase()))
+        } catch { /* an untyped slab can still be the plate */ }
+      }
+      if (!ids.length || typeof model.getBoxes !== 'function') return ids.slice(0, kind === 'slab' ? 60 : 200)
+      let boxes: THREE.Box3[] = []
+      try { boxes = await model.getBoxes(ids) } catch { return [] }
+      const ranked: { id: number; area: number }[] = []
+      ids.forEach((id, i) => {
+        const b = boxes[i]
+        if (!b || b.isEmpty()) return
+        const dx = b.max.x - b.min.x, dy = b.max.y - b.min.y, dz = b.max.z - b.min.z
+        const area = dx * dz
+        if (kind === 'slab') {
+          if (dy > 1.8 || dx < 2 || dz < 2 || area < 8) return
+        } else if (area < 1.5 || area > 80000 || dy < 0.4) return
+        ranked.push({ id, area })
+      })
+      ranked.sort((a, b) => b.area - a.area)
+      return ranked.slice(0, kind === 'slab' ? 60 : 200).map(r => r.id)
+    }
     let outlineSeq = 0
     const outlineFloorOf = async (assetIdOrBimId: string | null) => {
-      const seq = ++outlineSeq
       const wake = engine.world?.renderer as { needsUpdate?: boolean } | undefined
       dropOutline()
       if (wake) wake.needsUpdate = true
+      // The storey box is off. A call only clears one that is already drawn.
+      return
+      const seq = ++outlineSeq
       const bimId = assetIdOrBimId ? toBimId(assetIdOrBimId) : null
       const floorId = bimId ? await floorOf(bimId) : null
-      if (!floorId) return
+      if (!floorId || seq !== outlineSeq) return
+      const models = [...(engine.fragments?.models?.list?.values() ?? [])]
+      const slabIds: { model: any; ids: number[] }[] = []
+      for (const model of models) {
+        if (seq !== outlineSeq) return
+        const m = model as any
+        try {
+          const slabs = await plateIds(m, floorId, 'slab')
+          if (slabs.length) slabIds.push({ model: m, ids: slabs })
+        } catch { /* model not ready */ }
+      }
+      if (seq !== outlineSeq) return
+      const slabTris: XzTri[] = []
+      for (const part of slabIds) {
+        if (seq !== outlineSeq) return
+        slabTris.push(...await planTris(part.model, part.ids))
+      }
+      if (seq !== outlineSeq) return
+      const slabLoops = slabTris.length ? plateLoops(slabTris, { pad: 0.35 }) : null
+      // A four-corner slab is a pad. The rooms on that floor carry the building shape.
+      const plain = !slabLoops?.length || slabLoops[0].length / 2 - 1 <= 4
+      let spaceLoops: number[][] | null = null
+      if (plain) {
+        const spaceTris: XzTri[] = []
+        for (const model of models) {
+          if (seq !== outlineSeq) return
+          const m = model as any
+          try {
+            const spaces = await plateIds(m, floorId, 'space')
+            if (spaces.length) spaceTris.push(...await planTris(m, spaces))
+          } catch { /* model not ready */ }
+        }
+        if (seq !== outlineSeq) return
+        spaceLoops = spaceTris.length ? plateLoops(spaceTris, { pad: 0.35, bridge: 0.8 }) : null
+      }
+      const loops = choosePlate(slabLoops, spaceLoops)
+      const showPlate = (y0: number, y1: number) => {
+        if (!loops?.length) return false
+        const pos = platePrism(loops, y0, y1)
+        if (!pos.length) return false
+        const geom = new THREE.BufferGeometry()
+        geom.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+        geom.computeBoundingSphere()
+        floorOutline = new THREE.LineSegments(geom, outlineMat)
+        floorOutline.frustumCulled = false
+        floorOutline.renderOrder = 999
+        overlay.add(floorOutline)
+        if (wake) wake.needsUpdate = true
+        return true
+      }
+      const span = spanOf(floorId)
+      if (span && showPlate(span.yLo, Math.max(span.yHi, span.yLo + 0.5))) return
       const box = new THREE.Box3()
-      for (const model of engine.fragments?.models?.list?.values() ?? []) {
+      for (const model of models) {
         const m = model as any
         if (typeof m.getMergedBox !== 'function') continue
         try {
@@ -1332,9 +1451,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         } catch { /* model not ready */ }
       }
       if (seq !== outlineSeq || box.isEmpty()) return
-      // the floor's own height, not a stair core or a mast that rises through it
-      const span = spanOf(floorId)
       if (span) { box.min.y = span.yLo; box.max.y = Math.max(span.yHi, span.yLo + 0.5) }
+      if (showPlate(box.min.y, box.max.y)) return
       const size = box.getSize(new THREE.Vector3())
       floorOutline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(size.x + 0.6, size.y + 0.2, size.z + 0.6)), outlineMat)
       floorOutline.position.copy(box.getCenter(new THREE.Vector3()))
@@ -1400,6 +1518,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     let heatSheets: THREE.Mesh[] = []
     let heatSig = ''
     let heatSeq = 0
+    let heatBusy = false
+    let heatAgain = false
+    let crowdPlacedSig = ''
+    let crowdJob = 0
+    let crowdJobBusy = 0
     let heatReq: { zones: { bimId?: string; bimIds?: string[]; gid?: string; nameEn?: string; tempC?: number | null; rh?: number | null; co2?: number | null }[]; mode?: string } | null = null
     /* Colour sits in the room and is tested against the building, so a ceiling does not hide it from an angled view. */
     let heatInsideWalls = false
@@ -1582,7 +1705,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       depthTest: true,
       toneMapped: false,
     })
-    const clearCrowd = () => {
+    const wipeCrowd = () => {
       if (crowdMesh) {
         overlay.remove(crowdMesh)
         crowdMesh.geometry.dispose()
@@ -1596,6 +1719,13 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       }
       crowd = []
     }
+    const clearCrowd = () => {
+      wipeCrowd()
+      crowdPlacedSig = ''
+      crowdJob++
+      crowdJobBusy = 0
+    }
+    const crowdWanted = () => heatModeNow === 'occ' && (window as any).EKO?.state?.pageId === 'heatmap'
     const occSpeed = () => {
       const n = useProjectStore.getState().currentProject?.apiSettings?.heatmap?.speed
       const s = n == null || !Number.isFinite(Number(n)) ? 1 : Number(n)
@@ -1686,16 +1816,23 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     /* Each zone gets the dashboard's count for it (same weight on the same key), shared among its rooms in view.
        Sharing all the people among every room rounded each room to none once a zone linked many rooms. */
-    const placeCrowd = async (floorIds: string[], zones: { key: string; ids: string[] }[], people: number) => {
+    const placeCrowd = async (floorIds: string[], zones: { key: string; ids: string[] }[], people: number, key: string) => {
       const seq = heatSeq
-      clearCrowd()
+      if (!crowdWanted()) { clearCrowd(); return }
+      if (crowdPlacedSig === key && (crowdMesh || crowdJobBusy)) return
+      const job = ++crowdJob
+      crowdJobBusy = job
+      crowdPlacedSig = key
+      wipeCrowd()
+      const mine = () => job === crowdJob && crowdWanted() && seq === heatSeq
+      try {
       const inView = new Set<string>()
       for (const floorId of floorIds) {
         const set = floorRooms.get(floorId)?.guids
         if (!set) continue
         for (const g of set) if (located.has(g)) inView.add(g)
       }
-      if (!inView.size || people <= 0) return
+      if (!inView.size || people <= 0 || !mine()) { if (crowdJobBusy === job) crowdJobBusy = 0; return }
       const zoneWeights = zones.map(z => occWeight(z.key))
       const zoneSum = zoneWeights.reduce((n, w) => n + w, 0) || 1
       const plan: { id: string; count: number }[] = []
@@ -1711,14 +1848,14 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         exact.map((v, i) => [v - counts[i], i] as const).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { counts[i]++; left-- } })
         rooms.forEach((id, i) => { if (counts[i]) plan.push({ id, count: counts[i] }) })
       })
-      if (!plan.length) return
+      if (!plan.length) { if (crowdJobBusy === job) crowdJobBusy = 0; return }
       const spots = plan.flatMap(sp => {
         const entry = located.get(sp.id)
         return entry?.localBox ? [{ ...sp, entry }] : []
       })
-      if (!spots.length) return
+      if (!spots.length) { if (crowdJobBusy === job) crowdJobBusy = 0; return }
       await solidsFor(spots.map(sp => ({ guid: sp.id, model: sp.entry.model, localId: sp.entry.localId, box: sp.entry.localBox })))
-      if (seq !== heatSeq) return
+      if (!mine()) { if (crowdJobBusy === job) crowdJobBusy = 0; return }
       type Ready = { count: number; walks: boolean; y: number; minX: number; maxX: number; minZ: number; maxZ: number; foot: CrowdFoot | null; area: number }
       const ready: Ready[] = []
       for (const sp of spots) {
@@ -1743,7 +1880,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       /* A storey-sized space is the floor plate, not a room. People there covered the site. */
       const kept = typical > 0 ? ready.filter(r => r.area > 0.5 && r.area <= typical * 16) : ready.filter(r => r.area > 0.5)
       const total = kept.reduce((n, r) => n + r.count, 0)
-      if (!total) return
+      if (!total) { if (crowdJobBusy === job) crowdJobBusy = 0; return }
       const geo = new THREE.SphereGeometry(0.22, 6, 6)
       const mat = new THREE.MeshBasicMaterial({ color: 0xffffff })
       const mesh = new THREE.InstancedMesh(geo, mat, total)
@@ -1792,12 +1929,27 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       mesh.instanceMatrix.needsUpdate = true
       glow.instanceMatrix.needsUpdate = true
       if (glow.instanceColor) glow.instanceColor.needsUpdate = true
+      if (!mine()) {
+        wipeCrowd()
+        mesh.geometry.dispose()
+        ;(mesh.material as THREE.Material).dispose()
+        glow.geometry.dispose()
+        if (crowdJobBusy === job) crowdJobBusy = 0
+        return
+      }
       overlay.add(mesh)
       overlay.add(glow)
       crowdMesh = mesh
       crowdGlowMesh = glow
+      } finally {
+        if (crowdJobBusy === job) crowdJobBusy = 0
+      }
     }
     stepCrowd = () => {
+      if (!crowdWanted()) {
+        if (crowdMesh || crowdGlowMesh || crowd.length) clearCrowd()
+        return
+      }
       if (!crowdMesh || !crowd.length) return
       const step = 0.016 * occSpeed()
       // A person keeps about 10 px across, so a whole floor seen from above still shows them; up close they stay life size
@@ -1805,6 +1957,17 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       const viewH = engine.world?.renderer?.three?.domElement?.clientHeight || 800
       const viewW = engine.world?.renderer?.three?.domElement?.clientWidth || 1200
       const perPx = cam?.isPerspectiveCamera ? 2 * Math.tan((cam.fov * Math.PI) / 360) / viewH : 0
+      const crowdNear = new Map<string, number[]>()
+      for (let n = 0; n < crowd.length; n++) {
+        const q = crowd[n]
+        const cx = Math.floor(q.x / 4), cz = Math.floor(q.z / 4)
+        for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+          const bin = `${cx + dx}:${cz + dz}`
+          const list = crowdNear.get(bin)
+          if (list) list.push(n)
+          else crowdNear.set(bin, [n])
+        }
+      }
       for (let i = 0; i < crowd.length; i++) {
         const p = crowd[i]
         /* Ordinary rooms stand still. A ticked name walks, and only on that room's floor. */
@@ -1830,9 +1993,11 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
           p.z = nz
         }
         let near = 0
-        for (let j = 0; j < crowd.length; j++) {
-          const dx = crowd[j].x - p.x
-          const dz = crowd[j].z - p.z
+        const list = crowdNear.get(`${Math.floor(p.x / 4)}:${Math.floor(p.z / 4)}`)
+        if (list) for (let k = 0; k < list.length; k++) {
+          const o = crowd[list[k]]
+          const dx = o.x - p.x
+          const dz = o.z - p.z
           if (dx * dx + dz * dz < 16) near++
         }
         /* Neighbours within 4 m, the medical twin's bands */
@@ -1868,7 +2033,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     const clearSpaceHeat = async () => {
       heatSeq++
+      heatBusy = false
+      heatAgain = false
       heatReq = null
+      heatModeNow = 'temp'
       spaceHeatActive = false
       heatInsideWalls = false
       syncHeatClip()
@@ -2017,11 +2185,13 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
     }
     const applySpaceHeat = async (zones: { bimId?: string; bimIds?: string[]; gid?: string; nameEn?: string; tempC?: number | null; rh?: number | null; co2?: number | null }[], mode?: string) => {
       heatReq = { zones, mode }
+      const md = mode === 'comfort' || mode === 'hum' || mode === 'occ' ? mode : 'temp'
+      heatModeNow = md
+      /* People belong to Occupancy only. Clear them before any early return so another tab cannot keep the crowd. */
+      if (md !== 'occ') clearCrowd()
       /* Locating every room shares the worker that is still parsing the next file. */
       if (useLoadingProgressStore.getState().sessionActive) return
-      const md = mode === 'comfort' || mode === 'hum' || mode === 'occ' ? mode : 'temp'
       spaceHeatActive = true
-      heatModeNow = md
       applySpacesGate()
       const inside = heatInsideOf()
       heatInsideWalls = inside
@@ -2050,18 +2220,36 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         for (const bimId of idsOf(z)) jobs.push({ bimId, t })
       }
       const valueSig = (inside ? 'in|' : 'out|') + md + '|' + (md === 'occ' ? 'p' + occPeople() + '|' + walkSig() + '|' : '') + jobs.map(j => `${j.bimId}:${round1(j.t)}`).join(';')
-      if (valueSig !== heatSig) {
-        dropHeatSheets()
-        heatSig = valueSig
-      }
-      const seq = ++heatSeq
-      const wanted = new Set(jobs.map(job => job.bimId))
       // The zones the dashboard counts people in, keyed as it keys them
       const crowdZones = md === 'occ'
         ? (zones || []).filter(z => z.bimId || z.gid || (z.bimIds && z.bimIds.length))
           .map(z => ({ key: String((z.bimIds && z.bimIds[0]) || z.bimId || z.gid || z.nameEn || ''), ids: idsOf(z) }))
         : []
       const alone = !!(window as any).EKO?.state?.dock?.floorAlone
+      if (valueSig === heatSig) {
+        const ready = floorsInView(levelId, alone)
+        const missingNow = ready.filter(id => !heatFloorSheets.get(id)?.done)
+        if (ready.length && !missingNow.length) {
+          showHeatFloors(new Set(ready))
+          if (md === 'occ') await placeCrowd(ready, crowdZones, occPeople(), valueSig + '@' + ready.join(','))
+          syncGhost()
+          const wakeNow = engine.world?.renderer as { needsUpdate?: boolean } | undefined
+          if (wakeNow) wakeNow.needsUpdate = true
+          return
+        }
+        /* A list switch shares this signature. Starting the room walk over is what freezes the page. */
+        if (heatBusy) return
+      } else if (heatBusy) {
+        heatAgain = true
+        return
+      } else {
+        dropHeatSheets()
+        heatSig = valueSig
+      }
+      const seq = ++heatSeq
+      heatBusy = true
+      try {
+      const wanted = new Set(jobs.map(job => job.bimId))
       if (levelId && levelId !== 'ALL') await guidsForFloor(levelId, wanted)
       else {
         for (const model of engine.fragments?.models?.list?.values() ?? []) await readStoreys(model)
@@ -2072,9 +2260,8 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       showHeatFloors(show)
       const missing = order.filter(id => !heatFloorSheets.get(id)?.done)
       const wake = engine.world?.renderer as { needsUpdate?: boolean } | undefined
-      if (md !== 'occ') clearCrowd()
       if (!missing.length) {
-        if (md === 'occ') await placeCrowd(order, crowdZones, occPeople())
+        if (md === 'occ') await placeCrowd(order, crowdZones, occPeople(), valueSig + '@' + order.join(','))
         syncGhost()
         if (wake) wake.needsUpdate = true
         return
@@ -2099,12 +2286,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         /* Occupancy colours the people, not the room, the same way the medical twin does. */
         if (md === 'occ') {
           for (const id of guids) kept.guids.add(id)
-          if (seq === heatSeq) {
-            kept.done = true
-            await placeCrowd(order, crowdZones, occPeople())
-            syncGhost()
-            if (wake) wake.needsUpdate = true
-          }
+          if (seq === heatSeq) kept.done = true
           continue
         }
         type Room = { model: any; geoms: THREE.BufferGeometry[]; x: number; y: number; z: number; hx: number; hy: number; hz: number; t: number; guid: string; area: number }
@@ -2180,7 +2362,21 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         if (wake) wake.needsUpdate = true
         if (seq === heatSeq) kept.done = true
       }
+      if (seq === heatSeq && md === 'occ') {
+        await placeCrowd(order, crowdZones, occPeople(), valueSig + '@' + order.join(','))
+        syncGhost()
+        if (wake) wake.needsUpdate = true
+      }
       return
+      } finally {
+        if (seq === heatSeq) {
+          heatBusy = false
+          if (heatAgain && heatReq) {
+            heatAgain = false
+            void applySpaceHeat(heatReq.zones, heatReq.mode)
+          }
+        }
+      }
     }
 
     // Same rule as isAlarmed
@@ -2451,7 +2647,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       miniMap.capture()
       // Fans in the shown equipment and the occupancy crowd move only while frames are drawn
       const spinning = !!(active && ghost?.group.visible)
-      if (spinning || (crowdMesh && crowd.length)) {
+      if (spinning || (crowdMesh && crowd.some(p => !p.still))) {
         const wake = engine.world?.renderer as { needsUpdate?: boolean } | undefined
         if (wake) wake.needsUpdate = true
       }
@@ -2611,7 +2807,15 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       isAlarmed,
       listMapped: () => links().list.map(m => ({ id: m.equip, bimId: m.guid })),
       spaceLinks: () => indexSpaceLinks(useProjectStore.getState().currentProject?.assetLinks),
-      listLevels: () => levels.map(l => ({ id: l.id, name: l.name })),
+      listLevels: () => levels.map(l => ({ id: l.id, name: l.name, rank: l.rank })),
+      /* The toolbar name for a storey string: "Level 1" and "LEVEL 1" are both First floor. */
+      floorOf: (raw: string) => {
+        const text = String(raw || '').trim()
+        if (!text) return null
+        const known = floorCatalog.get(text)
+        const floor = known || floorKey(text)
+        return floor ? { id: floor.id, name: floor.name, rank: floor.rank } : null
+      },
       captureCamera: () => {
         const cam = engine.world?.camera?.controls as { getPosition?: (out: THREE.Vector3) => void; getTarget?: (out: THREE.Vector3) => void } | undefined
         if (!cam?.getPosition || !cam?.getTarget) return null

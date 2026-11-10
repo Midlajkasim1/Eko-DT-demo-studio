@@ -74,7 +74,7 @@ window.EKO_DATA.marsa = {
 
   /* Integrations (drawer + top-bar pill count). */
   "integrations": [
-    { "name": "BMS (J2 FIN Framework)", "proto": "BACnet/IP", "st": "Live", "hb": "2 s ago", "pts": "4,812 points" }
+    { "name": "BMS (J2 EKO)", "proto": "BACnet/IP", "st": "Live", "hb": "2 s ago", "pts": "4,812 points" }
   ],
 
   /* ------------------------------------------------------------------------

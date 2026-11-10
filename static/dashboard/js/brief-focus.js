@@ -160,7 +160,7 @@ window.EKO_BFOCUS = (function(){
     const dx = cx - (vr.left + vr.right) / 2, dy = cy - (vr.top + vr.bottom) / 2;
     clearLine(); mark && (mark.hidden = true);
     (window.DASHBOARD_ROOT || document.documentElement).classList.add('bfx');
-    try{ eng.setFocus && eng.setFocus([it.asset], '#7B6CFF'); eng.cutAbove && eng.cutAbove(it.asset); eng.outlineLevel && eng.outlineLevel(it.asset); }catch(e){}
+    try{ eng.setFocus && eng.setFocus([it.asset], '#7B6CFF'); eng.cutAbove && eng.cutAbove(it.asset); /* outline off for now: eng.outlineLevel && eng.outlineLevel(it.asset); */ }catch(e){}
     eng.flyToAssetAt(it.asset, dx, it.dist || 34, reduce() ? 1 : 900, dy);
     whenStill(() => drawLine(true));
   }
