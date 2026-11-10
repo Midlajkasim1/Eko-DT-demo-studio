@@ -46,7 +46,7 @@
 }
 
 /* ≤1024: nav rail auto-collapses to icons; summary narrows further. */
-@media (max-width:1024px){.dashboard-native-container{ --navw:56px }.dashboard-native-container #ekonav .nlbl,.dashboard-native-container #ekonav .nchevb,.dashboard-native-container #ekonav .nsubs{ display:none }.dashboard-native-container{ --ovw:300px }.dashboard-native-container .deskwide{ display:none }
+@media (max-width:1023px){.dashboard-native-container{ --navw:56px }.dashboard-native-container #ekonav .nlbl,.dashboard-native-container #ekonav .nchevb,.dashboard-native-container #ekonav .nsubs{ display:none }.dashboard-native-container{ --ovw:300px }.dashboard-native-container .deskwide{ display:none }
 }
 
 /* ≤1023: stacked. Page scrolls; rail becomes bottom tabs; cards stack.

@@ -661,7 +661,7 @@
   opacity:0
 }
 
-.dashboard-native-container[data-nav="min"] .nsubs,.dashboard-native-container[data-nav="min"] .nchevb {
+.dashboard-native-container[data-nav="min"] .nchevb {
   display:none
 }
 
@@ -17625,3 +17625,8 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .twwo li[data-wo="due"] { border-inline-start-color:#d97706 }
 .dashboard-native-container .twwo li[data-wo="due"] em { color:#b45309 }
 .dashboard-native-container .twwo li[data-wo="sched"] { border-inline-start-color:var(--bd2) }
+
+/* The collapsed rail shows a module's items as a flyout beside its icon (the rail has no room for them inline) */
+.dashboard-native-container[data-nav="min"] #ekonav > div { position:relative }
+.dashboard-native-container[data-nav="min"] .nsubs { position:fixed; inset-inline-start:calc(var(--navw) + 4px); z-index:50; min-width:190px; padding:6px; gap:1px;
+  background:var(--chrome-bg); border:1px solid var(--chrome-edge); border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.25) }

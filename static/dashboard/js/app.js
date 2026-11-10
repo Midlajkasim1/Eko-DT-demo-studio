@@ -143,6 +143,7 @@
       themeMode: ls.get('eko-theme-mode') || 'auto',
       navMin: ls.get('eko-nav') === 'min',
       exp: {},   /* exclusive accordion (D28): at most one module open */
+      navCollapsed: null,   /* the active module whose items the person folded away; any navigation shows them again */
       alarmF: { sev: new Set(), sys: new Set() },
       triageOpen: {}, alHistOpen: {},   /* alarm id -> its history is expanded */
       assetSel: null, apTab: 'alarms',
@@ -340,6 +341,7 @@
       if(gate){ this.set({ born:'dlg', teaserKey: gate, dlg:'teaser', mobMore:false }); return; }
       if(pageId !== this.state.pageId) this.state._prev = { pageId: this.state.pageId, module: this.state.module, sub: this.state.sub };
       this.state.locFocus = null;   /* any navigation (the logo, a module, search, Back) ends Locate-in-3D focus */
+      this.state.navCollapsed = null;
       if(pageId !== 'sec') this.state.secLocated = null;
       if(this.state.roofView) closeRoofView();   /* ...and the Hospital roof schematic, which stands in the content area */
       if(window.EKO_SURF) window.EKO_SURF.closeAll();          /* R4 (D67) */
@@ -615,8 +617,9 @@
     const mods = E.nav.modules.filter(navVisible).map(m => {
       const on = E.state.module === m.id ? (E.state.sub ? 'contains' : 'page') : 'none';
       const hasSubs = m.subs && m.subs.length;
-      const open = !!E.state.exp[m.id] || E.state.module === m.id;   /* D117: the active module shows its sub-items, as the mockup does */
-      const subs = hasSubs && open && !E.state.navMin ? `<div class="nsubs" data-born="${E.state.born==='nsub:'+m.id?1:0}">${m.subs.filter(s => !s.hidden).map(s =>
+      /* D117: the active module shows its sub-items, as the mockup does, until the person folds them away. The collapsed rail shows them as a flyout, only for the module just opened. */
+      const open = E.state.navMin ? !!E.state.exp[m.id] : (E.state.navCollapsed !== m.id && (!!E.state.exp[m.id] || E.state.module === m.id));
+      const subs = hasSubs && open ? `<div class="nsubs" data-born="${E.state.born==='nsub:'+m.id?1:0}">${m.subs.filter(s => !s.hidden).map(s =>
         s.locked
         ? `<button class="nsub" data-lock="true" data-act="teaser" data-teaser="${esc(s.teaser||s.label)}" data-mod="${m.id}">
              <span class="grow taS">${esc(E.t(s.label))}</span>${icon('lock',12)}</button>`
@@ -624,7 +627,7 @@
            <span class="grow taS">${esc(E.t(s.label))}</span>
            ${s.dot?`<span class="ndot" style="background:var(--sev${s.dot[0].toUpperCase()+s.dot.slice(1)})"></span>`:''}</button>`).join('')}</div>` : '';
       return `<div>
-        <button class="nvi" data-on="${on}" data-lock="${!!m.locked}" ${E.state.navMin?`data-tip="${esc(E.t(m.label))}" data-tipat="end"`:''}
+        <button class="nvi" data-on="${on}" data-lock="${!!m.locked}" ${E.state.navMin && !subs?`data-tip="${esc(E.t(m.label))}" data-tipat="end"`:''}
           data-act="${m.locked?'teaser':'goMod'}" data-mod="${m.id}" ${m.teaser?`data-teaser="${m.teaser}"`:''} data-page="${esc(m.pageId||'')}">
           <span class="nvib"></span><span class="nvic">${icon(m.icon,17)}</span>
           <span class="nlbl">${esc(E.t(m.label))}</span>
@@ -1063,6 +1066,8 @@
       : E.state.born === 'navx' ? 'x'
       : (E.state.born === 'nav' || /^nsub:/.test(E.state.born || '')) ? '1' : '0');
     $('ekonav').innerHTML = navRail();
+    { const fl = E.state.navMin && document.querySelector('#ekonav .nsubs');   /* the collapsed rail's flyout: beside its icon, kept inside the window */
+      if(fl){ const top = fl.parentNode.getBoundingClientRect().top; fl.style.top = Math.max(8, Math.min(top, window.innerHeight - fl.offsetHeight - 8)) + 'px'; } }
     if(twinHost && E.state.pageId !== 'live-twin' && window.EKO_TWIN) window.EKO_TWIN.release(twinHost);   /* the Live Twin's highlight in the model is its own page's */
     if(E.state.roofView && roofHost){
       const m = $('mount');
@@ -1362,10 +1367,17 @@
   function closeRoofView(){ roofHost = null; E.state.roofView = false; }
   const ACTS = {
     goMod(el){ const m = E.nav.modules.find(x=>x.id===el.dataset.mod);
+      /* the module's own page is already open with its items showing: a second click folds them away (the chevron does the same) */
+      if(m.subs && m.subs.length && E.state.module === m.id){
+        /* collapsed rail: the icon of the page you are on opens or closes its flyout (which shows the active item) without leaving the page */
+        if(E.state.navMin){ E.state.exp = E.state.exp[m.id] ? {} : { [m.id]: true }; render(); return; }
+        if(!E.state.sub && E.state.navCollapsed !== m.id){ E.state.navCollapsed = m.id; E.state.exp = {}; render(); return; }
+      }
       if(!E.state.exp[m.id]) E.state.born = 'nsub:'+m.id;
       E.state.exp = { [m.id]: true }; E.state.moduleLabel = m.label;
       E.go(el.dataset.page || 'stub', m.id, null); },
-    goSub(el){ E.go(el.dataset.page || 'stub', el.dataset.mod, el.dataset.sub); },
+    goSub(el){ if(E.state.navMin) E.state.exp = {};   /* the collapsed rail's flyout closes on a choice */
+      E.go(el.dataset.page || 'stub', el.dataset.mod, el.dataset.sub); },
     /* D94: page-header sub tabs; model mode; the ask dialog on the stacked shell */
     phGo(el){ E.go(el.dataset.page || 'stub', el.dataset.mod, el.dataset.sub || null); },
     modelFs(){ E.set({ modelFs: !E.state.modelFs, born: E.state.modelFs ? null : 'dlg', mkPop:null }); },
@@ -1471,7 +1483,8 @@
     addonShow(el){ window.EKO_ADDONS.setOption(E, 'showAddOns', el.dataset.v === '1'); render(); },
     addonReset(){ window.EKO_ADDONS.reset(); render(); },
     navExp(el, ev){ ev.stopPropagation(); const id = el.dataset.mod;
-      const willOpen = !E.state.exp[id];
+      const willOpen = E.state.navCollapsed === id || !(E.state.exp[id] || E.state.module === id);   /* what the rail shows now: the active module is open unless folded away */
+      E.state.navCollapsed = willOpen ? null : id;
       E.state.exp = willOpen ? { [id]: true } : {};
       if(willOpen) E.state.born = 'nsub:'+id;
       render(); },
