@@ -354,6 +354,7 @@
       this.state.locFocus = null;   /* any navigation (the logo, a module, search, Back) ends Locate-in-3D focus */
       this.state.navCollapsed = null;
       if(pageId !== 'sec') this.state.secLocated = null;
+      if(pageId !== 'sec' && window.EKO_SECW && !(window.EKO_SCN && window.EKO_SCN.on(this))) window.EKO_SECW.leave(this);
       if(this.state.roofView) closeRoofView();   /* ...and the Hospital roof schematic, which stands in the content area */
       if(window.EKO_SURF) window.EKO_SURF.closeAll();          /* R4 (D67) */
       const targetModule = module ?? this.state.module;
@@ -1290,10 +1291,19 @@
   /* select + fly to it; or, when it is already selected, deselect + home */
   function selectEquipment(assetId, patch, still){   /* still: select without moving the camera (the model tree) */
     if(still && E.state.paint === assetId) return false;
-    if(E.state.paint && E.state.paint === assetId){ E.set({ mkPop: null, mkPopN: 0, paint: null }); goHome(); return false; }
-    E.set(Object.assign({}, patch, { paint: assetId }));
+    if(E.state.paint && E.state.paint === assetId){ leaveSelection(); return false; }
+    E.set(Object.assign({}, patch, { paint: assetId, mkFrom: wayBack(assetId, still) }));
     if(!still && typeof E.engine.flyTo === 'function') E.engine.flyTo(assetId);
     return true;
+  }
+  function wayBack(id, still){
+    const prev = E.state.mkFrom;
+    return { for: id, view: prev && prev.for === E.state.paint ? prev.view : (!still && E.engine.saveViewpoint ? E.engine.saveViewpoint() : null) };
+  }
+  function leaveSelection(){
+    const id = E.state.paint, from = E.state.mkFrom;
+    E.set({ mkPop: null, mkPopN: 0, paint: null, mkFrom: null });
+    if(from && from.for === id && from.view && E.engine.flyToViewpoint) E.engine.flyToViewpoint(from.view); else goHome();
   }
   function goHome(){ if(E.engine && typeof E.engine.resetView === 'function') E.engine.resetView(); }
   const apHistAt = () => { const nav = document.querySelector('.aphnav'); return nav ? +nav.getAttribute('aria-valuenow') : 0; };
@@ -1306,7 +1316,7 @@
   function leavePanel(pageId){ if(pageId === E.state.pageId) return; Object.assign(E.state, { paint: null, mkPulse: null }); goHome(); }
   /* Nothing selected: no popup, no equipment colour, no asset panel, no locate
      pulse. Reset uses it, and so does the host's orientation-cube home button. */
-  const NO_SEL = { mkPop: null, mkPopN: 0, mkPulse: null, paint: null, assetSel: null, pickEl: null, elMenu: null };
+  const NO_SEL = { mkPop: null, mkPopN: 0, mkPulse: null, paint: null, assetSel: null, pickEl: null, elMenu: null, mkFrom: null };
   E.clearSelection = () => E.set(NO_SEL);
   /* Mutate only. The caller renders once, after the tool change. */
   E.dropSelection = () => Object.assign(E.state, NO_SEL);
@@ -1697,6 +1707,7 @@
       } else if(onStrip){
         E.state.locFocus = { assetSel: id, back: null }; E.state.assetSel = id; E.state.mkPop = null;
       }
+      E.state.mkFrom = wayBack(id);
       E.state.mkPulse = a ? a.id : null; E.state.paint = id; render();   /* located equipment is coloured like a marker tap */
       E.engine.flyTo(id);
       setTimeout(() => { E.state.mkPulse = null; render(); }, 2200); },
@@ -1705,8 +1716,8 @@
     /* Back from the model to the view that opened it (Live Twin: Back to Schematic), stored in state.bimBack by that view */
     bimBack(){ const b = E.state.bimBack; if(!b) return; E.state.bimBack = null; E.state.modelFs = false; E.go(b.from.pageId, b.from.module, b.from.sub); },
     locBack(){ const lf = E.state.locFocus; if(!lf) return;
-      if(lf.back){ E.go(lf.back.pageId, lf.back.module, lf.back.sub); E.set({ assetSel: lf.assetSel, paint: lf.assetSel }); }
-      else E.set({ locFocus: null, modelFs: false, assetSel: lf.assetSel || E.state.assetSel, paint: lf.assetSel || E.state.paint }); },
+      if(lf.back){ E.go(lf.back.pageId, lf.back.module, lf.back.sub); E.set({ assetSel: lf.assetSel, mkFrom: null }); }
+      else { Object.assign(E.state, { locFocus: null, modelFs: false, assetSel: lf.assetSel || E.state.assetSel }); leaveSelection(); } },
 
     /* One handler for the bar, the sheet, the radial, and the shortcut keys.
        Select and Measure share the click. Slice stays on until it is clicked off or Reset. */
@@ -1884,8 +1895,7 @@
       E.set({ histAge: newer.length ? newer.sort((a,b)=>b.ageH-a.ageH)[0].ageH : null }); },
     mkClu(el){ const al = (el && el.dataset.alarm && E.alarm(el.dataset.alarm)) || E.data.alarms.find(x=>x.sev==='critical') || E.data.alarms[0];
       selectEquipment(al.asset, { born:'pop', mkPop: al.id, mkPopN: +((el && el.dataset.n) || 0) }); },
-    /* the visible Back for a selected equipment dot: the very action of tapping that dot again (selectEquipment's second tap) */
-    mkBack(){ if(E.state.paint) selectEquipment(E.state.paint, {}); },
+    mkBack(){ if(E.state.paint) leaveSelection(); },
     mkClose(){ E.set({ mkPop: null, mkPopN: 0 }); },
 
     /* Timeline. */

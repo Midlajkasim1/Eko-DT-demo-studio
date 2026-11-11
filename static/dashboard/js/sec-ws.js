@@ -227,6 +227,16 @@ window.EKO_SECW = (function(){
       if(e.gid && E.engine.setLabels && E.engine.roomsNear){ const near = E.engine.roomsNear(e.gid, 9);
         E.engine.setLabels([{ gid: e.gid, text: e.device || e.title, tone: 'sel', lift: 1.6 }].concat(near.map((r, i) => ({ gid: 'space:' + r.gid, text: r.name, tone: i ? 'room' : 'roomOn', lift: 0.4 })))); } });
   }
+  function leave(E){
+    const from = E.state.secEvFrom, eng = E.engine;
+    if(!E.state.secEv && !from) return;
+    E.state.secEv = null; E.state.secEvFrom = null;
+    if(!eng) return;
+    if(eng.highlightGid) eng.highlightGid(null);
+    if(eng.setLabels) eng.setLabels(null);
+    if(from && E.state.dock){ E.state.dock.level = from.level; if(eng.isolateLevel) eng.isolateLevel(from.level); }
+    if(from && from.view && eng.flyToViewpoint) eng.flyToViewpoint(from.view); else if(eng.resetView) eng.resetView();
+  }
   /* the pulse ring at the selected event, drawn in the marker layer */
   function pulse(E){
     const e = E.state.secEv && events(E).find(x => x.id === E.state.secEv);
@@ -253,12 +263,13 @@ window.EKO_SECW = (function(){
   setTimeout(regDrills, 0);
 
   const ACTS = {
-    secFilter(el){ const E = window.EKO, v = el.dataset.v || null; E.set({ secFilter: E.state.secFilter === v ? null : v, secEv: null }); },
+    secFilter(el){ const E = window.EKO, v = el.dataset.v || null; leave(E); E.set({ secFilter: E.state.secFilter === v ? null : v, secEv: null }); },
     secEv(el){ const E = window.EKO, id = el.dataset.v, e = events(E).find(x => x.id === id);
       E.state.dlg = null; E.state.opsDrill = null; E.state.secSel = null;
       if(E.state.pageId !== 'sec') E.go('sec', 'security', null);
+      if(!E.state.secEvFrom) E.state.secEvFrom = { level: E.state.dock.level, view: E.engine && E.engine.saveViewpoint ? E.engine.saveViewpoint() : null };
       focus(E, e); E.set({ secEv: id }); },
-    secBack(){ const E = window.EKO; if(E.engine && E.engine.highlightGid) E.engine.highlightGid(null); if(E.engine && E.engine.setLabels) E.engine.setLabels(null); E.set({ secEv: null }); }
+    secBack(){ const E = window.EKO; leave(E); E.set({}); }
   };
-  return { events, tiles, kpis, summary, panel, workspace, pulse, focus, clipOf, clipSrc, clipsFor, videoEl, seeing, areasNow, ACTS };
+  return { events, tiles, kpis, summary, panel, workspace, pulse, focus, leave, clipOf, clipSrc, clipsFor, videoEl, seeing, areasNow, ACTS };
 })();

@@ -193,9 +193,10 @@ window.EKO_SEC = (function(){
   }
   function located(E2){
     const b = E2.state.secLocated;
-    if(!b) return '';
-    return `<div class="secloc" role="status"><span>${esc(t('sec.located', { c: b.id }))}</span>
-      <button class="btnG btnSm" data-act="secLocatedBack">${icon('chevL', 12)} ${esc(t('back'))}</button></div>`;
+    const ev = !b && E2.state.secEv && window.EKO_SECW ? window.EKO_SECW.events(E2).find(x => x.id === E2.state.secEv) : null;
+    if(!b && !ev) return '';
+    return `<div class="secloc" role="status"><span>${esc(t('sec.located', { c: b ? b.id : (ev.device || ev.title) }))}</span>
+      <button class="btnG btnSm" data-act="${b ? 'secLocatedBack' : 'secBack'}">${icon('chevL', 12)} ${esc(t('back'))}</button></div>`;
   }
   /* A second locate keeps the first one's way back */
   function locatedFrom(E2, id){

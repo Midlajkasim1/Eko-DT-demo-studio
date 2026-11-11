@@ -865,14 +865,6 @@
   }
 }
 
-.dashboard-native-container .vpback {
-  position:absolute;
-  top:10px;
-  inset-inline-start:12px;
-  z-index:58;
-  min-height:34px
-}
-
 /* The Assets Overview shown over the register's model strip (Locate in 3D) sizes to the strip: 70% of it, between its
    own 220px floor and its normal width, instead of a fixed width that overflows a 270-400px strip */
 .dashboard-native-container .regmodelwrap #ovp {
@@ -17864,13 +17856,6 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   background:var(--chrome-bg); border:1px solid var(--chrome-edge); border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.25) }
 
 /* Back from the model to the view that opened it: solid, readable on a light or a dark model, top-centre, clear of the Overview panel (left), the model tools and the close button (right) */
-.dashboard-native-container .vpbim { pointer-events:auto; position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:58; white-space:nowrap; min-height:36px; display:inline-flex; align-items:center; gap:6px; padding:0 14px; border-radius:8px; border:1px solid #4b5f78; background:#0f1a28; color:#fff; font:inherit; font-weight:600; font-size:13px; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.4) }
-.dashboard-native-container .vpbim:hover { background:#16263a }
+.dashboard-native-container .vpbim { pointer-events:auto; position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:58; white-space:nowrap; min-height:36px; display:inline-flex; align-items:center; gap:6px; padding:0 14px; border-radius:8px; border:1px solid var(--elevBd); background:var(--elev); color:var(--t1); font:inherit; font-weight:600; font-size:13px; cursor:pointer; box-shadow:var(--shadow) }
+.dashboard-native-container .vpbim:hover { background:var(--s3) }
 .dashboard-native-container .vpbim:focus-visible { outline:2px solid var(--acc); outline-offset:2px }
-
-/* Back for a selected equipment dot in the model: same look as vpbim, below it when both show */
-.dashboard-native-container .vpmkback { pointer-events:auto; position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:57; min-height:36px; display:inline-flex; align-items:center; gap:6px; padding:0 14px; border-radius:8px; border:1px solid #4b5f78; background:#0f1a28; color:#fff; font:inherit; font-weight:600; font-size:13px; white-space:nowrap; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.4) }
-.dashboard-native-container .vpbim ~ .vpmkback { top:54px }
-.dashboard-native-container .vpmkback:hover { background:#16263a }
-.dashboard-native-container .vpmkback:focus-visible { outline:2px solid var(--acc); outline-offset:2px }
-
