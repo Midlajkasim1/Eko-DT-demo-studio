@@ -9335,6 +9335,29 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   height:0
 }
 
+.dashboard-native-container .velm {
+  position:absolute;
+  z-index:30;
+  min-width:176px;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  padding:6px;
+  background:var(--elev);
+  border:1px solid var(--elevBd);
+  border-radius:var(--radPop);
+  box-shadow:var(--shadowPop)
+}
+
+.dashboard-native-container .velm .dgvgo {
+  flex:none
+}
+
+.dashboard-native-container .velm .dgvgo:disabled {
+  opacity:.45;
+  cursor:default
+}
+
 .dashboard-native-container .vrc {
   position:absolute;
   left:0;

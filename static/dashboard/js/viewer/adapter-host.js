@@ -141,6 +141,18 @@
           window.EKO_HOST_ENGINE.isolateLayer(layerId, force);
         }
       },
+      hideElement: function (id) {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.hideElement) window.EKO_HOST_ENGINE.hideElement(id);
+      },
+      isolateElement: function (id) {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.isolateElement) window.EKO_HOST_ENGINE.isolateElement(id);
+      },
+      showAllElements: function () {
+        if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.showAllElements) window.EKO_HOST_ENGINE.showAllElements();
+      },
+      elementAt: function (id, clientX, clientY) {
+        return !!(window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.elementAt && window.EKO_HOST_ENGINE.elementAt(id, clientX, clientY));
+      },
       showAllLevels: function () {
         if (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.isolateLevel) {
           window.EKO_HOST_ENGINE.isolateLevel('ALL');

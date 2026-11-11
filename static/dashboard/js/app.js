@@ -154,7 +154,7 @@
       assetSel: null, apTab: 'alarms',
       dock: { tool: null, slice: false, bloom: null, style: window.EKO_LAYOUTS.tools.defaultStyle, tone: 'blue',
               level: 'ALL', layer: 'all', floorAlone: false, alerts: 'all', minimap: false },
-      mkPop: null, mkPopN: 0, mkPulse: null, paint: null, radial: null, vbarMin: ls.get('eko-vbar') === 'min',   /* D73 */
+      mkPop: null, mkPopN: 0, mkPulse: null, paint: null, radial: null, elMenu: null, elHidden: false, vbarMin: ls.get('eko-vbar') === 'min',   /* D73 */
       treeOpen: false, sumScroll: 0, sumScrollBack: null,   /* the model tree replaces the summary panel's body while open */
       ovpMin: ls.get('eko-ovp') === 'min', panMin: ls.get('eko-pan') === 'min', regMin: ls.get('eko-reg') === 'min',   /* D128: the register's model strip */
       /* `born` marks the element a state change just opened, so entry
@@ -1305,7 +1305,7 @@
   function leavePanel(pageId){ if(pageId === E.state.pageId) return; Object.assign(E.state, { paint: null, mkPulse: null }); goHome(); }
   /* Nothing selected: no popup, no equipment colour, no asset panel, no locate
      pulse. Reset uses it, and so does the host's orientation-cube home button. */
-  const NO_SEL = { mkPop: null, mkPopN: 0, mkPulse: null, paint: null, assetSel: null, pickEl: null };
+  const NO_SEL = { mkPop: null, mkPopN: 0, mkPulse: null, paint: null, assetSel: null, pickEl: null, elMenu: null };
   E.clearSelection = () => E.set(NO_SEL);
   /* Mutate only. The caller renders once, after the tool change. */
   E.dropSelection = () => Object.assign(E.state, NO_SEL);
@@ -1382,6 +1382,8 @@
     if(E.engine.clearMeasure) E.engine.clearMeasure();
     if(E.engine.clearSection) E.engine.clearSection();
     window.dispatchEvent(new Event('eko-tree-reset'));   /* what the model tree hid comes back with the floors and layers */
+    if(E.engine.showAllElements) E.engine.showAllElements();
+    E.state.elHidden = false;
     const heat = E.state.pageId === 'heatmap';
     E.set(Object.assign({
       dock: heat
@@ -1761,6 +1763,10 @@
       else if(def.kind === 'bloom'){ d.bloom = d.bloom === k ? null : k; }
       if(d.bloom && d.bloom !== prev) E.state.born = 'bloom';
       render(); },
+    elHide(){ const id = E.state.paint; if(!id) return; E.engine.hideElement(id); E.state.elHidden = true; E.clearSelection(); },
+    elIsolate(){ const id = E.state.paint; if(!id) return; E.engine.isolateElement(id); E.set({ elHidden: true, elMenu: null }); },
+    elShowAll(){ E.engine.showAllElements(); E.set({ elHidden: false, elMenu: null }); },
+    elClear(){ E.clearSelection(); },
     setLevel(el){ showLevel(el.dataset.v, true); },
     /* Isolate floor: the picked floor alone instead of that floor and everything below it. The picker stays open. */
     floorAlone(){ const d = E.state.dock; d.floorAlone = !d.floorAlone;

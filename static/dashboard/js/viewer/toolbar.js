@@ -39,6 +39,7 @@ window.EKO_VT = (function(){
     const layersOn = chosenLayers(d);
     if(layersOn.length) items.push({ k:'layer', text: layersOn.map(id => E.t(LBL[id] || id)).join(', ') });
     if(d.minimap) items.push({ k:'minimap', text: E.t('dockMinimap') });
+    if(E.state.elHidden) items.push({ k:'hidden', text: E.t('elHiddenState') });
     return items;
   }
   const cameraMoved = E => !!(E.engine && E.engine.cameraMoved && E.engine.cameraMoved());
@@ -143,7 +144,7 @@ window.EKO_VT = (function(){
   }
   /* The phone sheet and the radial are positioned against the scene, so
      they render at the viewer level — never inside the centred bar row. */
-  function extras(E){ return (phone() ? sheet(E) : '') + radial(E); }
+  function extras(E){ return (phone() ? sheet(E) : '') + radial(E) + elMenu(E); }
 
   /* ------------------------------- flyouts --------------------------------- */
   const panel = (E, cls, inner) =>
@@ -243,11 +244,20 @@ window.EKO_VT = (function(){
       style="left:${r.x}px;top:${r.y}px"><span class="vrc" aria-hidden="true"></span>${items}</div>`;
   }
 
+  function elMenu(E){
+    const m = E.state.elMenu;
+    if(!m || !E.state.paint) return '';
+    const esc = C().esc, t = E.t.bind(E);
+    const row = (act, icon, label, off) => `<button class="dgvgo" role="menuitem" data-act="${act}" ${off ? 'disabled' : ''}>${C().icon(icon, 14)}<span>${esc(t(label))}</span></button>`;
+    return `<div class="velm" role="menu" aria-label="${esc(t('elMenu'))}" style="left:${m.x}px;top:${m.y}px">
+      ${row('elHide', 'eyeOff', 'elHide')}${row('elIsolate', 'maximize', 'elIsolate')}${row('elShowAll', 'eye', 'elShowAll', !E.state.elHidden)}${row('elClear', 'x', 'elClear')}</div>`;
+  }
+
   /* --------------------------- canvas gestures ----------------------------- */
   /* The adapter owns drag / two-finger / pinch / wheel. The shell adds the
      semantic gestures: double-click / double-tap = frame, long-press /
      right-click = radial. Never on chrome or markers. */
-  const IGN = '.mk,.mkpop,#vbar,.mzfly,.vradial,.scrubbar,.minimap,.vsheet,.scrim,.vfab';
+  const IGN = '.mk,.mkpop,#vbar,.mzfly,.vradial,.velm,.scrubbar,.minimap,.vsheet,.scrim,.vfab';
   function wireCanvas(E, host){
     if(host._ekoGest) return;
     host._ekoGest = true;
@@ -255,6 +265,12 @@ window.EKO_VT = (function(){
     const vp = () => document.getElementById('vpmain');
     const openRadial = ev => {
       const vr = vp().getBoundingClientRect(), hr = host.getBoundingClientRect();
+      if(E.state.paint && E.engine.elementAt && E.engine.elementAt(E.state.paint, ev.clientX, ev.clientY)){
+        const W = 190, Hh = 176;
+        E.set({ elMenu: { x: Math.round(Math.max(hr.left - vr.left + 4, Math.min(hr.right - vr.left - W, ev.clientX - vr.left))),
+          y: Math.round(Math.max(hr.top - vr.top + 4, Math.min(hr.bottom - vr.top - Hh, ev.clientY - vr.top))) } });
+        return;
+      }
       const R = M().radialR + 26;
       const x = Math.max(hr.left - vr.left + R, Math.min(hr.right - vr.left - R, ev.clientX - vr.left));
       const y = Math.max(hr.top - vr.top + R, Math.min(hr.bottom - vr.top - R, ev.clientY - vr.top));

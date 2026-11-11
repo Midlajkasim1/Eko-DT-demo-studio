@@ -21,7 +21,7 @@ import {
 import { runIfcDiagnostics } from '@/lib/ifcDiagnostics' // TEMPORARY, with EKO_IFC_DIAGNOSTICS below
 import { HVAC_GENERIC, HVAC_SPECIFIC, floorFilterSkips, isCeilingType, levelHides, reportLevel, type LevelIndex, type MechanicalInfo } from '@/lib/floorPolicy'
 import { choosePlate, plateLoops, platePrism, type XzTri } from '@/lib/floorOutline'
-import { setHidden, isHidden, onVisibilityApplied } from '@/lib/visibilityCoordinator'
+import { setHidden, isHidden, hiddenBy, onVisibilityApplied } from '@/lib/visibilityCoordinator'
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
 import { createFcuSchematic } from '@/lib/fcuSchematic'
@@ -348,6 +348,55 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         locate(bimId).then(e => { if (e) repositionMarkers() })
       }
       return null
+    }
+
+    const loadedModels = (): any[] => {
+      const list = engine?.fragments?.models?.list
+      return list ? Array.from(list.values()) : []
+    }
+
+    const hideElement = async (idOrBimId: string) => {
+      const bimId = toBimId(idOrBimId)
+      const entry = bimId ? await locate(bimId) : null
+      if (!entry) return false
+      return setHidden(entry.model, 'pick', new Set(hiddenBy(entry.model, 'pick')).add(entry.localId))
+    }
+
+    const isolateElement = async (idOrBimId: string) => {
+      const bimId = toBimId(idOrBimId)
+      const entry = bimId ? await locate(bimId) : null
+      if (!entry) return false
+      for (const m of loadedModels()) {
+        if (typeof m.getItemsIdsWithGeometry !== 'function') continue
+        const rest = new Set<number>(await m.getItemsIdsWithGeometry())
+        if (m === entry.model) rest.delete(entry.localId)
+        await setHidden(m, 'pick', rest)
+      }
+      return true
+    }
+
+    const showAllElements = async () => {
+      for (const m of loadedModels()) if (hiddenBy(m, 'pick').size) await setHidden(m, 'pick', [])
+    }
+
+    const elementAt = (idOrBimId: string, clientX: number, clientY: number) => {
+      const camera = engine?.world?.camera?.three
+      const canvas = engine?.world?.renderer?.three?.domElement as HTMLElement | undefined
+      const bimId = toBimId(idOrBimId)
+      const entry = bimId ? located.get(bimId) : null
+      if (!camera || !canvas || !entry) return false
+      const box = worldBoxOf(entry), cr = canvas.getBoundingClientRect(), PAD = 6
+      camera.updateMatrixWorld()
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, behind = 0
+      for (let i = 0; i < 8; i++) {
+        const v = new THREE.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(camera)
+        if (v.z > 1) { behind++; continue }
+        const x = cr.left + (v.x * 0.5 + 0.5) * cr.width, y = cr.top + (-v.y * 0.5 + 0.5) * cr.height
+        x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y)
+      }
+      if (behind === 8) return false
+      if (behind) return true
+      return clientX >= x0 - PAD && clientX <= x1 + PAD && clientY >= y0 - PAD && clientY <= y1 + PAD
     }
 
     // Whether a loaded model holds the asset's element; a first ask looks it up and redraws once found
@@ -2798,6 +2847,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       flyToAsset,
       highlightAsset,
       clearHighlight,
+      hideElement,
+      isolateElement,
+      showAllElements,
+      elementAt,
       resetView: () => { leavePlan(); resetCameraToHome(engine) },
       setViewMode,
       setDashboardOpen,
