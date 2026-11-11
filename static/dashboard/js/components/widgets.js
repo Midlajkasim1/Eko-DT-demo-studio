@@ -1802,7 +1802,8 @@ window.EKO_C = (function(){
           value: L.sub ? [t('ap.reading'), L.sub] : null, sev: a.sev, acked: !!a.ack, hend: histBtn(a),
           actions: a.ack ? [] : [{ act: 'ackAlarm', data: { alarm: a.id }, label: t('acknowledge') }] })}${recOf(a, L.rec)}${histPanel(a)}</div>`; }).join('');
       const fdd = fddRows.map(p => { const v = String(E.clip2(p[2]));
-        return pbox({ kind: t('apFdd'), title: trP(p[0]), value: [t(v.length < 16 ? 'dgc.status' : 'ap.reading'), v] }); }).join('');
+        const healthy = /^(normal|ok|false|off|0|healthy)$/i.test(v.trim()) || /[-–:]\s*normal\s*$/i.test(v);
+        return pbox({ kind: t('apFdd'), title: trP(p[0]), value: [t(v.length < 16 ? 'dgc.status' : 'ap.reading'), v], sev: healthy ? '' : 'critical' }); }).join('');
       const pts = alarmPtRows.map(p => row(trP(p[0]), esc(p[1]))).join('');
       body = (als.length ? '' : empty('ap.noAlarms')) + (boxes || fdd ? `<div class="pboxes">${boxes}${fdd}</div>` : '')
         + (pts ? sec(t('ap.readings')) + rows(pts) : '');

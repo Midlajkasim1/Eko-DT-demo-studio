@@ -733,7 +733,61 @@ window.EKO_A = (function(){
     const n = window.INJECTED_PROJECT_CONFIG && window.INJECTED_PROJECT_CONFIG.heatmap && window.INJECTED_PROJECT_CONFIG.heatmap.people;
     return Math.max(0, Math.min(400, n == null || !isFinite(Number(n)) ? 80 : Math.round(Number(n))));
   }
+  /* Largest remainder, so the parts add up to total. */
+  function splitCount(total, weights){
+    const sum = weights.reduce((n, w) => n + w, 0) || 1;
+    const exact = weights.map(w => total * w / sum);
+    const counts = exact.map(v => Math.floor(v));
+    let left = total - counts.reduce((n, c) => n + c, 0);
+    exact.map((v, i) => [v - counts[i], i]).sort((a, b) => b[0] - a[0]).forEach(pair => { if(left > 0){ counts[pair[1]]++; left--; } });
+    return counts;
+  }
+  let occPlanKey = '', occPlanMap = null;
+  /* Each level gets its own count: a saved number, or its share of People by how many rooms it has. */
+  function occPlan(){
+    const h = (window.INJECTED_PROJECT_CONFIG || {}).heatmap || {};
+    const rooms = (window.EKO && window.EKO.data && window.EKO.data.heat && window.EKO.data.heat.rooms) || [];
+    if(!rooms.length) return null;
+    const by = h.peopleByLevel && typeof h.peopleByLevel === 'object' ? h.peopleByLevel : {};
+    let sig = String(occPeople()) + (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.floorOf ? '|floors' : '|nofloor');
+    Object.keys(by).sort().forEach(k => { sig += '|' + k + '=' + by[k]; });
+    rooms.forEach(r => { sig += ';' + r.guid + (r.level || ''); });
+    if(sig === occPlanKey && occPlanMap) return occPlanMap;
+    const groups = new Map();
+    rooms.forEach(r => {
+      if(!r || !r.guid) return;
+      const floor = toolbarFloor(r.level || '');
+      const key = floor ? floor.id : '';
+      if(!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(r.guid);
+    });
+    const floors = [...groups.entries()];
+    const saved = id => { const n = by[id]; return n == null || !isFinite(Number(n)) ? null : Math.max(0, Math.min(400, Math.round(Number(n)))); };
+    const open = floors.filter(f => saved(f[0]) == null);
+    const openCounts = splitCount(occPeople(), open.map(f => f[1].length));
+    const budget = new Map();
+    let oi = 0;
+    floors.forEach(f => { const n = saved(f[0]); budget.set(f[0], n == null ? openCounts[oi++] || 0 : n); });
+    let sum = 0; budget.forEach(n => { sum += n; });
+    if(sum > 400){ const scaled = splitCount(400, floors.map(f => budget.get(f[0]))); floors.forEach((f, i) => budget.set(f[0], scaled[i] || 0)); }
+    const map = new Map();
+    floors.forEach(f => {
+      const n = budget.get(f[0]) || 0;
+      if(!n) return;
+      const counts = splitCount(n, f[1].map(occWeight));
+      f[1].forEach((id, i) => { if(counts[i]) map.set(id, (map.get(id) || 0) + counts[i]); });
+    });
+    occPlanKey = sig; occPlanMap = map;
+    return map;
+  }
   function occOf(z, zones){
+    const plan = occPlan();
+    if(plan){
+      const ids = (z.bimIds && z.bimIds.length) ? z.bimIds : [z.bimId || z.gid || z.guid].filter(Boolean);
+      const count = ids.reduce((n, id) => n + (plan.get(id) || 0), 0);
+      const cap = Math.max(4, ids.length * 4);
+      return { count: count, ratio: Math.min(1, count / cap) };
+    }
     const list = zones || [z];
     const idOf = x => (x.bimIds && x.bimIds[0]) || x.bimId || x.gid || x.nameEn;
     const weights = list.map(x => occWeight(idOf(x)));

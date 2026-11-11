@@ -161,7 +161,9 @@ window.EKO_V = (function(){
         z: el.dataset.z ? +el.dataset.z : undefined,
         bimId: el.dataset.bimid,
         asset: el.dataset.asset,
-        alarm: el.dataset.alarm
+        alarm: el.dataset.alarm,
+        alt: el.dataset.alt,
+        pin: el.dataset.pin
       });
       const on = p.visible && p.x >= 0 && p.x <= hr.width && p.y >= 0 && p.y <= hr.height;
       const left = (p.x + hr.left - lr.left).toFixed(1) + 'px', top = (p.y + hr.top - lr.top).toFixed(1) + 'px';
