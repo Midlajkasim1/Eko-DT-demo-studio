@@ -111,7 +111,7 @@
         cell:(E2, r) => sevCell(E2, r),
         enumOpts:E2 => [{ v:'alarm', label:E2.t('dgv.alarm') }, { v:'stale', label:E2.t('dgst.stale') }, { v:'ok', label:E2.t('stNormal') }, { v:'nc', label:E2.t('reg13.nc') }],
         sortVal:(E2, r) => { const c = sevCounts(E2, r); return c.critical ? 0 : c.high ? 1 : c.medium ? 2 : r.st === 'stale' ? 3 : r.st === 'nc' ? 5 : 4; } },
-      { key:'trend', labelKey:'dgc.trend', type:'text', width:132, def:true, grp:'condition', noFilter:true, get:(E2, r) => trendText(E2, r), text:(E2, r) => trendText(E2, r), cell:(E2, r) => trendCell(E2, r), sortVal:(E2, r) => { const d = trendDelta(r); return d == null ? null : -d; } },
+      { key:'trend', labelKey:'dgc.trend', type:'text', width:132, def:false, grp:'condition', noFilter:true, get:(E2, r) => trendText(E2, r), text:(E2, r) => trendText(E2, r), cell:(E2, r) => trendCell(E2, r), sortVal:(E2, r) => { const d = trendDelta(r); return d == null ? null : -d; } },
       { key:'sev', labelKey:'dgc.sev', type:'enum', width:150, def:false, grp:'condition', get:(E2, r) => { const w = worst(E2, r); return w ? w.sev : ''; }, text:(E2, r) => { const w = worst(E2, r); return w ? E2.t('rpSev.' + w.sev) : E2.t('emptyDash'); },
         enumOpts:E2 => ['critical', 'high', 'medium'].map(v => ({ v, label:E2.t('rpSev.' + v) })), sortVal:(E2, r) => { const w = worst(E2, r); return w ? ({ critical:0, high:1, medium:2 }[w.sev]) : 9; } },
       { key:'floor', labelKey:'dgc.floor', type:'enum', width:94, def:true, grp:'identity', mob:'line2', get:(E2, r) => r.floor, text:(E2, r) => r.floor, enumOpts:E2 => [...new Set(regRows(E2).map(r => r.floor))].sort().map(v => ({ v, label:v })) },
@@ -132,7 +132,7 @@
         cell:(E2, r) => tagsOf(E2, r).length ? tagsOf(E2, r).map(x => `<span class="chip dgtag">${esc(x)}</span>`).join(' ') : `<span class="tCap">${esc(E2.t('emptyDash'))}</span>` }
     ],
     views:[
-      { id:'all', nameKey:'dgv.all', cols:['id', 'st', 'trend', 'floor', 'zone', 'wos', 'wost'], sort:[{ key:'st', dir:'asc' }], filters:{}, density:'standard' },
+      { id:'all', nameKey:'dgv.all', cols:['id', 'st', 'floor', 'zone', 'wos', 'wost'], sort:[{ key:'st', dir:'asc' }], filters:{}, density:'standard' },
       { id:'alarm', nameKey:'dgv.alarm', cols:['id', 'st', 'sev', 'sys', 'floor', 'wost'], sort:[{ key:'sev', dir:'asc' }], filters:{ st:{ in:['alarm'] } }, density:'standard' },
       { id:'wo', nameKey:'dgv.wo', cols:['id', 'wost', 'wos', 'st', 'floor', 'svc'], sort:[{ key:'wos', dir:'desc' }], filters:{ hasWo:{ is:true } }, group:'wost', density:'compact' }
     ],

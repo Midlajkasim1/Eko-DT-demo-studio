@@ -813,6 +813,8 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
   const equipCsv = links.filter(l => l.kind !== 'space' && l.kind !== 'cctv')
   const cameraCsv = links.filter(l => l.kind === 'cctv')
   const roomCsv = links.filter(l => l.kind === 'space')
+  const tabCsv = mode === 'cctv' ? cameraCsv : mode === 'space' ? roomCsv : equipCsv
+  const tabFile = mode === 'cctv' ? 'cctv' : mode === 'space' ? 'spaces' : 'equipment'
 
   const handleSave = async () => {
     setSaving(true)
@@ -1409,15 +1411,11 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
                   </div>
                 )}
                 <div className="al-group">
-                  <button
-                    className="ds-btn ds-btn-secondary al-small"
-                    onClick={() => setImportText(importText === null ? '' : null)}
-                    title={mode === 'cctv' ? 'Adds cameras from a file. Equipment and room rows are left out.' : mode === 'space' ? 'Adds rooms from a file. Equipment and camera rows are left out.' : 'Adds equipment from a file. Camera and room rows are left out.'}
-                  >
+                  <button className="ds-btn ds-btn-secondary al-small" onClick={() => setImportText(importText === null ? '' : null)}>
                     {importText === null ? 'Import' : 'Close import'}
                   </button>
                   <div className="al-export" ref={exportMenu}>
-                    <button className="ds-btn ds-btn-secondary al-small" onClick={() => downloadCsv(links, 'equipment-spaces')} disabled={!links.length} title="Equipment, cameras and rooms in one CSV">Export CSV</button>
+                    <button className="ds-btn ds-btn-secondary al-small" onClick={() => downloadCsv(tabCsv, tabFile)} disabled={!tabCsv.length}>Export CSV</button>
                     <button
                       className="ds-btn ds-btn-secondary al-small al-export-more"
                       onClick={() => setExportOpen(open => !open)}
@@ -1445,11 +1443,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
                   <textarea
                     value={importText}
                     onChange={e => setImportText(e.target.value)}
-                    placeholder={mode === 'cctv'
-                      ? 'Cameras only. An equipment or room row in this file is left out.\nCSV: equip,guid,type,finId,element,kind,room,level,clip'
-                      : mode === 'space'
-                      ? 'Rooms only. An equipment or camera row in this file is left out.\nCSV: equip,guid,type,finId,element,kind,room,level,clip'
-                      : 'Equipment only. A camera or room row in this file is left out.\nCSV: equip,guid,type,finId,element,kind,room,level,clip'}
+                    placeholder={'CSV or JSON: equip,guid,type,finId,element,kind,room,level,clip'}
                   />
                   <div className="al-import-row">
                     <input type="file" accept=".csv,.json,.txt" onChange={e => readFile(e.target.files?.[0])} />
