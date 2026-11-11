@@ -784,25 +784,26 @@
   var HIDDEN = {};   /* the system layers switched off, for the page session */
 
   /* the floor mapping, with no machine selected: what FIN floor each drawn level's mapped equipment report */
-  /* a machine's floor key for navigation: the outside machines (DEWA, generator) are listed with Level 1, as goTo shows them there */
-  function lvOf(e) { return e.level === 'EXT' ? 'L1' : e.level; }
-  var FLOOR_ORDER = ['L1', 'L2', 'L3', 'RF'];
-  function floorName(E, lv) { return tr(E, 'twinLv.' + lv) + ' \u00b7 ' + lv + ' / ' + MAP.LEVELS[lv]; }
-  /* the Equipment tab with nothing selected: four floor cards, or the chosen floor's machines (the same EQUIP list and floor keys the drawing uses) */
+  /* a machine's floor in the list: its own drawn level (the outside machines, DEWA and the generator, are listed as Outside, not put on a floor) */
+  function lvOf(e) { return e.level; }
+  /* top to bottom as the building is drawn; Outside only when something is drawn outside */
+  var FLOOR_ORDER = ['RF', 'L3', 'L2', 'L1', 'EXT'];
+  /* the Equipment tab with nothing selected: one expandable row per floor (name, count from EQUIP), the open floor's machines under it; one floor open at a time */
   function equipNavHtml(E, s) {
-    if (!s.flr) {
-      return '<p class="twpick">' + esc(tr(E, 'twinFloorPick')) + '</p><div class="twfcards">' + FLOOR_ORDER.map(function (lv) {
-        var n = EQUIP.filter(function (e) { return lvOf(e) === lv; }).length;
-        return '<button type="button" class="twfcard" data-tw="floor" data-lv="' + lv + '"><b>' + esc(tr(E, 'twinLv.' + lv)) + '</b><span>' + esc(lv + ' / ' + MAP.LEVELS[lv]) + '</span><small>' + esc(tr(E, 'twinFloorCount', { n: String(n) })) + '</small></button>';
-      }).join('') + '</div>';
-    }
-    return '<div class="twnav"><button type="button" class="btnG btnSm" data-tw="floors">\u2190 ' + esc(tr(E, 'twinAllFloors')) + '</button></div><h3 class="twsub">' + esc(floorName(E, s.flr)) + '</h3><ul class="twelist">' +
-      EQUIP.filter(function (e) { return lvOf(e) === s.flr; }).map(function (e) {
-        var st = s.res[e.id].state, al = (s.alIdx.by[e.id] || []).length;
-        return '<li>' + goBtn(e.id, '<b>' + esc(e.label) + '</b><span class="twchip" data-fin="' + st + '">' + esc(tr(E, 'twinFin.' + st)) + '</span>' +
-          (MAP.RUNPTS[e.type] ? '<span class="twchip" data-run="' + (s.run[e.id] || 'unknown') + '">' + esc(tr(E, 'twinRun.' + (s.run[e.id] || 'unknown'))) + '</span>' : '') +
-          (al ? '<span class="twchip" data-al="1">' + esc(tr(E, 'twinAlarms', { n: String(al) })) + '</span>' : '')) + '</li>';
-      }).join('') + '</ul>';
+    return '<p class="twpick">' + esc(tr(E, 'twinFloorPick')) + '</p><div class="twacc">' + FLOOR_ORDER.map(function (lv) {
+      var list = EQUIP.filter(function (e) { return lvOf(e) === lv; }), open = s.flr === lv;
+      if (!list.length) return '';
+      var code = MAP.LEVELS[lv] ? lv + ' \u00b7 ' + MAP.LEVELS[lv] : '';
+      return '<section class="twaccf" data-lv="' + lv + '" data-open="' + (open ? 1 : 0) + '"><button type="button" class="twaccrow" data-tw="floor" data-lv="' + lv + '" aria-expanded="' + open + '" aria-controls="twacc-' + lv + '">' +
+        '<i class="twaccarr" aria-hidden="true"></i><span class="twaccn"><b>' + esc(tr(E, 'twinLv.' + lv)) + '</b>' + (code ? '<small>' + esc(code) + '</small>' : '') + '</span>' +
+        '<span class="twaccc" aria-label="' + esc(tr(E, 'twinFloorCount', { n: String(list.length) })) + '">' + list.length + '</span></button>' +
+        (open ? '<ul class="twelist" id="twacc-' + lv + '">' + list.map(function (e) {
+          var st = s.res[e.id].state, al = (s.alIdx.by[e.id] || []).length;
+          return '<li>' + goBtn(e.id, '<b>' + esc(e.label) + '</b><span class="twchip" data-fin="' + st + '">' + esc(tr(E, 'twinFin.' + st)) + '</span>' +
+            (MAP.RUNPTS[e.type] ? '<span class="twchip" data-run="' + (s.run[e.id] || 'unknown') + '">' + esc(tr(E, 'twinRun.' + (s.run[e.id] || 'unknown'))) + '</span>' : '') +
+            (al ? '<span class="twchip" data-al="1">' + esc(tr(E, 'twinAlarms', { n: String(al) })) + '</span>' : '')) + '</li>';
+        }).join('') + '</ul>' : '') + '</section>';
+    }).join('') + '</div>';
   }
   /* the systems, flow and layout key, from SYSTEMS / LAYERS; opened from the Legend button on the drawing */
   function legendHtml(E) {
@@ -1020,7 +1021,7 @@
       else if (b.dataset.tw === 'go') goTo(host, b.dataset.id);
       else if (b.dataset.tw === 'bim') showInModel(host, s.sel);
       else if (b.dataset.tw === 'legend') setLegend(host);
-      else if (b.dataset.tw === 'floor') { s.flr = b.dataset.lv; s.side.scrollTop = 0; update(host, s.E); }
+      else if (b.dataset.tw === 'floor') { s.flr = s.flr === b.dataset.lv ? null : b.dataset.lv; update(host, s.E); refocus('[data-tw="floor"][data-lv="' + b.dataset.lv + '"]'); }
       else if (b.dataset.tw === 'floors') { s.flr = null; s.side.scrollTop = 0; select(host, null); }
       else if (b.dataset.tw === 'back') { s.side.scrollTop = 0; select(host, null); }
       else if (b.dataset.tw === 'tab') { s.tab = b.dataset.tab; update(host, s.E); }
