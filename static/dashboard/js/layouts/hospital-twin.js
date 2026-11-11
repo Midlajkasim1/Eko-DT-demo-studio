@@ -813,7 +813,7 @@
         }).join('') + '</div>';
       }).join('') + '</dl><h3 class="twsub">' + esc(tr(E, 'twinFlowT')) + '</h3><ul class="twflowkey">' + ['measured', 'running', 'stopped', 'tripped', 'stale', 'offline', 'unknown'].map(function (k) {
         return '<li><i class="twfk" data-flow="' + k + '"></i>' + esc(tr(E, 'twinFlow.' + k)) + '</li>';
-      }).join('') + '</ul><p class="twnote">' + esc(tr(E, 'twinLayoutNote')) + '</p>';
+      }).join('') + '</ul>';
   }
   function label(id) { return EQ[id] ? EQ[id].label : id; }
   /* a machine's name as a button that selects it (and shows its floor) */

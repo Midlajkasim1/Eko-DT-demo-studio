@@ -17520,8 +17520,9 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .twtrace[hidden] { display:none }
 .dashboard-native-container .twtrace button { flex:none; color:#e6eef7; border-color:#4b5f78; background:rgba(255,255,255,.06) }
 .dashboard-native-container .twtrace .twtracet { flex:1 1 auto; min-width:0 }
-.dashboard-native-container .twacts { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 84px), 1fr)); gap:6px; margin:8px 0 }
-.dashboard-native-container .twacts button { min-height:34px; padding-block:4px; line-height:1.2; text-align:center; white-space:normal; overflow-wrap:anywhere }
+.dashboard-native-container .twacts { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; margin:8px 0 }
+.dashboard-native-container .twacts button { box-sizing:border-box; width:100%; min-height:36px; padding:4px 8px; line-height:1.2; text-align:center; white-space:normal; overflow-wrap:normal; word-break:normal }
+.dashboard-native-container .twacts button[data-tw="bim"], .dashboard-native-container .twacts button[data-tw="untrace"] { grid-column:1 / -1 }
 /* Legend drop-up on the drawing (bottom-left), floor cards and equipment list in the Equipment tab */
 .dashboard-native-container .twlegbtn { position:absolute; inset-block-end:10px; inset-inline-start:10px; z-index:3; background:rgba(9,14,21,.82); color:#e6eef7; border-color:#2a3b50 }
 .dashboard-native-container .twlegbtn[aria-expanded="true"] { border-color:var(--acc); color:var(--acc) }
