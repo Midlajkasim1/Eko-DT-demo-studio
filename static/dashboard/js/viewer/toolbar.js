@@ -261,10 +261,22 @@ window.EKO_VT = (function(){
   function wireCanvas(E, host){
     if(host._ekoGest) return;
     host._ekoGest = true;
+    if(typeof wireCanvas.off === 'function') wireCanvas.off();
     const M = () => T().metrics;
     const vp = () => document.getElementById('vpmain');
+    /* Studio sets pointer-events:none on #enginehost so orbit reaches the canvas behind it. */
+    const overHole = ev => {
+      const t = ev.target;
+      if(!(t instanceof Element) || !host.isConnected || t.closest(IGN)) return false;
+      if(host.contains(t)) return true;
+      if(!t.closest('.viewer-canvas-container')) return false;
+      const r = host.getBoundingClientRect();
+      return r.width >= 2 && r.height >= 2 && ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
+    };
     const openRadial = ev => {
-      const vr = vp().getBoundingClientRect(), hr = host.getBoundingClientRect();
+      const root = vp();
+      if(!root) return;
+      const vr = root.getBoundingClientRect(), hr = host.getBoundingClientRect();
       if(E.state.paint && E.engine.elementAt && E.engine.elementAt(E.state.paint, ev.clientX, ev.clientY)){
         const W = 190, Hh = 176;
         E.set({ elMenu: { x: Math.round(Math.max(hr.left - vr.left + 4, Math.min(hr.right - vr.left - W, ev.clientX - vr.left))),
@@ -286,19 +298,24 @@ window.EKO_VT = (function(){
       host.appendChild(rip); setTimeout(() => rip.remove(), 420);
     };
     let down = null, hold = null, holdFired = false, lastTap = null;
-    host.addEventListener('pointerdown', ev => {
-      if(ev.target.closest(IGN)) return;
+    const offs = [];
+    const listen = (type, fn, capture) => {
+      window.addEventListener(type, fn, capture);
+      offs.push(() => window.removeEventListener(type, fn, capture));
+    };
+    listen('pointerdown', ev => {
+      if(!overHole(ev)) return;
       down = { x: ev.clientX, y: ev.clientY, b: ev.button, t: Date.now(), pt: ev.pointerType };
       clearTimeout(hold); hold = null; holdFired = false;
       if(ev.pointerType === 'touch' && ev.isPrimary)
         hold = setTimeout(() => { hold = null; holdFired = true; openRadial(ev); }, M().holdMs);
     }, true);
-    host.addEventListener('pointermove', ev => {
+    listen('pointermove', ev => {
       if(hold && down && (Math.abs(ev.clientX - down.x) > 10 || Math.abs(ev.clientY - down.y) > 10)){ clearTimeout(hold); hold = null; }
     }, true);
-    host.addEventListener('pointerup', ev => {
+    listen('pointerup', ev => {
       clearTimeout(hold); hold = null;
-      if(ev.pointerType !== 'touch' || !down || holdFired) return;
+      if(!overHole(ev) || ev.pointerType !== 'touch' || !down || holdFired) return;
       const moved = Math.abs(ev.clientX - down.x) > 12 || Math.abs(ev.clientY - down.y) > 12;
       if(moved) return;
       const now = Date.now();
@@ -306,20 +323,21 @@ window.EKO_VT = (function(){
         lastTap = null; focus(ev);
       } else lastTap = { x: ev.clientX, y: ev.clientY, t: now };
     }, true);
-    host.addEventListener('pointercancel', () => { clearTimeout(hold); hold = null; }, true);
-    host.addEventListener('dblclick', ev => {
-      if(ev.target.closest(IGN)) return;
+    listen('pointercancel', () => { clearTimeout(hold); hold = null; }, true);
+    listen('dblclick', ev => {
+      if(!overHole(ev)) return;
       if(down && down.pt === 'touch') return;                 /* the tap path already framed */
       focus(ev);
-    });
-    host.addEventListener('contextmenu', ev => {
-      if(ev.target.closest(IGN)) return;
+    }, true);
+    listen('contextmenu', ev => {
+      if(!overHole(ev)) return;
       ev.preventDefault();
       /* a right-DRAG is a pan, not a request for the menu */
       if(down && down.b === 2 && (Math.abs(ev.clientX - down.x) > 6 || Math.abs(ev.clientY - down.y) > 6)) return;
       if(ev.button === 0 && down && down.pt === 'touch') return;   /* touch long-press handled above */
       openRadial(ev);
-    });
+    }, true);
+    wireCanvas.off = () => { offs.forEach(fn => fn()); wireCanvas.off = null; };
   }
 
   /* Type-ahead in the pickers filters rows in place (no re-render: the field
