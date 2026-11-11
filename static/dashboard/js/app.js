@@ -1794,6 +1794,8 @@
       E.set({ histAge: newer.length ? newer.sort((a,b)=>b.ageH-a.ageH)[0].ageH : null }); },
     mkClu(el){ const al = (el && el.dataset.alarm && E.alarm(el.dataset.alarm)) || E.data.alarms.find(x=>x.sev==='critical') || E.data.alarms[0];
       selectEquipment(al.asset, { born:'pop', mkPop: al.id, mkPopN: +((el && el.dataset.n) || 0) }); },
+    /* the visible Back for a selected equipment dot: the very action of tapping that dot again (selectEquipment's second tap) */
+    mkBack(){ if(E.state.paint) selectEquipment(E.state.paint, {}); },
     mkClose(){ E.set({ mkPop: null, mkPopN: 0 }); },
 
     /* Timeline. */

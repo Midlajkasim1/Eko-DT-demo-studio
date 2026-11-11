@@ -17708,3 +17708,10 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .vpbim { pointer-events:auto; position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:58; white-space:nowrap; min-height:36px; display:inline-flex; align-items:center; gap:6px; padding:0 14px; border-radius:8px; border:1px solid #4b5f78; background:#0f1a28; color:#fff; font:inherit; font-weight:600; font-size:13px; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.4) }
 .dashboard-native-container .vpbim:hover { background:#16263a }
 .dashboard-native-container .vpbim:focus-visible { outline:2px solid var(--acc); outline-offset:2px }
+
+/* Back for a selected equipment dot in the model: same look as vpbim, below it when both show */
+.dashboard-native-container .vpmkback { pointer-events:auto; position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:57; min-height:36px; display:inline-flex; align-items:center; gap:6px; padding:0 14px; border-radius:8px; border:1px solid #4b5f78; background:#0f1a28; color:#fff; font:inherit; font-weight:600; font-size:13px; white-space:nowrap; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.4) }
+.dashboard-native-container .vpbim ~ .vpmkback { top:54px }
+.dashboard-native-container .vpmkback:hover { background:#16263a }
+.dashboard-native-container .vpmkback:focus-visible { outline:2px solid var(--acc); outline-offset:2px }
+
