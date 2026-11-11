@@ -17650,6 +17650,7 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .twsvg .tag[data-map="provisional"] .tag-bg { stroke:#fbbf24; stroke-dasharray:2 2 }
 .dashboard-native-container .twchip[data-prov] { background:#fef3c7; color:#92400e }
 .dashboard-native-container .twsvg .tag[data-fin="stale"] .tag-dot { fill:#fbbf24 }
+.dashboard-native-container .twsvg .tag[data-run="tripped"] .tag-bg { stroke:#e5594f; stroke-width:1.4 }
 .dashboard-native-container .twsvg .tag.sel .tag-bg { stroke:#7dd3fc }
 /* Auto: the labels that fit (tagLayout marks the rest data-hide); Always: all of them; Off: none */
 .dashboard-native-container .twsvg[data-labels="auto"] .tag[data-hide="1"]:not(.sel) { display:none }
@@ -17678,7 +17679,28 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .twtrace[hidden] { display:none }
 .dashboard-native-container .twtrace button { flex:none; color:#e6eef7; border-color:#4b5f78; background:rgba(255,255,255,.06) }
 .dashboard-native-container .twtrace .twtracet { flex:1 1 auto; min-width:0 }
-.dashboard-native-container .twacts { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 }
+.dashboard-native-container .twacts { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 84px), 1fr)); gap:6px; margin:8px 0 }
+.dashboard-native-container .twacts button { min-height:34px; padding-block:4px; line-height:1.2; text-align:center; white-space:normal; overflow-wrap:anywhere }
+/* Legend drop-up on the drawing (bottom-left), floor cards and equipment list in the Equipment tab */
+.dashboard-native-container .twlegbtn { position:absolute; inset-block-end:10px; inset-inline-start:10px; z-index:3; background:rgba(9,14,21,.82); color:#e6eef7; border-color:#2a3b50 }
+.dashboard-native-container .twlegbtn[aria-expanded="true"] { border-color:var(--acc); color:var(--acc) }
+.dashboard-native-container .twlegpop { position:absolute; inset-block-end:56px; inset-inline-start:10px; z-index:3; box-sizing:border-box; width:min(290px, calc(100% - 20px)); max-height:calc(100% - 66px); overflow:auto; padding:2px 12px 12px; border-radius:8px; background:rgba(9,14,21,.96); border:1px solid #2a3b50; color:#e6eef7; box-shadow:0 8px 24px rgba(0,0,0,.45) }
+.dashboard-native-container .twlegpop[hidden] { display:none }
+.dashboard-native-container .twlegpop .twlegend dt { color:#e6eef7 }
+.dashboard-native-container .twlegpop :is(.twlegend dd, .twflowkey, .twnote, .twsub) { color:#9fb0c3 }
+.dashboard-native-container .twnav { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px }
+.dashboard-native-container .twfcards { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px }
+.dashboard-native-container .twfcard { display:flex; flex-direction:column; gap:3px; min-height:84px; padding:10px 12px; border:1px solid var(--bd2); border-radius:8px; background:var(--s1); font:inherit; text-align:start; color:var(--t1); cursor:pointer; overflow-wrap:anywhere }
+.dashboard-native-container .twfcard b { font-size:14px }
+.dashboard-native-container .twfcard span, .twfcard small { font-size:11.5px; color:var(--t2) }
+.dashboard-native-container .twfcard:hover { border-color:var(--acc) }
+.dashboard-native-container .twfcard:focus-visible { outline:2px solid var(--acc); outline-offset:1px }
+.dashboard-native-container .twelist { list-style:none; margin:0; padding:0; display:grid; gap:6px }
+.dashboard-native-container .twelist .twgo { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; width:100%; padding:8px 10px; border:1px solid var(--bd2); border-radius:6px; background:none; font:inherit; text-align:start; color:var(--t1); cursor:pointer }
+.dashboard-native-container .twelist .twgo:hover { border-color:var(--acc) }
+.dashboard-native-container .twelist .twgo b { flex:1 0 100%; font-size:13px; overflow-wrap:anywhere }
+.dashboard-native-container .twelist .twchip { margin:0; font-size:11px }
+.dashboard-native-container .twelist .twchip[data-al] { background:#fee2e2; color:#991b1b }
 .dashboard-native-container .twacts button[aria-pressed="true"] { border-color:var(--acc); color:var(--acc) }
 .dashboard-native-container .twgo { display:inline; padding:0; border:0; background:none; font:inherit; color:var(--acc); text-align:start; cursor:pointer }
 .dashboard-native-container .twgo:hover, .dashboard-native-container .twgo:focus-visible { text-decoration:underline }
@@ -17711,18 +17733,22 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .twchip[data-bim="missing"], .dashboard-native-container .twchip[data-bim="unconfirmed"] { background:var(--acc8); color:var(--t2) }
 .dashboard-native-container .twcand { margin-block-start:6px; padding:6px 8px; border:1px dashed var(--bd2); border-radius:6px }
 
-/* live flow: measured flow moves (dashes along the route's direction); running equipment without a flow meter shows still dashes; stopped dims; no data stays plain */
+/* live flow: dashes move along the route's direction while a meter reads flow (bright) or the machine that drives the route reports running (softer); stopped, tripped, stale and offline do not move; no data stays plain */
 .dashboard-native-container .twsvg .pipe .flow { fill:none; stroke-linecap:round; opacity:0; stroke-width:1.4; stroke-dasharray:1.6 6.5 }
 .dashboard-native-container .twsvg .k-duct .flow { stroke-width:2.2; stroke-dasharray:3 12 }
 .dashboard-native-container .twsvg .k-cable .flow { stroke-width:1.2; stroke-dasharray:2 9 }
 .dashboard-native-container .twsvg .pipe[data-flow="measured"] .flow { opacity:1; filter:brightness(1.6); animation:twflow 1s linear infinite }
 .dashboard-native-container .twsvg .k-duct[data-flow="measured"] .flow { animation-duration:1.6s }
 .dashboard-native-container .twsvg .pipe[data-flow="measured"] .core, .dashboard-native-container .twsvg .pipe[data-flow="running"] .core { opacity:1 }
-.dashboard-native-container .twsvg .pipe[data-flow="running"] .flow { opacity:.55 }
+.dashboard-native-container .twsvg .pipe[data-flow="running"] .flow { opacity:.7; animation:twflow 1.3s linear infinite }
+.dashboard-native-container .twsvg .k-duct[data-flow="running"] .flow { animation-duration:2s }
+.dashboard-native-container .twsvg .k-cable[data-flow="running"] .flow, .dashboard-native-container .twsvg .k-cable[data-flow="measured"] .flow { animation-duration:1.4s }
 .dashboard-native-container .twsvg .pipe[data-flow="stopped"] .core { opacity:.22 }
+.dashboard-native-container .twsvg .pipe[data-flow="tripped"] .core { opacity:.5; stroke:#e5594f }
+.dashboard-native-container .twsvg .pipe[data-flow="stale"] .core, .dashboard-native-container .twsvg .pipe[data-flow="offline"] .core { opacity:.4 }
 @keyframes twflow { to { stroke-dashoffset:-16.2 } }
 /* fans and pumps turn only while their own run status is on */
-.dashboard-native-container .twsvg .equip[data-run="on"] .rotor { animation:twspin 1.6s linear infinite }
+.dashboard-native-container .twsvg .rotor[data-spin="on"] { animation:twspin 1.6s linear infinite }
 @keyframes twspin { to { transform:rotate(360deg) } }
 /* nothing moves on a faded floor, in a hidden browser tab */
 .dashboard-native-container .twsvg.paused .flow, .dashboard-native-container .twsvg.paused .rotor,
@@ -17749,10 +17775,13 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .twflowkey li { display:flex; align-items:center; gap:8px }
 .dashboard-native-container .twfk { flex:none; width:22px; height:0; border-block-start:3px solid #5b7ea6 }
 .dashboard-native-container .twfk[data-flow="measured"] { border-block-start-style:dashed; border-color:#5cc8ff }
-.dashboard-native-container .twfk[data-flow="running"] { border-block-start-style:dotted }
+.dashboard-native-container .twfk[data-flow="running"] { border-block-start-style:dashed; border-color:#7fa8c4 }
+.dashboard-native-container .twfk[data-flow="tripped"] { border-color:#e5594f }
 .dashboard-native-container .twfk[data-flow="stopped"] { opacity:.3 }
 .dashboard-native-container .twchip[data-run="on"] { background:#dcfce7; color:#166534 }
 .dashboard-native-container .twchip[data-run="off"] { background:#e5e7eb; color:#374151 }
+.dashboard-native-container .twchip[data-run="tripped"] { background:#fee2e2; color:#991b1b }
+.dashboard-native-container .twchip[data-run="stale"], .dashboard-native-container .twchip[data-run="offline"] { background:#fef3c7; color:#92400e }
 .dashboard-native-container .twchip[data-run="unknown"] { background:transparent; color:var(--t2); box-shadow:inset 0 0 0 1px var(--bd2) }
 
 /* the 3D view controls: top right of the stage, under the trace bar while one is shown. Never at the bottom, where the toast and the Ask button are. */
@@ -17799,7 +17828,8 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 @media (prefers-reduced-motion:reduce) {
   .dashboard-native-container .twsvg .tw-level { transition:none }
   .dashboard-native-container .twsvg .pipe[data-flow="measured"] .flow { animation:none; stroke-dasharray:none; opacity:.85 }
-  .dashboard-native-container .twsvg .equip[data-run="on"] .rotor { animation:none }
+  .dashboard-native-container .twsvg .pipe[data-flow="running"] .flow { animation:none; stroke-dasharray:none; opacity:.6 }
+  .dashboard-native-container .twsvg .rotor[data-spin="on"] { animation:none }
 }
 
 /* Schematic: the supply-air cone under a running ceiling unit, room-temperature floor patches, the Work orders tab */
@@ -17832,3 +17862,15 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container[data-nav="min"] #ekonav > div { position:relative }
 .dashboard-native-container[data-nav="min"] .nsubs { position:fixed; inset-inline-start:calc(var(--navw) + 4px); z-index:50; min-width:190px; padding:6px; gap:1px;
   background:var(--chrome-bg); border:1px solid var(--chrome-edge); border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.25) }
+
+/* Back from the model to the view that opened it: solid, readable on a light or a dark model, top-centre, clear of the Overview panel (left), the model tools and the close button (right) */
+.dashboard-native-container .vpbim { pointer-events:auto; position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:58; white-space:nowrap; min-height:36px; display:inline-flex; align-items:center; gap:6px; padding:0 14px; border-radius:8px; border:1px solid #4b5f78; background:#0f1a28; color:#fff; font:inherit; font-weight:600; font-size:13px; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.4) }
+.dashboard-native-container .vpbim:hover { background:#16263a }
+.dashboard-native-container .vpbim:focus-visible { outline:2px solid var(--acc); outline-offset:2px }
+
+/* Back for a selected equipment dot in the model: same look as vpbim, below it when both show */
+.dashboard-native-container .vpmkback { pointer-events:auto; position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:57; min-height:36px; display:inline-flex; align-items:center; gap:6px; padding:0 14px; border-radius:8px; border:1px solid #4b5f78; background:#0f1a28; color:#fff; font:inherit; font-weight:600; font-size:13px; white-space:nowrap; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.4) }
+.dashboard-native-container .vpbim ~ .vpmkback { top:54px }
+.dashboard-native-container .vpmkback:hover { background:#16263a }
+.dashboard-native-container .vpmkback:focus-visible { outline:2px solid var(--acc); outline-offset:2px }
+

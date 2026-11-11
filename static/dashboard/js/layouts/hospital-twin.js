@@ -127,8 +127,8 @@
   PI('hw_boiler_riser', 'hw', 'BOILER_01', [[49.8, 11.4, RZ + 1.4], [52, 11.4, RZ + 1.4], [52, 15.2, RZ + 1.4]]);
   /* risers (one segment per floor gap is cut from these when the scene is drawn) */
   var RISERS = [
-    { sys: 'chws', src: 'CHILLED_WATER_PUMP_01', x: 51.0, y: 15.2, top: RZ + 1.2, bottom: 4.6 }, { sys: 'chwr', src: 'CHILLED_WATER_PUMP_01', x: 50.2, y: 15.2, top: RZ + 0.9, bottom: 4.9 },
-    { sys: 'hw', src: 'BOILER_01', x: 52.0, y: 15.2, top: RZ + 1.4, bottom: 4.2 }, { sys: 'dcw', src: 'BOOSTER_PUMP', x: 13.6, y: 10.6, top: LZ.L3 + 1.8, bottom: 1.6 },
+    { sys: 'chws', src: 'CHILLED_WATER_PUMP_01', x: 51.0, y: 15.2, top: RZ + 1.2, bottom: 4.6, down: true }, { sys: 'chwr', src: 'CHILLED_WATER_PUMP_01', x: 50.2, y: 15.2, top: RZ + 0.9, bottom: 4.9 },
+    { sys: 'hw', src: 'BOILER_01', x: 52.0, y: 15.2, top: RZ + 1.4, bottom: 4.2, down: true }, { sys: 'dcw', src: 'BOOSTER_PUMP', x: 13.6, y: 10.6, top: LZ.L3 + 1.8, bottom: 1.6 },
     { sys: 'o2', src: 'OXYGEN_PLANT_01', x: 24.4, y: 15.2, top: LZ.L3 + 3.2, bottom: 3.2 }, { sys: 'ma', src: 'MEDICAL_AIR_COMPRESSOR_01', x: 25.1, y: 15.2, top: LZ.L3 + 3.6, bottom: 3.6 },
     { sys: 'pwr', src: 'MDB', x: 5.6, y: 15.5, top: RZ + 3.6, bottom: 3.9, kind: 'cable' }
   ];
@@ -248,6 +248,8 @@
   /* the Studio's BIM bridge, read only through its existing methods (DashboardOverlay.tsx); absent outside the Studio */
   function host3d() { return typeof window !== 'undefined' && window.EKO_HOST_ENGINE ? window.EKO_HOST_ENGINE : null; }
   function call3d(name) { var h = host3d(); try { return h && typeof h[name] === 'function' ? h[name].apply(h, [].slice.call(arguments, 1)) : undefined; } catch (e) { return undefined; } }
+  /* the rotors of one machine, found once per drawing */
+  function rotorsOf(s, id) { return s.rot[id] || (s.rot[id] = [].slice.call(s.eqs[id].querySelectorAll('.rotor'))); }
   function feedStale(E) { return MAP.feedStale(E && E.data && E.data.equipmentAt, Date.now()); }
   /* everything the panel and the BIM link read, for the dashboard's current data */
   function current(E) {
@@ -352,11 +354,11 @@
     var m = [(ux[0] - o[0]) * r, (ux[1] - o[1]) * r, (vy[0] - o[0]) * r, (vy[1] - o[1]) * r, o[0], o[1]];
     return el('g', { transform: 'matrix(' + m.map(fmt).join(',') + ')' }, g);
   }
-  /* a fan or a heat wheel, drawn still: Phase 1 shows no running state */
-  function rotor(g, cx, cy, cz, r, plane, blades, style) {
+  /* a fan, pump impeller or heat wheel, drawn still; update() turns it (data-spin) only while FIN says the part is running. role: a part with its own status (a pump of a set, the heat wheel). */
+  function rotor(g, cx, cy, cz, r, plane, blades, style, role) {
     var pg = planeGroup(g, cx, cy, cz, r, plane);
     el('circle', { r: 1, 'class': 'rotor-house', 'vector-effect': 'non-scaling-stroke' }, pg);
-    var rot = el('g', { 'class': 'rotor' }, pg), i, a;
+    var rot = el('g', role ? { 'class': 'rotor', 'data-role': role } : { 'class': 'rotor' }, pg), i, a;
     if (style === 'wheel') {
       el('circle', { r: 0.96, 'class': 'wheel-face', 'vector-effect': 'non-scaling-stroke' }, rot);
       for (i = 0; i < 12; i++) { a = i / 12 * Math.PI * 2; el('line', { x1: 0, y1: 0, x2: Math.cos(a) * 0.95, y2: Math.sin(a) * 0.95, 'class': 'spoke', 'vector-effect': 'non-scaling-stroke' }, rot); }
@@ -428,11 +430,11 @@
   DRAW.PUMPSET = function (g, e) {
     var x = e.x, y = e.y, z = e.z, w = e.w;
     box(g, x, y, z, w, 3, 0.3, 'dark');
-    [y + 2.15, y + 0.85].forEach(function (yy) {
+    [y + 2.15, y + 0.85].forEach(function (yy, pi) {
       box(g, x + 0.5, yy - 0.55, z + 0.3, 1.3, 1.1, 1.0, 'steel');
       cylV(g, x + 1.15, yy, z + 1.3, 0.3, 0.5, 'steel');
       cylX(g, x + 1.8, x + 4.6, yy, z + 0.9, 0.52, 'blue');
-      rotor(g, x + 4.62, yy, z + 0.9, 0.42, 'yz', 7);
+      rotor(g, x + 4.62, yy, z + 0.9, 0.42, 'yz', 7, null, 'p' + (pi + 1));
       lamp(g, x + 5.2, yy - 0.5, z + 0.35, 2.6);
     });
     lcd(g, x + 5.1, y, z + 1.1, 0.85, 0.55);
@@ -460,7 +462,7 @@
     face(g, [[fx, y - 0.01, fz], [fx + 1.6, y - 0.01, fz], [fx + 1.6, y - 0.01, fz + 2.3], [fx, y - 0.01, fz + 2.3]], 'url(#twhatch)', 'filter-panel');
     face(g, [[cx0, y - 0.01, fz], [cx0 + 1.5, y - 0.01, fz], [cx0 + 1.5, y - 0.01, fz + 2.3], [cx0, y - 0.01, fz + 2.3]], 'url(#twfins)', 'coil-panel');
     if (isFahu) {
-      rotor(g, x + 3.1, y - 0.03, z + 1.85, 1.2, 'xz', 0, 'wheel');
+      rotor(g, x + 3.1, y - 0.03, z + 1.85, 1.2, 'xz', 0, 'wheel', 'wheel');
       rotor(g, x + 7.3, y - 0.03, z + 1.85, 1.05, 'xz', 6);
     } else rotor(g, x + 6.6, y - 0.03, z + 1.85, 1.15, 'xz', 6);
     lcd(g, x + w + 0.01, y + 0.4, z + 2.2, 2.0, 0.7, 'yz');
@@ -612,10 +614,10 @@
     var x = e.x, y = e.y, z = e.z;
     box(g, x, y, z, 6, 4, 0.3, 'dark');
     cylV(g, x + 1.2, y + 2.6, z + 0.3, 0.95, 2.8, 'blue');
-    [x + 4.6, x + 3.2].forEach(function (px) {
+    [x + 4.6, x + 3.2].forEach(function (px, pi) {
       cylV(g, px, y + 1.2, z + 0.3, 0.32, 1.7, 'steel');
       cylV(g, px, y + 1.2, z + 2.0, 0.45, 0.85, 'blue');
-      rotor(g, px, y + 1.2, z + 2.86, 0.38, 'xy', 5);
+      rotor(g, px, y + 1.2, z + 2.86, 0.38, 'xy', 5, null, 'p' + (pi + 1));
       lamp(g, px + 0.5, y + 0.7, z + 0.4, 2.4);
     });
     lcd(g, x + 3.4, y - 0.01, z + 0.9, 1.6, 0.5);
@@ -686,7 +688,8 @@
   }
   function pathD(pts) { return pts.map(function (q, i) { var p = P(q[0], q[1], q[2]); return (i ? 'L' : 'M') + fmt(p[0]) + ',' + fmt(p[1]); }).join(' '); }
   /* one pipe, duct or cable. data-src: the machine the reference ties it to (selection highlights it). The .flow overlay is drawn once; update() only sets
-     data-flow (measured · running · stopped · unknown, MAP.flowState) and CSS animates measured flow alone. */
+     data-flow (measured · running · stopped · tripped · stale · offline · unknown, MAP.flowState) and CSS animates measured and running flow only. The path runs the way the
+     fluid, air or current goes, so the moving dashes show the direction. */
   function drawPipe(g, p, refs) {
     var d = pathD(p.pts), grp = el('g', { 'class': 'pipe k-' + p.kind, 'data-pipe': p.id, 'data-sys': p.sys, 'data-layer': SYSTEMS[p.sys][1], 'data-src': p.src, 'data-flow': 'unknown' }, g);
     el('path', { d: d, 'class': 'casing' }, grp);
@@ -728,7 +731,7 @@
         t.textContent = T('twinLv.' + lv).toUpperCase();
         RISERS.forEach(function (r) {
           var up = { L1: LZ.L2, L2: LZ.L3, L3: LZ.RF, RF: 999 }[lv], a = Math.max(r.bottom, z), b = Math.min(r.top, up - 0.7);
-          if (b > a + 0.2) drawPipe(g, { id: 'riser_' + r.sys + '_' + lv, sys: r.sys, src: r.src, kind: r.kind || 'pipe', pts: [[r.x, r.y, a], [r.x, r.y, b]] }, refs);
+          if (b > a + 0.2) drawPipe(g, { id: 'riser_' + r.sys + '_' + lv, sys: r.sys, src: r.src, kind: r.kind || 'pipe', pts: r.down ? [[r.x, r.y, b], [r.x, r.y, a]] : [[r.x, r.y, a], [r.x, r.y, b]] }, refs);
         });
       }
       var floorTop = LZ[lv === 'EXT' ? 'L1' : lv] + 3.2;
@@ -781,14 +784,36 @@
   var HIDDEN = {};   /* the system layers switched off, for the page session */
 
   /* the floor mapping, with no machine selected: what FIN floor each drawn level's mapped equipment report */
-  function floorsHtml(E, res) {
-    var fc = MAP.floorCheck(EQUIP.map(function (e) { return res[e.id]; }));
-    return '<h3 class="twsub">' + esc(tr(E, 'twinFloorMap')) + '</h3><dl class="twdl twfloors">' + LEVELS.map(function (lv) {
-      var f = fc[lv], names = Object.keys(f.floors);
-      var said = f.fin + (names.length ? '' : ' · ' + tr(E, 'twinFloorNone'));
-      if (f.conflict) said += ' · ' + tr(E, 'twinFloorConflict', { floors: names.filter(function (n) { return n !== f.fin; }).join(', ') });
-      return '<div data-conflict="' + (f.conflict ? 1 : 0) + '"><dt>' + esc(tr(E, 'twinLv.' + lv)) + '</dt><dd>' + esc(said) + '</dd></div>';
-    }).join('') + '</dl>';
+  /* a machine's floor key for navigation: the outside machines (DEWA, generator) are listed with Level 1, as goTo shows them there */
+  function lvOf(e) { return e.level === 'EXT' ? 'L1' : e.level; }
+  var FLOOR_ORDER = ['L1', 'L2', 'L3', 'RF'];
+  function floorName(E, lv) { return tr(E, 'twinLv.' + lv) + ' \u00b7 ' + lv + ' / ' + MAP.LEVELS[lv]; }
+  /* the Equipment tab with nothing selected: four floor cards, or the chosen floor's machines (the same EQUIP list and floor keys the drawing uses) */
+  function equipNavHtml(E, s) {
+    if (!s.flr) {
+      return '<p class="twpick">' + esc(tr(E, 'twinFloorPick')) + '</p><div class="twfcards">' + FLOOR_ORDER.map(function (lv) {
+        var n = EQUIP.filter(function (e) { return lvOf(e) === lv; }).length;
+        return '<button type="button" class="twfcard" data-tw="floor" data-lv="' + lv + '"><b>' + esc(tr(E, 'twinLv.' + lv)) + '</b><span>' + esc(lv + ' / ' + MAP.LEVELS[lv]) + '</span><small>' + esc(tr(E, 'twinFloorCount', { n: String(n) })) + '</small></button>';
+      }).join('') + '</div>';
+    }
+    return '<div class="twnav"><button type="button" class="btnG btnSm" data-tw="floors">\u2190 ' + esc(tr(E, 'twinAllFloors')) + '</button></div><h3 class="twsub">' + esc(floorName(E, s.flr)) + '</h3><ul class="twelist">' +
+      EQUIP.filter(function (e) { return lvOf(e) === s.flr; }).map(function (e) {
+        var st = s.res[e.id].state, al = (s.alIdx.by[e.id] || []).length;
+        return '<li>' + goBtn(e.id, '<b>' + esc(e.label) + '</b><span class="twchip" data-fin="' + st + '">' + esc(tr(E, 'twinFin.' + st)) + '</span>' +
+          (MAP.RUNPTS[e.type] ? '<span class="twchip" data-run="' + (s.run[e.id] || 'unknown') + '">' + esc(tr(E, 'twinRun.' + (s.run[e.id] || 'unknown'))) + '</span>' : '') +
+          (al ? '<span class="twchip" data-al="1">' + esc(tr(E, 'twinAlarms', { n: String(al) })) + '</span>' : '')) + '</li>';
+      }).join('') + '</ul>';
+  }
+  /* the systems, flow and layout key, from SYSTEMS / LAYERS; opened from the Legend button on the drawing */
+  function legendHtml(E) {
+    return '<h3 class="twsub">' + esc(tr(E, 'twinSystems')) + '</h3><dl class="twlegend">' +
+      LAYERS.map(function (l) {
+        return '<div data-layer="' + l + '"><dt>' + esc(tr(E, 'twinLayer.' + l)) + '</dt>' + Object.keys(SYSTEMS).filter(function (k) { return SYSTEMS[k][1] === l; }).map(function (k) {
+          return '<dd><i class="twkey" data-sys="' + k + '" style="background:' + SYSTEMS[k][0] + '"></i>' + esc(tr(E, 'twinSys.' + k)) + '</dd>';
+        }).join('') + '</div>';
+      }).join('') + '</dl><h3 class="twsub">' + esc(tr(E, 'twinFlowT')) + '</h3><ul class="twflowkey">' + ['measured', 'running', 'stopped', 'tripped', 'stale', 'offline', 'unknown'].map(function (k) {
+        return '<li><i class="twfk" data-flow="' + k + '"></i>' + esc(tr(E, 'twinFlow.' + k)) + '</li>';
+      }).join('') + '</ul><p class="twnote">' + esc(tr(E, 'twinLayoutNote')) + '</p>';
   }
   function label(id) { return EQ[id] ? EQ[id].label : id; }
   /* a machine's name as a button that selects it (and shows its floor) */
@@ -872,28 +897,7 @@
     var row = function (other, l) { return '<li>' + goBtn(other, esc(label(other))) + ' <span>' + esc(tr(E, l.kind === 'stop' ? 'twinRelStop' : 'twinRelShift')) + '</span><em>' + esc(l.what) + '</em>' +
       (l.also || []).map(function (x) { return '<em class="twalso">' + esc(tr(E, 'twinRelAlso', { what: x.what })) + '</em>'; }).join('') + '</li>'; };
     return '<h3 class="twsub">' + esc(tr(E, 'twinDeps', { n: String(d.up.length) })) + '</h3>' + (d.up.length ? '<ul class="twrel">' + d.up.map(function (l) { return row(l.from, l); }).join('') + '</ul>' : '') +
-      '<h3 class="twsub">' + esc(tr(E, 'twinAffects', { n: String(d.down.length) })) + '</h3>' + (d.down.length ? '<ul class="twrel">' + d.down.map(function (l) { return row(l.to, l); }).join('') + '</ul>' : '') +
-      '<p class="twnote">' + esc(tr(E, 'twinRelRef')) + '</p>';
-  }
-  /* the machine's BIM element: which GlobalId, from where, whether the loaded model has it, and why there is none */
-  function bimHtml(E, s, id) {
-    var b = s.bim.by[id], r = s.res[id];
-    if (!b || b.state === 'not-fin') return '';
-    var rows = [], note = '';
-    if (b.guid) rows.push([tr(E, 'twinBimGuid'), b.guid]);
-    if (b.state === 'verified') {
-      rows.push([tr(E, 'twinBimSource'), tr(E, 'twinBimSrc.' + b.source)]);
-      var inM = call3d('inModel', b.guid);
-      rows.push([tr(E, 'twinBimModel'), inM === undefined ? tr(E, 'twinBimNoViewer') : tr(E, inM ? 'twinBimFound' : 'twinBimNotFound')]);
-      var lv = r.floor ? MAP.modelLevel(r.floor, call3d('listLevels')) : null;
-      rows.push([tr(E, 'twinBimStorey'), lv ? lv.name : tr(E, 'twinBimStoreyNone', { floor: r.floor || tr(E, 'twinNone') })]);
-    } else if (b.state === 'shared') note = tr(E, 'twinBimWhy.shared', { with: b.with.join(', ') });
-    else if (b.state === 'conflict') note = tr(E, 'twinBimWhy.conflict', { fin: b.fin || tr(E, 'twinNone'), link: b.link || b.with.filter(function (g) { return g !== b.fin; }).join(', ') });
-    else note = tr(E, 'twinBimWhy.' + b.state);
-    return '<h3 class="twsub">' + esc(tr(E, 'twinBimT')) + '</h3><span class="twchip" data-bim="' + b.state + '">' + esc(tr(E, 'twinBimSt.' + b.state)) + '</span>' +
-      (rows.length ? '<dl class="twdl">' + rows.map(function (x) { return '<div><dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd></div>'; }).join('') + '</dl>' : '') +
-      (note ? '<p class="twnote twwarn">' + esc(note) + '</p>' : '') +
-      (b.state === 'verified' && host3d() ? '<div class="twacts"><button type="button" class="btnG btnSm" data-tw="bim">' + esc(tr(E, 'twinBimShow')) + '</button></div>' : '');
+      '<h3 class="twsub">' + esc(tr(E, 'twinAffects', { n: String(d.down.length) })) + '</h3>' + (d.down.length ? '<ul class="twrel">' + d.down.map(function (l) { return row(l.to, l); }).join('') + '</ul>' : '');
   }
   /* an energy meter's record among what the backend leaves out of its list: shown for checking, never as a mapping */
   function candHtml(E, s, id, connected) {
@@ -907,52 +911,9 @@
       '<dl class="twdl">' + rows.map(function (x) { return '<div><dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd></div>'; }).join('') + '</dl>' +
       (pts.length ? '<table class="twpts">' + pts.map(function (p) { return '<tr data-st="' + p.state + '"><th>' + esc(p.name) + '</th><td>' + esc(pointShown(E, p)) + '</td></tr>'; }).join('') + '</table>' : '') + '</section>';
   }
-  /* with nothing selected: how many machines have a verified BIM element, and the data-quality issues */
-  function bimSummaryHtml(E, s) {
-    var n = {}, shared = {};
-    Object.keys(s.bim.by).forEach(function (id) { var b = s.bim.by[id]; n[b.state] = (n[b.state] || 0) + 1; if (b.state === 'shared') shared[[id].concat(b.with).sort().join(' · ')] = 1; });
-    return '<h3 class="twsub">' + esc(tr(E, 'twinBimT')) + '</h3><p class="twnote">' + esc(tr(E, 'twinBimSum', { ok: String(n.verified || 0), missing: String(n.missing || 0),
-        shared: String(n.shared || 0), conflict: String(n.conflict || 0), unconfirmed: String(n.unconfirmed || 0) })) + '</p>' +
-      Object.keys(shared).map(function (k) { return '<p class="twnote twwarn">' + esc(tr(E, 'twinBimSharedPair', { names: k })) + '</p>'; }).join('');
-  }
-  /* Work orders: the dashboard's own work-order feed (the CMMS query the project is set up with), linked to each drawn machine by the machine's equipment number.
-     The feed has no repair progress, technician, or completion data, so none is shown: a status is only the due date against today (the dashboard's own rule). */
-  function woList(E, s, connected) {
-    var st = (E && E.data && E.data.workOrderState) || '', rows = null, msg = '';
-    if (!connected) msg = 'twinWoOffline';
-    else if (st === 'off') msg = 'twinWoOff';
-    else if (st === 'pending') msg = 'twinWoPending';
-    else if (st === 'error') msg = 'twinWoFail';
-    else {
-      rows = [];
-      EQUIP.forEach(function (e) { var r = s.res[e.id], l = r && r.asset && r.asset.workOrders; if (l) l.forEach(function (o) { rows.push({ id: e.id, o: o }); }); });
-      var rk = { over: 0, due: 1, sched: 2 };
-      rows.sort(function (a, b) { return ((rk[a.o.status] == null ? 2 : rk[a.o.status]) - (rk[b.o.status] == null ? 2 : rk[b.o.status])) || String(a.o.dueIso || '').localeCompare(String(b.o.dueIso || '')); });
-      if (!rows.length) msg = 'twinWoNone';
-    }
-    return { rows: rows, msg: msg };
-  }
-  function woHtml(E, w) {
-    var n = w.rows ? w.rows.length : 0;
-    return '<h3 class="twsub">' + esc(tr(E, 'twinWoT', { n: w.rows ? String(n) : '\u2014' })) + '</h3>' +
-      (w.msg ? '<p class="twnote">' + esc(tr(E, w.msg)) + '</p>' : '<ul class="twwo">' + w.rows.map(function (x) {
-        var o = x.o, bits = [o.dueDate ? tr(E, 'twinWoDue', { d: o.dueDate }) : '', o.type || ''].filter(Boolean).join(' \u00b7 ');
-        return '<li data-wo="' + esc(o.status || 'sched') + '">' + goBtn(x.id, '<b>' + esc(label(x.id)) + '</b><span class="twwoid">' + esc(tr(E, 'twinWoNo', { id: o.id })) + '</span>' +
-          (o.description ? '<span class="twwod">' + esc(o.description) + '</span>' : '') + '<small>' + esc(bits) + '</small><em>' + esc(tr(E, 'twinWoSt.' + (o.status || 'sched'))) + '</em>') + '</li>';
-      }).join('') + '</ul>') + '<p class="twnote">' + esc(tr(E, 'twinWoNote')) + '</p>';
-  }
   function panelHtml(E, s, connected) {
     var id = s.sel, res = s.res;
-    if (!id) {
-      return '<p class="twpick">' + esc(tr(E, 'twinPick')) + '</p>' + floorsHtml(E, res) + bimSummaryHtml(E, s) + '<h3 class="twsub">' + esc(tr(E, 'twinSystems')) + '</h3><dl class="twlegend">' +
-        LAYERS.map(function (l) {
-          return '<div data-layer="' + l + '"><dt>' + esc(tr(E, 'twinLayer.' + l)) + '</dt>' + Object.keys(SYSTEMS).filter(function (k) { return SYSTEMS[k][1] === l; }).map(function (k) {
-            return '<dd><i class="twkey" data-sys="' + k + '" style="background:' + SYSTEMS[k][0] + '"></i>' + esc(tr(E, 'twinSys.' + k)) + '</dd>';
-          }).join('') + '</div>';
-        }).join('') + '</dl><h3 class="twsub">' + esc(tr(E, 'twinFlowT')) + '</h3><ul class="twflowkey">' + ['measured', 'running', 'stopped', 'unknown'].map(function (k) {
-          return '<li><i class="twfk" data-flow="' + k + '"></i>' + esc(tr(E, 'twinFlow.' + k)) + '</li>';
-        }).join('') + '</ul><p class="twnote">' + esc(tr(E, 'twinLayoutNote')) + '</p>';
-    }
+    if (!id) return equipNavHtml(E, s);
     var e = EQ[id], r = res[id], st = r.state, none = tr(E, 'twinNone');
     var rows = [[tr(E, 'twinType'), tr(E, 'twinT.' + e.type)], [tr(E, 'twinLevel'), tr(E, 'twinLv.' + e.level)]];
     if (!e.nonFin) {
@@ -960,8 +921,6 @@
         [tr(E, 'twinFinFloor'), r.floor || none], [tr(E, 'twinBim'), r.bimId ? r.bimId + (r.bimShared ? ' · ' + tr(E, 'twinBimShared') : '') : none]);
     }
     if (e.feed) rows.push([tr(E, 'twinFeed'), label(e.feed)]);
-    var pts = r.fin && (st === 'mapped' || st === 'stale' || st === 'offline') ? MAP.pointRows(r, connected) : [];
-    var live = pts.filter(function (p) { return p.state === 'live'; }).length;
     var why = (r.reason ? '<p class="twnote">' + esc(tr(E, 'twinWhy.' + r.reason, { fin: r.fin || r.candidate || '', id: id })) + '</p>' : '') +
       (r.provisional ? '<p class="twnote twwarn">' + esc(tr(E, 'twinProvNote', { fin: r.fin })) + '</p>' : '') +
       (r.floorDiffers ? '<p class="twnote twwarn">' + esc(tr(E, 'twinFloorDiffers', { floor: r.floor, want: MAP.LEVELS[e.level] })) + '</p>' : '');
@@ -969,23 +928,19 @@
     var actions = '<div class="twacts">' +
       '<button type="button" class="btnG btnSm" data-tw="trace" data-dir="up" aria-pressed="' + !!(tracing && s.trace.dir === 'up') + '">' + esc(tr(E, 'twinTraceUp')) + '</button>' +
       '<button type="button" class="btnG btnSm" data-tw="trace" data-dir="down" aria-pressed="' + !!(tracing && s.trace.dir === 'down') + '">' + esc(tr(E, 'twinTraceDown')) + '</button>' +
+      (s.bim.by[id] && s.bim.by[id].state === 'verified' && host3d() ? '<button type="button" class="btnG btnSm" data-tw="bim">' + esc(tr(E, 'twinBimShow')) + '</button>' : '') +
       (s.trace ? '<button type="button" class="btnG btnSm" data-tw="untrace">' + esc(tr(E, 'twinTraceClear')) + '</button>' : '') + '</div>';
-    return '<div class="twdh"><div><h3 class="twdt">' + esc(e.label) + '</h3><code class="twdid">' + esc(e.nonFin ? tr(E, 'twinNotFinId') : tr(E, 'twinDrawnId', { id: id })) + '</code></div>' +
+    return '<div class="twnav"><button type="button" class="btnG btnSm" data-tw="back">\u2190 ' + esc(tr(E, 'twinBack', { floor: tr(E, 'twinLv.' + lvOf(e)) })) + '</button>' +
+      '<button type="button" class="btnG btnSm" data-tw="floors">' + esc(tr(E, 'twinAllFloors')) + '</button></div>' +
+      '<div class="twdh"><div><h3 class="twdt">' + esc(e.label) + '</h3><code class="twdid">' + esc(e.nonFin ? tr(E, 'twinNotFinId') : id) + '</code></div>' +
       '<button type="button" class="btnG btnSm twclose" data-tw="close" aria-label="' + esc(tr(E, 'twinClose')) + '">✕</button></div>' +
-      '<span class="twchip" data-fin="' + st + '">' + esc(tr(E, 'twinFin.' + st)) + '</span>' +
+      (st === 'mapped' ? '' : '<span class="twchip" data-fin="' + st + '">' + esc(tr(E, 'twinFin.' + st)) + '</span>') +
       (r.provisional ? ' <span class="twchip" data-prov="1">' + esc(tr(E, 'twinProv')) + '</span>' : '') +
       (MAP.RUNPTS[e.type] ? ' <span class="twchip" data-run="' + (s.run[id] || 'unknown') + '">' + esc(tr(E, 'twinRun.' + (s.run[id] || 'unknown'))) + '</span>' : '') + why +
       (s.picked && s.picked.id === id ? '<p class="twnote">' + esc(tr(E, 'twinPicked', { guid: s.picked.bimId })) + '</p>' : '') + actions +
       '<dl class="twdl">' + rows.map(function (x) { return '<div><dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd></div>'; }).join('') + '</dl>' +
-      bimHtml(E, s, id) + candHtml(E, s, id, connected) +
+      candHtml(E, s, id, connected) +
       alarmsHtml(E, s.alIdx.by[id] || []) + fddHtml(E, s.fdd[id] || []) + evidenceHtml(E, s, id) + depsHtml(E, s, id) +
-      (pts.length
-        ? '<h3 class="twsub">' + esc(tr(E, 'twinPoints', { n: String(live), total: String(pts.length) })) + '</h3><table class="twpts">' + pts.map(function (p) {
-            var tags = (p.his ? '<abbr class="twflag" title="' + esc(tr(E, 'twinHis')) + '">H</abbr>' : '') + (p.alarm ? '<abbr class="twflag" data-k="al" title="' + esc(tr(E, 'twinAlarmPt')) + '">A</abbr>' : '') +
-              (p.sp ? '<abbr class="twflag" title="' + esc(tr(E, 'twinSp')) + '">S</abbr>' : '');
-            return '<tr data-st="' + p.state + '"><th>' + esc(p.name) + tags + '</th><td' + (p.enumText ? ' title="' + esc(tr(E, 'twinEnum', { values: p.enumText })) + '"' : '') + '>' + esc(pointShown(E, p)) + '</td></tr>';
-          }).join('') + '</table>'
-        : r.fin && (st === 'mapped' || st === 'stale') ? '<p class="twnote">' + esc(tr(E, 'twinNoPoints')) + '</p>' : '') +
       borrowedHtml(E, s, id, connected) + netsHtml(E, id) + '<p class="twnote">' + esc(tr(E, 'twinLayoutNote')) + '</p>';
   }
   /* readings of another FIN equipment shown on this machine's panel (the MDB shows PMU_Main's), each labelled with its source and never a measurement of this machine */
@@ -1030,22 +985,20 @@
     }).join('');
     host.innerHTML = '<div class="twbar"><h2 class="twttl">' + esc(tr(E, 'twinTitle')) + '</h2>' +
       '<div class="twseg" role="group" aria-label="' + esc(tr(E, 'twinFloors')) + '">' + floors + '</div>' +
-      '<button type="button" class="btnG btnSm" data-tw="home">' + esc(tr(E, 'twinWhole')) + '</button>' +
-      '<span class="twmeta"><span class="twillus">' + esc(tr(E, 'twinIllusShort')) + '</span><span class="twstatus" role="status"></span></span></div>' +
+      '<span class="twmeta"><span class="twstatus" role="status" hidden></span></span></div>' +
       '<div class="twlayers" role="group" aria-label="' + esc(tr(E, 'twinSystems')) + '">' + layerChips +
-      '<span class="twex" role="group" aria-label="' + esc(tr(E, 'twinEx')) + '"><b>' + esc(tr(E, 'twinEx')) + '</b>' +
-      '<label><input type="checkbox" data-tw-ex="fly"' + (ex.fly ? ' checked' : '') + '> ' + esc(tr(E, 'twinExFly')) + '</label>' +
-      '<label class="twexoff" title="' + esc(tr(E, 'twinExFaultsNo')) + '"><input type="checkbox" disabled> ' + esc(tr(E, 'twinExFaults')) + ' <small>' + esc(tr(E, 'twinExFaultsNo')) + '</small></label>' +
+      '<span class="twex" role="group" aria-label="' + esc(tr(E, 'twinEx')) + '">' +
       '<label>' + esc(tr(E, 'twinExLabels')) + ' <select data-tw-ex="labels">' + ['auto', 'always', 'off'].map(function (v) {
         return '<option value="' + v + '"' + (ex.labels === v ? ' selected' : '') + '>' + esc(tr(E, 'twinExLbl.' + v)) + '</option>'; }).join('') + '</select></label></span></div>' +
       '<div class="twbody"><div class="twstage"><div class="twtrace" hidden><span class="twtracet"></span><button type="button" class="btnG btnSm" data-tw="untrace">' + esc(tr(E, 'twinTraceClear')) + '</button></div>' +
-      camHtml(E) + '</div>' +
+      camHtml(E) + '<div class="twlegwrap"><button type="button" class="btnG btnSm twlegbtn" data-tw="legend" aria-expanded="false" aria-controls="twlegpop">' + esc(tr(E, 'twinLegend')) + '</button>' +
+      '<div class="twlegpop" id="twlegpop" role="region" aria-label="' + esc(tr(E, 'twinLegend')) + '" hidden>' + legendHtml(E) + '</div></div></div>' +
       '<aside class="twside"><div class="twtabs" role="tablist"><button type="button" role="tab" data-tw="tab" data-tab="alarms" aria-selected="true"></button>' +
       '<button type="button" role="tab" data-tw="tab" data-tab="equip" aria-selected="false">' + esc(tr(E, 'twinTabEquip')) + '</button>' +
-      '<button type="button" role="tab" data-tw="tab" data-tab="wo" aria-selected="false"></button></div><div class="twpane" aria-live="polite"></div></aside></div>';
+      '</div><div class="twpane" aria-live="polite"></div></aside></div>';
     var stage = host.querySelector('.twstage');
     var svg = el('svg', { 'class': 'twsvg', role: 'img', 'aria-label': tr(E, 'twinTitle'), dir: 'ltr', 'data-level': 'ALL', 'data-labels': ex.labels, preserveAspectRatio: 'xMidYMid meet' }, stage);
-    var s = { E: E, host: host, view: null, cam: 'fit', turnMode: false, tagKs: null, svg: svg, side: host.querySelector('.twpane'), tabs: host.querySelectorAll('.twtabs button'), tab: 'alarms', ex: ex, flows: [], zones: [], run: {}, seen: {}, opened: Date.now(), lastUser: 0, status: host.querySelector('.twstatus'), sel: null, level: 'ALL', eqs: {}, tags: {}, pipes: {}, vb: null, home: null, panel: '',
+    var s = { E: E, host: host, view: null, cam: 'fit', turnMode: false, tagKs: null, svg: svg, side: host.querySelector('.twpane'), tabs: host.querySelectorAll('.twtabs button'), tab: 'alarms', flr: null, ex: ex, flows: [], zones: [], run: {}, seen: {}, opened: Date.now(), lastUser: 0, status: host.querySelector('.twstatus'), sel: null, level: 'ALL', eqs: {}, tags: {}, pipes: {}, rot: {}, vb: null, home: null, panel: '',
       graph: MAP.graph(EQUIP), trace: null, traceBar: host.querySelector('.twtrace'), res: {}, alIdx: { by: {}, unlinked: [] }, fdd: {}, faults: {},
       bim: { by: {}, guid: {} }, cands: {}, stale: false, lit: null, picked: null };
     LAYERS.forEach(function (l) { if (HIDDEN[l]) svg.classList.add('hide-' + l); });
@@ -1060,16 +1013,26 @@
       var b = ev.target.closest && ev.target.closest('[data-tw]');
       if (!b) return;
       if (b.dataset.tw === 'level') setLevel(host, b.dataset.lv);
-      else if (b.dataset.tw === 'home') setLevel(host, 'ALL');
       else if (b.dataset.tw === 'close') select(host, null);
       else if (b.dataset.tw === 'layer') setLayer(host, b.dataset.layer, b.getAttribute('aria-pressed') !== 'true');
       else if (b.dataset.tw === 'trace') { trace(host, s.sel, b.dataset.dir); refocus('[data-tw="trace"][data-dir="' + b.dataset.dir + '"]'); }
       else if (b.dataset.tw === 'untrace') { trace(host, null); refocus(s.sel ? '[data-tw="trace"]' : null); }
       else if (b.dataset.tw === 'go') goTo(host, b.dataset.id);
       else if (b.dataset.tw === 'bim') showInModel(host, s.sel);
+      else if (b.dataset.tw === 'legend') setLegend(host);
+      else if (b.dataset.tw === 'floor') { s.flr = b.dataset.lv; s.side.scrollTop = 0; update(host, s.E); }
+      else if (b.dataset.tw === 'floors') { s.flr = null; s.side.scrollTop = 0; select(host, null); }
+      else if (b.dataset.tw === 'back') { s.side.scrollTop = 0; select(host, null); }
       else if (b.dataset.tw === 'tab') { s.tab = b.dataset.tab; update(host, s.E); }
       else if (b.dataset.tw === 'cam') camAction(host, b.dataset.cam);
     });
+    /* a click anywhere outside the open legend closes it; the listener removes itself once the view has left the page */
+    var outside = function (ev) {
+      if (!host.isConnected) return document.removeEventListener('pointerdown', outside, true);
+      if (!ev.target.closest || !ev.target.closest('.twlegwrap')) setLegend(host, false);
+    };
+    document.addEventListener('pointerdown', outside, true);
+    host.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') setLegend(host, false); });
     host.addEventListener('change', function (ev) {
       var k = ev.target.getAttribute && ev.target.getAttribute('data-tw-ex'); if (!k) return;
       if (k === 'fly') s.ex.fly = !!ev.target.checked;
@@ -1142,11 +1105,12 @@
      and label's state attributes, the selection, the trace marks, each pipe's flow state, the room patches, the keyboard focus. ── */
   var SNAP = ['data-fin', 'data-bim', 'data-al', 'data-run', 'data-tr'];
   function snapshot(s) {
-    var o = { eqs: {}, pipes: {}, zones: s.zones.map(function (z) { return [z.poly.getAttribute('class'), z.tt.textContent]; }) };
+    var o = { eqs: {}, pipes: {}, rot: {}, zones: s.zones.map(function (z) { return [z.poly.getAttribute('class'), z.tt.textContent]; }) };
     Object.keys(s.eqs).forEach(function (id) {
       var one = function (n) { var a = {}; SNAP.forEach(function (k) { if (n.hasAttribute(k)) a[k] = n.getAttribute(k); }); a.sel = n.classList.contains('sel'); return a; };
       o.eqs[id] = [one(s.eqs[id]), one(s.tags[id])];
     });
+    Object.keys(s.eqs).forEach(function (id) { o.rot[id] = rotorsOf(s, id).map(function (r) { return r.getAttribute('data-spin'); }); });
     Object.keys(s.pipes).forEach(function (k) { o.pipes[k] = s.pipes[k].map(function (g) { return [g.getAttribute('data-flow'), g.classList.contains('conn'), g.classList.contains('tr-on')]; }); });
     return o;
   }
@@ -1155,11 +1119,12 @@
       [s.eqs[id], s.tags[id]].forEach(function (n, i) { var a = o.eqs[id][i]; SNAP.forEach(function (k) { if (k in a) n.setAttribute(k, a[k]); else n.removeAttribute(k); }); n.classList.toggle('sel', a.sel); });
     });
     Object.keys(o.pipes).forEach(function (k) { (s.pipes[k] || []).forEach(function (g, i) { var a = o.pipes[k][i]; if (!a) return; g.setAttribute('data-flow', a[0]); g.classList.toggle('conn', a[1]); g.classList.toggle('tr-on', a[2]); }); });
+    Object.keys(o.rot).forEach(function (id) { rotorsOf(s, id).forEach(function (r, i) { if (o.rot[id][i]) r.setAttribute('data-spin', o.rot[id][i]); }); });
     s.zones.forEach(function (z, i) { if (o.zones[i]) { z.poly.setAttribute('class', o.zones[i][0]); z.tt.textContent = o.zones[i][1]; } });
   }
   function rebuild(s) {
     var snap = snapshot(s), ae = document.activeElement, fe = ae && s.svg.contains(ae) && ae.closest ? ae.closest('.equip') : null, fid = fe ? fe.getAttribute('data-id') : null;
-    s.eqs = {}; s.tags = {}; s.pipes = {}; s.flows = []; s.zones = []; s.tagKs = null;
+    s.eqs = {}; s.tags = {}; s.pipes = {}; s.flows = []; s.zones = []; s.rot = {}; s.tagKs = null;
     /* built apart from the page and put in with one replace: the browser styles and paints the new drawing once, not as it is made */
     var fresh = document.createElementNS(NS, 'svg');
     scene(fresh, function (k) { return tr(s.E, k); }, s);
@@ -1300,10 +1265,15 @@
     [].forEach.call(host.querySelectorAll('[data-tw="level"]'), function (b) { b.setAttribute('aria-pressed', String(b.dataset.lv === lv)); });
     frame(s);
   }
+  function setLegend(host, on) {
+    var b = host.querySelector('.twlegbtn'), p = host.querySelector('.twlegpop'); if (!b || !p) return;
+    if (on == null) on = p.hidden;
+    p.hidden = !on; b.setAttribute('aria-expanded', String(!!on));
+  }
   function select(host, id) {
     var s = host && STATE && STATE.get(host); if (!s) return;
     s.sel = id && EQ[id] ? id : null;
-    if (s.sel) s.tab = 'equip';
+    if (s.sel) { s.tab = 'equip'; s.flr = lvOf(EQ[s.sel]); }
     if (s.picked && s.picked.id !== s.sel) s.picked = null;
     if (s.trace && s.trace.seed !== s.sel) trace(host, null, true);
     Object.keys(s.eqs).forEach(function (k) { s.eqs[k].classList.toggle('sel', k === s.sel); s.tags[k].classList.toggle('sel', k === s.sel); });
@@ -1356,7 +1326,9 @@
     var E = s.E, from = { pageId: E.state.pageId, module: E.state.module, sub: E.state.sub };
     var lv = s.res[id] && s.res[id].floor ? MAP.modelLevel(s.res[id].floor, call3d('listLevels')) : null;
     E.go(E.overviewId ? E.overviewId() : 'marsa-overview', 'overview', null);
-    if (E.stacked && E.stacked()) { E.state.locFocus = { assetSel: null, back: from }; E.state.modelFs = true; }
+    /* the way back is stored here, not guessed: the model's "Back to Schematic" (app.js bimBack) returns to this page, whose view is kept */
+    E.state.bimBack = { from: from, labelKey: 'twinBackSchematic' };
+    if (E.stacked && E.stacked()) E.state.modelFs = true;
     if (lv && E.state.dock) E.state.dock.level = lv.id;
     E.set({});
     var eng = E.engine, n = 0;
@@ -1413,7 +1385,9 @@
     s.flows.forEach(function (f) { var st = MAP.flowState(f.rule, res, connected); if (f.g.getAttribute('data-flow') !== st) f.g.setAttribute('data-flow', st); });
     EQUIP.forEach(function (e) {
       var rs = MAP.runState(e.id, e.type, res, connected); s.run[e.id] = rs;
-      if (s.eqs[e.id].getAttribute('data-run') !== rs) { if (rs) s.eqs[e.id].setAttribute('data-run', rs); else s.eqs[e.id].removeAttribute('data-run'); }
+      if (s.eqs[e.id].getAttribute('data-run') !== rs) { var tg = s.tags[e.id]; if (rs) { s.eqs[e.id].setAttribute('data-run', rs); tg.setAttribute('data-run', rs); } else { s.eqs[e.id].removeAttribute('data-run'); tg.removeAttribute('data-run'); } }
+      /* each rotor turns only while the status that drives it says on: the machine's own, or its part's (a pump of a set, the heat wheel) */
+      rotorsOf(s, e.id).forEach(function (r) { var role = r.getAttribute('data-role'), st = role ? MAP.rotorState(e.id, e.type, role, res, connected) : rs, v = st === 'on' ? 'on' : null; if (r.getAttribute('data-spin') !== v) { if (v) r.setAttribute('data-spin', v); else r.removeAttribute('data-spin'); } });
     });
     /* room temperature under each ceiling unit, as that unit reports it; without a live setpoint the patch is tinted neutral (no judgement is made) */
     s.zones.forEach(function (z) {
@@ -1441,9 +1415,7 @@
     var nAct = Object.keys(act).length + s.alIdx.unlinked.length, tabTxt = tr(E, 'twinTabAlarms', { n: String(nAct) });
     [].forEach.call(s.tabs, function (b) { b.setAttribute('aria-selected', String(b.dataset.tab === s.tab)); });
     if (s.tabs[0].textContent !== tabTxt) s.tabs[0].textContent = tabTxt;
-    var wo = woList(E, s, connected), woTxt = tr(E, 'twinTabWo', { n: wo.rows ? String(wo.rows.length) : '\u2014' });
-    if (s.tabs[2].textContent !== woTxt) s.tabs[2].textContent = woTxt;
-    var html = s.tab === 'alarms' ? alarmListHtml(E, s) + clearedHtml(E, s) : s.tab === 'wo' ? woHtml(E, wo) : panelHtml(E, s, connected);
+    var html = s.tab === 'alarms' ? alarmListHtml(E, s) + clearedHtml(E, s) : panelHtml(E, s, connected);
     if (html !== s.panel) { s.side.innerHTML = html; s.panel = html; }
     if (fly) goTo(host, fly);
     host.setAttribute('data-sel', s.sel ? '1' : '0');
