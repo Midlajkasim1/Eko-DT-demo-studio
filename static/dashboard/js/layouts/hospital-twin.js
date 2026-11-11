@@ -181,6 +181,18 @@
   PI('pwr_mdb_riser', 'pwr', 'MDB', [[5.6, 13.6, 3.6], [5.6, 15.5, 3.9]], 'cable');
   PI('pwr_mcc1_plumbing', 'pwr', 'MCC_01', [[12.3, 12.4, 0.25], [12.3, 7.2, 0.25], [4.2, 7.2, 0.25], [4.2, 5.6, 0.25]], 'cable');
   PI('pwr_mcc1_sump', 'pwr', 'MCC_01', [[10.4, 7.2, 0.25], [10.4, 6.0, 0.25]], 'cable');
+  /* what each cable from the MDB, an MCC or a DB reaches, from the drawing's own feed relationships: those boards have no status point in FIN, so the
+     cable's evidence is at its other end (MAP.flowRule): the receiving SMDB's incomer, or the run status of the machines the board feeds */
+  (function () {
+    var pipe = function (id) { return PIPES.filter(function (p) { return p.id === id; })[0]; };
+    var fedBy = function (b) { return EQUIP.filter(function (e) { return e.feed === b; }).map(function (e) { return e.id; }); };
+    pipe('pwr_mdb_smdb1').to = [SMDB_OF.L1];
+    pipe('pwr_mdb_riser').to = [SMDB_OF.L2, SMDB_OF.L3, SMDB_OF.RF];
+    ['L2', 'L3', 'RF'].forEach(function (lv) { pipe('pwr_riser_' + lv).to = [SMDB_OF[lv]]; });
+    ['L1', 'L2', 'L3', 'RF'].forEach(function (lv) { pipe('pwr_bus_' + MCC_OF[lv]).to = fedBy(MCC_OF[lv]); if (DB_OF[lv]) pipe('pwr_bus_' + DB_OF[lv]).to = fedBy(DB_OF[lv]); });
+    pipe('pwr_mcc1_plumbing').to = ['BOOSTER_PUMP'];
+    pipe('pwr_mcc1_sump').to = ['SUMP_PUMP'];
+  })();
   PI('dcw_booster', 'dcw', 'BOOSTER_PUMP', [[7.2, 3.4, 1.6], [13.6, 3.4, 1.6], [13.6, 10.6, 1.6]]);
   PI('drn_floor', 'drn', 'SUMP_PUMP', [[14.6, 8.2, 0.3], [11.4, 8.2, 0.3], [11.4, 6.0, 0.3]]);
   PI('drn_out', 'drn', 'SUMP_PUMP', [[10.4, 2.0, 1.2], [10.4, -1.8, 1.2]]);
@@ -731,7 +743,9 @@
         t.textContent = T('twinLv.' + lv).toUpperCase();
         RISERS.forEach(function (r) {
           var up = { L1: LZ.L2, L2: LZ.L3, L3: LZ.RF, RF: 999 }[lv], a = Math.max(r.bottom, z), b = Math.min(r.top, up - 0.7);
-          if (b > a + 0.2) drawPipe(g, { id: 'riser_' + r.sys + '_' + lv, sys: r.sys, src: r.src, kind: r.kind || 'pipe', pts: r.down ? [[r.x, r.y, b], [r.x, r.y, a]] : [[r.x, r.y, a], [r.x, r.y, b]] }, refs);
+          /* the power riser's segment on a floor carries the feeders of the SMDBs on that floor and above (Level 1's SMDB has its own cable) */
+          var to = r.sys === 'pwr' ? ['L2', 'L3', 'RF'].filter(function (l) { return LZ[l] >= z; }).map(function (l) { return SMDB_OF[l]; }) : undefined;
+          if (b > a + 0.2) drawPipe(g, { id: 'riser_' + r.sys + '_' + lv, sys: r.sys, src: r.src, kind: r.kind || 'pipe', to: to, pts: r.down ? [[r.x, r.y, b], [r.x, r.y, a]] : [[r.x, r.y, a], [r.x, r.y, b]] }, refs);
         });
       }
       var floorTop = LZ[lv === 'EXT' ? 'L1' : lv] + 3.2;

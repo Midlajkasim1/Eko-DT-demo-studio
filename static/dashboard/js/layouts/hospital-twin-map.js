@@ -1111,6 +1111,16 @@
     else if (t === 'O2' || t === 'MAC') M.push([p.src, 'Flow']);
     else if (p.src === 'DEWA_SUPPLY' || t === 'PMU') { M.push(['PMU_Main', 'ActivePower']); R.push(['AUTOMATIC_TRANSFER_SWITCH_01', 'NormalSupplySts']); }
     else if (p.src === 'GENERATOR') R.push(['AUTOMATIC_TRANSFER_SWITCH_01', 'EmergencySupplySts']);
+    else if (p.sys === 'pwr' && p.to && !RUNPTS[t] && !TRIPPTS[t]) {
+      /* a cable from a board with no status point of its own (MDB, MCC, DB): it carries power to what it reaches. A receiving SMDB's incomer closed, or a machine
+         it feeds reporting running, is current through it; a receiving SMDB's incomer trip stops it. A machine with no status point says nothing, so then
+         "every reading off" is not called stopped (partial). */
+      var partial = false;
+      p.to.forEach(function (d) { var dt = EQ[d] && EQ[d].type; if (RUNPTS[dt]) run(d); else partial = true; });
+      var one = p.to.length === 1 && EQ[p.to[0]];
+      if (one && one.type === 'SMDB') by.push([one.id, 'SMDB']);
+      return { measure: M, run: R, by: by, partial: partial };
+    }
     else run(p.src);
     if (t && TRIPPTS[t]) by.push([p.src, t]);
     return { measure: M, run: R, by: by };
@@ -1165,7 +1175,7 @@
     var m = rule.measure.map(function (q) { return liveReading(res[q[0]], q[1]); }).filter(function (x) { return x && x.type === 'number'; });
     if (m.length) return m.some(function (x) { return x.value > 0; }) ? 'measured' : 'stopped';
     var rr = rule.run.map(function (q) { return liveReading(res[q[0]], q[1]); }).filter(function (x) { return x && x.type === 'bool'; });
-    if (rr.length) return rr.some(function (x) { return x.value; }) ? 'running' : rr.length === rule.run.length ? 'stopped' : 'unknown';
+    if (rr.length) return rr.some(function (x) { return x.value; }) ? 'running' : rr.length === rule.run.length && !rule.partial ? 'stopped' : 'unknown';
     var involved = rule.measure.concat(rule.run).map(function (q) { return res[q[0]]; });
     return involved.some(function (r) { return r && r.state === 'stale'; }) ? 'stale' : 'unknown';
   }
