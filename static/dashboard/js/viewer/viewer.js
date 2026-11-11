@@ -506,6 +506,7 @@ window.EKO_V = (function(){
       <div class="v3tint" aria-hidden="true"></div>
       <div class="v3glow" aria-hidden="true"></div>
       ${E.state.locFocus && E.stacked() ? `<button class="btnG btnSm vpback" data-act="locBack">${C().icon('chevL', 14)} ${C().esc(t('backToAssets'))}</button>` : ''}
+      ${E.state.bimBack ? `<button class="vpbim" data-act="bimBack">${C().icon('chevL', 14)} ${C().esc(t(E.state.bimBack.labelKey))}</button>` : ''}
       ${config.markers ? markers(E) : ''}
       ${config.pmuChips ? (cacheOK = lastSig !== '' && hostSig(E) === lastSig, chipLayer(E.data.power.pmuChips||[])) : ''}
       ${config.utilChips ? (cacheOK = lastSig !== '' && hostSig(E) === lastSig, chipLayer(E.data.utilLanding.chips||[])) : ''}

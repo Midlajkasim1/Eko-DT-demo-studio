@@ -344,6 +344,7 @@
       if(gate === '#hidden'){ this.go(this.overviewId(), 'overview', null); return; }   /* E15 port (D169): a route this site hides goes to its Overview, never an add-on card */
       if(gate){ this.set({ born:'dlg', teaserKey: gate, dlg:'teaser', mobMore:false }); return; }
       if(pageId !== this.state.pageId) this.state._prev = { pageId: this.state.pageId, module: this.state.module, sub: this.state.sub };
+      this.state.bimBack = null;    /* a way back from the model belongs to one visit to it */
       this.state.locFocus = null;   /* any navigation (the logo, a module, search, Back) ends Locate-in-3D focus */
       this.state.navCollapsed = null;
       if(pageId !== 'sec') this.state.secLocated = null;
@@ -1615,6 +1616,8 @@
       setTimeout(() => { E.state.mkPulse = null; render(); }, 2200); },
     /* Back to Assets (also Escape): leaves the focus. On the strip that is only the flag (the panel and the
        highlight stay); a stacked layout goes back to the page it came from, and go() resets the model for it. */
+    /* Back from the model to the view that opened it (Live Twin: Back to Schematic), stored in state.bimBack by that view */
+    bimBack(){ const b = E.state.bimBack; if(!b) return; E.state.bimBack = null; E.state.modelFs = false; E.go(b.from.pageId, b.from.module, b.from.sub); },
     locBack(){ const lf = E.state.locFocus; if(!lf) return;
       if(lf.back){ E.go(lf.back.pageId, lf.back.module, lf.back.sub); E.set({ assetSel: lf.assetSel, paint: lf.assetSel }); }
       else E.set({ locFocus: null, modelFs: false, assetSel: lf.assetSel || E.state.assetSel, paint: lf.assetSel || E.state.paint }); },
@@ -1860,6 +1863,7 @@
     if(window.EKO_NOTIF && window.EKO_NOTIF.setViewer) window.EKO_NOTIF.setViewer(p.name);
     E.state.dlg = null; if(window.EKO_BRIEF) window.EKO_BRIEF.reset(); E.set({}); };
   E.runAct = (name, data) => { const f = ACTS[name]; if(f) f({ dataset: data || {}, value: (data || {}).v }); };   /* E15: an action by name (js/e14.js) */
+  E.bimBack = ACTS.bimBack;
   E.locExit = ACTS.locBack;   /* Escape leaves Locate-in-3D focus the way Back to Assets does (surfaces.js) */
 
   /* E15 port: the click and change handlers of the ported ESG, Security, Evacuation, Maintenance and scenario modules, looked up
