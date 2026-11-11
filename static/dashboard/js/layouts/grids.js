@@ -63,13 +63,14 @@
   const expand = (E, r) => { const t = E.t.bind(E); const als = (r.alarms || []).map(id => E.alarm(id)).filter(Boolean);
     const foldN = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const isFdd = n => { const k = foldN(n); return k.indexOf('fdd') === 0 || k.indexOf('rule') === 0; };
+    const worded = C().alarmWorded(E, r);
     const isBool = v => { const s = String(v == null ? '' : v).trim().toUpperCase(); return s === 'T' || s === 'F' || s === 'TRUE' || s === 'FALSE'; };
-    const analogParams = (r.analog && r.analog.length ? r.analog : (r.params || [])).filter(p => !isFdd(p[0]) && foldN(p[0]).indexOf('warrant') === -1);
+    const analogParams = (r.analog && r.analog.length ? r.analog : (r.params || [])).filter(p => !isFdd(p[0]) && foldN(p[0]).indexOf('warrant') === -1 && !worded(p[2]));
     const liveParams = (r.params || []).filter(p => isFdd(p[0]) && !isBool(p[2]));
     const analog = analogParams.length ? `<dl class="dgxl">${analogParams.map(p => `<div class="aprow"><dt>${esc(pAr(E, p[0]))}</dt><dd>${esc(p[2])}</dd></div>`).join('')}</dl>` : '';
     const live = liveParams.length ? `<dl class="dgxl">${liveParams.map(p => `<div class="aprow"><dt>${esc(pAr(E, p[0]))}${p[1] ? `<span class="apsrc">${esc(pAr(E, p[1]))}</span>` : ''}</dt><dd>${esc(p[2])}</dd></div>`).join('')}</dl>` : `<p class="tCap">${esc(t('emptyDash'))}</p>`;
-    const al = als.length ? als.map(a => `<div class="alref"><div class="alrefh"><span class="statchip" data-sev="${a.sev}">${esc(t('rib' + a.sev[0].toUpperCase() + a.sev.slice(1)).toLowerCase())}</span><span class="alrefage tMonoS msA">${esc(a.ageH != null ? E.fmtAge(a.ageH) : (a.age || ''))}</span></div>
-      <div class="alreft">${esc(E.alarmLines(a).main)}</div>${E.alarmLines(a).sub ? `<div class="alreftech">${esc(E.alarmLines(a).sub)}</div>` : ''}${a.ack ? `<div class="alrefack">${esc(t('ackShort', { time:a.ack.time, who:a.ack.who }))}</div>` : ''}</div>`).join('') : `<p class="tCap">${esc(t('apNoAlarms'))}</p>`;
+    const al = als.length ? als.map(a => { const L = E.alarmParts(a); return `<div class="alref"><div class="alrefh"><span class="statchip" data-sev="${a.sev}">${esc(t('rib' + a.sev[0].toUpperCase() + a.sev.slice(1)).toLowerCase())}</span><span class="alrefage tMonoS msA">${esc(a.ageH != null ? E.fmtAge(a.ageH) : (a.age || ''))}</span></div>
+      <div class="alreft">${esc(L.main)}</div>${L.sub ? `<div class="alreftech">${esc(L.sub)}</div>` : ''}${a.ack ? `<div class="alrefack">${esc(t('ackShort', { time:a.ack.time, who:a.ack.who }))}</div>` : ''}</div>${L.rec ? `<div class="alref"><span class="tCap">${esc(t('apRecommended'))}</span><div class="alreftech">${esc(L.rec)}</div></div>` : ''}`; }).join('') : `<p class="tCap">${esc(t('apNoAlarms'))}</p>`;
     return `<div class="dgxg"><section><h4 class="tLbl">${esc(t('apAnalytics'))}</h4>${analog || `<p class="tCap">${esc(t('emptyDash'))}</p>`}</section><section><h4 class="tLbl">${esc(t('apAlarms'))}</h4>${live}${al}</section></div>`; };
 
   const assets = E => ({

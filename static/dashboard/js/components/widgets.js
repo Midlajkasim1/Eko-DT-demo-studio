@@ -1081,6 +1081,13 @@ window.EKO_C = (function(){
     if (!s || s === '—' || s === '--' || s === 'N/A' || /^null$/i.test(s)) return null;
     return s;
   }
+  function alarmWorded(E, asset) {
+    const norm = s => String(s == null ? '' : s).toLowerCase().replace(/\s+/g, ' ').trim();
+    const texts = ((asset && asset.alarms) || []).map(id => E.alarm(id)).filter(Boolean)
+      .reduce((all, a) => all.concat(a.plainEn, a.techEn), []).map(norm).filter(Boolean);
+    return value => { const s = norm(value);
+      return s.length >= 16 && texts.some(x => x.indexOf(s.slice(0, 48)) !== -1 || (x.length >= 16 && s.indexOf(x.slice(0, 48)) !== -1)); };
+  }
   function fcuNumber(raw) {
     const m = String(raw).replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
     if (!m) return null;
@@ -1675,21 +1682,14 @@ window.EKO_C = (function(){
     const ctx = [arL ? (r.levelAr || r.level) : r.level, arL ? (r.typeAr || r.typeEn) : r.typeEn].filter(Boolean).join(' \u00b7 ');
     const ctl = window.EKO_CTL && window.EKO_CTL.showsControl(E, r);
     let tab = E.state.apTab;
-    if (tab === 'workorder') tab = 'activity';   /* E15: the FIN work orders are the Activity tab */
-    if(!['alarms','activity','analytics','om','warranty','control'].includes(tab)) tab = 'alarms';
+    if(!['alarms','activity','analytics','om','warranty','workorder','control'].includes(tab)) tab = 'alarms';
     if(tab === 'control' && !ctl) tab = 'alarms';
     const trP = x => E.ph(x);
     const foldNav = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const wtySlot = n => { const f = foldNav(n); if (f.indexOf('warrant') === -1) return null; if (f.indexOf('start') !== -1) return 'start'; if (f.indexOf('end') !== -1) return 'end'; return null; };
-    const alsText = als.map(a => String((a && (a.plainEn || a.techEn)) || '').toLowerCase());
-    const fddRows = (r.params || []).filter(p => {
-      if (!isFddNav(p[0]) || wtySlot(p[0])) return false;
-      const msg = String(p[2] || '').toLowerCase();
-      if (!msg) return false;
-      if (msg.length < 16) return true;   // a state word (FAULT), not a message
-      return !alsText.some(t => t && (t.indexOf(msg.slice(0, 48)) !== -1 || msg.indexOf(t.slice(0, 48)) !== -1));
-    });
-    const alarmPtRows = (r.alarmPts || []).filter(p => fcuClean(p[2])).map(p => [p[0], fcuClean(p[2])]);
+    const worded = alarmWorded(E, r);
+    const fddRows = (r.params || []).filter(p => isFddNav(p[0]) && !wtySlot(p[0]) && p[2] && !worded(p[2]));
+    const alarmPtRows = (r.alarmPts || []).filter(p => fcuClean(p[2]) && !worded(p[2])).map(p => [p[0], fcuClean(p[2])]);
     const analogRows = analogPointRows(E, r);
     /* MAHU and ECO list every FIN point they draw, a missing one as "—"; the rest use the generic analog rows */
     const typeRows = mauPointRows(E, r) || ecoPointRows(r);
@@ -1791,20 +1791,24 @@ window.EKO_C = (function(){
     const rows = html => html ? `<dl class="aprows">${html}</dl>` : '';
     const sec = label => `<h3 class="apsec">${esc(label)}</h3>`;
     const empty = key => `<p class="apempty">${esc(t(key))}</p>`;
-    const recOf = a => a.recEn ? `<div class="alrec"><span class="alrecl">${esc(t('apRecommended'))}</span><div class="alrect">${esc(E.lang === 'ar' ? (a.recAr || a.recEn) : a.recEn)}</div>${a.basisEn ? `<div class="alrecb"><span class="alrecl">${esc(t('apRecBasis'))}</span> ${esc(E.lang === 'ar' ? (a.basisAr || a.basisEn) : a.basisEn)}</div>` : ''}</div>` : '';
+    const recBox = (text, basis) => text ? pbox({ kind: t('apRecommended'), title: text, detail: basis ? t('apRecBasis') + ' ' + basis : '' }) : '';
+    const recOf = (a, own) => recBox(a.recEn && (arL ? (a.recAr || a.recEn) : a.recEn), a.basisEn && (arL ? (a.basisAr || a.basisEn) : a.basisEn)) + recBox(own);
     let body = '';
     if(tab === 'alarms'){
-      const boxes = als.map(a => { const L = E.alarmLines(a);   /* the technical line stays visible, as before */
+      const boxes = als.map(a => { const L = E.alarmParts(a);   /* the technical line stays visible, as before */
         return `<div class="apalarm">${pbox({ kind: t('ap.alarmKind.' + a.sev), time: a.ageH != null ? E.fmtAge(a.ageH) : (a.age || ''),
           title: (arL ? (a.plainAr || a.plainEn) : a.plainEn) || L.main,
           detail: a.ack ? t('ackShort', { time: a.ack.time, who: E.person(a.ack.who) }) : t('apUnack'),
           value: L.sub ? [t('ap.reading'), L.sub] : null, sev: a.sev, acked: !!a.ack, hend: histBtn(a),
-          actions: a.ack ? [] : [{ act: 'ackAlarm', data: { alarm: a.id }, label: t('acknowledge') }] })}${recOf(a)}${histPanel(a)}</div>`; }).join('');
-      const fdd = fddRows.map(p => row(trP(p[0]), esc(E.clip2 ? E.clip2(p[2]) : p[2]))).join('');
+          actions: a.ack ? [] : [{ act: 'ackAlarm', data: { alarm: a.id }, label: t('acknowledge') }] })}${recOf(a, L.rec)}${histPanel(a)}</div>`; }).join('');
+      const fdd = fddRows.map(p => { const v = String(E.clip2(p[2]));
+        return pbox({ kind: t('apFdd'), title: trP(p[0]), value: [t(v.length < 16 ? 'dgc.status' : 'ap.reading'), v] }); }).join('');
       const pts = alarmPtRows.map(p => row(trP(p[0]), esc(p[1]))).join('');
-      body = (als.length ? `<div class="pboxes">${boxes}</div>` : empty('ap.noAlarms'))
-        + (fdd ? sec(t('apFdd')) + rows(fdd) : '') + (pts ? sec(t('ap.readings')) + rows(pts) : '');
+      body = (als.length ? '' : empty('ap.noAlarms')) + (boxes || fdd ? `<div class="pboxes">${boxes}${fdd}</div>` : '')
+        + (pts ? sec(t('ap.readings')) + rows(pts) : '');
     } else if(tab === 'activity'){
+      body = window.EKO_ACT ? window.EKO_ACT.tab(E, r, als, finAsset(E, id)) : empty('ap.noActivity');
+    } else if(tab === 'workorder'){
       body = workOrderBody(E, r);
     } else if(tab === 'analytics'){
       const live = typeRows || (fahuRows ? fahuRows + (analogRows || '') : analogRows);
@@ -1838,7 +1842,7 @@ window.EKO_C = (function(){
         <button class="iconbtn icon26" data-act="closeAsset" aria-label="${esc(t('close'))}">${icon('x',12)}</button>
       </div>
       <div class="apctx" data-tip="${esc(ctx)}" data-tipif="trunc">${esc(ctx)}</div>
-      <div class="aptabs">${tabBtn('alarms', t('apAlarms'), badge)}${tabBtn('activity', t('apActivityTab'), woBadge)}${tabBtn('analytics', t('apFullT'))}${tabBtn('om', t('apOmTab'))}${tabBtn('warranty', t('apWtyTab'))}${ctl?tabBtn('control', t('apControlTab')):''}</div>
+      <div class="aptabs">${tabBtn('alarms', t('apAlarms'), badge)}${tabBtn('activity', t('apActivityTab'))}${tabBtn('analytics', t('apFullT'))}${tabBtn('om', t('apOmTab'))}${tabBtn('warranty', t('apWtyTab'))}${tabBtn('workorder', t('apWoTab'), woBadge)}${ctl?tabBtn('control', t('apControlTab')):''}</div>
       <div class="apbody">${body}</div>
       <div class="apfoot apfootmob">
         ${E.state.woRaised[id] || (E.state.woPhase||{})[id]
@@ -1884,7 +1888,7 @@ window.EKO_C = (function(){
   }
   const kwhBasis = (E, kwh, tb) => E.t('basisKwh', { kwh: fmt(kwh, kwh < 100 ? 2 : 0), basis: tb.text });
 
-  return { esc, fmt, icon, dicon, tariffBasis, emissionBasis, kwhBasis, pbox, spine, aiBtn, ctl, sevGlyph, sevAction, sevTipFor, actTip, sparkPath, ribbon, woBtn, brandLogo, utilitiesSummary, mkEye,
+  return { esc, fmt, icon, dicon, tariffBasis, emissionBasis, kwhBasis, pbox, spine, alarmWorded, aiBtn, ctl, sevGlyph, sevAction, sevTipFor, actTip, sparkPath, ribbon, woBtn, brandLogo, utilitiesSummary, mkEye,
            execSummary, energySummary, alarmModPanel, energyModPanel,
            powerPage, consModelPanel, utilitiesPanel, registerTable, assetPanel, summaryShell, treeShell, modShell };
 })();

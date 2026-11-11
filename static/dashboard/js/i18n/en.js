@@ -4401,6 +4401,8 @@ window.EKO_I18N.en = {
   "act.prevNone": "No earlier occurrence in the alarm history.",
   "act.empty": "No alarm or work order history for this asset.",
   "act.foot": "Three sources: the EKO alarm history, the CMMS work order history and the inspection records. Newest first; planned work ahead sits at the top.",
+  "act.emptyLive": "No alarm record or work order for this equipment.",
+  "act.src.wo": "Work orders",
   "evac.none": "This site has no bed data.",
   "evac.planAria": "Level 1 plan with the beds and the evacuation route",
   "evac.h.beds": "BEDS",

@@ -269,6 +269,10 @@
     alarmLines(a, compact){ const tech = this.clip2(this.lang === 'ar' ? (a.techAr || a.techEn) : a.techEn); const plain = this.clip2(this.loc(a, 'plain'));
       if(this.wording() === 'technical') return { main: tech, sub: '' };
       return { main: plain, sub: (compact && !this.disclose('tech')) ? '' : tech }; },
+    alarmParts(a, compact){ const l = this.alarmLines(a, compact);
+      const cut = s => { const m = /^([\s\S]*?)[\s,.;]*\bRecommendations?\s*:\s*([\s\S]+)$/i.exec(s || ''); return m && m[1].trim() ? [m[1].trim(), m[2].trim()] : [s || '', '']; };
+      const main = cut(l.main), sub = cut(l.sub);
+      return { main: main[0], sub: sub[0], rec: sub[1] || main[1] }; },
     loc(a, kind){
       const ar = this.lang === 'ar';
       return kind === 'plain' ? (ar ? a.plainAr : a.plainEn) : (ar ? a.locAr : a.locEn);
