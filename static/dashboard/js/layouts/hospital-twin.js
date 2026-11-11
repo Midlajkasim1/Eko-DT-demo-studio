@@ -181,6 +181,18 @@
   PI('pwr_mdb_riser', 'pwr', 'MDB', [[5.6, 13.6, 3.6], [5.6, 15.5, 3.9]], 'cable');
   PI('pwr_mcc1_plumbing', 'pwr', 'MCC_01', [[12.3, 12.4, 0.25], [12.3, 7.2, 0.25], [4.2, 7.2, 0.25], [4.2, 5.6, 0.25]], 'cable');
   PI('pwr_mcc1_sump', 'pwr', 'MCC_01', [[10.4, 7.2, 0.25], [10.4, 6.0, 0.25]], 'cable');
+  /* what each cable from the MDB, an MCC or a DB reaches, from the drawing's own feed relationships: those boards have no status point in FIN, so the
+     cable's evidence is at its other end (MAP.flowRule): the receiving SMDB's incomer, or the run status of the machines the board feeds */
+  (function () {
+    var pipe = function (id) { return PIPES.filter(function (p) { return p.id === id; })[0]; };
+    var fedBy = function (b) { return EQUIP.filter(function (e) { return e.feed === b; }).map(function (e) { return e.id; }); };
+    pipe('pwr_mdb_smdb1').to = [SMDB_OF.L1];
+    pipe('pwr_mdb_riser').to = [SMDB_OF.L2, SMDB_OF.L3, SMDB_OF.RF];
+    ['L2', 'L3', 'RF'].forEach(function (lv) { pipe('pwr_riser_' + lv).to = [SMDB_OF[lv]]; });
+    ['L1', 'L2', 'L3', 'RF'].forEach(function (lv) { pipe('pwr_bus_' + MCC_OF[lv]).to = fedBy(MCC_OF[lv]); if (DB_OF[lv]) pipe('pwr_bus_' + DB_OF[lv]).to = fedBy(DB_OF[lv]); });
+    pipe('pwr_mcc1_plumbing').to = ['BOOSTER_PUMP'];
+    pipe('pwr_mcc1_sump').to = ['SUMP_PUMP'];
+  })();
   PI('dcw_booster', 'dcw', 'BOOSTER_PUMP', [[7.2, 3.4, 1.6], [13.6, 3.4, 1.6], [13.6, 10.6, 1.6]]);
   PI('drn_floor', 'drn', 'SUMP_PUMP', [[14.6, 8.2, 0.3], [11.4, 8.2, 0.3], [11.4, 6.0, 0.3]]);
   PI('drn_out', 'drn', 'SUMP_PUMP', [[10.4, 2.0, 1.2], [10.4, -1.8, 1.2]]);
@@ -731,7 +743,9 @@
         t.textContent = T('twinLv.' + lv).toUpperCase();
         RISERS.forEach(function (r) {
           var up = { L1: LZ.L2, L2: LZ.L3, L3: LZ.RF, RF: 999 }[lv], a = Math.max(r.bottom, z), b = Math.min(r.top, up - 0.7);
-          if (b > a + 0.2) drawPipe(g, { id: 'riser_' + r.sys + '_' + lv, sys: r.sys, src: r.src, kind: r.kind || 'pipe', pts: r.down ? [[r.x, r.y, b], [r.x, r.y, a]] : [[r.x, r.y, a], [r.x, r.y, b]] }, refs);
+          /* the power riser's segment on a floor carries the feeders of the SMDBs on that floor and above (Level 1's SMDB has its own cable) */
+          var to = r.sys === 'pwr' ? ['L2', 'L3', 'RF'].filter(function (l) { return LZ[l] >= z; }).map(function (l) { return SMDB_OF[l]; }) : undefined;
+          if (b > a + 0.2) drawPipe(g, { id: 'riser_' + r.sys + '_' + lv, sys: r.sys, src: r.src, kind: r.kind || 'pipe', to: to, pts: r.down ? [[r.x, r.y, b], [r.x, r.y, a]] : [[r.x, r.y, a], [r.x, r.y, b]] }, refs);
         });
       }
       var floorTop = LZ[lv === 'EXT' ? 'L1' : lv] + 3.2;
@@ -784,25 +798,27 @@
   var HIDDEN = {};   /* the system layers switched off, for the page session */
 
   /* the floor mapping, with no machine selected: what FIN floor each drawn level's mapped equipment report */
-  /* a machine's floor key for navigation: the outside machines (DEWA, generator) are listed with Level 1, as goTo shows them there */
+  /* a machine's floor in the list: its own drawn level; the outside machines (DEWA supply, the generator: level EXT) are listed under Level 1, the floor goTo shows them on.
+     Only the list grouping: their drawn level, position and relationships stay EXT. */
   function lvOf(e) { return e.level === 'EXT' ? 'L1' : e.level; }
-  var FLOOR_ORDER = ['L1', 'L2', 'L3', 'RF'];
-  function floorName(E, lv) { return tr(E, 'twinLv.' + lv) + ' \u00b7 ' + lv + ' / ' + MAP.LEVELS[lv]; }
-  /* the Equipment tab with nothing selected: four floor cards, or the chosen floor's machines (the same EQUIP list and floor keys the drawing uses) */
+  /* top to bottom as the building is drawn; Outside only when something is drawn outside */
+  var FLOOR_ORDER = ['RF', 'L3', 'L2', 'L1'];
+  /* the Equipment tab with nothing selected: one expandable row per floor (name, count from EQUIP), the open floor's machines under it; one floor open at a time */
   function equipNavHtml(E, s) {
-    if (!s.flr) {
-      return '<p class="twpick">' + esc(tr(E, 'twinFloorPick')) + '</p><div class="twfcards">' + FLOOR_ORDER.map(function (lv) {
-        var n = EQUIP.filter(function (e) { return lvOf(e) === lv; }).length;
-        return '<button type="button" class="twfcard" data-tw="floor" data-lv="' + lv + '"><b>' + esc(tr(E, 'twinLv.' + lv)) + '</b><span>' + esc(lv + ' / ' + MAP.LEVELS[lv]) + '</span><small>' + esc(tr(E, 'twinFloorCount', { n: String(n) })) + '</small></button>';
-      }).join('') + '</div>';
-    }
-    return '<div class="twnav"><button type="button" class="btnG btnSm" data-tw="floors">\u2190 ' + esc(tr(E, 'twinAllFloors')) + '</button></div><h3 class="twsub">' + esc(floorName(E, s.flr)) + '</h3><ul class="twelist">' +
-      EQUIP.filter(function (e) { return lvOf(e) === s.flr; }).map(function (e) {
-        var st = s.res[e.id].state, al = (s.alIdx.by[e.id] || []).length;
-        return '<li>' + goBtn(e.id, '<b>' + esc(e.label) + '</b><span class="twchip" data-fin="' + st + '">' + esc(tr(E, 'twinFin.' + st)) + '</span>' +
-          (MAP.RUNPTS[e.type] ? '<span class="twchip" data-run="' + (s.run[e.id] || 'unknown') + '">' + esc(tr(E, 'twinRun.' + (s.run[e.id] || 'unknown'))) + '</span>' : '') +
-          (al ? '<span class="twchip" data-al="1">' + esc(tr(E, 'twinAlarms', { n: String(al) })) + '</span>' : '')) + '</li>';
-      }).join('') + '</ul>';
+    return '<p class="twpick">' + esc(tr(E, 'twinFloorPick')) + '</p><div class="twacc">' + FLOOR_ORDER.map(function (lv) {
+      var list = EQUIP.filter(function (e) { return lvOf(e) === lv; }), open = s.flr === lv;
+      if (!list.length) return '';
+      var code = MAP.LEVELS[lv] ? lv + ' \u00b7 ' + MAP.LEVELS[lv] : '';
+      return '<section class="twaccf" data-lv="' + lv + '" data-open="' + (open ? 1 : 0) + '"><button type="button" class="twaccrow" data-tw="floor" data-lv="' + lv + '" aria-expanded="' + open + '" aria-controls="twacc-' + lv + '">' +
+        '<i class="twaccarr" aria-hidden="true"></i><span class="twaccn"><b>' + esc(tr(E, 'twinLv.' + lv)) + '</b>' + (code ? '<small>' + esc(code) + '</small>' : '') + '</span>' +
+        '<span class="twaccc" aria-label="' + esc(tr(E, 'twinFloorCount', { n: String(list.length) })) + '">' + list.length + '</span></button>' +
+        (open ? '<ul class="twelist" id="twacc-' + lv + '">' + list.map(function (e) {
+          var st = s.res[e.id].state, al = (s.alIdx.by[e.id] || []).length;
+          return '<li>' + goBtn(e.id, '<b>' + esc(e.label) + '</b><span class="twchip" data-fin="' + st + '">' + esc(tr(E, 'twinFin.' + st)) + '</span>' +
+            (MAP.RUNPTS[e.type] ? '<span class="twchip" data-run="' + (s.run[e.id] || 'unknown') + '">' + esc(tr(E, 'twinRun.' + (s.run[e.id] || 'unknown'))) + '</span>' : '') +
+            (al ? '<span class="twchip" data-al="1">' + esc(tr(E, 'twinAlarms', { n: String(al) })) + '</span>' : '')) + '</li>';
+        }).join('') + '</ul>' : '') + '</section>';
+    }).join('') + '</div>';
   }
   /* the systems, flow and layout key, from SYSTEMS / LAYERS; opened from the Legend button on the drawing */
   function legendHtml(E) {
@@ -813,7 +829,7 @@
         }).join('') + '</div>';
       }).join('') + '</dl><h3 class="twsub">' + esc(tr(E, 'twinFlowT')) + '</h3><ul class="twflowkey">' + ['measured', 'running', 'stopped', 'tripped', 'stale', 'offline', 'unknown'].map(function (k) {
         return '<li><i class="twfk" data-flow="' + k + '"></i>' + esc(tr(E, 'twinFlow.' + k)) + '</li>';
-      }).join('') + '</ul><p class="twnote">' + esc(tr(E, 'twinLayoutNote')) + '</p>';
+      }).join('') + '</ul>';
   }
   function label(id) { return EQ[id] ? EQ[id].label : id; }
   /* a machine's name as a button that selects it (and shows its floor) */
@@ -1020,7 +1036,7 @@
       else if (b.dataset.tw === 'go') goTo(host, b.dataset.id);
       else if (b.dataset.tw === 'bim') showInModel(host, s.sel);
       else if (b.dataset.tw === 'legend') setLegend(host);
-      else if (b.dataset.tw === 'floor') { s.flr = b.dataset.lv; s.side.scrollTop = 0; update(host, s.E); }
+      else if (b.dataset.tw === 'floor') { s.flr = s.flr === b.dataset.lv ? null : b.dataset.lv; update(host, s.E); refocus('[data-tw="floor"][data-lv="' + b.dataset.lv + '"]'); }
       else if (b.dataset.tw === 'floors') { s.flr = null; s.side.scrollTop = 0; select(host, null); }
       else if (b.dataset.tw === 'back') { s.side.scrollTop = 0; select(host, null); }
       else if (b.dataset.tw === 'tab') { s.tab = b.dataset.tab; update(host, s.E); }
