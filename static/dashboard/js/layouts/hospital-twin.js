@@ -784,10 +784,11 @@
   var HIDDEN = {};   /* the system layers switched off, for the page session */
 
   /* the floor mapping, with no machine selected: what FIN floor each drawn level's mapped equipment report */
-  /* a machine's floor in the list: its own drawn level (the outside machines, DEWA and the generator, are listed as Outside, not put on a floor) */
-  function lvOf(e) { return e.level; }
+  /* a machine's floor in the list: its own drawn level; the outside machines (DEWA supply, the generator: level EXT) are listed under Level 1, the floor goTo shows them on.
+     Only the list grouping: their drawn level, position and relationships stay EXT. */
+  function lvOf(e) { return e.level === 'EXT' ? 'L1' : e.level; }
   /* top to bottom as the building is drawn; Outside only when something is drawn outside */
-  var FLOOR_ORDER = ['RF', 'L3', 'L2', 'L1', 'EXT'];
+  var FLOOR_ORDER = ['RF', 'L3', 'L2', 'L1'];
   /* the Equipment tab with nothing selected: one expandable row per floor (name, count from EQUIP), the open floor's machines under it; one floor open at a time */
   function equipNavHtml(E, s) {
     return '<p class="twpick">' + esc(tr(E, 'twinFloorPick')) + '</p><div class="twacc">' + FLOOR_ORDER.map(function (lv) {
