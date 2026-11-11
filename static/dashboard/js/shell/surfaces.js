@@ -54,14 +54,15 @@ window.EKO_SURF = (function(){
     { id:'conn',     kind:'overlay', isOpen:()=>E.state.dlg==='conn',                           close:()=>{ E.state.dlg=null; } },
     { id:'more',     kind:'menu',    isOpen:()=>!!E.state.mobMore,                              close:()=>{ E.state.mobMore=false; E.state.rlAsk=false; } },
     { id:'fly',      kind:'flyout',  isOpen:()=>!!E.state.dock.bloom,                           close:()=>{ E.state.dock.bloom=null; } },
-    { id:'radial',   kind:'menu',    isOpen:()=>!!E.state.radial,                               close:()=>{ E.state.radial=null; } }
+    { id:'radial',   kind:'menu',    isOpen:()=>!!E.state.radial,                               close:()=>{ E.state.radial=null; } },
+    { id:'elmenu',   kind:'menu',    isOpen:()=>!!E.state.elMenu,                               close:()=>{ E.state.elMenu=null; } }
   ];
   const byId = {}; DEFS.forEach(d => byId[d.id] = d);
   const openSet = () => new Set(DEFS.filter(d => { try{ return d.isOpen(); }catch(e){ return false; } }).map(d => d.id));
 
   let last = new Set(), order = [], lastClick = null, openers = {}, pendingFocus = null, pendingEnter = null;
   /* where each surface's first focusable control lives (D121) */
-  const ROOTS = { mkpop:'.mkpop', conn:'.connpop', settings:'.dlgsettings', signout:'.dlgsignout', menu:'.accmenu', display:'.dispmenu', switcher:'.dlg[role="menu"]', more:'.dlg', notif:'.nfpanel, .nfpop', alerts:'.dlg', report:'.dlg', help:'.dlghelp', wallcfg:'.wcfg', pfcov:'.dlg', rpconfirm:'.dlg', teaser:'.dlg', ai:'#aipanel', prefs:'.dlg', esg:'.esgdlg', sec:'.secdlg', ops:'.opsdlg', esgfp:'.esgfpop' };
+  const ROOTS = { elmenu:'.velm', mkpop:'.mkpop', conn:'.connpop', settings:'.dlgsettings', signout:'.dlgsignout', menu:'.accmenu', display:'.dispmenu', switcher:'.dlg[role="menu"]', more:'.dlg', notif:'.nfpanel, .nfpop', alerts:'.dlg', report:'.dlg', help:'.dlghelp', wallcfg:'.wcfg', pfcov:'.dlg', rpconfirm:'.dlg', teaser:'.dlg', ai:'#aipanel', prefs:'.dlg', esg:'.esgdlg', sec:'.secdlg', ops:'.opsdlg', esgfp:'.esgfpop' };
   function enterSurface(id){
     const sel = ROOTS[id]; if(!sel) return;
     const root = [...document.querySelectorAll(sel)].find(x => x.getClientRects().length); if(!root) return;   /* fixed-positioned surfaces have no offsetParent */
@@ -86,6 +87,7 @@ window.EKO_SURF = (function(){
         DEFS.forEach(d => {
           if(d.id === newest || d.sticky || !now.has(d.id)) return;
           if(newest === 'fly' && d.id === 'mkpop') return;
+          if(newest === 'elmenu' && (d.id === 'mkpop' || d.id === 'asset')) return;
           d.close();
         });
       }
@@ -173,6 +175,7 @@ window.EKO_SURF = (function(){
       if(!(t instanceof Element)) return;
       if(E.state.dock.bloom && !t.closest('.mzfly, #vbar, .vsheet, .vfab')){ E.state.dock.bloom = null; E.set({}); }
       else if(E.state.radial && !t.closest('.vradial')){ E.state.radial = null; E.set({}); }
+      else if(E.state.elMenu && !t.closest('.velm')){ E.state.elMenu = null; E.set({}); }
     }, true);
   }
 

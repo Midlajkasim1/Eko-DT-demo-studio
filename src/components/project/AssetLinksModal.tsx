@@ -92,8 +92,8 @@ function newLink(eq: LinkEquipment, guid: string, nameWords: boolean, el?: Model
 }
 
 const HINTS: Record<Mode, string> = {
-  equip: 'Link each FIN equipment to its element in the model. A link keeps the IFC GlobalId, so it carries over to a revised model.',
-  cctv: 'Link each FIN camera to its element in the model, then set the room it is in. FIN’s bimId is suggested first. Rooms come from the Spaces tab.',
+  equip: 'Link each FIN equipment to its element in the model, or add one by name and GlobalId. A link keeps the IFC GlobalId, so it carries over to a revised model.',
+  cctv: 'Link each FIN camera to its element in the model, or add a camera by name and GlobalId, then set the room it is in. FIN’s bimId is suggested first. Rooms come from the Spaces tab.',
   space: 'Rooms for the heatmap, grouped by level. Choose a FIN sensor or a piece of equipment for a room, or type a name such as IS-01. Rooms with no sensor of their own share the sample sensors.',
 }
 
@@ -174,6 +174,8 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
   const declinedRoomsRef = useRef<Set<string>>(new Set())
   const [confirmClose, setConfirmClose] = useState(false)
   const [cameraSource, setCameraSource] = useState<CameraSource>(initialSource)
+  const [exportOpen, setExportOpen] = useState(false)
+  const exportMenu = useRef<HTMLDivElement>(null)
   const spaceMode = mode === 'space'
 
   const initialText = useMemo(() => JSON.stringify(initial), [initial])
@@ -186,12 +188,22 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
       if (e.key !== 'Escape') return
       if (pickerFor) setPickerFor(null)
       else if (finFor) setFinFor(null)
+      else if (exportOpen) setExportOpen(false)
       else if (dirty) setConfirmClose(true)
       else onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [dirty, confirmClose, onClose, pickerFor, finFor])
+  }, [dirty, confirmClose, onClose, pickerFor, finFor, exportOpen])
+
+  useEffect(() => {
+    if (!exportOpen) return
+    const onPointer = (e: MouseEvent) => {
+      if (!exportMenu.current?.contains(e.target as Node)) setExportOpen(false)
+    }
+    document.addEventListener('mousedown', onPointer)
+    return () => document.removeEventListener('mousedown', onPointer)
+  }, [exportOpen])
 
   useEffect(() => { linksRef.current = links }, [links])
   useEffect(() => {
@@ -710,6 +722,25 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
     setManualGuid('')
   }
 
+  const addManualLink = () => {
+    const guid = manualGuid.trim()
+    const name = manualName.trim()
+    if (!isGuid(guid) || !name || mode === 'space') return
+    const el = byGuid.get(guid)
+    const cctv = mode === 'cctv'
+    const key = foldName(name)
+    const next: AssetLink = {
+      equip: name,
+      guid,
+      type: cctv ? 'CCTV' : defaultType({ name }, nameWords),
+      ...(cctv ? { kind: 'cctv' as const } : {}),
+      ...(el ? { element: el.name || el.objectType } : { element: name }),
+    }
+    setLinks(prev => [...prev.filter(l => l.kind === 'space' || foldName(l.equip) !== key), next])
+    setManualName('')
+    setManualGuid('')
+  }
+
   const setHeatName = (guid: string, name: string, fromFin?: { finId?: string } | null) => {
     setLinks(prev => prev.map(l => {
       if (!(l.kind === 'space' && l.guid === guid)) return l
@@ -747,29 +778,43 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
     setError(null)
   }
 
+  const linkKind = (l: AssetLink): Mode => l.kind === 'space' ? 'space' : l.kind === 'cctv' ? 'cctv' : 'equip'
   const doImport = () => {
     const parsed = parseLinks(importText ?? '', nameWords)
     if (!parsed.links) {
       setError(parsed.error ?? 'Nothing to import.')
       return
     }
-    const merged = mergeLinks(links, parsed.links)
+    const picked = parsed.links.filter(l => linkKind(l) === mode)
+    if (!picked.length) {
+      const name = mode === 'equip' ? 'equipment' : mode === 'cctv' ? 'camera' : 'room'
+      setError(`That file has no ${name} links.`)
+      return
+    }
+    const merged = mergeLinks(links, picked)
     setImportText(null)
-    bulk(merged.links, `Imported ${merged.added} new and ${merged.replaced} replaced links. Save to keep them.`)
+    const which = mode === 'equip' ? 'equipment' : mode === 'cctv' ? 'camera' : 'room'
+    bulk(merged.links, `Imported ${merged.added} new and ${merged.replaced} replaced ${which} links. Save to keep them.`)
   }
 
   const readFile = async (file: File | undefined) => {
     if (file) setImportText(await file.text())
   }
 
-  const exportCsv = () => {
-    const url = URL.createObjectURL(new Blob([linksToCsv(links)], { type: 'text/csv' }))
+  const downloadCsv = (rows: AssetLink[], file: string) => {
+    const url = URL.createObjectURL(new Blob([linksToCsv(rows)], { type: 'text/csv' }))
     const a = document.createElement('a')
     a.href = url
-    a.download = `${projectName || 'project'}-equipment-spaces.csv`
+    a.download = `${projectName || 'project'}-${file}.csv`
     a.click()
     URL.revokeObjectURL(url)
+    setExportOpen(false)
   }
+  const equipCsv = links.filter(l => l.kind !== 'space' && l.kind !== 'cctv')
+  const cameraCsv = links.filter(l => l.kind === 'cctv')
+  const roomCsv = links.filter(l => l.kind === 'space')
+  const tabCsv = mode === 'cctv' ? cameraCsv : mode === 'space' ? roomCsv : equipCsv
+  const tabFile = mode === 'cctv' ? 'cctv' : mode === 'space' ? 'spaces' : 'equipment'
 
   const handleSave = async () => {
     setSaving(true)
@@ -1369,7 +1414,27 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
                   <button className="ds-btn ds-btn-secondary al-small" onClick={() => setImportText(importText === null ? '' : null)}>
                     {importText === null ? 'Import' : 'Close import'}
                   </button>
-                  <button className="ds-btn ds-btn-secondary al-small" onClick={exportCsv} disabled={!links.length} title="Equipment, cameras and rooms in one CSV">Export CSV</button>
+                  <div className="al-export" ref={exportMenu}>
+                    <button className="ds-btn ds-btn-secondary al-small" onClick={() => downloadCsv(tabCsv, tabFile)} disabled={!tabCsv.length}>Export CSV</button>
+                    <button
+                      className="ds-btn ds-btn-secondary al-small al-export-more"
+                      onClick={() => setExportOpen(open => !open)}
+                      disabled={!links.length}
+                      aria-haspopup="menu"
+                      aria-expanded={exportOpen}
+                      title="Export all, or equipment, cameras, or rooms on their own"
+                    >
+                      <i className="bx bx-chevron-down" aria-hidden="true" />
+                    </button>
+                    {exportOpen && (
+                      <div className="al-export-menu" role="menu">
+                        <button role="menuitem" disabled={!links.length} onClick={() => downloadCsv(links, 'equipment-spaces')}>All ({links.length})</button>
+                        <button role="menuitem" disabled={!equipCsv.length} onClick={() => downloadCsv(equipCsv, 'equipment')}>Equipment ({equipCsv.length})</button>
+                        <button role="menuitem" disabled={!cameraCsv.length} onClick={() => downloadCsv(cameraCsv, 'cctv')}>CCTV ({cameraCsv.length})</button>
+                        <button role="menuitem" disabled={!roomCsv.length} onClick={() => downloadCsv(roomCsv, 'spaces')}>Spaces ({roomCsv.length})</button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -1378,7 +1443,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
                   <textarea
                     value={importText}
                     onChange={e => setImportText(e.target.value)}
-                    placeholder={'CSV with a header row: equip,guid,type,finId,element,kind,room\nkind is empty for equipment, cctv for a camera, space for a heatmap room. room is the GlobalId of a camera’s space.\nA JSON list of the same fields also works.'}
+                    placeholder={'CSV or JSON: equip,guid,type,finId,element,kind,room,level,clip'}
                   />
                   <div className="al-import-row">
                     <input type="file" accept=".csv,.json,.txt" onChange={e => readFile(e.target.files?.[0])} />
@@ -1387,14 +1452,16 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
                 </div>
               )}
 
-              {mode === 'space' && (
-                <div className="al-search-row al-manual">
-                  <span className="al-sub">Add a room by GlobalId</span>
-                  <input placeholder="Heatmap name" value={manualName} onChange={e => setManualName(e.target.value)} />
-                  <input placeholder="IFC GlobalId" value={manualGuid} onChange={e => setManualGuid(e.target.value)} />
-                  <button className="ds-btn ds-btn-secondary al-small" disabled={!manualName.trim() || !isGuid(manualGuid.trim())} onClick={addManualSpace}>Add</button>
-                </div>
-              )}
+              <div className="al-search-row al-manual">
+                <span className="al-sub">{mode === 'space' ? 'Add a room by GlobalId' : mode === 'cctv' ? 'Add a camera by GlobalId' : 'Add equipment by GlobalId'}</span>
+                <input
+                  placeholder={mode === 'space' ? 'Heatmap name' : mode === 'cctv' ? 'Camera name' : 'Equipment name'}
+                  value={manualName}
+                  onChange={e => setManualName(e.target.value)}
+                />
+                <input placeholder="IFC GlobalId" value={manualGuid} onChange={e => setManualGuid(e.target.value)} />
+                <button className="ds-btn ds-btn-secondary al-small" disabled={!manualName.trim() || !isGuid(manualGuid.trim())} onClick={mode === 'space' ? addManualSpace : addManualLink}>Add</button>
+              </div>
 
               {mode !== 'space' && (tabAuto > 0 || tabAutoRooms > 0) && (
                 <p className="al-banner">
@@ -1437,8 +1504,8 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
                               : !equipment.length
                                 ? 'FIN sent no equipment for this project. Press Reload FIN to ask again.'
                                 : mode === 'cctv'
-                                  ? 'FIN has no cameras for this project. A camera is FIN equipment with the cctv tag.'
-                                  : 'FIN has no equipment outside the cameras for this project.'}
+                                  ? 'FIN has no cameras for this project. Add one by name and GlobalId, or import a list. A FIN camera is equipment with the cctv tag.'
+                                  : 'FIN has no equipment outside the cameras for this project. Add one by name and GlobalId, or import a list.'}
                       </td></tr>
                     )}
                   </tbody>

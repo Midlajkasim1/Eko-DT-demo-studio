@@ -122,6 +122,34 @@ function HeatmapPane({
           style={{ width: 72, padding: '4px 8px', borderRadius: 6, background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
         />
       </label>
+      <p className="ds-hint">A drawn count, not a live reading. It is shared across the levels, so a level with more rooms gets more people. Set a level to give it its own count. A blank level keeps its share. The crowd drawn at once stops at 400.</p>
+      {floors.length ? floors.map(f => {
+        const saved = current.peopleByLevel?.[f.id]
+        return (
+          <label key={f.id} style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0', fontSize: 13 }}>
+            {f.name}
+            <input
+              type="number"
+              min={0}
+              max={400}
+              placeholder="share"
+              value={saved ?? ''}
+              onChange={e => {
+                const next = { ...(current.peopleByLevel || {}) }
+                if (e.target.value === '') delete next[f.id]
+                else next[f.id] = Math.max(0, Math.min(400, Math.round(Number(e.target.value) || 0)))
+                if (Object.keys(next).length) patch({ peopleByLevel: next })
+                else {
+                  const cleared = { ...current }
+                  delete cleared.peopleByLevel
+                  onChange(cleared)
+                }
+              }}
+              style={{ width: 72, padding: '4px 8px', borderRadius: 6, background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+            />
+          </label>
+        )
+      }) : <p className="ds-hint">Open the model to set a count for each level.</p>}
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
         Speed
         <input

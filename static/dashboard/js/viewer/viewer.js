@@ -161,7 +161,9 @@ window.EKO_V = (function(){
         z: el.dataset.z ? +el.dataset.z : undefined,
         bimId: el.dataset.bimid,
         asset: el.dataset.asset,
-        alarm: el.dataset.alarm
+        alarm: el.dataset.alarm,
+        alt: el.dataset.alt,
+        pin: el.dataset.pin
       });
       const on = p.visible && p.x >= 0 && p.x <= hr.width && p.y >= 0 && p.y <= hr.height;
       const left = (p.x + hr.left - lr.left).toFixed(1) + 'px', top = (p.y + hr.top - lr.top).toFixed(1) + 'px';
@@ -244,7 +246,7 @@ window.EKO_V = (function(){
     const asset = (E.data.assets || []).find(x => x.id === a.asset) || {};
     const name = ar ? (asset.typeAr || asset.typeEn || a.asset) : (asset.typeEn || a.asset);
     const zone = ar ? (asset.zoneAr || asset.zone || '') : (asset.zone || '');
-    const l = E.alarmLines(a, false);
+    const l = E.alarmParts(a, false);
     const woDone = E.state.woRaised[a.asset];
     const n = E.state.mkPopN || 0;
     return `<div class="mkpop mzglass col gap8" data-x="${a.x}" data-y="${a.y}" data-z="${a.z || ''}" data-bimid="${a.bimId || ''}" data-asset="${a.asset || ''}" data-alarm="${a.id}" data-born="${E.state.born==='pop'?1:0}"${popPlaced(E)} role="dialog" aria-label="${esc(name + ' ' + a.asset)}">
@@ -252,11 +254,12 @@ window.EKO_V = (function(){
       <div class="row gap8 aiC"><span class="statchip" data-sev="${esc(a.sev)}">${esc(t('rpSev.' + a.sev))}</span>${a.ack ? `<span class="tCap">${esc(t('ackedShort'))}</span>` : ''}<span class="grow"></span>
         <button class="iconbtn icon26" data-act="mkClose" aria-label="${esc(t('close'))}">${C().icon('x',12)}</button></div>
       <div class="col"><b class="mkname">${esc(name)}</b><span class="tMonoS mkcode">${esc(a.asset)}${zone ? ` · ${esc(zone)}` : ''}</span></div>
-      <div class="col gap2"><span class="mkwhat">${esc(l.main)}</span>${l.sub ? `<span class="mkwhat mktech">${esc(l.sub)}</span>` : ''}</div>
+      <div class="mkbox col gap2" data-sev="${esc(a.sev)}"><span class="mkwhat">${esc(l.main)}</span>${l.sub ? `<span class="mkwhat mktech">${esc(l.sub)}</span>` : ''}</div>
+      ${l.rec ? `<div class="mkbox col gap2"><span class="tCap">${esc(t('apRecommended'))}</span><span class="mkwhat mktech">${esc(l.rec)}</span></div>` : ''}
       ${a.impactAedMo ? `<span class="mkimpact tMonoS cWarn">${esc(t('mkImpact', { v: C().fmt(a.impactAedMo) }))}</span>` : ''}
       ${n > 1 ? `<span class="tCap">${esc(t('mkCluNote', { n }))}</span>` : ''}
       <div class="row gap6 mkacts">
-        <button class="btnP btnSm" data-act="openAsset" data-asset="${esc(a.asset)}">${esc(t('details'))}</button>
+        <button class="btnP btnSm" data-act="openAsset" data-asset="${esc(a.asset)}" data-tab="alarms">${esc(t('details'))}</button>
         ${woDone || (E.state.woPhase||{})[a.asset]
           ? C().woBtn(E, a.asset)
           : `<button class="btnG btnSm" data-act="cwo" data-asset="${esc(a.asset)}">${esc(t('cwo'))}</button>`}
@@ -306,7 +309,7 @@ window.EKO_V = (function(){
       ${params.length ? `<div class="mkparams">${params.map(p => `<span class="tCap mkplbl" data-tip="${esc(E.ph(p[0]))}" data-tipif="trunc">${esc(E.ph(p[0]))}</span><span class="tMonoS mkpval">${esc(p[2])}</span>`).join('')}</div>` : ''}
       ${also.length ? `<span class="tCap">${esc(also.join(', '))}</span>` : ''}
       <div class="row gap6 mkacts">
-        <button class="btnP btnSm" data-act="openAsset" data-asset="${esc(id)}">${esc(t('details'))}</button>
+        <button class="btnP btnSm" data-act="openAsset" data-asset="${esc(id)}" data-tab="alarms">${esc(t('details'))}</button>
         ${woDone || (E.state.woPhase||{})[id]
           ? C().woBtn(E, id)
           : `<button class="btnG btnSm" data-act="cwo" data-asset="${esc(id)}">${esc(t('cwo'))}</button>`}

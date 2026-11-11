@@ -112,7 +112,7 @@
 .dashboard-native-container .mpeek .v3glow {
   display: none;
 }
-.dashboard-native-container #modelfs :is(.mfsclose, #vbar, #vbottom, .vfab, #vcap, .vpback, .secloc, .minimap, .histbanner, .mk, .mkpop, .vradial, .vsheet, .scrim) {
+.dashboard-native-container #modelfs :is(.mfsclose, #vbar, #vbottom, .vfab, #vcap, .vpback, .secloc, .minimap, .histbanner, .mk, .mkpop, .vradial, .velm, .vsheet, .scrim) {
   pointer-events: auto;
 }
 /* Open model is a full-screen view of the canvas. The summary and the alarms
@@ -150,6 +150,8 @@
 .dashboard-native-container .heatbar,
 .dashboard-native-container .minimap,
 .dashboard-native-container .histbanner,
+.dashboard-native-container .vradial,
+.dashboard-native-container .velm,
 .dashboard-native-container #statusband,
 .dashboard-native-container #overlays > *,
 .dashboard-native-container #mount > *:not(#vpmain),
@@ -545,6 +547,11 @@ body:has([data-wall="1"]) .viewer-toolbar {
 }
 .dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="1"]) #vbottom { bottom: 104px; }
 .dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="2"]) #vbottom { bottom: 116px; }
+/* The work-order tab was wrapping onto its own line and reading as an empty section. */
+.dashboard-native-container #assetpanel .aptabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
 .dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="1"]) > #ovp:not([data-min="1"]) .ovpad {
   padding-block-end: calc(var(--ovFade) - 16px);
 }

@@ -128,14 +128,14 @@ window.EKO_A = (function(){
   /* D105: compact lists show the plain line; "Show technical detail" reveals the technical string, per user */
   const discloseBar = E => E.wording() === 'plain' ? `<div class="alldisc"><button class="statlink" data-act="disclose" data-k="tech" aria-pressed="${E.disclose('tech')}">${esc(E.t(E.disclose('tech') ? 'hideTech' : 'discloseTech'))}</button></div>` : '';
   const alarmRows = (E, alarms) => discloseBar(E) + alarms.map(a => { const l = E.alarmLines(a, true); return (
-    `<div class="alr" data-act="openAsset" data-asset="${esc(a.asset)}" role="button" tabindex="0">
+    `<div class="alr" data-act="openAsset" data-asset="${esc(a.asset)}" data-tab="alarms" role="button" tabindex="0">
       <span class="alrsev" data-tip="${esc(C().sevTipFor(E, a))}">${C().sevGlyph(a.sev, !!a.ack, 13)}</span>
       <div class="alrbody"><span class="alrid" ${a.ack?'data-ack="1"':''}>${esc(a.asset)}</span>
         <span class="alrwhat">${esc(l.main)}</span>${l.sub ? `<span class="alrtech">${esc(l.sub)}</span>` : ''}
         ${a.ack?`<span class="alrack">${esc(E.t('ackShort',{time:a.ack.time,who:a.ack.who}))}</span>`:''}</div>
       <span class="alract hst">
         ${a.ack?'':`<button class="alghost" data-act="ackAlarm" data-alarm="${a.id}">${esc(E.t('acknowledge'))}</button>`}
-        <button class="alprim" data-act="openAsset" data-asset="${esc(a.asset)}">${esc(E.t('details'))}</button></span>
+        <button class="alprim" data-act="openAsset" data-asset="${esc(a.asset)}" data-tab="alarms">${esc(E.t('details'))}</button></span>
       <span class="alrage">${esc(E.fmtAge(a.ageH))}</span>
       <span class="alractw" data-tip="${esc(C().actTip(E, a.sev))}">${esc(C().sevAction(E,a.sev))}</span></div>`); }).join('');
 
@@ -733,7 +733,61 @@ window.EKO_A = (function(){
     const n = window.INJECTED_PROJECT_CONFIG && window.INJECTED_PROJECT_CONFIG.heatmap && window.INJECTED_PROJECT_CONFIG.heatmap.people;
     return Math.max(0, Math.min(400, n == null || !isFinite(Number(n)) ? 80 : Math.round(Number(n))));
   }
+  /* Largest remainder, so the parts add up to total. */
+  function splitCount(total, weights){
+    const sum = weights.reduce((n, w) => n + w, 0) || 1;
+    const exact = weights.map(w => total * w / sum);
+    const counts = exact.map(v => Math.floor(v));
+    let left = total - counts.reduce((n, c) => n + c, 0);
+    exact.map((v, i) => [v - counts[i], i]).sort((a, b) => b[0] - a[0]).forEach(pair => { if(left > 0){ counts[pair[1]]++; left--; } });
+    return counts;
+  }
+  let occPlanKey = '', occPlanMap = null;
+  /* Each level gets its own count: a saved number, or its share of People by how many rooms it has. */
+  function occPlan(){
+    const h = (window.INJECTED_PROJECT_CONFIG || {}).heatmap || {};
+    const rooms = (window.EKO && window.EKO.data && window.EKO.data.heat && window.EKO.data.heat.rooms) || [];
+    if(!rooms.length) return null;
+    const by = h.peopleByLevel && typeof h.peopleByLevel === 'object' ? h.peopleByLevel : {};
+    let sig = String(occPeople()) + (window.EKO_HOST_ENGINE && window.EKO_HOST_ENGINE.floorOf ? '|floors' : '|nofloor');
+    Object.keys(by).sort().forEach(k => { sig += '|' + k + '=' + by[k]; });
+    rooms.forEach(r => { sig += ';' + r.guid + (r.level || ''); });
+    if(sig === occPlanKey && occPlanMap) return occPlanMap;
+    const groups = new Map();
+    rooms.forEach(r => {
+      if(!r || !r.guid) return;
+      const floor = toolbarFloor(r.level || '');
+      const key = floor ? floor.id : '';
+      if(!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(r.guid);
+    });
+    const floors = [...groups.entries()];
+    const saved = id => { const n = by[id]; return n == null || !isFinite(Number(n)) ? null : Math.max(0, Math.min(400, Math.round(Number(n)))); };
+    const open = floors.filter(f => saved(f[0]) == null);
+    const openCounts = splitCount(occPeople(), open.map(f => f[1].length));
+    const budget = new Map();
+    let oi = 0;
+    floors.forEach(f => { const n = saved(f[0]); budget.set(f[0], n == null ? openCounts[oi++] || 0 : n); });
+    let sum = 0; budget.forEach(n => { sum += n; });
+    if(sum > 400){ const scaled = splitCount(400, floors.map(f => budget.get(f[0]))); floors.forEach((f, i) => budget.set(f[0], scaled[i] || 0)); }
+    const map = new Map();
+    floors.forEach(f => {
+      const n = budget.get(f[0]) || 0;
+      if(!n) return;
+      const counts = splitCount(n, f[1].map(occWeight));
+      f[1].forEach((id, i) => { if(counts[i]) map.set(id, (map.get(id) || 0) + counts[i]); });
+    });
+    occPlanKey = sig; occPlanMap = map;
+    return map;
+  }
   function occOf(z, zones){
+    const plan = occPlan();
+    if(plan){
+      const ids = (z.bimIds && z.bimIds.length) ? z.bimIds : [z.bimId || z.gid || z.guid].filter(Boolean);
+      const count = ids.reduce((n, id) => n + (plan.get(id) || 0), 0);
+      const cap = Math.max(4, ids.length * 4);
+      return { count: count, ratio: Math.min(1, count / cap) };
+    }
     const list = zones || [z];
     const idOf = x => (x.bimIds && x.bimIds[0]) || x.bimId || x.gid || x.nameEn;
     const weights = list.map(x => occWeight(idOf(x)));
@@ -901,8 +955,6 @@ window.EKO_A = (function(){
       : '';
     const unit = mode === 'occ' ? '' : mode === 'comfort' ? E.t('hmUnitDt') : mode === 'hum' ? E.t('hmUnitPpl') : E.t('hmUnitTemp');
     const mseg = (lbl, on, v) => `<button class="hmseg" data-on="${on}" data-act="hmMode" data-v="${v}">${esc(lbl)}</button>`;
-    /* the module set that hides Spaces > Occupancy (Marsa's) hides this tab too */
-    const occTab = !window.EKO_ADDONS || window.EKO_ADDONS.state(E, 'spaces.occ') !== 'hidden';
     const fseg = (lbl, on, v) => `<button class="hmfloor" data-on="${on}" data-act="hmFloor" data-v="${esc(v)}">${esc(lbl)}</button>`;
     const realFloors = (d.floors || []).filter(f => f && f !== 'All');
     const floorBar = realFloors.length > 1
@@ -916,7 +968,7 @@ window.EKO_A = (function(){
       : E.t('hmTempFoot', { m: siteMean == null ? '—' : fmt(siteMean, 1) });
     return C().modShell(E, E.t('subHeat'), '', '',
       `<div class="hmwrap"><div class="row gap8">
-        <span class="row gap2">${mseg(E.t('hmTemp'), mode==='temp', 'temp')}${mseg(E.t('hmComfort'), mode==='comfort', 'comfort')}${mseg(E.t('hmOcc'), mode==='hum', 'hum')}${occTab ? mseg(E.t('hmPeople'), mode==='occ', 'occ') : ''}</span>
+        <span class="row gap2">${mseg(E.t('hmTemp'), mode==='temp', 'temp')}${mseg(E.t('hmComfort'), mode==='comfort', 'comfort')}${mseg(E.t('hmOcc'), mode==='hum', 'hum')}${mseg(E.t('hmPeople'), mode==='occ', 'occ')}</span>
         ${floorBar}</div>
       <div class="alcard"><div class="alcardh"><span class="alcardt">${esc(E.t(roomsOn ? 'hmRooms' : 'hmRanking'))}</span>
         ${listSwitch}<span class="alcardm">${esc(cap)}</span></div>

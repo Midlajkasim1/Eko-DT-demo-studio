@@ -21,7 +21,7 @@ import {
 import { runIfcDiagnostics } from '@/lib/ifcDiagnostics' // TEMPORARY, with EKO_IFC_DIAGNOSTICS below
 import { HVAC_GENERIC, HVAC_SPECIFIC, floorFilterSkips, isCeilingType, levelHides, reportLevel, type LevelIndex, type MechanicalInfo } from '@/lib/floorPolicy'
 import { choosePlate, plateLoops, platePrism, type XzTri } from '@/lib/floorOutline'
-import { setHidden, isHidden, onVisibilityApplied } from '@/lib/visibilityCoordinator'
+import { setHidden, isHidden, hiddenBy, onVisibilityApplied } from '@/lib/visibilityCoordinator'
 import { measureTool } from '@/lib/measureTool'
 import { sliceTool, unwatchClipping, watchClipping } from '@/lib/sliceTool'
 import { createFcuSchematic } from '@/lib/fcuSchematic'
@@ -348,6 +348,55 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         locate(bimId).then(e => { if (e) repositionMarkers() })
       }
       return null
+    }
+
+    const loadedModels = (): any[] => {
+      const list = engine?.fragments?.models?.list
+      return list ? Array.from(list.values()) : []
+    }
+
+    const hideElement = async (idOrBimId: string) => {
+      const bimId = toBimId(idOrBimId)
+      const entry = bimId ? await locate(bimId) : null
+      if (!entry) return false
+      return setHidden(entry.model, 'pick', new Set(hiddenBy(entry.model, 'pick')).add(entry.localId))
+    }
+
+    const isolateElement = async (idOrBimId: string) => {
+      const bimId = toBimId(idOrBimId)
+      const entry = bimId ? await locate(bimId) : null
+      if (!entry) return false
+      for (const m of loadedModels()) {
+        if (typeof m.getItemsIdsWithGeometry !== 'function') continue
+        const rest = new Set<number>(await m.getItemsIdsWithGeometry())
+        if (m === entry.model) rest.delete(entry.localId)
+        await setHidden(m, 'pick', rest)
+      }
+      return true
+    }
+
+    const showAllElements = async () => {
+      for (const m of loadedModels()) if (hiddenBy(m, 'pick').size) await setHidden(m, 'pick', [])
+    }
+
+    const elementAt = (idOrBimId: string, clientX: number, clientY: number) => {
+      const camera = engine?.world?.camera?.three
+      const canvas = engine?.world?.renderer?.three?.domElement as HTMLElement | undefined
+      const bimId = toBimId(idOrBimId)
+      const entry = bimId ? located.get(bimId) : null
+      if (!camera || !canvas || !entry) return false
+      const box = worldBoxOf(entry), cr = canvas.getBoundingClientRect(), PAD = 6
+      camera.updateMatrixWorld()
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, behind = 0
+      for (let i = 0; i < 8; i++) {
+        const v = new THREE.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(camera)
+        if (v.z > 1) { behind++; continue }
+        const x = cr.left + (v.x * 0.5 + 0.5) * cr.width, y = cr.top + (-v.y * 0.5 + 0.5) * cr.height
+        x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y)
+      }
+      if (behind === 8) return false
+      if (behind) return true
+      return clientX >= x0 - PAD && clientX <= x1 + PAD && clientY >= y0 - PAD && clientY <= y1 + PAD
     }
 
     // Whether a loaded model holds the asset's element; a first ask looks it up and redraws once found
@@ -819,22 +868,37 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
 
     const HIDDEN = { x: 0, y: 0, visible: false }
 
-    const projectPoint = (point: { x?: number; y?: number; z?: number; bimId?: string; asset?: string; alarm?: string }) => {
+    const projectPoint = (point: { x?: number; y?: number; z?: number; bimId?: string; asset?: string; alarm?: string; alt?: string; pin?: string }) => {
       const camera = engine?.world?.camera?.three
       if (!camera) return null
       // Not an equipment point (e.g. a PMU chip): leave it to the adapter's 2D fallback
-      if (!point.asset && !point.bimId && !point.alarm) return null
+      if (!point.asset && !point.bimId && !point.alarm && point.pin !== 'room') return null
 
-      let bimId = toBimId(point.asset) || (isGuid(point.bimId) ? point.bimId : null)
-      if (!bimId && point.alarm) {
-        const al = (window as any).EKO?.data?.alarms?.find((a: any) => a.id === point.alarm)
-        bimId = toBimId(al?.asset) || (isGuid(al?.bimId) ? al.bimId : null)
+      const kick = (id: string) => {
+        if (!located.has(id) && !missing.has(id) && !pending.has(id)) void locate(id).then(e => { if (e) repositionMarkers() })
       }
-      // Only equipment found in the model gets a marker: anything else has no
-      // real position and would float at an arbitrary spot.
-      if (!bimId) return HIDDEN
-      const entry = locatedNow(bimId)
-      if (!entry || entry.model.object?.visible === false) return HIDDEN   // unknown, or its model is isolated away
+      let entry: Located | null = null
+      if (point.pin === 'room') {
+        const room = isGuid(point.bimId) ? point.bimId : null
+        const alt = isGuid(point.alt) ? point.alt : null
+        if (room) kick(room)
+        if (alt) kick(alt)
+        if (room && located.has(room)) entry = located.get(room) ?? null
+        else if (room && !missing.has(room)) entry = null
+        else if (alt && located.has(alt)) entry = located.get(alt) ?? null
+        if (!entry) return HIDDEN
+      } else {
+        let bimId = toBimId(point.asset) || (isGuid(point.bimId) ? point.bimId : null)
+        if (!bimId && point.alarm) {
+          const al = (window as any).EKO?.data?.alarms?.find((a: any) => a.id === point.alarm)
+          bimId = toBimId(al?.asset) || (isGuid(al?.bimId) ? al.bimId : null)
+        }
+        // Only equipment found in the model gets a marker: anything else has no
+        // real position and would float at an arbitrary spot.
+        if (!bimId) return HIDDEN
+        entry = locatedNow(bimId)
+        if (!entry || entry.model.object?.visible === false) return HIDDEN   // unknown, or its model is isolated away
+      }
 
       const world = worldBoxOf(entry).getCenter(new THREE.Vector3())
       camera.updateMatrixWorld()
@@ -1814,8 +1878,59 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619)
       return 0.35 + ((h >>> 0) % 1000) / 1000 * 1.3
     }
-    /* Each zone gets the dashboard's count for it (same weight on the same key), shared among its rooms in view.
-       Sharing all the people among every room rounded each room to none once a zone linked many rooms. */
+    const splitCount = (total: number, weights: number[]) => {
+      const sum = weights.reduce((n, w) => n + w, 0) || 1
+      const exact = weights.map(w => total * w / sum)
+      const counts = exact.map(v => Math.floor(v))
+      let left = total - counts.reduce((n, c) => n + c, 0)
+      exact.map((v, i) => [v - counts[i], i] as const).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { counts[i]++; left-- } })
+      return counts
+    }
+    /* Same split as the occupancy list: a saved level count, or that level's share of People. */
+    const levelPlan = (people: number) => {
+      const rooms = ((window as any).EKO?.data?.heat?.rooms || []) as { guid?: string; level?: string }[]
+      if (!rooms.length) return null
+      const by = useProjectStore.getState().currentProject?.apiSettings?.heatmap?.peopleByLevel || {}
+      const groups = new Map<string, string[]>()
+      for (const room of rooms) {
+        if (!room?.guid) continue
+        const floor = floorKey(room.level || '')
+        const id = floor ? floor.id : ''
+        const list = groups.get(id) || []
+        list.push(room.guid)
+        groups.set(id, list)
+      }
+      const floors = [...groups.entries()]
+      const saved = (id: string) => {
+        const n = by[id]
+        return n == null || !Number.isFinite(Number(n)) ? null : Math.max(0, Math.min(400, Math.round(Number(n))))
+      }
+      const open = floors.filter(f => saved(f[0]) == null)
+      const openCounts = splitCount(people, open.map(f => f[1].length))
+      const budget = new Map<string, number>()
+      let oi = 0
+      for (const floor of floors) {
+        const n = saved(floor[0])
+        budget.set(floor[0], n == null ? openCounts[oi++] || 0 : n)
+      }
+      let sum = 0
+      for (const n of budget.values()) sum += n
+      if (sum > 400) {
+        const scaled = splitCount(400, floors.map(f => budget.get(f[0]) || 0))
+        floors.forEach((f, i) => budget.set(f[0], scaled[i] || 0))
+      }
+      const countsByRoom = new Map<string, number>()
+      for (const floor of floors) {
+        const n = budget.get(floor[0]) || 0
+        if (!n) continue
+        const counts = splitCount(n, floor[1].map(occWeight))
+        floor[1].forEach((id, i) => {
+          if (!counts[i]) return
+          countsByRoom.set(id, (countsByRoom.get(id) || 0) + counts[i])
+        })
+      }
+      return [...countsByRoom.entries()].map(([id, count]) => ({ id, count }))
+    }
     const placeCrowd = async (floorIds: string[], zones: { key: string; ids: string[] }[], people: number, key: string) => {
       const seq = heatSeq
       if (!crowdWanted()) { clearCrowd(); return }
@@ -1832,22 +1947,28 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         if (!set) continue
         for (const g of set) if (located.has(g)) inView.add(g)
       }
-      if (!inView.size || people <= 0 || !mine()) { if (crowdJobBusy === job) crowdJobBusy = 0; return }
-      const zoneWeights = zones.map(z => occWeight(z.key))
-      const zoneSum = zoneWeights.reduce((n, w) => n + w, 0) || 1
-      const plan: { id: string; count: number }[] = []
-      zones.forEach((zone, z) => {
-        const zoneCount = Math.max(0, Math.round(people * zoneWeights[z] / zoneSum))
-        const rooms = zone.ids.filter(id => inView.has(id))
-        if (!zoneCount || !rooms.length) return
-        const weights = rooms.map(occWeight)
-        const sum = weights.reduce((n, w) => n + w, 0) || 1
-        const exact = weights.map(w => zoneCount * w / sum)
-        const counts = exact.map(Math.floor)
-        let left = zoneCount - counts.reduce((n, c) => n + c, 0)
-        exact.map((v, i) => [v - counts[i], i] as const).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { counts[i]++; left-- } })
-        rooms.forEach((id, i) => { if (counts[i]) plan.push({ id, count: counts[i] }) })
-      })
+      const planned = levelPlan(people)
+      if (!inView.size || !mine() || (!planned && people <= 0)) { if (crowdJobBusy === job) crowdJobBusy = 0; return }
+      let plan: { id: string; count: number }[]
+      if (planned) {
+        plan = planned.filter(sp => inView.has(sp.id))
+      } else {
+        plan = []
+        const zoneWeights = zones.map(z => occWeight(z.key))
+        const zoneSum = zoneWeights.reduce((n, w) => n + w, 0) || 1
+        zones.forEach((zone, z) => {
+          const zoneCount = Math.max(0, Math.round(people * zoneWeights[z] / zoneSum))
+          const rooms = zone.ids.filter(id => inView.has(id))
+          if (!zoneCount || !rooms.length) return
+          const weights = rooms.map(occWeight)
+          const sum = weights.reduce((n, w) => n + w, 0) || 1
+          const exact = weights.map(w => zoneCount * w / sum)
+          const counts = exact.map(Math.floor)
+          let left = zoneCount - counts.reduce((n, c) => n + c, 0)
+          exact.map((v, i) => [v - counts[i], i] as const).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { counts[i]++; left-- } })
+          rooms.forEach((id, i) => { if (counts[i]) plan.push({ id, count: counts[i] }) })
+        })
+      }
       if (!plan.length) { if (crowdJobBusy === job) crowdJobBusy = 0; return }
       const spots = plan.flatMap(sp => {
         const entry = located.get(sp.id)
@@ -2208,6 +2329,17 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         const words = Array.isArray(list) ? list : WALK_WORDS
         return (heat?.stillRooms === false ? 'walk' : 'still') + '|' + words.map(w => w.trim().toLowerCase()).filter(Boolean).join(',')
       }
+      const levelSig = () => {
+        const by = useProjectStore.getState().currentProject?.apiSettings?.heatmap?.peopleByLevel || {}
+        const saved = Object.keys(by).sort().map(k => k + '=' + by[k]).join(',')
+        let h = 2166136261
+        const rooms = ((window as any).EKO?.data?.heat?.rooms || []) as { guid?: string; level?: string }[]
+        for (const room of rooms) {
+          const s = String(room?.guid || '') + '|' + String(room?.level || '')
+          for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619)
+        }
+        return saved + '|r' + (h >>> 0).toString(16) + '.' + rooms.length
+      }
       const jobs: { bimId: string; t: number }[] = []
       for (const z of zones || []) {
         if (md === 'occ') {
@@ -2219,7 +2351,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
         if (t == null) continue
         for (const bimId of idsOf(z)) jobs.push({ bimId, t })
       }
-      const valueSig = (inside ? 'in|' : 'out|') + md + '|' + (md === 'occ' ? 'p' + occPeople() + '|' + walkSig() + '|' : '') + jobs.map(j => `${j.bimId}:${round1(j.t)}`).join(';')
+      const valueSig = (inside ? 'in|' : 'out|') + md + '|' + (md === 'occ' ? 'p' + occPeople() + '|' + levelSig() + '|' + walkSig() + '|' : '') + jobs.map(j => `${j.bimId}:${round1(j.t)}`).join(';')
       // The zones the dashboard counts people in, keyed as it keys them
       const crowdZones = md === 'occ'
         ? (zones || []).filter(z => z.bimId || z.gid || (z.bimIds && z.bimIds.length))
@@ -2798,6 +2930,10 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       flyToAsset,
       highlightAsset,
       clearHighlight,
+      hideElement,
+      isolateElement,
+      showAllElements,
+      elementAt,
       resetView: () => { leavePlan(); resetCameraToHome(engine) },
       setViewMode,
       setDashboardOpen,

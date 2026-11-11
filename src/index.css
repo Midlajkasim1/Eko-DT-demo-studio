@@ -2160,6 +2160,53 @@ details > summary.fpm-gh { cursor: pointer; }
   gap: 8px;
   flex-wrap: wrap;
 }
+.al-export {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+.al-export > .ds-btn:first-child {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+.al-export-more {
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  margin-left: 1px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.al-export-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  inset-inline-end: 0;
+  z-index: 5;
+  min-width: 168px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+.al-export-menu button {
+  text-align: start;
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.al-export-menu button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.al-export-menu button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 .al-actions .ds-btn:disabled,
 .al-models .ds-btn:disabled {
   opacity: 0.4;

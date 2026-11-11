@@ -63,13 +63,14 @@
   const expand = (E, r) => { const t = E.t.bind(E); const als = (r.alarms || []).map(id => E.alarm(id)).filter(Boolean);
     const foldN = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const isFdd = n => { const k = foldN(n); return k.indexOf('fdd') === 0 || k.indexOf('rule') === 0; };
+    const worded = C().alarmWorded(E, r);
     const isBool = v => { const s = String(v == null ? '' : v).trim().toUpperCase(); return s === 'T' || s === 'F' || s === 'TRUE' || s === 'FALSE'; };
-    const analogParams = (r.analog && r.analog.length ? r.analog : (r.params || [])).filter(p => !isFdd(p[0]) && foldN(p[0]).indexOf('warrant') === -1);
+    const analogParams = (r.analog && r.analog.length ? r.analog : (r.params || [])).filter(p => !isFdd(p[0]) && foldN(p[0]).indexOf('warrant') === -1 && !worded(p[2]));
     const liveParams = (r.params || []).filter(p => isFdd(p[0]) && !isBool(p[2]));
     const analog = analogParams.length ? `<dl class="dgxl">${analogParams.map(p => `<div class="aprow"><dt>${esc(pAr(E, p[0]))}</dt><dd>${esc(p[2])}</dd></div>`).join('')}</dl>` : '';
     const live = liveParams.length ? `<dl class="dgxl">${liveParams.map(p => `<div class="aprow"><dt>${esc(pAr(E, p[0]))}${p[1] ? `<span class="apsrc">${esc(pAr(E, p[1]))}</span>` : ''}</dt><dd>${esc(p[2])}</dd></div>`).join('')}</dl>` : `<p class="tCap">${esc(t('emptyDash'))}</p>`;
-    const al = als.length ? als.map(a => `<div class="alref"><div class="alrefh"><span class="statchip" data-sev="${a.sev}">${esc(t('rib' + a.sev[0].toUpperCase() + a.sev.slice(1)).toLowerCase())}</span><span class="alrefage tMonoS msA">${esc(a.ageH != null ? E.fmtAge(a.ageH) : (a.age || ''))}</span></div>
-      <div class="alreft">${esc(E.alarmLines(a).main)}</div>${E.alarmLines(a).sub ? `<div class="alreftech">${esc(E.alarmLines(a).sub)}</div>` : ''}${a.ack ? `<div class="alrefack">${esc(t('ackShort', { time:a.ack.time, who:a.ack.who }))}</div>` : ''}</div>`).join('') : `<p class="tCap">${esc(t('apNoAlarms'))}</p>`;
+    const al = als.length ? als.map(a => { const L = E.alarmParts(a); return `<div class="alref"><div class="alrefh"><span class="statchip" data-sev="${a.sev}">${esc(t('rib' + a.sev[0].toUpperCase() + a.sev.slice(1)).toLowerCase())}</span><span class="alrefage tMonoS msA">${esc(a.ageH != null ? E.fmtAge(a.ageH) : (a.age || ''))}</span></div>
+      <div class="alreft">${esc(L.main)}</div>${L.sub ? `<div class="alreftech">${esc(L.sub)}</div>` : ''}${a.ack ? `<div class="alrefack">${esc(t('ackShort', { time:a.ack.time, who:a.ack.who }))}</div>` : ''}</div>${L.rec ? `<div class="alref"><span class="tCap">${esc(t('apRecommended'))}</span><div class="alreftech">${esc(L.rec)}</div></div>` : ''}`; }).join('') : `<p class="tCap">${esc(t('apNoAlarms'))}</p>`;
     return `<div class="dgxg"><section><h4 class="tLbl">${esc(t('apAnalytics'))}</h4>${analog || `<p class="tCap">${esc(t('emptyDash'))}</p>`}</section><section><h4 class="tLbl">${esc(t('apAlarms'))}</h4>${live}${al}</section></div>`; };
 
   const assets = E => ({
@@ -110,7 +111,7 @@
         cell:(E2, r) => sevCell(E2, r),
         enumOpts:E2 => [{ v:'alarm', label:E2.t('dgv.alarm') }, { v:'stale', label:E2.t('dgst.stale') }, { v:'ok', label:E2.t('stNormal') }, { v:'nc', label:E2.t('reg13.nc') }],
         sortVal:(E2, r) => { const c = sevCounts(E2, r); return c.critical ? 0 : c.high ? 1 : c.medium ? 2 : r.st === 'stale' ? 3 : r.st === 'nc' ? 5 : 4; } },
-      { key:'trend', labelKey:'dgc.trend', type:'text', width:132, def:true, grp:'condition', noFilter:true, get:(E2, r) => trendText(E2, r), text:(E2, r) => trendText(E2, r), cell:(E2, r) => trendCell(E2, r), sortVal:(E2, r) => { const d = trendDelta(r); return d == null ? null : -d; } },
+      { key:'trend', labelKey:'dgc.trend', type:'text', width:132, def:false, grp:'condition', noFilter:true, get:(E2, r) => trendText(E2, r), text:(E2, r) => trendText(E2, r), cell:(E2, r) => trendCell(E2, r), sortVal:(E2, r) => { const d = trendDelta(r); return d == null ? null : -d; } },
       { key:'sev', labelKey:'dgc.sev', type:'enum', width:150, def:false, grp:'condition', get:(E2, r) => { const w = worst(E2, r); return w ? w.sev : ''; }, text:(E2, r) => { const w = worst(E2, r); return w ? E2.t('rpSev.' + w.sev) : E2.t('emptyDash'); },
         enumOpts:E2 => ['critical', 'high', 'medium'].map(v => ({ v, label:E2.t('rpSev.' + v) })), sortVal:(E2, r) => { const w = worst(E2, r); return w ? ({ critical:0, high:1, medium:2 }[w.sev]) : 9; } },
       { key:'floor', labelKey:'dgc.floor', type:'enum', width:94, def:true, grp:'identity', mob:'line2', get:(E2, r) => r.floor, text:(E2, r) => r.floor, enumOpts:E2 => [...new Set(regRows(E2).map(r => r.floor))].sort().map(v => ({ v, label:v })) },
@@ -131,7 +132,7 @@
         cell:(E2, r) => tagsOf(E2, r).length ? tagsOf(E2, r).map(x => `<span class="chip dgtag">${esc(x)}</span>`).join(' ') : `<span class="tCap">${esc(E2.t('emptyDash'))}</span>` }
     ],
     views:[
-      { id:'all', nameKey:'dgv.all', cols:['id', 'st', 'trend', 'floor', 'zone', 'wos', 'wost'], sort:[{ key:'st', dir:'asc' }], filters:{}, density:'standard' },
+      { id:'all', nameKey:'dgv.all', cols:['id', 'st', 'floor', 'zone', 'wos', 'wost'], sort:[{ key:'st', dir:'asc' }], filters:{}, density:'standard' },
       { id:'alarm', nameKey:'dgv.alarm', cols:['id', 'st', 'sev', 'sys', 'floor', 'wost'], sort:[{ key:'sev', dir:'asc' }], filters:{ st:{ in:['alarm'] } }, density:'standard' },
       { id:'wo', nameKey:'dgv.wo', cols:['id', 'wost', 'wos', 'st', 'floor', 'svc'], sort:[{ key:'wos', dir:'desc' }], filters:{ hasWo:{ is:true } }, group:'wost', density:'compact' }
     ],

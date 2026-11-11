@@ -206,6 +206,7 @@
 .dashboard-native-container #assetpanel .alldisc{margin:0}
 .dashboard-native-container .cbadge[data-sev="none"]{background:var(--s3); border:1px solid var(--bd1); color:var(--t3)}
 .dashboard-native-container .pboxes{display:flex; flex-direction:column; gap:8px}
+.dashboard-native-container .apalarm{display:flex; flex-direction:column; gap:6px}
 .dashboard-native-container .pbox{position:relative; display:flex; flex-direction:column; gap:3px; width:100%; box-sizing:border-box; margin:0;
   padding:9px 12px 10px; border:1px solid var(--bd1); border-radius:8px; background:var(--s2);
   text-align:start; font-family:var(--fB),sans-serif; color:var(--t1)}
@@ -249,7 +250,8 @@
 .dashboard-native-container .pcardb{margin:0; font-size:var(--txSubSz); color:var(--t3)}
 .dashboard-native-container #assetpanel .ctlrow{border-block-end:0; padding:6px 4px}
 .dashboard-native-container #assetpanel .ctlname{color:var(--t2); font-size:var(--txBodySz)}
-.dashboard-native-container #assetpanel .aptab{padding-inline:4px}
+.dashboard-native-container #assetpanel .aptabs{flex-wrap:wrap}
+.dashboard-native-container #assetpanel .aptab{padding-inline:4px; flex:none; white-space:nowrap}
 .dashboard-native-container #assetpanel .aptab .cbadge{margin-inline-start:4px}
 .dashboard-native-container .dgwrap[data-grid="assets"],.dashboard-native-container .dgwrap[data-grid="assets"] .dgscroll,.dashboard-native-container .dgwrap[data-grid="assets"] .dgfoot{background:var(--s0)}
 .dashboard-native-container .dgwrap[data-grid="assets"] table.dg th,.dashboard-native-container .dgwrap[data-grid="assets"] table.dg th.dgsel,.dashboard-native-container .dgwrap[data-grid="assets"] table.dg th.dgpinh{background:var(--s0)}

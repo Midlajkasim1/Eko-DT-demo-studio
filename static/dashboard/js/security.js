@@ -151,6 +151,12 @@ window.EKO_SEC = (function(){
   /* the markers of the security landing: cameras, doors and fire devices that carry a position.
      A card reader is access equipment, not a marker on this model. */
   const cardReader = c => /^CR[-_]/.test(String(c.id || '')) || /card reader/i.test(c.en || '') || /قارئ البطاقات|قارئ بطاقات/.test(c.ar || '');
+  /* a fire device from the site catalog: its room GlobalId is where the Fire tile's marker sits */
+  function fireGear(id){
+    const f = ((D() || {}).fire) || {}, lists = [f.detectors, f.devices, f.deviceTests];
+    for(let i = 0; i < lists.length; i++){ const hit = (lists[i] || []).find(q => q.id === id); if(hit) return hit; }
+    return null;
+  }
   function markers(E2){
     use(E2);
     const d = D(); if(!d) return '';
@@ -161,13 +167,21 @@ window.EKO_SEC = (function(){
     /* D180: fire devices in alarm (the demo scenario) are marked; a site with many devices shows only what needs a look:
        flagged doors, offline cameras, the selection, and every camera only with the view cones on */
     fireEvents().filter(e => e.active !== false && e.kind !== 'fault' && isFinite(+e.x) && e.x !== undefined).forEach(e => pts.push({ id: e.device, ev: e.id, x: +e.x, y: +e.y, k: 'fire', bad: true, tip: L(e.en, e.ar) }));
+    /* Fire Attention: one flame marker on each open fire event's room, including a fault */
+    if(E.state.secFilter === 'fire') fireEvents().filter(e => e.active !== false).forEach(e => {
+      const dev = fireGear(e.device) || {};
+      const room = dev.room || e.room;
+      if(!room && !dev.gid && !e.gid) return;
+      const where = L(dev.roomEn, dev.roomAr);
+      pts.push({ id: 'room:' + (e.device || e.id), ev: e.id, gid: room || dev.gid || e.gid, alt: room && dev.gid && dev.gid !== room ? dev.gid : '', x: isFinite(+dev.x) ? +dev.x : (+e.x || 0), y: isFinite(+dev.y) ? +dev.y : (+e.y || 0), k: 'fire', bad: true, force: true, pin: 'room', tip: [where, L(e.en, e.ar) || e.device].filter(Boolean).join(' · ') });
+    });
     const fk = E.state.secFilter, fOk = p => !fk || (fk === 'cctv' && p.k === 'cam') || (fk === 'access' && p.k === 'door') || (fk === 'fire' && p.k === 'fire');   /* D182: a tile filters the model */
     for(let q = pts.length - 1; q >= 0; q--) if(!fOk(pts[q])) pts.splice(q, 1);
     const crowded = { cam: cams().length > 60, door: doors().length > 60 };
     const off = !!E.state.secMarksOff;
-    const keep = p => p.id === sel || (!off && (!crowded[p.k] || p.bad || (p.k === 'cam' && (E.state.secCones || fk === 'cctv'))));
+    const keep = p => p.force || p.id === sel || (!off && (!crowded[p.k] || p.bad || (p.k === 'cam' && (E.state.secCones || fk === 'cctv'))));
     for(let q = pts.length - 1; q >= 0; q--) if(!keep(pts[q])) pts.splice(q, 1);
-    return `<div class="mklayer secmklayer">${pts.map(p => `<button class="mk secmk" data-x="${p.x}" data-y="${p.y}"${p.gid ? ` data-bimid="${esc(p.gid)}"` : ''} data-k="${p.k}" data-bad="${p.bad ? 1 : 0}" data-sel="${sel === p.id ? 1 : 0}"
+    return `<div class="mklayer secmklayer">${pts.map(p => `<button class="mk secmk" data-x="${p.x}" data-y="${p.y}"${p.gid ? ` data-bimid="${esc(p.gid)}"` : ''}${p.alt ? ` data-alt="${esc(p.alt)}"` : ''}${p.pin ? ` data-pin="${esc(p.pin)}"` : ''} data-k="${p.k}" data-bad="${p.bad ? 1 : 0}" data-sel="${sel === p.id ? 1 : 0}"
         data-act="${p.k === 'cam' ? 'secCam' : p.k === 'fire' ? 'secEv' : 'secDoor'}" data-v="${esc(p.ev || p.id)}" data-tip="${esc(p.tip)}" aria-label="${esc(p.tip)}">${icon(p.k === 'cam' ? 'eye' : p.k === 'fire' ? 'flame' : 'lock', 11)}</button>`).join('')}${window.EKO_SECW ? window.EKO_SECW.pulse(E) : ''}${!off && window.EKO_SCN3 ? window.EKO_SCN3.markers(E) : ''}${!off && window.EKO_EVAC && window.EKO_EVAC.markers ? window.EKO_EVAC.markers(E) : ''}</div>`;
   }
   /* the landing: the summary over the model, the open events in the panel */

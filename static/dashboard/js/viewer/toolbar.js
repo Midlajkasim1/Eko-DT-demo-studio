@@ -39,6 +39,7 @@ window.EKO_VT = (function(){
     const layersOn = chosenLayers(d);
     if(layersOn.length) items.push({ k:'layer', text: layersOn.map(id => E.t(LBL[id] || id)).join(', ') });
     if(d.minimap) items.push({ k:'minimap', text: E.t('dockMinimap') });
+    if(E.state.elHidden) items.push({ k:'hidden', text: E.t('elHiddenState') });
     return items;
   }
   const cameraMoved = E => !!(E.engine && E.engine.cameraMoved && E.engine.cameraMoved());
@@ -143,7 +144,7 @@ window.EKO_VT = (function(){
   }
   /* The phone sheet and the radial are positioned against the scene, so
      they render at the viewer level — never inside the centred bar row. */
-  function extras(E){ return (phone() ? sheet(E) : '') + radial(E); }
+  function extras(E){ return (phone() ? sheet(E) : '') + radial(E) + elMenu(E); }
 
   /* ------------------------------- flyouts --------------------------------- */
   const panel = (E, cls, inner) =>
@@ -243,18 +244,45 @@ window.EKO_VT = (function(){
       style="left:${r.x}px;top:${r.y}px"><span class="vrc" aria-hidden="true"></span>${items}</div>`;
   }
 
+  function elMenu(E){
+    const m = E.state.elMenu;
+    if(!m || !E.state.paint) return '';
+    const esc = C().esc, t = E.t.bind(E);
+    const row = (act, icon, label, off) => `<button class="dgvgo" role="menuitem" data-act="${act}" ${off ? 'disabled' : ''}>${C().icon(icon, 14)}<span>${esc(t(label))}</span></button>`;
+    return `<div class="velm" role="menu" aria-label="${esc(t('elMenu'))}" style="left:${m.x}px;top:${m.y}px">
+      ${row('elHide', 'eyeOff', 'elHide')}${row('elIsolate', 'maximize', 'elIsolate')}${row('elShowAll', 'eye', 'elShowAll', !E.state.elHidden)}${row('elClear', 'x', 'elClear')}</div>`;
+  }
+
   /* --------------------------- canvas gestures ----------------------------- */
   /* The adapter owns drag / two-finger / pinch / wheel. The shell adds the
      semantic gestures: double-click / double-tap = frame, long-press /
      right-click = radial. Never on chrome or markers. */
-  const IGN = '.mk,.mkpop,#vbar,.mzfly,.vradial,.scrubbar,.minimap,.vsheet,.scrim,.vfab';
+  const IGN = '.mk,.mkpop,#vbar,.mzfly,.vradial,.velm,.scrubbar,.minimap,.vsheet,.scrim,.vfab';
   function wireCanvas(E, host){
     if(host._ekoGest) return;
     host._ekoGest = true;
+    if(typeof wireCanvas.off === 'function') wireCanvas.off();
     const M = () => T().metrics;
     const vp = () => document.getElementById('vpmain');
+    /* Studio sets pointer-events:none on #enginehost so orbit reaches the canvas behind it. */
+    const overHole = ev => {
+      const t = ev.target;
+      if(!(t instanceof Element) || !host.isConnected || t.closest(IGN)) return false;
+      if(host.contains(t)) return true;
+      if(!t.closest('.viewer-canvas-container')) return false;
+      const r = host.getBoundingClientRect();
+      return r.width >= 2 && r.height >= 2 && ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
+    };
     const openRadial = ev => {
-      const vr = vp().getBoundingClientRect(), hr = host.getBoundingClientRect();
+      const root = vp();
+      if(!root) return;
+      const vr = root.getBoundingClientRect(), hr = host.getBoundingClientRect();
+      if(E.state.paint && E.engine.elementAt && E.engine.elementAt(E.state.paint, ev.clientX, ev.clientY)){
+        const W = 190, Hh = 176;
+        E.set({ elMenu: { x: Math.round(Math.max(hr.left - vr.left + 4, Math.min(hr.right - vr.left - W, ev.clientX - vr.left))),
+          y: Math.round(Math.max(hr.top - vr.top + 4, Math.min(hr.bottom - vr.top - Hh, ev.clientY - vr.top))) } });
+        return;
+      }
       const R = M().radialR + 26;
       const x = Math.max(hr.left - vr.left + R, Math.min(hr.right - vr.left - R, ev.clientX - vr.left));
       const y = Math.max(hr.top - vr.top + R, Math.min(hr.bottom - vr.top - R, ev.clientY - vr.top));
@@ -270,19 +298,24 @@ window.EKO_VT = (function(){
       host.appendChild(rip); setTimeout(() => rip.remove(), 420);
     };
     let down = null, hold = null, holdFired = false, lastTap = null;
-    host.addEventListener('pointerdown', ev => {
-      if(ev.target.closest(IGN)) return;
+    const offs = [];
+    const listen = (type, fn, capture) => {
+      window.addEventListener(type, fn, capture);
+      offs.push(() => window.removeEventListener(type, fn, capture));
+    };
+    listen('pointerdown', ev => {
+      if(!overHole(ev)) return;
       down = { x: ev.clientX, y: ev.clientY, b: ev.button, t: Date.now(), pt: ev.pointerType };
       clearTimeout(hold); hold = null; holdFired = false;
       if(ev.pointerType === 'touch' && ev.isPrimary)
         hold = setTimeout(() => { hold = null; holdFired = true; openRadial(ev); }, M().holdMs);
     }, true);
-    host.addEventListener('pointermove', ev => {
+    listen('pointermove', ev => {
       if(hold && down && (Math.abs(ev.clientX - down.x) > 10 || Math.abs(ev.clientY - down.y) > 10)){ clearTimeout(hold); hold = null; }
     }, true);
-    host.addEventListener('pointerup', ev => {
+    listen('pointerup', ev => {
       clearTimeout(hold); hold = null;
-      if(ev.pointerType !== 'touch' || !down || holdFired) return;
+      if(!overHole(ev) || ev.pointerType !== 'touch' || !down || holdFired) return;
       const moved = Math.abs(ev.clientX - down.x) > 12 || Math.abs(ev.clientY - down.y) > 12;
       if(moved) return;
       const now = Date.now();
@@ -290,20 +323,21 @@ window.EKO_VT = (function(){
         lastTap = null; focus(ev);
       } else lastTap = { x: ev.clientX, y: ev.clientY, t: now };
     }, true);
-    host.addEventListener('pointercancel', () => { clearTimeout(hold); hold = null; }, true);
-    host.addEventListener('dblclick', ev => {
-      if(ev.target.closest(IGN)) return;
+    listen('pointercancel', () => { clearTimeout(hold); hold = null; }, true);
+    listen('dblclick', ev => {
+      if(!overHole(ev)) return;
       if(down && down.pt === 'touch') return;                 /* the tap path already framed */
       focus(ev);
-    });
-    host.addEventListener('contextmenu', ev => {
-      if(ev.target.closest(IGN)) return;
+    }, true);
+    listen('contextmenu', ev => {
+      if(!overHole(ev)) return;
       ev.preventDefault();
       /* a right-DRAG is a pan, not a request for the menu */
       if(down && down.b === 2 && (Math.abs(ev.clientX - down.x) > 6 || Math.abs(ev.clientY - down.y) > 6)) return;
       if(ev.button === 0 && down && down.pt === 'touch') return;   /* touch long-press handled above */
       openRadial(ev);
-    });
+    }, true);
+    wireCanvas.off = () => { offs.forEach(fn => fn()); wireCanvas.off = null; };
   }
 
   /* Type-ahead in the pickers filters rows in place (no re-render: the field
