@@ -139,7 +139,7 @@ window.EKO_SURF = (function(){
     const top = topmost();
     /* Locate in 3D keeps the asset panel open, so the panel is the topmost surface: Escape leaves the focus
        first (the table comes back, the panel stays). Any surface opened since still closes before that. */
-    if(top === 'asset' && E.state.locFocus && E.locExit){ E.locExit(); return 'locate'; }
+    if(top === 'asset' && E.state.locFocus && E.back.go()) return 'locate';
     if(top){
       if(top === 'pal' && E.state.palQ){ E.state.palQ = ''; E.state.palSel = 0; E.set({}); return 'cleared'; }
       byId[top].close(); E.set({}); return top;
@@ -150,10 +150,8 @@ window.EKO_SURF = (function(){
       if(E.state.dock.tool === 'slice' && E.engine && E.engine.stopSlice) E.engine.stopSlice();
       if(E.state.dock.tool === 'select' && E.dropSelection) E.dropSelection();
       E.state.dock.tool = null; E.set({}); return 'tool'; }
-    if(E.state.locFocus && E.locExit){ E.locExit(); return 'locate'; }     /* Locate-in-3D focus: a mode too */
     if(E.state.bimBack && E.bimBack){ E.bimBack(); return 'bim-back'; }
-    if(E.state.secLocated && window.EKO_SEC){ window.EKO_SEC.ACTS.secLocatedBack(); return 'locate'; }
-    if(E.state.hmRoomView && E.hmRoomBack){ E.hmRoomBack(); return 'locate'; }
+    if(E.back.go()) return 'locate';
     if(E.state.modelFs){ E.set({ modelFs:false }); return 'model'; }       /* D94: a mode, not a surface */
     if(PAGES.includes(E.state.pageId)){ back(); return 'back'; }
     if(E.state.histAge != null){ E.set({ histAge:null }); return 'live'; }   /* a mode, not a surface */

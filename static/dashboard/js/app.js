@@ -1298,13 +1298,31 @@
   }
   function wayBack(id, still){
     const prev = E.state.mkFrom;
-    return { for: id, view: prev && prev.for === E.state.paint ? prev.view : (!still && E.engine.saveViewpoint ? E.engine.saveViewpoint() : null) };
+    return { for: id, view: prev && prev.for === E.state.paint ? prev.view : (still ? null : E.back.save()) };
   }
   function leaveSelection(){
     const id = E.state.paint, from = E.state.mkFrom;
     E.set({ mkPop: null, mkPopN: 0, paint: null, mkFrom: null });
-    if(from && from.for === id && from.view && E.engine.flyToViewpoint) E.engine.flyToViewpoint(from.view); else goHome();
+    if(!E.back.fly(from && from.for === id ? from.view : null)) goHome();
   }
+  /* One Back for the model: each entry names what is located and how to leave it. The chip, its button and Escape all read this list, first match first. */
+  const located = () => { const el = E.state.pickEl, id = E.state.paint || (E.state.locFocus || {}).assetSel; return el && el.bimId === id && el.name ? el.name : id; };
+  const BACKS = [
+    { on(){ const ev = E.state.secEv && window.EKO_SECW ? window.EKO_SECW.events(E).find(x => x.id === E.state.secEv) : null; return ev ? { text: ev.device || ev.title } : null; },
+      leave(){ window.EKO_SECW.leave(E); E.set({}); } },
+    { on(){ const b = E.state.secLocated; return b && window.EKO_SEC ? { text: b.id } : null; }, leave(){ window.EKO_SEC.ACTS.secLocatedBack(); } },
+    { on(){ const v = E.state.hmRoomView, room = v && ((E.data.heat || {}).rooms || []).find(r => r.guid === v.guid); return room ? { text: room.name || room.guid } : null; }, leave(){ endRoomFly(); } },
+    { on(){ const lf = E.state.locFocus; return lf ? { text: located(), key: lf.back ? 'backToAssets' : 'back' } : null; }, leave(){ ACTS.locBack(); } },
+    { on(){ return E.state.paint ? { text: located() } : null; }, leave: leaveSelection }
+  ];
+  E.back = {
+    cur(){ for(let i = 0; i < BACKS.length; i++){ const v = BACKS[i].on(); if(v) return { v, leave: BACKS[i].leave }; } return null; },
+    go(){ const c = this.cur(); if(c) c.leave(); return !!c; },
+    save(){ return E.engine && E.engine.saveViewpoint ? E.engine.saveViewpoint() : null; },
+    fly(view){ return !!(view && E.engine && E.engine.flyToViewpoint) && E.engine.flyToViewpoint(view) !== false; },
+    chip(){ const c = this.cur(); if(!c) return '';
+      return `<div class="secloc" role="status"><span>${C.esc(E.t('sec.located', { c: c.v.text }))}</span><button class="btnG btnSm" data-act="viewBack">${C.icon('chevL', 12)} ${C.esc(E.t(c.v.key || 'back'))}</button></div>`; }
+  };
   function goHome(){ if(E.engine && typeof E.engine.resetView === 'function') E.engine.resetView(); }
   const apHistAt = () => { const nav = document.querySelector('.aphnav'); return nav ? +nav.getAttribute('aria-valuenow') : 0; };
   function apHistGo(i, focus){
@@ -1461,8 +1479,7 @@
     const view = E.state.hmRoomView && E.state.hmRoomView.view;
     if(E.engine && E.engine.highlightGid) E.engine.highlightGid(null);
     E.set(Object.assign({ hmSel: null, hmRoomView: null }, patch || {}));
-    const ok = view && E.engine && E.engine.flyToViewpoint && E.engine.flyToViewpoint(view);
-    if(!ok && E.state.pageId === 'heatmap') applyHeatView(E, true);
+    if(!E.back.fly(view) && E.state.pageId === 'heatmap') applyHeatView(E, true);
   }
   const ACTS = {
     goMod(el){ const m = E.nav.modules.find(x=>x.id===el.dataset.mod);
@@ -1895,7 +1912,7 @@
       E.set({ histAge: newer.length ? newer.sort((a,b)=>b.ageH-a.ageH)[0].ageH : null }); },
     mkClu(el){ const al = (el && el.dataset.alarm && E.alarm(el.dataset.alarm)) || E.data.alarms.find(x=>x.sev==='critical') || E.data.alarms[0];
       selectEquipment(al.asset, { born:'pop', mkPop: al.id, mkPopN: +((el && el.dataset.n) || 0) }); },
-    mkBack(){ if(E.state.paint) leaveSelection(); },
+    viewBack(){ E.back.go(); },
     mkClose(){ E.set({ mkPop: null, mkPopN: 0 }); },
 
     /* Timeline. */
@@ -1963,7 +1980,7 @@
         if(E.state.hmRoomView && E.state.hmRoomView.guid === v) return;
         const eng = E.engine;
         const kept = E.state.hmRoomView && E.state.hmRoomView.view;
-        const view = kept || (eng && eng.saveViewpoint ? eng.saveViewpoint() : null);
+        const view = kept || E.back.save();
         E.set({ hmSel: v, hmRoomView: { guid: v, view: view } });
         requestAnimationFrame(() => requestAnimationFrame(() => {
           if(!E.state.hmRoomView || E.state.hmRoomView.guid !== v || !eng) return;
@@ -1975,7 +1992,6 @@
       if(E.state.hmRoomView){ endRoomFly({ hmSel: E.state.hmSel === v ? null : v }); return; }
       E.set({ hmSel: E.state.hmSel === v ? null : v });
     },
-    hmRoomBack(){ endRoomFly(); },
     hmOutline(){ E.set({ hmOutline: !E.state.hmOutline }); },
     hmStill(){
       const heat = (window.INJECTED_PROJECT_CONFIG || {}).heatmap || {};
@@ -1996,8 +2012,6 @@
     E.state.dlg = null; if(window.EKO_BRIEF) window.EKO_BRIEF.reset(); E.set({}); };
   E.runAct = (name, data) => { const f = ACTS[name]; if(f) f({ dataset: data || {}, value: (data || {}).v }); };   /* E15: an action by name (js/e14.js) */
   E.bimBack = ACTS.bimBack;
-  E.locExit = ACTS.locBack;   /* Escape leaves Locate-in-3D focus the way Back to Assets does (surfaces.js) */
-  E.hmRoomBack = ACTS.hmRoomBack;
 
   /* E15 port: the click and change handlers of the ported ESG, Security, Evacuation, Maintenance and scenario modules, looked up
      after ours in the pack's order (a name already in ACTS or an earlier module keeps winning) */

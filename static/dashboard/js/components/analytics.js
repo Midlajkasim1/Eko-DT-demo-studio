@@ -1054,11 +1054,7 @@ window.EKO_A = (function(){
        a dashboard refresh does not hide them for a frame (that blink reads
        as flicker). The blur is left off: sampling the 3D canvas shimmers. */
     const projected = tiles.indexOf('left:') !== -1;
-    const flown = s.hmRoomView && (d.rooms || []).find(r => r.guid === s.hmRoomView.guid);
-    const locBar = flown
-      ? `<div class="secloc hmroomloc" role="status"><span>${esc(E.t('sec.located', { c: flown.name || flown.guid }))}</span><button class="btnG btnSm" data-act="hmRoomBack">${icon('chevL', 12)} ${esc(E.t('back'))}</button></div>`
-      : '';
-    return `${locBar}<div class="hmlayer"${projected ? ' data-proj="1"' : ''}>${tiles}</div>
+    return `<div class="hmlayer"${projected ? ' data-proj="1"' : ''}>${tiles}</div>
       <div class="heatbar mzglass">
         ${mode === 'occ'
           ? `<span class="hmocc">${[['hmOccLow', '#3b82f6'], ['hmOccNormal', '#22c55e'], ['hmOccHigh', '#eab308'], ['hmOccCritical', '#ef4444']]

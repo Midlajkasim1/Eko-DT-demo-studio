@@ -1028,9 +1028,7 @@
 .dashboard-native-container [data-e3d="plan"] > .e3dcanvas{display:none}
 .dashboard-native-container .e3dsw{position:absolute; z-index:6; top:56px; inset-inline-end:12px; display:flex; align-items:center; gap:2px; padding:3px; border-radius:8px; background:var(--elevChip); border:1px solid var(--bd1)}
 .dashboard-native-container .e3dsw .seg{padding:3px 10px; font-size:var(--txCapSz)}
-.dashboard-native-container .secloc{position:absolute; z-index:6; top:56px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:8px; padding:3px 3px 3px 12px; border-radius:8px; background:var(--elev); border:1px solid var(--elevBd); box-shadow:var(--shadow); color:var(--t1); font-size:var(--txCapSz); white-space:nowrap; pointer-events:auto; max-width:min(440px, calc(100% - 24px))}
-.dashboard-native-container .secloc.hmroomloc{z-index:12}
-.dashboard-native-container .secloc.vploc{z-index:57}
+.dashboard-native-container .secloc{position:absolute; z-index:57; top:56px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:8px; padding:3px 3px 3px 12px; border-radius:8px; background:var(--elev); border:1px solid var(--elevBd); box-shadow:var(--shadow); color:var(--t1); font-size:var(--txCapSz); white-space:nowrap; pointer-events:auto; max-width:min(440px, calc(100% - 24px))}
 .dashboard-native-container .secloc > span:first-child{min-width:0; overflow:hidden; text-overflow:ellipsis}
 .dashboard-native-container .secloc > button{flex:none}
 .dashboard-native-container .e3dnote{padding:0 8px; font-size:var(--txCapSz); color:var(--t2); white-space:nowrap}

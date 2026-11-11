@@ -189,20 +189,13 @@ window.EKO_SEC = (function(){
     use(E2);
     const model = (doc.widgets || []).find(w => w.type === 'viewer3d') || {};
     const cfg = Object.assign({}, model.config || {}, { markers: false, markToggle: true });
-    return window.EKO_V.viewer(E, cfg, located(E) + markers(E) + summary(E)) + (E.state.assetSel ? C().assetPanel(E) : panel(E));
-  }
-  function located(E2){
-    const b = E2.state.secLocated;
-    const ev = !b && E2.state.secEv && window.EKO_SECW ? window.EKO_SECW.events(E2).find(x => x.id === E2.state.secEv) : null;
-    if(!b && !ev) return '';
-    return `<div class="secloc" role="status"><span>${esc(t('sec.located', { c: b ? b.id : (ev.device || ev.title) }))}</span>
-      <button class="btnG btnSm" data-act="${b ? 'secLocatedBack' : 'secBack'}">${icon('chevL', 12)} ${esc(t('back'))}</button></div>`;
+    return window.EKO_V.viewer(E, cfg, markers(E) + summary(E)) + (E.state.assetSel ? C().assetPanel(E) : panel(E));
   }
   /* A second locate keeps the first one's way back */
   function locatedFrom(E2, id){
     const prev = E2.state.secLocated, eng = E2.engine;
     if(prev) return Object.assign({}, prev, { id });
-    return { id, from: { pageId: E2.state.pageId, module: E2.state.module, sub: E2.state.sub }, view: eng && eng.saveViewpoint ? eng.saveViewpoint() : null };
+    return { id, from: { pageId: E2.state.pageId, module: E2.state.module, sub: E2.state.sub }, view: E2.back.save() };
   }
 
   const widget = (...a) => A().widget(E, ...a), hero = (...a) => A().heroTile(E, ...a);
@@ -419,7 +412,7 @@ window.EKO_SEC = (function(){
       if(eng && eng.highlightGid) eng.highlightGid(null);
       E2.state.secLocated = null; E2.state.secSel = null;
       if(b.from.pageId !== E2.state.pageId){ E2.go(b.from.pageId, b.from.module, b.from.sub); return; }
-      if(b.view && eng && eng.flyToViewpoint) eng.flyToViewpoint(b.view); else if(eng && eng.resetView) eng.resetView();
+      if(!E2.back.fly(b.view) && eng && eng.resetView) eng.resetView();
       E2.set({}); }
   };
   /* D182: the internals the overview and event workspace build on (js/sec-ws.js) */

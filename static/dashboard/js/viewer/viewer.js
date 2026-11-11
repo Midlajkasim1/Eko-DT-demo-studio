@@ -499,13 +499,6 @@ window.EKO_V = (function(){
       + (config && config.markToggle ? `<button class="seg" data-act="secMarksShow" data-on="${marks}" aria-pressed="${marks}">${C().esc(t('e3d.marks'))}</button>` : '')
       + `</div>`;
   }
-  function located(E){
-    const id = E.state.paint, lf = E.state.locFocus;
-    if(!id || E.state.secLocated || E.state.secEv) return '';
-    const esc = C().esc, el = E.state.pickEl;
-    return `<div class="secloc vploc" role="status"><span>${esc(E.t('sec.located', { c: el && el.bimId === id && el.name ? el.name : id }))}</span>
-      <button class="btnG btnSm" data-act="${lf ? 'locBack' : 'mkBack'}">${C().icon('chevL', 12)} ${esc(E.t(lf && lf.back ? 'backToAssets' : 'back'))}</button></div>`;
-  }
   /* Viewer surface. summaryHtml (the #ovp overlay) renders INSIDE vpmain,
      exactly as the reference layers it. */
   function viewer(E, config, summaryHtml){
@@ -516,7 +509,7 @@ window.EKO_V = (function(){
       <div class="v3tint" aria-hidden="true"></div>
       <div class="v3glow" aria-hidden="true"></div>
       ${E.state.bimBack ? `<button class="vpbim" data-act="bimBack">${C().icon('chevL', 14)} ${C().esc(t(E.state.bimBack.labelKey))}</button>` : ''}
-      ${located(E)}
+      ${E.back ? E.back.chip() : ''}
       ${config.markers ? markers(E) : ''}
       ${config.pmuChips ? (cacheOK = lastSig !== '' && hostSig(E) === lastSig, chipLayer(E.data.power.pmuChips||[])) : ''}
       ${config.utilChips ? (cacheOK = lastSig !== '' && hostSig(E) === lastSig, chipLayer(E.data.utilLanding.chips||[])) : ''}

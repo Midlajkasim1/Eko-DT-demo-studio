@@ -235,7 +235,7 @@ window.EKO_SECW = (function(){
     if(eng.highlightGid) eng.highlightGid(null);
     if(eng.setLabels) eng.setLabels(null);
     if(from && E.state.dock){ E.state.dock.level = from.level; if(eng.isolateLevel) eng.isolateLevel(from.level); }
-    if(from && from.view && eng.flyToViewpoint) eng.flyToViewpoint(from.view); else if(eng.resetView) eng.resetView();
+    if(!E.back.fly(from && from.view) && eng.resetView) eng.resetView();
   }
   /* the pulse ring at the selected event, drawn in the marker layer */
   function pulse(E){
@@ -267,7 +267,7 @@ window.EKO_SECW = (function(){
     secEv(el){ const E = window.EKO, id = el.dataset.v, e = events(E).find(x => x.id === id);
       E.state.dlg = null; E.state.opsDrill = null; E.state.secSel = null;
       if(E.state.pageId !== 'sec') E.go('sec', 'security', null);
-      if(!E.state.secEvFrom) E.state.secEvFrom = { level: E.state.dock.level, view: E.engine && E.engine.saveViewpoint ? E.engine.saveViewpoint() : null };
+      if(!E.state.secEvFrom) E.state.secEvFrom = { level: E.state.dock.level, view: E.back.save() };
       focus(E, e); E.set({ secEv: id }); },
     secBack(){ const E = window.EKO; leave(E); E.set({}); }
   };
