@@ -1313,7 +1313,8 @@
     { on(){ const b = E.state.secLocated; return b && window.EKO_SEC ? { text: b.id } : null; }, leave(){ window.EKO_SEC.ACTS.secLocatedBack(); } },
     { on(){ const v = E.state.hmRoomView, room = v && ((E.data.heat || {}).rooms || []).find(r => r.guid === v.guid); return room ? { text: room.name || room.guid } : null; }, leave(){ endRoomFly(); } },
     { on(){ const lf = E.state.locFocus; return lf ? { text: located(), key: lf.back ? 'backToAssets' : 'back' } : null; }, leave(){ ACTS.locBack(); } },
-    { on(){ return E.state.paint ? { text: located() } : null; }, leave: leaveSelection }
+    { on(){ return E.state.paint ? { text: located() } : null; }, leave: leaveSelection },
+    { on(){ const b = E.state.bimBack; return b ? { text: b.label || '', key: b.labelKey } : null; }, leave(){ ACTS.bimBack(); } }
   ];
   E.back = {
     cur(){ for(let i = 0; i < BACKS.length; i++){ const v = BACKS[i].on(); if(v) return { v, leave: BACKS[i].leave }; } return null; },
@@ -1321,7 +1322,7 @@
     save(){ return E.engine && E.engine.saveViewpoint ? E.engine.saveViewpoint() : null; },
     fly(view){ return !!(view && E.engine && E.engine.flyToViewpoint) && E.engine.flyToViewpoint(view) !== false; },
     chip(){ const c = this.cur(); if(!c) return '';
-      return `<div class="secloc" role="status"><span>${C.esc(E.t('sec.located', { c: c.v.text }))}</span><button class="btnG btnSm" data-act="viewBack">${C.icon('chevL', 12)} ${C.esc(E.t(c.v.key || 'back'))}</button></div>`; }
+      return `<div class="secloc" role="status">${c.v.text ? `<span>${C.esc(E.t('sec.located', { c: c.v.text }))}</span>` : ''}<button class="btnG btnSm" data-act="viewBack">${C.icon('chevL', 12)} ${C.esc(E.t(c.v.key || 'back'))}</button></div>`; }
   };
   function goHome(){ if(E.engine && typeof E.engine.resetView === 'function') E.engine.resetView(); }
   const apHistAt = () => { const nav = document.querySelector('.aphnav'); return nav ? +nav.getAttribute('aria-valuenow') : 0; };
@@ -2011,7 +2012,6 @@
     if(window.EKO_NOTIF && window.EKO_NOTIF.setViewer) window.EKO_NOTIF.setViewer(p.name);
     E.state.dlg = null; if(window.EKO_BRIEF) window.EKO_BRIEF.reset(); E.set({}); };
   E.runAct = (name, data) => { const f = ACTS[name]; if(f) f({ dataset: data || {}, value: (data || {}).v }); };   /* E15: an action by name (js/e14.js) */
-  E.bimBack = ACTS.bimBack;
 
   /* E15 port: the click and change handlers of the ported ESG, Security, Evacuation, Maintenance and scenario modules, looked up
      after ours in the pack's order (a name already in ACTS or an earlier module keeps winning) */

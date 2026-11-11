@@ -508,7 +508,6 @@ window.EKO_V = (function(){
       ${planSwitch(E, config)}
       <div class="v3tint" aria-hidden="true"></div>
       <div class="v3glow" aria-hidden="true"></div>
-      ${E.state.bimBack ? `<button class="vpbim" data-act="bimBack">${C().icon('chevL', 14)} ${C().esc(t(E.state.bimBack.labelKey))}</button>` : ''}
       ${E.back ? E.back.chip() : ''}
       ${config.markers ? markers(E) : ''}
       ${config.pmuChips ? (cacheOK = lastSig !== '' && hostSig(E) === lastSig, chipLayer(E.data.power.pmuChips||[])) : ''}

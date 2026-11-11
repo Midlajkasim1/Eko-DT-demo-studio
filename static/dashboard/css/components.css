@@ -17854,8 +17854,3 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container[data-nav="min"] #ekonav > div { position:relative }
 .dashboard-native-container[data-nav="min"] .nsubs { position:fixed; inset-inline-start:calc(var(--navw) + 4px); z-index:50; min-width:190px; padding:6px; gap:1px;
   background:var(--chrome-bg); border:1px solid var(--chrome-edge); border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.25) }
-
-/* Back from the model to the view that opened it: solid, readable on a light or a dark model, top-centre, clear of the Overview panel (left), the model tools and the close button (right) */
-.dashboard-native-container .vpbim { pointer-events:auto; position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:58; white-space:nowrap; min-height:36px; display:inline-flex; align-items:center; gap:6px; padding:0 14px; border-radius:8px; border:1px solid var(--elevBd); background:var(--elev); color:var(--t1); font:inherit; font-weight:600; font-size:13px; cursor:pointer; box-shadow:var(--shadow) }
-.dashboard-native-container .vpbim:hover { background:var(--s3) }
-.dashboard-native-container .vpbim:focus-visible { outline:2px solid var(--acc); outline-offset:2px }
