@@ -58,6 +58,7 @@
       ? { esg: 'active', maintenance: 'active', security: 'active', 'systems.life': 'hidden', 'systems.security': 'hidden' }
       : { esg: 'available', maintenance: 'available', security: 'available' };
     ['systems.other', 'systems.data', 'spaces.occ', 'security.evac', 'security.nurse'].forEach(v => { states[v] = extended ? 'active' : 'hidden'; });
+    if(cfg.hospitalHvac === true) states['spaces.occ'] = 'hidden';
     if(window.INJECTED_PROJECT_CONFIG) states['energy.anom'] = 'active';   /* every Studio project: its meters, the sample's, or none yet */
     states['systems.twin'] = cfg.hospitalHvac === true ? 'active' : 'hidden';   /* Systems > Live Twin (layouts/hospital-twin.js): the Eko Hospital project only, as the roof schematic */
     /* Ask EKO asks the backend's Eko-Chat for every Studio and exported project, whatever sample data it shows */
