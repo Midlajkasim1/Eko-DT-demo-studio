@@ -448,7 +448,7 @@ window.EKO_C = (function(){
     });
     const rowHtml = (a, grouped) => {
       const l = E.alarmLines(a);   /* D105: wording from the role; the technical line beneath for plain-wording roles */
-      return `<div class="alr ${grouped?'alrind':''}" data-act="openAsset" data-asset="${esc(a.asset)}" role="button" tabindex="0">
+      return `<div class="alr ${grouped?'alrind':''}" data-act="openAsset" data-asset="${esc(a.asset)}" data-tab="alarms" role="button" tabindex="0">
         <span class="alrsev" data-tip="${esc(sevTipFor(E, a))}">${sevGlyph(a.sev, !!a.ack, 13)}</span>
         <div class="alrbody">
           ${grouped?'':`<span class="alrid" ${a.ack?'data-ack="1"':''}>${esc(a.asset)}</span>`}
@@ -458,7 +458,7 @@ window.EKO_C = (function(){
         </div>
         <span class="alract hst">
           ${a.ack?'':`<button class="alghost" data-act="ackAlarm" data-alarm="${a.id}">${esc(E.t('acknowledge'))}</button>`}
-          <button class="alprim" data-act="openAsset" data-asset="${esc(a.asset)}">${esc(E.t('details'))}</button>
+          <button class="alprim" data-act="openAsset" data-asset="${esc(a.asset)}" data-tab="alarms">${esc(E.t('details'))}</button>
         </span>
         <span class="alrage">${esc(a.ageH != null ? E.fmtAge(a.ageH) : (a.age || ''))}</span>
         <span class="alractw" data-tip="${esc(actTip(E, a.sev))}">${esc(sevAction(E,a.sev))}</span>
@@ -1805,8 +1805,9 @@ window.EKO_C = (function(){
         const healthy = /^(normal|ok|false|off|0|healthy)$/i.test(v.trim()) || /[-–:]\s*normal\s*$/i.test(v);
         return pbox({ kind: t('apFdd'), title: trP(p[0]), value: [t(v.length < 16 ? 'dgc.status' : 'ap.reading'), v], sev: healthy ? '' : 'critical' }); }).join('');
       const pts = alarmPtRows.map(p => row(trP(p[0]), esc(p[1]))).join('');
+      const wo = (r.workOrders || []).length ? sec(t('apWoTab')) + workOrderBody(E, r) : '';
       body = (als.length ? '' : empty('ap.noAlarms')) + (boxes || fdd ? `<div class="pboxes">${boxes}${fdd}</div>` : '')
-        + (pts ? sec(t('ap.readings')) + rows(pts) : '');
+        + (pts ? sec(t('ap.readings')) + rows(pts) : '') + wo;
     } else if(tab === 'activity'){
       body = window.EKO_ACT ? window.EKO_ACT.tab(E, r, als, finAsset(E, id)) : empty('ap.noActivity');
     } else if(tab === 'workorder'){

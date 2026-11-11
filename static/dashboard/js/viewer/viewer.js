@@ -259,7 +259,7 @@ window.EKO_V = (function(){
       ${a.impactAedMo ? `<span class="mkimpact tMonoS cWarn">${esc(t('mkImpact', { v: C().fmt(a.impactAedMo) }))}</span>` : ''}
       ${n > 1 ? `<span class="tCap">${esc(t('mkCluNote', { n }))}</span>` : ''}
       <div class="row gap6 mkacts">
-        <button class="btnP btnSm" data-act="openAsset" data-asset="${esc(a.asset)}">${esc(t('details'))}</button>
+        <button class="btnP btnSm" data-act="openAsset" data-asset="${esc(a.asset)}" data-tab="alarms">${esc(t('details'))}</button>
         ${woDone || (E.state.woPhase||{})[a.asset]
           ? C().woBtn(E, a.asset)
           : `<button class="btnG btnSm" data-act="cwo" data-asset="${esc(a.asset)}">${esc(t('cwo'))}</button>`}
@@ -309,7 +309,7 @@ window.EKO_V = (function(){
       ${params.length ? `<div class="mkparams">${params.map(p => `<span class="tCap mkplbl" data-tip="${esc(E.ph(p[0]))}" data-tipif="trunc">${esc(E.ph(p[0]))}</span><span class="tMonoS mkpval">${esc(p[2])}</span>`).join('')}</div>` : ''}
       ${also.length ? `<span class="tCap">${esc(also.join(', '))}</span>` : ''}
       <div class="row gap6 mkacts">
-        <button class="btnP btnSm" data-act="openAsset" data-asset="${esc(id)}">${esc(t('details'))}</button>
+        <button class="btnP btnSm" data-act="openAsset" data-asset="${esc(id)}" data-tab="alarms">${esc(t('details'))}</button>
         ${woDone || (E.state.woPhase||{})[id]
           ? C().woBtn(E, id)
           : `<button class="btnG btnSm" data-act="cwo" data-asset="${esc(id)}">${esc(t('cwo'))}</button>`}

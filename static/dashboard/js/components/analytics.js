@@ -128,14 +128,14 @@ window.EKO_A = (function(){
   /* D105: compact lists show the plain line; "Show technical detail" reveals the technical string, per user */
   const discloseBar = E => E.wording() === 'plain' ? `<div class="alldisc"><button class="statlink" data-act="disclose" data-k="tech" aria-pressed="${E.disclose('tech')}">${esc(E.t(E.disclose('tech') ? 'hideTech' : 'discloseTech'))}</button></div>` : '';
   const alarmRows = (E, alarms) => discloseBar(E) + alarms.map(a => { const l = E.alarmLines(a, true); return (
-    `<div class="alr" data-act="openAsset" data-asset="${esc(a.asset)}" role="button" tabindex="0">
+    `<div class="alr" data-act="openAsset" data-asset="${esc(a.asset)}" data-tab="alarms" role="button" tabindex="0">
       <span class="alrsev" data-tip="${esc(C().sevTipFor(E, a))}">${C().sevGlyph(a.sev, !!a.ack, 13)}</span>
       <div class="alrbody"><span class="alrid" ${a.ack?'data-ack="1"':''}>${esc(a.asset)}</span>
         <span class="alrwhat">${esc(l.main)}</span>${l.sub ? `<span class="alrtech">${esc(l.sub)}</span>` : ''}
         ${a.ack?`<span class="alrack">${esc(E.t('ackShort',{time:a.ack.time,who:a.ack.who}))}</span>`:''}</div>
       <span class="alract hst">
         ${a.ack?'':`<button class="alghost" data-act="ackAlarm" data-alarm="${a.id}">${esc(E.t('acknowledge'))}</button>`}
-        <button class="alprim" data-act="openAsset" data-asset="${esc(a.asset)}">${esc(E.t('details'))}</button></span>
+        <button class="alprim" data-act="openAsset" data-asset="${esc(a.asset)}" data-tab="alarms">${esc(E.t('details'))}</button></span>
       <span class="alrage">${esc(E.fmtAge(a.ageH))}</span>
       <span class="alractw" data-tip="${esc(C().actTip(E, a.sev))}">${esc(C().sevAction(E,a.sev))}</span></div>`); }).join('');
 
