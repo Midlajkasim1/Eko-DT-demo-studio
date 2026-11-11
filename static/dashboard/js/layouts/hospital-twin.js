@@ -925,20 +925,11 @@
       (r.provisional ? '<p class="twnote twwarn">' + esc(tr(E, 'twinProvNote', { fin: r.fin })) + '</p>' : '') +
       (r.floorDiffers ? '<p class="twnote twwarn">' + esc(tr(E, 'twinFloorDiffers', { floor: r.floor, want: MAP.LEVELS[e.level] })) + '</p>' : '');
     var tracing = s.trace && s.trace.seed === id;
-    /* Show in BIM model: enabled with a usable GlobalId (bimUsable). Missing, conflicting or unconfirmed ones keep the button, disabled, with the reason, and
-       nothing is navigated to; MAP.bimLinks is unchanged. Context items (not FIN equipment) have no BIM mapping to explain. */
-    var bm = s.bim.by[id], bimBtn = '', bimNote = '';
-    if (bimUsable(bm)) { if (host3d()) bimBtn = '<button type="button" class="btnG btnSm" data-tw="bim">' + esc(tr(E, 'twinBimShow')) + '</button>'; }
-    else if (bm && bm.state !== 'not-fin') {
-      var why = tr(E, 'twinBimUnavail') + ': ' + tr(E, 'twinBimWhy.' + bm.state, { with: bm.with.join(', '), fin: bm.fin || none, link: bm.link || bm.with.filter(function (g) { return g !== bm.fin; }).join(', ') });
-      bimBtn = '<button type="button" class="btnG btnSm" data-tw="bim" disabled aria-disabled="true" title="' + esc(why) + '">' + esc(tr(E, 'twinBimShow')) + '</button>';
-      bimNote = '<p class="twnote twwarn" data-bim-state="' + bm.state + '">' + esc(why) + '</p>';
-    }
     var actions = '<div class="twacts">' +
       '<button type="button" class="btnG btnSm" data-tw="trace" data-dir="up" aria-pressed="' + !!(tracing && s.trace.dir === 'up') + '">' + esc(tr(E, 'twinTraceUp')) + '</button>' +
       '<button type="button" class="btnG btnSm" data-tw="trace" data-dir="down" aria-pressed="' + !!(tracing && s.trace.dir === 'down') + '">' + esc(tr(E, 'twinTraceDown')) + '</button>' +
-      bimBtn +
-      (s.trace ? '<button type="button" class="btnG btnSm" data-tw="untrace">' + esc(tr(E, 'twinTraceClear')) + '</button>' : '') + '</div>' + bimNote;
+      (s.bim.by[id] && s.bim.by[id].state === 'verified' && host3d() ? '<button type="button" class="btnG btnSm" data-tw="bim">' + esc(tr(E, 'twinBimShow')) + '</button>' : '') +
+      (s.trace ? '<button type="button" class="btnG btnSm" data-tw="untrace">' + esc(tr(E, 'twinTraceClear')) + '</button>' : '') + '</div>';
     return '<div class="twnav"><button type="button" class="btnG btnSm" data-tw="back">\u2190 ' + esc(tr(E, 'twinBack', { floor: tr(E, 'twinLv.' + lvOf(e)) })) + '</button>' +
       '<button type="button" class="btnG btnSm" data-tw="floors">' + esc(tr(E, 'twinAllFloors')) + '</button></div>' +
       '<div class="twdh"><div><h3 class="twdt">' + esc(e.label) + '</h3><code class="twdid">' + esc(e.nonFin ? tr(E, 'twinNotFinId') : id) + '</code></div>' +
@@ -1327,15 +1318,11 @@
     tagsSoon(s);
     if (!quiet) update(host, s.E);
   }
-  /* A machine can be shown in the model when it has one agreed GlobalId: verified, or shared (the same single GlobalId also belongs to another drawn
-     machine, so the model element is real but not exclusive; the machine is still never looked up from that element, see MAP.bimLinks). Missing, conflicting
-     and unconfirmed ids have no usable GlobalId. */
-  function bimUsable(b) { return !!(b && b.guid && (b.state === 'verified' || b.state === 'shared')); }
   /* Show the selected machine in the Studio's BIM model, the way Locate in 3D does (app.js locate): the Overview's model (on a phone or tablet its
      full-screen model, whose Back returns here), the camera on the verified GlobalId, the element highlighted, and its storey alone when a model storey
      carries the FIN floor's own name. Only for a verified GlobalId. */
   function showInModel(host, id) {
-    var s = host && STATE && STATE.get(host), b = s && s.bim.by[id]; if (!bimUsable(b)) return false;
+    var s = host && STATE && STATE.get(host), b = s && s.bim.by[id]; if (!b || b.state !== 'verified') return false;
     var E = s.E, from = { pageId: E.state.pageId, module: E.state.module, sub: E.state.sub };
     var lv = s.res[id] && s.res[id].floor ? MAP.modelLevel(s.res[id].floor, call3d('listLevels')) : null;
     E.go(E.overviewId ? E.overviewId() : 'marsa-overview', 'overview', null);
