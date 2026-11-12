@@ -729,7 +729,7 @@
     if (!hits.length) { out.state = 'missing'; out.reason = 'not-in-feed'; return out; }
     if (hits.length > 1) { out.state = 'ambiguous'; out.reason = 'duplicate'; return out; }
     var a = hits[0], liveId = bareId(a.finId), tags = Array.isArray(a.tags) ? a.tags : [];
-    if (liveId && liveId !== bareId(ref.id)) { out.state = 'ambiguous'; out.reason = 'id-differs'; return out; }
+    /* the saved export's FIN id is no longer an identity check: the feed (the Asset Register's own rows) and the project's saved links decide, by name */
     if (tags.length && TYPE_TAG[e.type] && tags.indexOf(TYPE_TAG[e.type]) === -1) { out.state = 'ambiguous'; out.reason = 'type-differs'; return out; }
     out.asset = a;
     out.finId = liveId || ref.id;
@@ -1023,40 +1023,37 @@
   }
 
   /* ── BIM: one IFC GlobalId per drawn machine, or why there is none ──
-     Sources: the FIN equipment's own bimId (bimOf: a 22-character IFC GUID, never the FIN id or name the backend falls back to) and the Studio project's
-     equipment links (EKO_HOST_ENGINE.listMapped(): [{ id: FIN name, bimId: GlobalId }]). Nothing else, and no guess.
-     state: verified (source fin · link · both) · missing · shared (another equipment has the same GlobalId) · conflict (the sources disagree) ·
-            unconfirmed (no FIN equipment confirmed in the feed) · not-fin.
+     Same rule as the Asset Register (DashboardOverlay.tsx bimIdFor): the project's saved equipment link (Dashboard Settings > Equipment & Spaces, read through
+     EKO_HOST_ENGINE.listMapped(): [{ id: FIN name, bimId: GlobalId }]) wins; the feed's own bimId (bimOf: a 22-character IFC GUID, never the FIN id or name the
+     backend falls back to) is used only where no link is saved. Nothing else, and no guess.
+     state: verified (source link · fin · both) · missing · shared (another equipment resolves to the same GlobalId) ·
+            unconfirmed (no equipment confirmed in the feed) · not-fin.
      Returns { by: { drawnId: { state, guid, source, fin, link, with } }, guid: { GlobalId: drawnId } } (guid: verified ones only). */
   var GUID = /^[0-9A-Za-z_$]{22}$/;
   function bimLinks(res, idx, links) {
-    var owners = {}, linked = {};
-    function own(g, name) { var k = fold(name); if (!k) return; (owners[g] = owners[g] || {})[k] = name; }
-    Object.keys(idx || {}).forEach(function (k) { idx[k].forEach(function (a) { var g = bimOf(a); if (g) own(g, a.id); }); });
-    (Array.isArray(links) ? links : []).forEach(function (l) {
+    var linked = {}, names = {}, owners = {};
+    (Array.isArray(links) ? links : []).forEach(function (l) {   /* the last link of a name wins, as in the Register's lookup (assetLinks.ts indexLinks) */
       var g = l && l.bimId != null ? String(l.bimId).trim() : '', k = l && fold(l.id);
-      if (!k || !GUID.test(g)) return;
-      own(g, l.id);
-      (linked[k] = linked[k] || []).indexOf(g) === -1 && linked[k].push(g);
+      if (k && GUID.test(g)) { linked[k] = g; names[k] = l.id; }
     });
+    function own(g, k, name) { (owners[g] = owners[g] || {})[k] = name; }
+    Object.keys(idx || {}).forEach(function (k) { idx[k].forEach(function (a) { var g = linked[k] || bimOf(a); if (g) own(g, k, a.id); }); });
+    Object.keys(linked).forEach(function (k) { own(linked[k], k, names[k]); });
     var by = {}, guid = {};
     Object.keys(res || {}).forEach(function (id) {
       var r = res[id], out = { state: null, guid: null, source: null, fin: null, link: null, with: [] };
       by[id] = out;
       if (r.state === 'not-fin') { out.state = 'not-fin'; return; }
       if (!r.asset || (r.state !== 'mapped' && r.state !== 'stale')) { out.state = 'unconfirmed'; return; }
-      var me = fold(r.fin), ls = linked[me] || [];
+      var me = fold(r.fin), g = linked[me] || r.bimId || null;
       out.fin = r.bimId || null;
-      out.link = ls.length === 1 ? ls[0] : null;
-      var cands = [];
-      [out.fin].concat(ls).forEach(function (g) { if (g && cands.indexOf(g) === -1) cands.push(g); });
-      if (!cands.length) { out.state = 'missing'; return; }
-      if (cands.length > 1) { out.state = 'conflict'; out.with = cands; return; }
-      var g = cands[0], others = Object.keys(owners[g] || {}).filter(function (k) { return k !== me; });
+      out.link = linked[me] || null;
+      if (!g) { out.state = 'missing'; return; }
+      var others = Object.keys(owners[g] || {}).filter(function (k) { return k !== me; });
       out.guid = g;
       if (others.length) { out.state = 'shared'; out.with = others.map(function (k) { return owners[g][k]; }).sort(); return; }
       out.state = 'verified';
-      out.source = out.fin && out.link ? 'both' : out.fin ? 'fin' : 'link';
+      out.source = out.link ? (out.fin === out.link ? 'both' : 'link') : 'fin';
       guid[g] = id;
     });
     return { by: by, guid: guid };

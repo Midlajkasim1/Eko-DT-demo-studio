@@ -934,7 +934,7 @@
     var rows = [[tr(E, 'twinType'), tr(E, 'twinT.' + e.type)], [tr(E, 'twinLevel'), tr(E, 'twinLv.' + e.level)]];
     if (!e.nonFin) {
       rows.push([tr(E, 'twinFinName'), r.fin || none], [tr(E, 'twinFinId'), r.finId || none], [tr(E, 'twinFinType'), r.type || none],
-        [tr(E, 'twinFinFloor'), r.floor || none], [tr(E, 'twinBim'), r.bimId ? r.bimId + (r.bimShared ? ' · ' + tr(E, 'twinBimShared') : '') : none]);
+        [tr(E, 'twinFinFloor'), r.floor || none], [tr(E, 'twinBim'), s.bim.by[id].guid ? s.bim.by[id].guid + (s.bim.by[id].state === 'shared' ? ' · ' + tr(E, 'twinBimShared') : '') : none]);
     }
     if (e.feed) rows.push([tr(E, 'twinFeed'), label(e.feed)]);
     var why = (r.reason ? '<p class="twnote">' + esc(tr(E, 'twinWhy.' + r.reason, { fin: r.fin || r.candidate || '', id: id })) + '</p>' : '') +
