@@ -2267,3 +2267,10 @@
 .dashboard-native-container[data-stacked="1"] #topbar button.tbbrief{width:40px; min-width:40px}
 .dashboard-native-container #alarmribbon .ribone,.dashboard-native-container #estateribbon .ribone{padding-inline:4px}
 }
+/* Paired cards share a bottom edge. A shorter list was ending above the chart beside it. */
+.dashboard-native-container .pwgrid.pg39{align-items:stretch}
+.dashboard-native-container .pwgrid.pg39 > .pwwidget{height:100%}
+.dashboard-native-container .angrid39{align-items:stretch}
+.dashboard-native-container .angrid39 > .col{min-height:100%}
+.dashboard-native-container .angrid39 > .col > .pwwidget:last-child{flex:1 1 auto}
+.dashboard-native-container .pwarea[data-pg="anom"] .angrid39 > .pwwidget{max-height:none; height:100%}
