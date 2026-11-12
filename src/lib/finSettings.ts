@@ -233,7 +233,7 @@ export function dashboardProjectInfo(meta: { projectId: string; name: string; ap
     powerBoards: Array.isArray(s.finPowerBoards) && s.finPowerBoards.length ? s.finPowerBoards : null,
     /* the project's own meters; null = every meter FIN reports */
     meters: Array.isArray(s.finMeters) && s.finMeters.length
-      ? s.finMeters.map(m => ({ name: m.name, equip: m.equip, his: (m.history || m.point) ? meterHistoryKey(m.name) : null, main: m.main === true }))
+      ? s.finMeters.map(m => ({ name: m.name, equip: m.equip, his: (m.history || m.point) ? meterHistoryKey(m.name) : null, point: m.point || '', main: m.main === true }))
       : null,
     anomalyAllMeters: s.anomalyAllMeters === true,
     energyFromHourly: s.energyFromHourly === true,
