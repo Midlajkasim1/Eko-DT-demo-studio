@@ -503,11 +503,13 @@ window.EKO_V = (function(){
      exactly as the reference layers it. */
   function viewer(E, config, summaryHtml){
     const t = E.t.bind(E);
-    return `<main id="vpmain" data-vst="${E.state.dock.style}" data-tl="${config.timeline?1:0}">
+    const feed = E.state.cctvFeed;
+    return `<main id="vpmain" data-vst="${E.state.dock.style}" data-tl="${config.timeline?1:0}" data-cctv="${feed ? 1 : 0}">
       <div id="enginehost"></div>
       ${planSwitch(E, config)}
       <div class="v3tint" aria-hidden="true"></div>
       <div class="v3glow" aria-hidden="true"></div>
+      ${feed ? `<div class="cctvframe" aria-hidden="true"></div><div class="cctvhud"><span class="cctvrec"></span><b>${C().esc(feed)}</b><span>${C().esc(t('cctvLive'))}</span></div>` : ''}
       ${E.back ? E.back.chip() : ''}
       ${config.markers ? markers(E) : ''}
       ${config.pmuChips ? (cacheOK = lastSig !== '' && hostSig(E) === lastSig, chipLayer(E.data.power.pmuChips||[])) : ''}

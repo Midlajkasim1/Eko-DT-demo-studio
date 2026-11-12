@@ -937,6 +937,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       removeGhost()
       const entry = bimId ? await locate(bimId) : null
       if (seq !== highlightSeq || !bimId || !entry) return false
+      if (lensId && bimId === lensId) return false
       const tone = toneFor(assetIdOrBimId, bimId)
       colored = { bimId, tone }
       tintGhost(tone)
@@ -964,7 +965,57 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       return smaller ? { canvas: { x: c.left, y: c.top, w: c.width, h: c.height }, visible: { x, y, w, h } } : null
     }
 
+    const savedCctv = (id: string) => {
+      const links = useProjectStore.getState().currentProject?.assetLinks || []
+      const bim = toBimId(id)
+      const key = foldName(id)
+      const hit = links.find(l => l.kind === 'cctv' && l.view?.position?.length === 3 && l.view?.target?.length === 3
+        && (l.guid === bim || l.guid === id || foldName(l.equip) === key))
+      return hit?.view ? { name: hit.equip, view: hit.view } : null
+    }
+    let lensId: string | null = null
+    let cctvHidden: { model: object; localId: number } | null = null
+    let poseExact: (view: { position?: number[]; target?: number[] }) => boolean = () => false
+    const showCctvBody = async () => {
+      const held = cctvHidden
+      cctvHidden = null
+      if (!held) return
+      const rest = new Set(hiddenBy(held.model, 'cctv'))
+      rest.delete(held.localId)
+      try { await setHidden(held.model as Parameters<typeof setHidden>[0], 'cctv', rest) } catch { /* worker busy */ }
+    }
+    const hideCctvBody = async (id: string) => {
+      await showCctvBody()
+      const bim = toBimId(id)
+      const entry = bim ? await locate(bim) : null
+      const shot = savedCctv(id)
+      if (!entry || !shot?.view.position) return
+      const box = worldBoxOf(entry)
+      const center = box.getCenter(new THREE.Vector3())
+      const radius = box.getBoundingSphere(new THREE.Sphere()).radius
+      const at = new THREE.Vector3(shot.view.position[0], shot.view.position[1], shot.view.position[2])
+      if (at.distanceTo(center) > Math.max(radius * 2, 0.6)) return
+      cctvHidden = { model: entry.model, localId: entry.localId }
+      try { await setHidden(entry.model, 'cctv', new Set(hiddenBy(entry.model, 'cctv')).add(entry.localId)) } catch { cctvHidden = null }
+    }
+    const noteCctv = (name: string | null) => {
+      if (!name) { lensId = null; void showCctvBody() }
+      const eko = (window as { EKO?: { state?: { cctvFeed?: string | null }; set?: (patch: object) => void } }).EKO
+      if (!eko?.set || !eko.state) return
+      const next = name || null
+      if ((eko.state.cctvFeed || null) === next) return
+      eko.set({ cctvFeed: next })
+    }
+
     const flyToAsset = async (assetIdOrBimId: string) => {
+      const saved = savedCctv(assetIdOrBimId)
+      if (saved && poseExact(saved.view)) {
+        lensId = toBimId(assetIdOrBimId)
+        noteCctv(saved.name)
+        await hideCctvBody(assetIdOrBimId)
+        return true
+      }
+      noteCctv(null)
       const controls = engine?.world?.camera?.controls
       const bimId = toBimId(assetIdOrBimId)
       const entry = bimId ? await locate(bimId) : null
@@ -2803,7 +2854,12 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       if (wake) wake.needsUpdate = true
       return true
     }
-    const lookAtView = (view?: { position?: number[]; target?: number[] }) => applyPose(view, true)
+    poseExact = view => applyPose(view, true, true)
+    const lookAtView = (view?: { position?: number[]; target?: number[] }) => {
+      const ok = applyPose(view, true)
+      noteCctv(null)
+      return ok
+    }
 
     /* Furniture on whatever models are loaded. Furnishing classes, plus proxies in
        interior and equipment files (the pack's furniture group). Hidden through
@@ -2934,7 +2990,7 @@ export function DashboardOverlay({ visible, engineRef, engineReady = false }: Da
       isolateElement,
       showAllElements,
       elementAt,
-      resetView: () => { leavePlan(); resetCameraToHome(engine) },
+      resetView: () => { leavePlan(); resetCameraToHome(engine); noteCctv(null) },
       setViewMode,
       setDashboardOpen,
       bimIdFor,

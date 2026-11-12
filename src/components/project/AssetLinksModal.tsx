@@ -7,7 +7,7 @@ import { useFinStore } from '@/store/useFinStore'
 import { useModelStore } from '@/store/useModelStore'
 import { useLoadingProgressStore } from '@/store/useLoadingProgressStore'
 import type { FragmentsEngine } from '@/lib/fragmentsEngine'
-import type { AssetLink } from '@/types'
+import type { AssetLink, ProjectCamera } from '@/types'
 import type { FinEquipment } from '@/types/fin'
 import {
   CLIPS,
@@ -93,7 +93,7 @@ function newLink(eq: LinkEquipment, guid: string, nameWords: boolean, el?: Model
 
 const HINTS: Record<Mode, string> = {
   equip: 'Link each FIN equipment to its element in the model, or add one by name and GlobalId. A link keeps the IFC GlobalId, so it carries over to a revised model.',
-  cctv: 'Link each FIN camera to its element in the model, or add a camera by name and GlobalId, then set the room it is in. FIN’s bimId is suggested first. Rooms come from the Spaces tab.',
+  cctv: 'Link each FIN camera to its element in the model, or add a camera by name and GlobalId, then set the room it is in. Frame the model as that camera should see the building, then Save this view. Locate in 3D opens that picture. FIN’s bimId is suggested first. Rooms come from the Spaces tab.',
   space: 'Rooms for the heatmap, grouped by level. Choose a FIN sensor or a piece of equipment for a room, or type a name such as IS-01. Rooms with no sensor of their own share the sample sensors.',
 }
 
@@ -617,6 +617,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
       ...(el ? { element: el.name || el.objectType } : {}),
       ...(cctv && row.link?.room && row.link.guid === guid ? { room: row.link.room } : {}),
       ...(cctv && row.link?.clip ? { clip: row.link.clip } : {}),
+      ...(cctv && row.link?.view ? { view: row.link.view } : {}),
     }
     setLinks(prev => [...prev.filter(l => l.kind === 'space' || (l !== row.link && foldName(l.equip) !== row.key)), next])
     forget(row.key)
@@ -645,6 +646,17 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
     else delete next.clip
     return next
   }))
+  const setCamView = (row: Row, view: ProjectCamera | null) => setLinks(prev => prev.map(l => {
+    if (l !== row.link) return l
+    const next: AssetLink = { ...l }
+    if (view) next.view = view
+    else delete next.view
+    return next
+  }))
+  const saveCamView = (row: Row) => {
+    const shot = (window as { EKO_HOST_ENGINE?: { captureCamera?: () => ProjectCamera | null } }).EKO_HOST_ENGINE?.captureCamera?.()
+    if (shot) setCamView(row, shot)
+  }
   const followRename = (row: Row) => setLinks(prev => prev.map(l => (l === row.link && row.eq ? { ...l, equip: row.eq.name } : l)))
   const setRoom = (row: Row, room: string | null) => {
     setLinks(prev => prev.map(l => {
@@ -1115,6 +1127,20 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
               ) : <span className="al-sub">Link the camera first</span>}
             </td>
           )}
+          {mode === 'cctv' && (
+            <td>
+              {row.link ? (
+                <span className="al-search-row">
+                  <button type="button" className="ds-btn ds-btn-secondary al-small" onClick={() => saveCamView(row)}>
+                    {row.link.view ? 'Update view' : 'Save this view'}
+                  </button>
+                  {row.link.view && (
+                    <button type="button" className="ds-btn ds-btn-secondary al-small" onClick={() => setCamView(row, null)}>Clear</button>
+                  )}
+                </span>
+              ) : <span className="al-sub">Link the camera first</span>}
+            </td>
+          )}
           <td>
             <span className={`al-status al-${st.tone}`} title={autoKeys.get(row.key)}>{st.text}</span>
             {row.renamedFrom && (
@@ -1130,7 +1156,7 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
         </tr>
         {picking && (
           <tr className="al-picker-row">
-            <td colSpan={mode === 'cctv' ? 7 : 5}>{renderPicker(row)}</td>
+            <td colSpan={mode === 'cctv' ? 8 : 5}>{renderPicker(row)}</td>
           </tr>
         )}
       </Fragment>
@@ -1487,14 +1513,15 @@ function AssetLinksDialog({ initial, initialSource, projectName, nameWords, onCl
                       <th>Model element</th>
                       {mode === 'cctv' && <th>Room</th>}
                       {mode === 'cctv' && <th>Footage</th>}
+                      {mode === 'cctv' && <th>View</th>}
                       <th>Status</th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {groupRows(shown, rowLevel).map(g => renderGroup(g.key, mode === 'cctv' ? 7 : 5, g.rows.map(renderLinkRow)))}
+                    {groupRows(shown, rowLevel).map(g => renderGroup(g.key, mode === 'cctv' ? 8 : 5, g.rows.map(renderLinkRow)))}
                     {!shown.length && (
-                      <tr><td colSpan={mode === 'cctv' ? 7 : 5} className="al-sub al-empty">
+                      <tr><td colSpan={mode === 'cctv' ? 8 : 5} className="al-sub al-empty">
                         {rows.length
                           ? 'Nothing matches.'
                           : !finConnected
