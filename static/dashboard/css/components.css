@@ -17605,15 +17605,19 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 /* condenser water (the three CW pipes only): bright beads travel along the pipe; the dark breaks used on the other pipes are too faint on the thin orange and teal routes */
 .dashboard-native-container .twsvg .pipe[data-layer="cw"][data-flow="running"] .flow { stroke:#fff; opacity:.9; filter:none }
 @keyframes twflow { to { stroke-dashoffset:-16.2 } }
+/* cooling tower: water ticks fall down the louvres while the tower is on (data-run, the same status that turns its fan); hidden otherwise */
+.dashboard-native-container .twsvg .twfall { fill:none; stroke:#8fe9ff; stroke-width:1.6; stroke-linecap:round; opacity:0; pointer-events:none }
+.dashboard-native-container .twsvg .equip[data-run="on"] .twfall { opacity:.95; animation:twfall 1.1s linear infinite }
+@keyframes twfall { to { stroke-dashoffset:var(--twp) } }
 /* fans and pumps turn only while their own run status is on */
 .dashboard-native-container .twsvg .rotor[data-spin="on"] { animation:twspin 1.6s linear infinite }
 @keyframes twspin { to { transform:rotate(360deg) } }
 /* nothing moves on a faded floor, in a hidden browser tab */
-.dashboard-native-container .twsvg.paused .flow, .dashboard-native-container .twsvg.paused .rotor,
-.dashboard-native-container .twsvg[data-level="RF"] .tw-level:not([data-level="RF"]) :is(.flow,.rotor),
-.dashboard-native-container .twsvg[data-level="L3"] .tw-level:not([data-level="L3"]) :is(.flow,.rotor),
-.dashboard-native-container .twsvg[data-level="L2"] .tw-level:not([data-level="L2"]) :is(.flow,.rotor),
-.dashboard-native-container .twsvg[data-level="L1"] .tw-level:not([data-level="L1"]) :is(.flow,.rotor) { animation-play-state:paused }
+.dashboard-native-container .twsvg.paused .flow, .dashboard-native-container .twsvg.paused .rotor, .dashboard-native-container .twsvg.paused .twfall,
+.dashboard-native-container .twsvg[data-level="RF"] .tw-level:not([data-level="RF"]) :is(.flow,.rotor,.twfall),
+.dashboard-native-container .twsvg[data-level="L3"] .tw-level:not([data-level="L3"]) :is(.flow,.rotor,.twfall),
+.dashboard-native-container .twsvg[data-level="L2"] .tw-level:not([data-level="L2"]) :is(.flow,.rotor,.twfall),
+.dashboard-native-container .twsvg[data-level="L1"] .tw-level:not([data-level="L1"]) :is(.flow,.rotor,.twfall) { animation-play-state:paused }
 /* right sidebar: Alarms and Equipment tabs */
 .dashboard-native-container .twside { display:flex; flex-direction:column; padding:0 }
 .dashboard-native-container .twtabs { flex:none; display:flex; border-block-end:1px solid var(--bd2); position:sticky; top:0; background:var(--s1); z-index:1 }
@@ -17692,6 +17696,7 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   .dashboard-native-container .twsvg .pipe[data-layer="cw"][data-flow="running"] .flow { animation:none; opacity:0 }
   .dashboard-native-container .twsvg :is(.k-pipe, .k-cable)[data-flow] .flow { opacity:0 }   /* still: the dark breaks would be a solid dark line; the bright core says it flows */
   .dashboard-native-container .twsvg .rotor[data-spin="on"] { animation:none }
+  .dashboard-native-container .twsvg .equip[data-run="on"] .twfall { animation:none; opacity:0 }
 }
 
 /* Schematic: the supply-air cone under a running ceiling unit, room-temperature floor patches, the Work orders tab */

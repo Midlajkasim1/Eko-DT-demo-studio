@@ -399,6 +399,16 @@
       el('line', { x1: fmt(a[0]), y1: fmt(a[1]), x2: fmt(b[0]), y2: fmt(b[1]), 'class': 'slat' }, g);
     }
   }
+  /* water falling down a louvre face: short ticks on n-1 vertical lines, every other line offset (CSS moves them only while the machine's data-run is on).
+     Dash and period are fractions of one z unit on screen; --twp is the period the keyframes travel, so the loop never jumps. */
+  function fall(g, x, y, z, w, h, n, plane) {
+    var u = Math.abs(P(x, y, z + 1)[1] - P(x, y, z)[1]), len = u * 0.22, per = u * 0.84;
+    for (var i = 1; i < n; i++) {
+      var xx = plane === 'yz' ? x : x + w * i / n, yy = plane === 'yz' ? y + w * i / n : y, a = P(xx, yy, z + h), b = P(xx, yy, z);
+      el('line', { x1: fmt(a[0]), y1: fmt(a[1]), x2: fmt(b[0]), y2: fmt(b[1]), 'class': 'twfall', 'stroke-dasharray': fmt(len) + ' ' + fmt(per - len),
+        style: '--twp:' + fmt(-per) + 'px;animation-delay:-' + ((i % 2) * 0.55 + (i % 3) * 0.13).toFixed(2) + 's' }, g);
+    }
+  }
   function vlines(g, x, y, z, w, h, n, plane, cls) {
     for (var i = 1; i < n; i++) {
       var xx = plane === 'yz' ? x : x + w * i / n, yy = plane === 'yz' ? y + w * i / n : y, a = P(xx, yy, z), b = P(xx, yy, z + h);
@@ -433,6 +443,8 @@
     box(g, x + 0.2, y + 0.2, z + 0.8, w - 0.4, d - 0.4, h - 1.6, 'louver');
     slats(g, x + 0.2, y + 0.2, z + 0.9, w - 0.4, h - 1.8, 9, 'xz');
     slats(g, x + w - 0.2, y + 0.2, z + 0.9, d - 0.4, h - 1.8, 9, 'yz');
+    fall(g, x + 0.2, y + 0.19, z + 0.9, w - 0.4, h - 1.8, 9, 'xz');
+    fall(g, x + w - 0.19, y + 0.2, z + 0.9, d - 0.4, h - 1.8, 7, 'yz');
     box(g, x, y, z + h - 0.8, w, d, 0.25, 'steel');
     cylV(g, x + w / 2, y + d / 2, z + h - 0.55, 2.1, 0.9, 'steel');
     rotor(g, x + w / 2, y + d / 2, z + h + 0.36, 1.9, 'xy', 6);
