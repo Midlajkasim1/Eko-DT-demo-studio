@@ -224,6 +224,8 @@ export interface AssetLink {
   level?: string
   /** A camera's demo clip (V1–V7) or 'none'; absent: the clip in order */
   clip?: string
+  /** Where Locate in 3D puts the studio camera for this CCTV. Absent frames the camera body. */
+  view?: ProjectCamera
 }
 
 /** Everything the project list renders, so opening it never parses project.json */

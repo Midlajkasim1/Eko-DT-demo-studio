@@ -410,7 +410,7 @@ window.EKO_SEC = (function(){
     secMarksShow(){ const E2 = window.EKO; E2.set({ secMarksOff: !E2.state.secMarksOff }); },
     secLocatedBack(){ const E2 = window.EKO, b = E2.state.secLocated, eng = E2.engine; if(!b) return;
       if(eng && eng.highlightGid) eng.highlightGid(null);
-      E2.state.secLocated = null; E2.state.secSel = null;
+      E2.state.cctvFeed = null; E2.state.secLocated = null; E2.state.secSel = null;
       if(b.from.pageId !== E2.state.pageId){ E2.go(b.from.pageId, b.from.module, b.from.sub); return; }
       if(!E2.back.fly(b.view) && eng && eng.resetView) eng.resetView();
       E2.set({}); }

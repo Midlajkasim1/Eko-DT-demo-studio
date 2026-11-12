@@ -191,6 +191,37 @@
 .dashboard-native-container .scrim {
   pointer-events: auto;
 }
+.dashboard-native-container .cctvframe {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  box-shadow: inset 0 0 90px 18px rgba(0,0,0,.45);
+}
+.dashboard-native-container .cctvhud {
+  position: absolute;
+  z-index: 56;
+  top: 108px;
+  inset-inline-start: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(0,0,0,.62);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  pointer-events: none;
+}
+.dashboard-native-container .cctvrec {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e11d48;
+  box-shadow: 0 0 0 3px rgba(225,29,72,.28);
+}
 .dashboard-native-container[lang="ar"] {
   line-height: 1.5;
 }

@@ -4599,6 +4599,7 @@ window.EKO_I18N.en = {
   "sec.conesOcc": "Clip cones at walls",
   "sec.conesNote": "Cone 90 degrees wide and 15 m deep, facing the most open direction: assumed, set per camera.",
   "sec.located": "Located {c}",
+  "cctvLive": "LIVE",
   "bn.show3d": "Show the gap on the 3D model",
   "bn.show3dCap": "each system’s services coloured by its gap, with the colours of this chart",
   "bn.tone.ok": "within ±{p}%",

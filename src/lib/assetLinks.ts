@@ -275,7 +275,21 @@ function csvCells(line: string): string[] {
   return cells.map(c => c.trim())
 }
 
-const CSV_COLUMNS = ['equip', 'guid', 'type', 'finId', 'element', 'kind', 'room', 'level', 'clip'] as const
+const CSV_COLUMNS = ['equip', 'guid', 'type', 'finId', 'element', 'kind', 'room', 'level', 'clip', 'view'] as const
+
+/** Six numbers: camera position, then the point it looks at. */
+export function poseOf(text: string): { position: [number, number, number]; target: [number, number, number] } | undefined {
+  const n = String(text || '').trim().split(/[\s,;/]+/).map(Number)
+  if (n.length !== 6 || n.some(v => !Number.isFinite(v))) return undefined
+  return { position: [n[0], n[1], n[2]], target: [n[3], n[4], n[5]] }
+}
+
+export function poseText(view?: { position?: number[]; target?: number[] }): string {
+  const p = view?.position
+  const t = view?.target
+  if (!p || !t || p.length !== 3 || t.length !== 3) return ''
+  return [...p, ...t].map(n => String(Math.round(n * 1000) / 1000)).join(' ')
+}
 
 function linkFrom(rec: Record<string, unknown>, nameWords: boolean): AssetLink | string {
   const kindText = String(rec.kind ?? '').trim().toLowerCase()
@@ -296,6 +310,8 @@ function linkFrom(rec: Record<string, unknown>, nameWords: boolean): AssetLink |
   if (kind === 'space' && rec.level) link.level = String(rec.level).trim()
   const clip = String(rec.clip ?? '').trim()
   if (kind === 'cctv' && isClipName(clip)) link.clip = clip
+  const view = kind === 'cctv' ? poseOf(String(rec.view ?? '')) : undefined
+  if (view) link.view = view
   return link
 }
 
@@ -386,5 +402,6 @@ export function mergeLinks(current: AssetLink[], incoming: AssetLink[]): { links
 
 export function linksToCsv(links: AssetLink[]): string {
   const cell = (v: string | undefined) => (/[",\n]/.test(v ?? '') ? `"${(v ?? '').replace(/"/g, '""')}"` : v ?? '')
-  return [CSV_COLUMNS.join(','), ...links.map(l => CSV_COLUMNS.map(c => cell(l[c])).join(','))].join('\n') + '\n'
+  const value = (l: AssetLink, c: typeof CSV_COLUMNS[number]) => c === 'view' ? poseText(l.view) : l[c]
+  return [CSV_COLUMNS.join(','), ...links.map(l => CSV_COLUMNS.map(c => cell(value(l, c))).join(','))].join('\n') + '\n'
 }

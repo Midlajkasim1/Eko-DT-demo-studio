@@ -1,6 +1,6 @@
 
 
-export type HideSource = 'tree' | 'level' | 'nonPhysical' | 'furniture' | 'pick'
+export type HideSource = 'tree' | 'level' | 'nonPhysical' | 'furniture' | 'pick' | 'cctv'
 
 export interface VisibilityModel {
   setVisible(localIds: number[] | undefined, visible: boolean): Promise<void>
