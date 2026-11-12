@@ -17768,7 +17768,7 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .twtabs { flex:none; display:flex; border-block-end:1px solid var(--bd2); position:sticky; top:0; background:var(--s1); z-index:1 }
 .dashboard-native-container .twtabs button { flex:1; padding:10px 0 8px; border:0; border-block-end:2px solid transparent; background:none; font:inherit; font-weight:600; font-size:12.5px; color:var(--t2); cursor:pointer }
 .dashboard-native-container .twtabs button[aria-selected="true"] { color:var(--t1); border-block-end-color:var(--acc) }
-.dashboard-native-container .twpane { flex:1; min-height:0; overflow:auto; padding:12px 14px }
+.dashboard-native-container .twpane { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; padding:12px 14px }
 .dashboard-native-container .twaldet { display:block; font-size:11.5px; color:var(--t2); margin-block-start:2px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical }
 .dashboard-native-container .twcleared li { opacity:.7; border-inline-start-color:var(--bd2) }
 /* Exhibition controls in the systems row */
@@ -17809,7 +17809,8 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 /* tablet and phone: the controls take one row each, the building stays in view (the stage sticks to the top while the panel is read), the panel goes under it */
 @media (max-width:860px) {
   .dashboard-native-container .twbody { flex:none; flex-direction:column }
-  .dashboard-native-container #mount > .twinview { flex:none }   /* as tall as its panel: else the panel's last rows overflow past the page's room for the module bar */
+  .dashboard-native-container #mount > .twinview { flex:none }
+  .dashboard-native-container .twpane { overflow:visible; overscroll-behavior:auto }   /* the page scrolls here, not the panel: a contained non-scrolling box would swallow the wheel */   /* as tall as its panel: else the panel's last rows overflow past the page's room for the module bar */
   .dashboard-native-container .twbar { gap:4px 8px; padding:6px 10px }
   .dashboard-native-container .twttl { flex:1 0 100%; margin:0; font-size:14px }
   .dashboard-native-container .twlayers { flex-wrap:nowrap; overflow-x:auto; gap:6px; padding:6px 10px; scrollbar-width:none; -webkit-overflow-scrolling:touch }
