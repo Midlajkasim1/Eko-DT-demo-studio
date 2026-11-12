@@ -17602,6 +17602,8 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .twsvg .pipe[data-flow="stopped"] .core { opacity:.22 }
 .dashboard-native-container .twsvg .pipe[data-flow="tripped"] .core { opacity:.5; stroke:#e5594f }
 .dashboard-native-container .twsvg .pipe[data-flow="stale"] .core, .dashboard-native-container .twsvg .pipe[data-flow="offline"] .core { opacity:.4 }
+/* condenser water (the three CW pipes only): bright beads travel along the pipe; the dark breaks used on the other pipes are too faint on the thin orange and teal routes */
+.dashboard-native-container .twsvg .pipe[data-layer="cw"][data-flow="running"] .flow { stroke:#fff; opacity:.9; filter:none }
 @keyframes twflow { to { stroke-dashoffset:-16.2 } }
 /* fans and pumps turn only while their own run status is on */
 .dashboard-native-container .twsvg .rotor[data-spin="on"] { animation:twspin 1.6s linear infinite }
@@ -17687,6 +17689,7 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   .dashboard-native-container .twsvg .tw-level { transition:none }
   .dashboard-native-container .twsvg .pipe[data-flow="measured"] .flow { animation:none; stroke-dasharray:none; opacity:.85 }
   .dashboard-native-container .twsvg .pipe[data-flow="running"] .flow { animation:none; stroke-dasharray:none; opacity:.6 }
+  .dashboard-native-container .twsvg .pipe[data-layer="cw"][data-flow="running"] .flow { animation:none; opacity:0 }
   .dashboard-native-container .twsvg :is(.k-pipe, .k-cable)[data-flow] .flow { opacity:0 }   /* still: the dark breaks would be a solid dark line; the bright core says it flows */
   .dashboard-native-container .twsvg .rotor[data-spin="on"] { animation:none }
 }
