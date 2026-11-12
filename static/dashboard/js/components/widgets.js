@@ -729,7 +729,7 @@ window.EKO_C = (function(){
     const db = `<article class="pwwidget">
       <div class="pwwh"><span class="alcardt">${esc(E.t('pwDb'))}</span>
         <span class="alcardm">${esc(dbSub)}</span>${window.EKO_A.chrome(E)}</div>
-      <div class="dblist grow"${boards.length >= 4 ? ' data-many="1"' : ''}>${boards.map((x,i2) =>
+      <div class="dblist grow">${boards.map((x,i2) =>
         `<button class="dbrow" data-act="pwBoard" data-i="${i2}" data-on="${String(E.state.pwBoard)===String(i2)}"><span class="dbid">${esc(x[0])}</span>
           <span class="dbbar"><span style="width:${totalMax?((Math.max(0, Number(x[1])||0)/totalMax*100).toFixed(1)):0}%;background:${hues[i2]}"></span></span>
           <span class="dbkw">${x[1]==null||(dbEmpty&&Number(x[1])===0)?'--':(fmt(Number(x[1]), simKw ? 0 : 1)+(simKw ? ' kW' : ' kWh'))}</span>${icon('chevR',12)}</button>`).join('')}</div></article>`;
@@ -808,8 +808,9 @@ window.EKO_C = (function(){
     const ps = simPeakMw ? p.peakSeriesMw : ((psAll[tr] && psAll[tr].length) ? psAll[tr] : []);
     const pkUnit = simPeakMw ? 'MW' : 'kW';
     const n3 = ps.length;
-    const peakAvg = n3 ? ps.reduce((a2,v)=>a2+(Number(v)||0),0)/n3 : 0;
-    const livePeak = n3 ? Math.max(...ps.map(v=>Number(v)||0)) : 0;
+    const peakVals = ps.filter(v => v != null && isFinite(Number(v))).map(Number);
+    const peakAvg = peakVals.length ? peakVals.reduce((a2,v)=>a2+v,0)/peakVals.length : 0;
+    const livePeak = peakVals.length ? Math.max(...peakVals) : 0;
     const contract = simPeakMw ? limMw : m.contractedKw;
     const niceMax = v => {
       if(!(v > 0)) return 1;
@@ -821,13 +822,20 @@ window.EKO_C = (function(){
     const PMAX = niceMax(Math.max(contract || 0, livePeak) * 1.15);
     const pty = v => (100 - v/PMAX*100);
     const xAt = i2 => n3 ? ((i2 + 0.5) / n3 * 100) : 0;
-    const pts3 = n3 < 2 ? '' : ps.map((v,i2)=>`${xAt(i2).toFixed(2)},${pty(v).toFixed(2)}`).join(' ');
+    const pkSegs = [];
+    let pkSeg = [];
+    ps.forEach((v,i2) => {
+      if (v == null || !isFinite(Number(v))) { if (pkSeg.length > 1) pkSegs.push(pkSeg.join(' ')); pkSeg = []; return; }
+      pkSeg.push(`${xAt(i2).toFixed(2)},${pty(Number(v)).toFixed(2)}`);
+    });
+    if (pkSeg.length > 1) pkSegs.push(pkSeg.join(' '));
+    const pts3 = pkSegs.join(' ');
     const yC = contract != null ? pty(contract) : 0;
     const yA = pty(peakAvg);
     let pkHits = '';
     for(let i2=0;i2<n3;i2++){
       const label = xLabels[i2] || '';
-      const val = nv(Number(ps[i2])||0);
+      const val = ps[i2] == null || !isFinite(Number(ps[i2])) ? '--' : nv(Number(ps[i2]));
       pkHits += hitCell(label, pkUnit, [{ c: '#4EA3E8', n: E.t('pwPeak'), v: val }]);
     }
     const pTicks = [PMAX, PMAX*0.75, PMAX*0.5, PMAX*0.25, 0].map(v => v >= 10 ? Math.round(v) : (Math.round(v*10)/10));
@@ -843,8 +851,7 @@ window.EKO_C = (function(){
             ${grid39}
             ${contract != null ? `<rect x="0" y="0" width="100" height="${Math.max(0,yC).toFixed(2)}" fill="rgba(214,69,69,0.12)"/>` : ''}
             ${n3 ? `<line x1="0" x2="100" y1="${yA.toFixed(2)}" y2="${yA.toFixed(2)}" stroke="var(--chTx)" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>` : ''}
-            ${pts3 ? `<polygon points="0,100 ${pts3} 100,100" fill="url(#pwpkG)"/>
-            <polyline points="${pts3}" fill="none" stroke="#4EA3E8" stroke-width="2" vector-effect="non-scaling-stroke"/>` : ''}
+            ${pkSegs.map(seg => { const pts = seg.split(' '); const x0 = pts[0].split(',')[0]; const x1 = pts[pts.length-1].split(',')[0]; return `<polygon points="${x0},100 ${seg} ${x1},100" fill="url(#pwpkG)"/><polyline points="${seg}" fill="none" stroke="#4EA3E8" stroke-width="2" vector-effect="non-scaling-stroke"/>`; }).join('')}
             ${n3===1 ? `<circle cx="${xAt(0).toFixed(2)}" cy="${pty(ps[0]).toFixed(2)}" r="1.8" fill="#4EA3E8"/>` : ''}
             </svg>
           ${n3 ? `<div class="chhits39">${pkHits}</div>` : ''}

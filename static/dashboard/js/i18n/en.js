@@ -1287,7 +1287,7 @@ window.EKO_I18N.en = {
   "pwDbSub.one": "{when} · {n} board · {v} kWh total",
   "pwDbSub.other": "{when} · {n} boards · {v} kWh total",
   "pwPeakTrend": "PEAK DEMAND TREND",
-  "pwPeakSub": "kW · today to {t} · hourly samples",
+  "pwPeakSub": "kW · today to {t}",
   "pwPeakSub15": "kW · today · 15-minute samples",
   "pwDbShareMw": "load now · share of {mw} MW",
   "pwCarbonMtd": "{r} kg CO₂/kWh · month to date",

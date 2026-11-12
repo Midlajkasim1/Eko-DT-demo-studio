@@ -1364,7 +1364,7 @@ window.EKO_I18N.ar = {
   "pwDbSub.many": "{when} · {n} لوحة · {v} ك.و.س إجمالي",
   "pwDbSub.other": "{when} · {n} لوحة · {v} ك.و.س إجمالي",
   "pwPeakTrend": "اتجاه ذروة الطلب",
-  "pwPeakSub": "ك.و · اليوم حتى {t} · عينات ساعية",
+  "pwPeakSub": "ك.و · اليوم حتى {t}",
   "pwPeakSub15": "ك.و · اليوم · عينات كل 15 دقيقة",
   "pwDbShareMw": "الحمل الآن · حصة من {mw} م.و",
   "pwCarbonMtd": "{r} كج CO₂/ك.و.س · منذ بداية الشهر",

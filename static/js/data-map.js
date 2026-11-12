@@ -1006,7 +1006,7 @@
         var now = nowParts();
         var n = Math.min(24, Math.max(1, now.h + 1));
         var hours = [], i;
-        for (i = 0; i < n; i++) hours[i] = 0;
+        for (i = 0; i < n; i++) hours[i] = null;
         (flat || []).forEach(function (p) {
           if (p.y === now.y && p.m === now.m && p.d === now.d && p.h >= 0 && p.h < n) {
             hours[p.h] = Math.trunc(p.val * 100) / 100;
@@ -1310,10 +1310,11 @@
         var peakToday = todayHourly(peakFlat);
         site.power.peakSeries = align(peakToday, todayLen);
         if (peakFlat.length || mapsKey(p, 'peak_demand')) site.power.peakFromFin = true;
-        if (peakToday.length) {
+        var peakReported = peakToday.filter(function (v) { return v != null; });
+        if (peakReported.length) {
           var pkSum = 0;
-          peakToday.forEach(function (v) { pkSum += v; });
-          site.power.peakAvgKw = Math.trunc((pkSum / peakToday.length) * 10) / 10;
+          peakReported.forEach(function (v) { pkSum += v; });
+          site.power.peakAvgKw = Math.trunc((pkSum / peakReported.length) * 10) / 10;
         }
         var nH = todayLen;
         var hourLab = hourKeys.length
