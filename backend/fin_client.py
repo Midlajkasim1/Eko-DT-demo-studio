@@ -72,6 +72,12 @@ def collapse_metadata_blocks(text: str) -> str:
     return "".join(out)
 
 
+def zinc_grid_ok(text: str) -> bool:
+    """A non-error Zinc grid. An empty or failed read parses to no rows and must not count as a real answer."""
+    first = (text or "").lstrip("\ufeff").lstrip().split("\n", 1)[0]
+    return first.startswith("ver:") and not re.search(r"\berr\b", first)
+
+
 def parse_zinc_csv(text: str) -> list[dict]:
     """Parse Zinc/CSV formatted response from FIN server into list of dicts."""
     if not text:
@@ -799,32 +805,41 @@ class FinScramClient:
         alarms = await asyncio.to_thread(parse_zinc_csv, text or "")
         await asyncio.to_thread(attach_alarm_details, text or "", alarms)
         self.last_alarm_rows = alarms
-        first = (text or "").lstrip("\ufeff").lstrip().split("\n", 1)[0]
-        self.last_alarm_read_ok = first.startswith("ver:") and not re.search(r"\berr\b", first)
+        self.last_alarm_read_ok = zinc_grid_ok(text or "")
         return alarms
 
+    async def fetch_text(self, endpoint: str) -> str:
+        """One configured FIN path as text. A missing path or a failed read is an empty string."""
+        if not isinstance(endpoint, str) or not endpoint.startswith("/"):
+            return ""
+        return await self.fetch_api(self._resolve_endpoint(endpoint), is_text=True) or ""
+
     async def fetch_realtime_data(self, endpoints: dict[str, str]) -> dict:
-        """Fetch realtime points, equipment, and alarms. Returns floor-wise structure."""
-        resolved = {k: self._resolve_endpoint(v) for k, v in endpoints.items()}
-
-        tasks = [self.fetch_api(v, is_text=True) for v in resolved.values()]
-        results = await asyncio.gather(*tasks)
-
+        """Equipment and points only. The alarm grid is a separate read so this one is not held behind it."""
+        points_text, equip_text = await asyncio.gather(
+            self.fetch_text((endpoints or {}).get("points") or ""),
+            self.fetch_text((endpoints or {}).get("equipment") or ""),
+        )
         # CPU-bound zinc parsing — off the event loop so file serving stays responsive
-        return await asyncio.to_thread(self._build_realtime, *results)
+        return await asyncio.to_thread(self._build_realtime, points_text, equip_text, None)
 
-    def _build_realtime(self, points_text: str, equip_text: str, alarms_text: str) -> dict:
-        points = parse_zinc_csv(points_text)
-        equipment = parse_zinc_csv(equip_text)
+    def _alarm_rows(self, alarms_text: Optional[str]) -> list:
+        """Rows to attach to equipment. None keeps the alarm loop's last read and does not clear it."""
+        if alarms_text is None:
+            return list(self.last_alarm_rows or [])
         alarms = parse_zinc_csv(alarms_text)
         attach_alarm_details(alarms_text or "", alarms)
         self.last_alarm_rows = alarms
-        open_alarms = open_alarm_rows(alarms)   # one per logical alarm, as the alarm list counts them
-        # Did FIN answer with a non-error Zinc grid? A failed read also parses to no rows, and must
-        # never be taken for "all alarms cleared"
-        first = (alarms_text or "").lstrip("\ufeff").lstrip().split("\n", 1)[0]
-        self.last_alarm_read_ok = first.startswith("ver:") and not re.search(r"\berr\b", first)
-        self.last_point_rows = points
+        # A failed read also parses to no rows, and must never be taken for "all alarms cleared"
+        self.last_alarm_read_ok = zinc_grid_ok(alarms_text)
+        return alarms
+
+    def _build_realtime(self, points_text: str, equip_text: str, alarms_text: Optional[str]) -> dict:
+        points = parse_zinc_csv(points_text)
+        equipment = parse_zinc_csv(equip_text)
+        open_alarms = open_alarm_rows(self._alarm_rows(alarms_text))   # one per logical alarm, as the alarm list counts them
+        if points_text:
+            self.last_point_rows = points
 
         # Build floor-wise equipment data
         floor_wise: dict[str, dict] = {}
@@ -942,6 +957,7 @@ class FinScramClient:
                 "name": nav_name,
                 "bimId": equip.get("bimId") or equip_id or nav_name,
                 "finId": str(equip_id or "").lstrip("@"),
+                "_matchId": equip_id,
                 "equipId": _cmms_id(equip.get("equipId")),
                 "alarms": equip_alarms,
                 "points": formatted_points,
@@ -954,6 +970,35 @@ class FinScramClient:
             floor_wise[floor][type_tag].append(equip_data)
 
         return floor_wise
+
+    def apply_cached_alarms(self, floor_wise: dict) -> dict:
+        """A new floor tree whose equipment alarms follow the alarm loop's latest rows. Points are left as they are."""
+        by_id: dict = {}
+        for alarm in open_alarm_rows(self.last_alarm_rows or []):
+            equip_id = safe_get(alarm.get("sourceRef"), "val")
+            if not equip_id:
+                continue
+            by_id.setdefault(equip_id, []).append({
+                "alarm": alarm.get("message", "N/A"),
+                "priority": alarm.get("priority", 0),
+            })
+        out: dict = {}
+        for floor, cats in (floor_wise or {}).items():
+            if not isinstance(cats, dict):
+                continue
+            out[floor] = {}
+            for cat, items in cats.items():
+                if not isinstance(items, list):
+                    continue
+                nxt = []
+                for eq in items:
+                    if not isinstance(eq, dict):
+                        continue
+                    eq2 = dict(eq)
+                    eq2["alarms"] = by_id.get(eq.get("_matchId"), [])
+                    nxt.append(eq2)
+                out[floor][cat] = nxt
+        return out
 
     async def fetch_live_point(self, point_id_template: str):
         """Fetch a single live point: its value, and the unit FIN names."""
