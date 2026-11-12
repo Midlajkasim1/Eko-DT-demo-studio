@@ -814,7 +814,7 @@
         '<span class="twaccc" aria-label="' + esc(tr(E, 'twinFloorCount', { n: String(list.length) })) + '">' + list.length + '</span></button>' +
         (open ? '<ul class="twelist" id="twacc-' + lv + '">' + list.map(function (e) {
           var st = s.res[e.id].state, al = (s.alIdx.by[e.id] || []).length;
-          return '<li>' + goBtn(e.id, '<b>' + esc(e.label) + '</b><span class="twchip" data-fin="' + st + '">' + esc(tr(E, 'twinFin.' + st)) + '</span>' +
+          return '<li>' + goBtn(e.id, '<b>' + esc(e.label) + '</b>' + (st === 'mapped' ? '' : '<span class="twchip" data-fin="' + st + '">' + esc(tr(E, 'twinFin.' + st)) + '</span>') +
             (MAP.RUNPTS[e.type] ? '<span class="twchip" data-run="' + (s.run[e.id] || 'unknown') + '">' + esc(tr(E, 'twinRun.' + (s.run[e.id] || 'unknown'))) + '</span>' : '') +
             (al ? '<span class="twchip" data-al="1">' + esc(tr(E, 'twinAlarms', { n: String(al) })) + '</span>' : '')) + '</li>';
         }).join('').replace(/data-tw="go"/g, 'data-tw="go" data-focus="1"') + '</ul>' : '') + '</section>';
@@ -957,7 +957,7 @@
       '<dl class="twdl">' + rows.map(function (x) { return '<div><dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd></div>'; }).join('') + '</dl>' +
       candHtml(E, s, id, connected) +
       alarmsHtml(E, s.alIdx.by[id] || []) + fddHtml(E, s.fdd[id] || []) + evidenceHtml(E, s, id) + depsHtml(E, s, id) +
-      borrowedHtml(E, s, id, connected) + netsHtml(E, id) + '<p class="twnote">' + esc(tr(E, 'twinLayoutNote')) + '</p>';
+      borrowedHtml(E, s, id, connected) + netsHtml(E, id);
   }
   /* readings of another FIN equipment shown on this machine's panel (the MDB shows PMU_Main's), each labelled with its source and never a measurement of this machine */
   function borrowedHtml(E, s, id, connected) {
@@ -976,7 +976,7 @@
     sys.sort(function (a, b) { return Object.keys(SYSTEMS).indexOf(a) - Object.keys(SYSTEMS).indexOf(b); });
     return '<h3 class="twsub">' + esc(tr(E, 'twinNets')) + '</h3><ul class="twnets">' + sys.map(function (k) {
       return '<li><i class="twkey" style="background:' + SYSTEMS[k][0] + '"></i>' + esc(tr(E, 'twinSys.' + k)) + '</li>';
-    }).join('') + '</ul><p class="twnote">' + esc(tr(E, 'twinNetsNote')) + '</p>';
+    }).join('') + '</ul>';
   }
 
   /* the 3D view controls, on the stage: turn, tilt, drag-to-turn, reset (they sit at the top, clear of the notification toast and the Ask button at the bottom) */
