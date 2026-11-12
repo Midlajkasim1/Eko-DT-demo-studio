@@ -80,11 +80,8 @@ PROJECT_STR_SETTINGS = {
     "finBaseUrl": "fin_server_url",
     "finDisplayName": "display_name",
 }
-# project.json `apiSettings` booleans. notificationsCriticalAlarmsEnabled is the Studio project's own gate for creating
-# critical-alarm notifications (true / false); absent means "not configured", never "enabled".
-PROJECT_BOOL_SETTINGS = {
-    "notificationsCriticalAlarmsEnabled": "notifications_critical_alarms",
-}
+# (project.json's old apiSettings.notificationsCriticalAlarmsEnabled is no longer read: alarm notifications are automatic
+# for a validated project, so a saved project that still carries it is simply unaffected.)
 PROJECT_DICT_SETTINGS = {
     "finLivePoints": "live_point_ids",
     "finEndpoints": "power_endpoints",
@@ -125,9 +122,6 @@ def project_overrides(settings: Optional[dict]) -> dict:
         value = settings.get(src)
         if isinstance(value, dict) and value:
             out[dst] = value
-    for src, dst in PROJECT_BOOL_SETTINGS.items():
-        if isinstance(settings.get(src), bool):
-            out[dst] = settings[src]
     wo = settings.get("finWorkorderExpr")
     if isinstance(wo, str) and safe_workorder_expr(wo):
         out["workorder_expr"] = wo.strip()
@@ -464,8 +458,7 @@ async def realtime_loop():
             cached_fdd_summary = _build_fdd_summary(realtime)
             cached_meter_data = _extract_meters(realtime, CONFIG.get("meter_profile", {}))
             cached_alarm_data = _flatten_alarms(client.last_alarm_rows, CONFIG.get("severity_bands", {}))
-            _note_critical_alarms(client.project_name, cached_alarm_data["alarms"],
-                                  getattr(client, "last_alarm_read_ok", False))
+            _note_fin_read(client.project_name, realtime=True)
             cached_facility = _compute_facility_services(realtime)
             cached_power_history, hist_units = await client.fetch_power_histories(pw_endpoints)
             cached_power_history_at = datetime.now().isoformat()
@@ -505,11 +498,7 @@ async def alarm_loop():
             cached_alarm_data = _flatten_alarms(
                 client.last_alarm_rows, CONFIG.get("severity_bands", {})
             )
-            _note_critical_alarms(
-                client.project_name,
-                cached_alarm_data["alarms"],
-                getattr(client, "last_alarm_read_ok", False),
-            )
+            _note_fin_read(client.project_name)
             if not await _sleep_while_watched(15):
                 return
         except Exception as e:
@@ -1058,6 +1047,7 @@ def _reset_caches():
     cached_alarm_data = {}
     cached_facility = {}
     cached_workorders = {}
+    _reset_link()
 
 
 def _bundled_project() -> tuple[Optional[dict], Optional[str]]:
@@ -1847,39 +1837,6 @@ def _attach_workorders():
         eq["workOrders"] = list(grouped.get(equip_id, []))
 
 
-CRITICAL_ALARM = "alarm.critical"
-
-
-def _critical_project_gate(site: str) -> str:
-    """Gate 1, the open Studio project's own setting: "enabled", "disabled" or "not_configured".
-    The project's explicit notificationsCriticalAlarmsEnabled (apiSettings) decides, and false is never overridden by
-    config.json. A project with none is not configured, and config.json's critical_alarm_sites never applies to a
-    Studio project that is served its own mappings (ACTIVE_ISOLATED): that list is for config.json's own site
-    (Marsa) and the standalone / exported backend."""
-    explicit = CONFIG.get("notifications_critical_alarms") if "notifications_critical_alarms" in ACTIVE_OVERRIDES else None
-    if isinstance(explicit, bool):
-        return "enabled" if explicit else "disabled"
-    if ACTIVE_ISOLATED:
-        return "not_configured"
-    listed = site in [s for s in (BASE_CONFIG.get("critical_alarm_sites") or []) if isinstance(s, str)]
-    return "enabled" if listed else "not_configured"
-
-
-def _critical_alarms_state(store, site: str) -> str:
-    """not_configured | disabled_project | disabled_site | enabled. Both gates must permit: the project's
-    setting, then the site's baseline alarm.critical toggle (off by default). No user's preference enters into it."""
-    gate = _critical_project_gate(site)
-    if gate == "not_configured":
-        return "not_configured"
-    if gate == "disabled":
-        return "disabled_project"
-    return "enabled" if store.project_wants(site, CRITICAL_ALARM, default=False) else "disabled_site"
-
-
-def _critical_alarms_enabled(store, site: str) -> bool:
-    return _critical_alarms_state(store, site) == "enabled"
-
-
 def _severity_bands_configured() -> bool:
     """Whether the open project has bands that can grade an alarm critical or high (never Marsa's as a stand-in)."""
     bands = CONFIG.get("severity_bands")
@@ -1888,42 +1845,182 @@ def _severity_bands_configured() -> bool:
 
 
 def _notification_setup(site: str) -> dict:
-    """What the notification panel needs to tell "not set up" from "off" from "nothing yet", and nothing
-    that is a secret: the critical-alarm state, whether alarms can be graded, whether work orders are read, and
+    """What the notification panel needs to tell "nothing yet" from "cannot be graded" from "FIN did not answer", and nothing
+    that is a secret: whether alarms can be graded (the project's severity bands), whether work orders are read, and
     whether FIN's last alarm read worked (None before the first one), so a failed read is not shown as "no alarms"."""
-    try:
-        critical = _critical_alarms_state(notifications.store(), site)
-    except (notifications.StoreError, sqlite3.Error, ValueError):
-        critical = "unknown"
-    return {"critical_alarms": critical, "severity_bands": _severity_bands_configured(),
+    return {"severity_bands": _severity_bands_configured(),
             "workorders": bool((CONFIG.get("workorder_expr") or "").strip()),
             "alarms_read": getattr(client, "last_alarm_read_ok", None)}
 
 
-def _note_critical_alarms(site: str, alarms: list, read_ok: bool) -> None:
-    """Contract trigger "critical alarm": only when the site allows it (config.json
-    critical_alarm_sites lists its FIN project) AND the project's alarm.critical toggle is on (the
-    site's baseline setting, not any user's preference); both are off by default. One row per open critical FIN alarm, keyed by FIN's own id (an alarm with
-    no id is not notified), resolved once FIN stops reporting it. A failed or error read changes
-    nothing: an answer FIN did not give is not "all clear"."""
-    if not read_ok or not site:
+# Alarm notifications are automatic for a project FIN validated: the severity the project's own bands give an alarm picks its
+# type, nothing is enabled by hand. An alarm no band grades critical or warning is "info" and is not notified.
+ALARM_TYPES = (("critical", "alarm.critical"), ("warning", "alarm.warning"))
+ALARM_RETURN_WINDOW = timedelta(hours=24)   # the bell's own wording for a recurrence: "cleared and returned within 24h"
+FIN_LINK_DOWN, FIN_LINK_UP = "int.connector_down", "int.connector_restored"
+
+
+def _notifying(site: str) -> bool:
+    """Events are made only for the FIN project this session reads and FIN validated: the one the notification API serves."""
+    return bool(site) and PROJECT_CHECK.get("validated") is True
+
+
+def _span(seconds: float) -> str:
+    """"5m", "2h 10m", "3d 4h": how long something lasted, in the short Latin form the bell already uses for durations."""
+    minutes = max(0, int(seconds // 60))
+    days, rest = divmod(minutes, 1440)
+    hours, mins = divmod(rest, 60)
+    if days:
+        return f"{days}d {hours}h" if hours else f"{days}d"
+    return (f"{hours}h {mins}m" if mins else f"{hours}h") if hours else f"{mins}m"
+
+
+def _one_shot(store, site: str, type_: str, *, severity: str, source_kind: str, source_ref: str,
+              asset_id: Optional[str], state: str, params: dict) -> None:
+    """A single occurrence (cleared, returned, restored) through Store.condition: written and resolved at once, so it is listed
+    once and a later occurrence of the same thing is a new row."""
+    fields = dict(severity=severity, source_kind=source_kind, source_ref=source_ref, asset_id=asset_id, state=state)
+    store.condition(site, type_, True, params=params, **fields)
+    store.condition(site, type_, False, **fields)
+
+
+_FIN_TIME = re.compile(r"^\s*(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})(?:\s+\S+)?\s*$")
+
+
+def _fin_time(text) -> Optional[datetime]:
+    """When FIN says an alarm occurred, as an aware datetime: "2026-11-06T16:42:07.319+04:00 Dubai" (the zone name after the
+    offset is only a label). None for anything that is not that shape, so the caller can fail open."""
+    m = _FIN_TIME.match(text) if isinstance(text, str) else None
+    if not m:
+        return None
+    base, fraction, zone = m.groups()
+    try:
+        return datetime.fromisoformat(f"{base}.{(fraction or '0')[:6].ljust(6, '0')}{'+00:00' if zone == 'Z' else zone}")
+    except ValueError:
+        return None
+
+
+def _note_alarms(site: str, alarms: list, read_ok: bool) -> None:
+    """Alarm notifications from one FIN alarm read. One row per open critical or warning FIN alarm, keyed by FIN's own id (an
+    alarm with no id is not notified) and held while FIN still reports it. When FIN stops reporting it the row resolves and an
+    "alarm cleared" event is made (not when it was only re-graded between critical and warning); an alarm that comes back
+    within 24 hours of clearing also gets an "alarm returned" event. A failed or error read changes nothing, and neither does
+    no read at all: an answer FIN did not give is not "all clear", and an old answer is never replayed as a new alarm.
+    The first successful read of a BRAND-NEW site (no alarm notification history yet) is quiet: alarms already open then, whose FIN time
+    is earlier than that moment, are recorded as read for everyone (listed, not unread). A time that is missing or cannot be read counts
+    as new; so does everything later, and everything on a site that already has alarm history (Store.claim_baseline).
+    Only the newest alarm snapshot reaches this (fin_client._take_alarms drops an older one that finished late), so a stale read can
+    never clear, return or raise an alarm."""
+    if not read_ok or not _notifying(site):
         return
     try:
         store = notifications.store()
-        open_now = {a["id"]: a for a in alarms if a.get("severity") == "critical" and a.get("id")}
-        fields = dict(severity="critical", source_kind="alarm")
-        for asset, state in store.active_states(site, CRITICAL_ALARM):   # cleared since the last poll
-            if state not in open_now:
-                store.condition(site, CRITICAL_ALARM, False, asset_id=asset, state=state, source_ref=state, **fields)
-        if not _critical_alarms_enabled(store, site):
-            return
-        for fin_id, a in open_now.items():
-            store.condition(site, CRITICAL_ALARM, True, asset_id=a.get("source") or None, state=fin_id,
-                            source_ref=fin_id, params={"asset": a.get("source") or "", "message": a.get("message") or "",
-                                                       "occurred": a.get("occurred") or "", "priority": a.get("priority")},
-                            **fields)
+        now = datetime.now(timezone.utc)
+        baseline_at = now if store.claim_baseline(site, now) else None
+        sev_of = {t: sev for sev, t in ALARM_TYPES}
+        open_by = {t: {a["id"]: a for a in alarms if a.get("severity") == sev and a.get("id")} for sev, t in ALARM_TYPES}
+        open_ids = set().union(*open_by.values())
+        was = {t: store.active_states(site, t) for t in open_by}
+        tracked = {r["state"] for rows in was.values() for r in rows}
+        for t, rows in was.items():
+            for r in rows:
+                fin_id, asset = r["state"], r["asset_id"]
+                if fin_id in open_by[t]:
+                    continue
+                store.condition(site, t, False, severity=sev_of[t], source_kind="alarm", source_ref=fin_id, asset_id=asset, state=fin_id)
+                if fin_id not in open_ids:
+                    lasted = (now - datetime.fromisoformat(r["created_at"].replace("Z", "+00:00"))).total_seconds()
+                    _one_shot(store, site, "alarm.cleared", severity="info", source_kind="alarm", source_ref=fin_id,
+                              asset_id=asset, state=fin_id,
+                              params={"asset": asset or "", "alarm": r["params"].get("message") or "", "dur": _span(lasted)})
+        for t, open_now in open_by.items():
+            for fin_id, a in open_now.items():
+                asset, message = a.get("source") or None, a.get("message") or ""
+                if fin_id not in tracked and store.resolved_since(site, tuple(open_by), fin_id, now - ALARM_RETURN_WINDOW):
+                    _one_shot(store, site, "alarm.reraised", severity=sev_of[t], source_kind="alarm", source_ref=fin_id,
+                              asset_id=asset, state=fin_id, params={"asset": asset or "", "alarm": message})
+                occurred = _fin_time(a.get("occurred"))
+                quiet = baseline_at is not None and occurred is not None and occurred < baseline_at
+                store.condition(site, t, True, severity=sev_of[t], source_kind="alarm", source_ref=fin_id, asset_id=asset, state=fin_id,
+                                params={"asset": asset or "", "message": message, "occurred": a.get("occurred") or "",
+                                        "priority": a.get("priority")}, read=quiet)
     except (notifications.StoreError, sqlite3.Error, ValueError) as exc:
-        print(f"[notifications] critical alarms not recorded: {exc.__cause__ or exc}")
+        print(f"[notifications] alarms not recorded: {exc.__cause__ or exc}")
+
+
+# FIN connection tracking, per session and project (cleared by _reset_link on every sign-in and project switch). The link is "lost"
+# only when FIN really stops answering: a session FIN ended, at once; otherwise a run of three realtime polls in a row (the poll that
+# reads equipment, points and alarms together) that got no answer from FIN to ANY read, or about 90 seconds without any successful
+# read. Only that poll counts: an alarm-only read (the alarm loop) and a user's read never add to the run, one failing query is not a
+# failed poll while another read works, and a read that succeeded since the previous poll, whoever made it, says FIN is answering.
+# A FIN that answers with an error (a 4xx, an error grid) is reachable.
+LINK_FAILED_POLLS = 3
+LINK_SILENCE_S = 90.0
+_link: dict = {}
+
+
+def _reset_link() -> None:
+    _link.clear()
+    for name, empty in (("last_ok_at", None), ("last_realtime_failed", False), ("last_realtime_fail_kind", None),
+                        ("last_alarm_started_at", None)):   # the client's own marks belong to the project just left
+        if client is not None and hasattr(client, name):
+            setattr(client, name, empty)
+
+
+def _note_fin_link(site: str, realtime_failed: Optional[bool] = None, now: Optional[float] = None) -> None:
+    """The FIN connection, once per outage: one "connection lost" row when the link is judged lost (see above), however long it
+    lasts, then one "connection restored" event when a read succeeds again. realtime_failed: how the realtime poll just made went
+    (True: it failed, False: it did not); None for any other caller (the alarm loop), which can only see a session end or a
+    recovery, never count a failure."""
+    if not _notifying(site) or client is None:
+        return
+    now = time.monotonic() if now is None else now
+    ok_at = getattr(client, "last_ok_at", None)
+    if _link.get("key") != (site, id(client)):
+        _link.clear()
+        _link.update(key=(site, id(client)), ok_r=None, fails=0, since=now, lost_ok=None)
+    reason = None
+    if not client.is_authenticated:
+        reason = "session"                                           # FIN ended the session: nothing to wait for
+    elif realtime_failed:
+        if ok_at is not None and ok_at != _link["ok_r"]:
+            _link["fails"] = 0                                       # some read succeeded since the previous poll: FIN is answering
+        else:
+            _link["fails"] += 1
+            silent_for = now - (ok_at if ok_at is not None else _link["since"])
+            if _link["fails"] >= LINK_FAILED_POLLS or silent_for >= LINK_SILENCE_S:
+                reason = getattr(client, "last_realtime_fail_kind", None) or "network"
+    elif realtime_failed is False:
+        _link["fails"] = 0
+    if realtime_failed is not None:
+        _link["ok_r"] = ok_at
+    if reason is None and (ok_at is None or ok_at == _link["lost_ok"]):
+        return                                                       # nothing to report: no loss, or no read has succeeded since it
+    try:
+        store = notifications.store()
+        down = store.active_states(site, FIN_LINK_DOWN)
+        fields = dict(severity="warning", source_kind="integration", source_ref="fin", asset_id=None, state="down")
+        if reason:
+            if not down:   # an outage already reported is left as it is: its time and text stay those of its start
+                store.condition(site, FIN_LINK_DOWN, True, params={"connector": "FIN", "reason": reason,
+                                                                   "time": datetime.now(timezone.utc).strftime("%H:%M UTC")}, **fields)
+            _link["lost_ok"] = ok_at                                 # restored only by a read that succeeds after this one
+        elif down:
+            store.condition(site, FIN_LINK_DOWN, False, **fields)
+            lasted = (datetime.now(timezone.utc) - datetime.fromisoformat(down[0]["created_at"].replace("Z", "+00:00"))).total_seconds()
+            _one_shot(store, site, FIN_LINK_UP, severity="info", source_kind="integration", source_ref="fin", asset_id=None,
+                      state="up", params={"connector": "FIN", "dur": _span(lasted)})
+            _link["lost_ok"] = None
+    except (notifications.StoreError, sqlite3.Error, ValueError) as exc:
+        print(f"[notifications] FIN connection not recorded: {exc.__cause__ or exc}")
+
+
+def _note_fin_read(site: str, realtime: bool = False) -> None:
+    """After a poll's FIN reads: the connection first (so an outage is on record), then the alarms they may have brought. realtime:
+    this is the realtime loop's poll, the only one whose failure counts toward a lost connection."""
+    failed = bool(getattr(client, "last_realtime_failed", False)) if realtime else None
+    _note_fin_link(site, realtime_failed=failed)
+    _note_alarms(site, (cached_alarm_data or {}).get("alarms") or [], bool(getattr(client, "last_alarm_read_ok", None)))
 
 
 def _note_workorder_sync(error: str) -> None:
@@ -2085,31 +2182,10 @@ async def notifications_dismiss_opened(request: Request, response: Response):
     return {"updated": _notif_call(lambda s: s.dismiss_opened(who, site))}
 
 
-def _notification_admin(request: Request) -> tuple[str, str]:
-    """(user id, site) for a request that changes a SITE setting. The same session and project checks as every notification
-    route, then the server's own role for this user on this site must be the administrator's. A frontend role label, a
-    header or a body field is never consulted."""
-    who, site = _notification_scope(request)
-    if _notif_call(lambda s: s.role_of(site, who)) != notifications.ADMIN_ROLE:
-        raise NotificationApiError(403, "forbidden", "Only a superuser of this project can change its notification settings.")
-    return who, site
-
-
 def _preferences_answer(who: str, site: str) -> dict:
-    """The signed-in user's own preferences, plus read-only facts about the SITE next to them so the
-    page can tell the two apart. site.critical_alarms is true/false, or null when it cannot be read
-    (never assumed on). Nothing in a request can change the site part."""
-    answer = _notif_call(lambda s: s.get_preferences(who, site))
-    try:
-        enabled = _critical_alarms_enabled(notifications.store(), site)
-    except (notifications.StoreError, sqlite3.Error, ValueError):
-        enabled = None
-    try:   # lets the panel offer the site switch to the one role that may use it; the server still decides on every request
-        admin = notifications.store().role_of(site, who) == notifications.ADMIN_ROLE
-    except (notifications.StoreError, sqlite3.Error, ValueError):
-        admin = None
-    answer["site"] = {"critical_alarms": enabled, "can_administer": admin}
-    return answer
+    """The signed-in user's own preferences on this project. They only narrow what this one user sees: every
+    notification the project makes is made for everyone on it."""
+    return _notif_call(lambda s: s.get_preferences(who, site))
 
 
 @app.get(NOTIF_BASE + "/preferences")
@@ -2131,22 +2207,6 @@ async def notifications_preferences_update(request: Request, response: Response)
         raise NotificationApiError(400, "invalid_input", "Only master_enabled and types can be set.")
     _notif_call(lambda s: s.update_preferences(who, site, master_enabled=body.get("master_enabled"), types=body.get("types")))
     return _preferences_answer(who, site)
-
-
-@app.put(NOTIF_BASE + "/site-settings")
-async def notifications_site_settings(request: Request, response: Response):
-    """A superuser of this project switches its critical-alarm notifications on or off for everyone on it. The site comes from
-    the session, never the request; only the site's baseline alarm.critical row changes, and the change is audited."""
-    who, site = _notification_admin(request)
-    _stamp(response)
-    try:
-        body = await request.json()
-    except ValueError:
-        raise NotificationApiError(400, "invalid_input", "The body must be JSON.")
-    if not isinstance(body, dict) or set(body) != {"critical_alarms"} or not isinstance(body["critical_alarms"], bool):
-        raise NotificationApiError(400, "invalid_input", "The body must be exactly {\"critical_alarms\": true | false}.")
-    _notif_call(lambda s: s.set_site_critical(site, body["critical_alarms"], who))
-    return {"site": _preferences_answer(who, site)["site"], "setup": _notification_setup(site)}
 
 
 @app.get("/api/fin/workorders")

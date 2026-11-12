@@ -110,49 +110,55 @@ another project a 409 (`session_project_mismatch`); a notification or site that 
 - **Preferences** are per user and site, over the site's baseline toggles (the project's earlier
   preferences): a user's own toggle wins, an unset one falls back to the site's, then to the type
   registry's default.
-- **Whether critical alarm notifications are created stays a project setting**: `critical_alarm_sites`
-  in `config.json` AND the site's own `alarm.critical` toggle (baseline row), both off by default.
-  A user's `alarm.critical` preference never enables or disables creation: it is only that user's own
-  choice (inherited from the site's toggle until they set theirs). The server leaves `alarm.critical`
-  out for a user whose effective preference (or master toggle) is off: from their list and its pages,
-  the unread count, mark-all-read, archive-read and by-id reads, so all of them describe the same rows
-  and no state or history is written for notifications that user cannot see. A user's own `alarm.critical`
-  preference only narrows what that user sees. The user's `PUT /api/notifications/v1/preferences` can never write
-  the site setting (extra fields are a 400, and an owner starting `#project:` is refused). The site setting is changed
-  by a **superuser of that project** through `PUT /api/notifications/v1/site-settings` (below), or by an operator with
-  `Store.update_project_preferences`. `GET` and `PUT /api/notifications/v1/preferences` answer the user's own
-  preferences plus a read-only `site` part, `{"critical_alarms": true | false | null, "can_administer": true | false | null}`
-  (null: it could not be read, never assumed on), so the settings page can tell the two apart and offer the site switch
-  only to someone the server will accept it from.
-- **Per Studio project (gate 1).** A Studio project's own `apiSettings.notificationsCriticalAlarmsEnabled` (true / false) is the first
-  gate; the site's `alarm.critical` toggle above is the second, and both must allow it. Absent means *not configured*, never enabled:
-  `critical_alarm_sites` in `config.json` applies only to config.json's own site (Marsa) and the standalone backend, never to a Studio
-  project served its own mappings, and an explicit `false` is never overridden by it. `GET /notifications` carries
-  `setup: {critical_alarms: not_configured | disabled_project | disabled_site | enabled, severity_bands, workorders}` so the panel can
-  say why a list is empty. `apiSettings.finWorkorderExpr` is the project's own work-order query (read-only forms only); none means the
-  work-order sync is not configured (not a failure). Severity bands likewise come only from the project (`finSeverityBands`).
-- **Who may change the site setting (superuser, enforced on the server).** `PUT /api/notifications/v1/site-settings` with exactly
-  `{"critical_alarms": true | false}` is accepted only from a signed-in user whose server-side `eko_role_mapping` row for that
-  site and user is `superuser`. The role comes from that row, which is keyed by the site and the FIN-authenticated user of the
-  session cookie: no header, body field, query parameter or frontend role label is read. The site is the session's, never the
-  request's. It changes only that site's baseline `alarm.critical` row (never a user's own preference or another site), records
-  who did it in `notification_audit_log` (`notifications.site_critical_alarms.set`, with the previous value), deletes nothing, and
-  answers 403 to anyone else. Selecting a project or turning its Dashboard Settings switch on never writes it. There is no HTTP
-  route that grants the role: the operator maps the first superuser with the same care as the toggle, from `backend/`
-  and with the path the start-up line prints:
-  `python -c "import os, sys, notifications as n; p = sys.argv[1]; assert os.path.exists(p), p; n.Store(p).map_role(sys.argv[2], sys.argv[3], 'superuser', 'operator')" "<path from the start-up line>" "<site>" "<FIN user id>"`.
-  Both the site and the user id are exact and case-sensitive (`/api/auth/me` returns them; a user who signs in with different
-  capitalisation is a different user here, and fails closed).
-- **Enabling the site toggle without a superuser (operator, no HTTP route).** A project shows critical-alarm notifications only when three things hold:
-  its Dashboard Settings switch is on, the project has Severity Configuration (`finSeverityBands`; FIN's alarm priority has no fixed
-  direction, so Eko-DT cannot derive bands, and another project's are never used), and this site toggle is on. The panel names whichever
-  is missing. The backend prints `[notifications] database: <path> (from <why>)` at start-up: that is the database it uses, so write to
-  THAT path, never to one worked out on another account or machine (`config.json`'s `notification_db_path` and a service's own
-  `EKO_NOTIFICATION_DB` or profile all change it). The site is the exact, case-sensitive `site` that `/api/auth/me` returns. From `backend/`:
-  `python -c "import os, sys, notifications as n; p = sys.argv[1]; assert os.path.exists(p), p; n.Store(p).update_project_preferences(sys.argv[2], types={'alarm.critical': True})" "<path from the start-up line>" "<site>"`
-  (`False` switches it off). It refuses a path that does not exist instead of creating a new database, and touches only that site's
-  baseline row. To look first, read it with `sqlite3.connect(pathlib.Path(p).resolve().as_uri() + '?mode=ro', uri=True)` and
-  `SELECT user_id, site_id, type, enabled FROM notification_preferences WHERE site_id = '<site>'`. It takes effect on the next poll.
+- **Alarm and FIN-connection notifications are automatic.** A project FIN validated makes its own notifications from the polling
+  that already runs; nothing is switched on by hand (no Studio setting, no site toggle, no administrator step). Each project's
+  events belong to that project's `site_id` and no other, and everyone signed in for it (superuser, technician, any role) sees the same
+  list: roles are never read when listing, only the user's own read/dismissed state and own "hide this type" switches differ.
+  - **Alarms** (`alarm.critical`, `alarm.warning`) are graded by the project's own `finSeverityBands`; no threshold is in code. A
+    project with no bands grades every alarm "info", which is not notified, and the panel says so. One row per open FIN alarm, keyed
+    by FIN's own alarm id (an alarm with no id is not notified), held while FIN still reports it. When FIN stops reporting it the row
+    resolves and an `alarm.cleared` event says how long it lasted (not when it was only re-graded between critical and warning). An alarm
+    that returns within 24 hours of clearing also gets an `alarm.reraised` event next to its new row; later than that it is a new alarm.
+    Polling again changes nothing (Store.condition deduplicates on site + asset + type + state).
+  - **FIN connection** (`int.connector_down`, `int.connector_restored`): the client records, per read, why it failed (`fin_client.py`
+    `_fetch`: session ended by a 401/403, timeout, network error, server error; any other HTTP answer, or an error grid inside a 200, is
+    FIN answering and is not a link failure), when ANY read last succeeded (a poll, a live point, a user's action) and whether the
+    latest **realtime poll** (equipment, points and alarms read together) got no answer from FIN to every one of its reads. Only that poll
+    can be a failed poll. The link is reported lost, once per outage, at once for an ended session, otherwise after three failed realtime
+    polls in a row or about 90 seconds without any successful read (`LINK_FAILED_POLLS`, `LINK_SILENCE_S` in `main.py`). The alarm loop
+    never counts a failure (its query failing says nothing about the link), a user's failing read never counts, one failing query is
+    not a failed poll while another read works, and a read that succeeded since the previous poll, whoever made it, means FIN is
+    answering. After a reported loss, the next successful read says "restored" once, with the gap. Tracking is reset on every sign-in and
+    project switch (the client's marks are cleared too) and is per project. Before the first read of a project nothing is said. While FIN
+    is down nothing is graded or cleared: a failed read is not "all clear" and the last answer is never replayed as new alarms; an alarm
+    that cleared during the outage is reported cleared once FIN answers.
+  - **One alarm snapshot at a time.** The realtime poll and the alarm loop both read the alarm list. Each read is stamped with when its
+    request was sent, and an older read that finishes after a newer one is dropped (`FinScramClient._take_alarms`, under a lock because the
+    realtime poll parses on a worker thread), so a stale snapshot can never clear, return or raise an alarm. A project switch or sign-in
+    clears the stamp, so the new project's first read is never blocked by the old one's.
+  - **The first connection of a brand-new site is quiet.** The site's first successful alarm read claims a marker row in
+    `notification_audit_log` (`notifications.baseline`, kept past the audit retention, so a restart or later poll never repeats it).
+    The alarms already open at that moment are made quiet only when the site has no alarm notification history (`alarm.*` events,
+    resolved or not) at that moment, checked in the same transaction as the claim (`Store.claim_baseline`; the marker's details say
+    `{"quiet": true|false}`). Then those alarms whose FIN `occurred` time is earlier than the moment (FIN's
+    `2026-11-06T16:42:07.319+04:00 Dubai` form is understood) are stored as already read for everyone, on the site's shared baseline
+    recipient (`Store.condition(read=True)`): they stay listed in the history and are not in the unread count or badge. A site that
+    already has alarm history but no marker (an upgrade from a version that recorded alarms) gets its marker and nothing is quieted:
+    alarms raised since it last ran are new. Connection and sync events are not alarm history. A missing, unreadable (including no UTC
+    offset) or later time is treated as new and unread, and so is every alarm after that first read, whatever time FIN gives it. Each
+    site has its own marker.
+  - **Severity bands.** A project with no numeric critical or warning band cannot grade an alarm (no thresholds are ever assumed), so
+    none is notified; `GET /notifications` says `setup.severity_bands: false`, the bell and the Notifications page show a persistent
+    warning above the list whatever else is listed, and Studio shows one beside Severity Configuration. A project with only a warning
+    band notifies warnings by that band.
+  - Only a validated project (the one `/api/notifications/v1` serves) records anything; the site is the FIN project this session reads.
+  - A user's `PUT /preferences` can switch a type off for that user alone (it is left out of their list, count and bulk actions); the
+    server never stops creating it. A site-wide ("baseline") toggle saved under the old per-site setting, or the project's old
+    `apiSettings.notificationsCriticalAlarmsEnabled`, is no longer read by the server, so a project that still carries them is unaffected.
+    The `#project:<site>` rows, `eko_role_mapping` and `notification_preferences` tables are kept as they are (no migration);
+    `eko_role_mapping` still feeds `GET /api/auth/me`, and `PUT /api/notifications/v1/site-settings` is gone.
+  - Limits: polling runs only while a dashboard is open, so an outage is reported when the next poll finds it, and the gap in
+    "restored" includes time nobody was polling.
 - Migration 4 changes no row; it writes one `notifications.per_user_state` audit row per site with how
   many notifications and preferences were inherited as the baseline. The database is backed up first
   (see `notification_db_path`).

@@ -230,22 +230,21 @@ SEVERITIES = ("critical", "warning", "info")
 CHANNEL = "inapp"                            # the only channel the contract defines
 MASTER = "*"                                 # notification_preferences row for the master toggle
 # Types a user can switch off so they are not shown at all: left out of their list, count and bulk actions.
-# (alarm.critical is the one type the site creates for everyone; the others are the user's own anyway.)
-USER_HIDEABLE = ("alarm.critical",)
+# The site creates these for everyone on the project (alarms are automatic); a switch only narrows that one user's view.
+USER_HIDEABLE = ("alarm.critical", "alarm.warning", "alarm.cleared", "alarm.reraised")
 # Read, dismissed and preference state is per signed-in user and site. The site's shared recipient
 # ('#project:<site>', the state before per-user sign-in) is the baseline every user starts from: a
 # user's own recipient row, created the first time that user acts on a notification, overrides it for
 # that user alone. The baseline row is only ever read, so one user's action cannot reach another's.
 # A real user id never starts with the reserved prefix (_check_user refuses one that does).
 PROJECT_RECIPIENT_PREFIX = "#project:"
-# The eko_role_mapping role that may change a site's own settings. The mapping is server-side data keyed by the site and the
-# signed-in user (the session cookie), so nothing a browser sends can name it.
-ADMIN_ROLE = "superuser"
-
 
 def project_recipient(site_id: str) -> str:
     return PROJECT_RECIPIENT_PREFIX + site_id
 
+
+BASELINE_ACTION = "notifications.baseline"   # audit-log action of a site's first-connection claim (Store.claim_baseline)
+BASELINE_ID = "aud_baseline_"
 
 PAGE_DEFAULT, PAGE_MAX = 50, 100
 SEARCHED = ("e.type", "e.asset_id", "e.source_ref", "e.params_json")
@@ -395,9 +394,11 @@ class Store:
     def condition(self, site_id: Optional[str], type_: str, active: bool, *, severity: str,
                   source_kind: str, source_ref: str, asset_id: Optional[str] = None,
                   state: str = "failed", params: Optional[dict] = None,
-                  now: Optional[datetime] = None) -> Optional[str]:
+                  now: Optional[datetime] = None, read: bool = False) -> Optional[str]:
         """A condition FIN reports on every poll: one active row while it holds (dedup key
         site + asset + type + state), resolved when it clears; a recurrence opens a new row.
+        read=True records a NEW row as already read for everyone (on the site's shared baseline recipient, which every user
+        starts from): it stays listed but is not unread. It never changes a row that already exists.
         Returns the active row's id, or None when nothing is active (or there is no site)."""
         if not site_id or not SITE_RE.match(site_id):
             return None
@@ -433,18 +434,55 @@ class Store:
             self.db.execute("INSERT INTO notification_audience (event_id, kind, value) VALUES (?, 'project', ?)",
                             (event_id, site_id))
             self.db.execute(
-                "INSERT INTO notification_recipients (id, event_id, user_id, role, channel, delivery_status)"
-                " VALUES (?, ?, ?, NULL, ?, 'delivered')", ("rcp_" + event_id, event_id, project_recipient(site_id), CHANNEL),
+                "INSERT INTO notification_recipients (id, event_id, user_id, role, channel, delivery_status, opened_at)"
+                " VALUES (?, ?, ?, NULL, ?, 'delivered', ?)",
+                ("rcp_" + event_id, event_id, project_recipient(site_id), CHANNEL, stamp if read else None),
             )
         return event_id
 
-    def active_states(self, site_id: str, type_: str) -> list[tuple]:
-        """(asset_id, state) of this site's still-active conditions of one type: what a poll that no
-        longer sees them must resolve."""
+    def claim_baseline(self, site_id: str, now: Optional[datetime] = None) -> bool:
+        """The site's first notification connection: claims its marker (once per site, ever) and says whether the alarms open at
+        this moment may be made quiet. True only when this call claimed the marker AND the site has no alarm notification history
+        (alarm.* events, resolved or not): a brand-new site. A site that already has such history (one upgraded from a version that
+        recorded alarms, with no marker yet) still gets its marker, and False: alarms raised since it last ran are new, not
+        existing, and must stay unread. Other events (connection, sync) say nothing about alarms and do not count. The marker is a
+        row in the audit log (id fixed by the site, so two callers cannot both win; kept past the audit retention; survives a
+        restart), written with the history check in one transaction."""
         _check_ids("system", site_id)
-        rows = self._read("SELECT asset_id, state FROM notification_events WHERE site_id = ? AND type = ? AND status = 'active'",
-                          [site_id, type_])
-        return [(r["asset_id"], r["state"]) for r in rows]
+        if self._read("SELECT 1 FROM notification_audit_log WHERE id = ?", [BASELINE_ID + site_id]):
+            return False   # the common case, on every poll: nothing to write
+        stamp = utc_iso(now or datetime.now(timezone.utc))
+        with self._write():
+            history = self.db.execute("SELECT 1 FROM notification_events WHERE site_id = ? AND type LIKE 'alarm.%' LIMIT 1", (site_id,)).fetchone() is not None
+            cur = self.db.execute(
+                "INSERT OR IGNORE INTO notification_audit_log (id, site_id, actor_id, action, target_type, target_id, occurred_at, details_json)"
+                " VALUES (?, ?, 'system', ?, 'site', ?, ?, ?)",
+                (BASELINE_ID + site_id, site_id, BASELINE_ACTION, site_id, stamp, json.dumps({"quiet": not history})))
+            return cur.rowcount == 1 and not history
+
+    def active_states(self, site_id: str, type_: str) -> list[dict]:
+        """{asset_id, state, created_at, params} of this site's still-active conditions of one type: what a
+        poll that no longer sees them must resolve (and say how long they lasted)."""
+        _check_ids("system", site_id)
+        rows = self._read("SELECT asset_id, state, created_at, params_json FROM notification_events"
+                          " WHERE site_id = ? AND type = ? AND status = 'active'", [site_id, type_])
+        out = []
+        for r in rows:
+            try:
+                params = json.loads(r["params_json"] or "{}")
+            except ValueError:
+                params = {}
+            out.append({"asset_id": r["asset_id"], "state": r["state"], "created_at": r["created_at"], "params": params})
+        return out
+
+    def resolved_since(self, site_id: str, types: tuple, state: str, since: datetime) -> bool:
+        """Whether a condition of one of these types with this state was resolved at or after `since`: an alarm
+        that comes back after clearing is a recurrence, not a first raise."""
+        _check_ids("system", site_id)
+        rows = self._read("SELECT 1 FROM notification_events WHERE site_id = ? AND state = ? AND status = 'resolved'"
+                          f" AND resolved_at >= ? AND type IN ({','.join('?' * len(types))}) LIMIT 1",
+                          [site_id, state, utc_iso(since), *types])
+        return bool(rows)
 
     def events(self, site_id: str) -> list[dict]:
         """A site's events, newest first. Never another site's."""
@@ -610,7 +648,7 @@ class Store:
         """(SQL clause, args) leaving out the types this user's EFFECTIVE preferences switch off: their own
         toggle over the site's baseline, or their master toggle off. One rule for the list, its pages, the
         unread count and the bulk actions, so they always describe the same notifications. It only narrows
-        what one user sees: whether the site creates a type is decided elsewhere (project_wants)."""
+        what one user sees: the site creates its alarm notifications for everyone, whatever a user switches off here."""
         prefs = self.get_preferences(user_id, site_id)
         off = [t for t in USER_HIDEABLE if not prefs["master_enabled"] or prefs["types"].get(t) is False]
         return (" AND e.type NOT IN (" + ",".join("?" * len(off)) + ")", off) if off else ("", [])
@@ -624,7 +662,10 @@ class Store:
         toggles over the site's baseline ones. A type with no saved toggle is absent: its default
         comes from the type registry, not from here. No saved master means on."""
         _check_ids(user_id, site_id)
-        saved = {**self._saved(project_recipient(site_id), site_id), **self._saved(user_id, site_id)}
+        # The site's baseline no longer reaches what the server creates or shows: a site-wide toggle saved for an alarm type
+        # (or the master) before alarms became automatic would silence it for everyone, so only the user's own rows count there.
+        baseline = {k: v for k, v in self._saved(project_recipient(site_id), site_id).items() if k != MASTER and k not in USER_HIDEABLE}
+        saved = {**baseline, **self._saved(user_id, site_id)}
         return {"master_enabled": saved.pop(MASTER, True), "types": saved}
 
     def update_preferences(self, user_id: str, site_id: str, *, master_enabled: Optional[bool] = None,
@@ -637,14 +678,14 @@ class Store:
 
     def update_project_preferences(self, site_id: str, *, master_enabled: Optional[bool] = None,
                                    types: Optional[dict] = None) -> None:
-        """The site's baseline toggles (what every user starts from, and the site-level switch for
-        whether alarm.critical notifications are created). No HTTP route reaches this: it is the
+        """The site's baseline toggles (what every user starts from; it never stops the site creating a
+        notification, and a baseline for an alarm type is not applied to users). No HTTP route reaches this: it is the
         seam for the later administration phase and for operators."""
         _check_ids("system", site_id)
         self._save_preferences(project_recipient(site_id), site_id, master_enabled, types)
 
     def map_role(self, site_id: str, user_id: str, eko_role: str, updated_by: str) -> None:
-        """The EKO role of one signed-in user on one site (what role_of reads, and what authorises site settings).
+        """The EKO role of one signed-in user on one site (what role_of reads and /api/auth/me reports).
         No HTTP route reaches this: like update_project_preferences it is the operator's seam, because the
         server must be able to trust the mapping."""
         _check_ids(user_id, site_id)
@@ -657,31 +698,6 @@ class Store:
                 " ON CONFLICT (site_id, user_id) DO UPDATE SET eko_role = excluded.eko_role, updated_by = excluded.updated_by,"
                 " updated_at = excluded.updated_at",
                 (site_id, user_id, eko_role.strip(), updated_by, utc_iso(datetime.now(timezone.utc))))
-
-    def set_site_critical(self, site_id: str, enabled: bool, actor_id: str, now: Optional[datetime] = None) -> None:
-        """Switch the site's alarm.critical baseline (whether the site creates those notifications) and record who did it,
-        in one transaction. The caller has already authorised actor_id; nothing else is touched: no user's own
-        preference, no other site, no notification."""
-        _check_ids(actor_id, site_id)
-        if not isinstance(enabled, bool):
-            raise ValueError("enabled must be true or false")
-        owner, stamp = project_recipient(site_id), utc_iso(now or datetime.now(timezone.utc))
-        with self._write():
-            previous = self._saved(owner, site_id).get("alarm.critical")
-            self.db.execute(
-                "INSERT INTO notification_preferences (user_id, site_id, type, enabled) VALUES (?, ?, 'alarm.critical', ?)"
-                " ON CONFLICT (user_id, site_id, type) DO UPDATE SET enabled = excluded.enabled", (owner, site_id, int(enabled)))
-            self.db.execute(
-                "INSERT INTO notification_audit_log (id, site_id, actor_id, action, target_type, target_id, occurred_at, details_json)"
-                " VALUES (?, ?, ?, 'notifications.site_critical_alarms.set', 'site', ?, ?, ?)",
-                ("aud_" + uuid.uuid4().hex, site_id, actor_id, site_id, stamp, json.dumps({"enabled": enabled, "previous": previous})))
-
-    def project_wants(self, site_id: str, type_: str, default: bool) -> bool:
-        """Whether the SITE creates notifications of this type (its baseline master and toggle,
-        else the caller's default): one setting for the project, not any user's preference."""
-        _check_ids("system", site_id)
-        saved = self._saved(project_recipient(site_id), site_id)
-        return saved.get(MASTER, True) and saved.get(type_, default)
 
     def _save_preferences(self, owner: str, site_id: str, master_enabled, types) -> None:
         if master_enabled is not None and not isinstance(master_enabled, bool):
@@ -759,7 +775,8 @@ class Store:
             # a shelf still in force is kept however old (ending expired shelves is not built yet)
             self.db.execute("DELETE FROM alarm_shelving WHERE ended_at IS NOT NULL AND ended_at < ?", (long_,))
             # audit rows outlive the notifications they name: target_id is not a foreign key on purpose
-            self.db.execute("DELETE FROM notification_audit_log WHERE occurred_at < ?", (long_,))
+            # (the first-connection claim is never purged: without it the site would be "first" again and go quiet)
+            self.db.execute("DELETE FROM notification_audit_log WHERE occurred_at < ? AND action != ?", (long_, BASELINE_ACTION))
         self._purged_at = now
 
     def _maybe_purge(self, now: datetime) -> None:

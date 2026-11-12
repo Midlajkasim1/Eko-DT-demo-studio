@@ -180,24 +180,25 @@ window.EKO_NF = (function(){
       ${state === 'error' ? `<button class="btnG btnSm" data-act="nfRetryRemote">${esc(E.t('retryBtn'))}</button>` : ''}</div>`;
   }
 
-  /* Why a project's list is empty when it is not simply quiet: critical-alarm notifications not set up for the
-     project, switched off for it, or off for the site; or alarms that cannot be graded. Read from the backend's own
-     answer for THIS project (never inferred), and only once the list itself has loaded. */
+  /* The persistent warning above the list (bell and full page): a validated project with no severity bands cannot grade an alarm,
+     so none is notified. It stays whatever else is listed. Only the backend's own answer for THIS project says so (setup.severity_bands
+     === false): no answer yet, or an older backend, shows nothing. */
+  function bandsBanner(E){
+    const N2 = N();
+    if(!N2 || !N2.REMOTE || !N2.setup || N2.remoteState() !== 'ok') return '';
+    const s = N2.setup();
+    if(!s || s.severity_bands !== false) return '';
+    return `<div class="nfbanner" data-banner="no-bands" role="status"><span class="nfemoji">!</span><span>${esc(E.t('nfSetupNoBands'))}</span></div>`;
+  }
+
+  /* Why a project's list is empty when it is not simply quiet: FIN's last alarm read failed, so an empty list is unknown, not
+     "caught up" (null/absent = no read yet). Read from the backend's own answer, and only once the list itself has loaded. */
   function setupNotice(E){
     const N2 = N();
     if(!N2 || !N2.REMOTE || !N2.setup || N2.remoteState() !== 'ok') return '';
     const s = N2.setup();
-    if(!s) return '';
-    const keys = [];
-    if(s.critical_alarms === 'not_configured') keys.push('nfSetupNotConfigured');
-    else if(s.critical_alarms === 'disabled_project') keys.push('nfSetupDisabledProject');
-    else if(s.critical_alarms === 'disabled_site') keys.push('nfSetupDisabledSite');
-    /* bands matter once the project allows it: name a missing one beside a site switch that is also off, so both are fixed in one visit */
-    if((s.critical_alarms === 'enabled' || s.critical_alarms === 'disabled_site') && s.severity_bands === false) keys.push('nfSetupNoBands');
-    /* set up, but FIN's last alarm read failed: an empty list is then unknown, not "caught up" (null/absent = no read yet) */
-    if(s.critical_alarms === 'enabled' && s.alarms_read === false) keys.push('nfSetupAlarmRead');
-    if(!keys.length) return '';
-    return `<div class="nfempty nfsetup" data-setup="${esc(s.critical_alarms)}" role="status"><span class="nfemoji">i</span>${keys.map(k => esc(E.t(k))).join(' ')}</div>`;
+    if(!s || s.alarms_read !== false) return '';
+    return `<div class="nfempty nfsetup" role="status"><span class="nfemoji">i</span>${esc(E.t('nfSetupAlarmRead'))}</div>`;
   }
 
   /* ------------------------------- the panel ------------------------------- */
@@ -241,6 +242,7 @@ window.EKO_NF = (function(){
         ${menu}</div>
       <div class="nftabs">${tabs.map(t2 =>
         `<button class="seg" data-on="${s.tab===t2[0]}" data-act="nfTab" data-v="${t2[0]}">${esc(E.t(t2[1]))}</button>`).join('')}</div>
+      ${bandsBanner(E)}
       <div class="nflist">${body}</div>
       <button class="nffoot" data-act="nfViewAll">${esc(E.t('nfViewAll'))}</button>
     </div>
@@ -271,20 +273,13 @@ window.EKO_NF = (function(){
         <label class="nfdate">${esc(E.t('nfFrom'))} <input type="date" data-chg="nfFrom" value="${esc(s.page.from)}"></label>
         <label class="nfdate">${esc(E.t('nfTo'))} <input type="date" data-chg="nfTo" value="${esc(s.page.to)}"></label>
       </div>
+      ${bandsBanner(E)}
       <div class="pwwidget nfpage">${remoteNotice(E)}${g.html || (remoteNotice(E) ? '' : `<div class="nfempty">${esc(E.t('nfFilterEmpty'))}</div>`)}
         ${g.more ? `<button class="btnG" data-act="nfMore">${esc(E.t('nfShowMore'))}</button>` : ''}</div>
     </div>`;
   }
 
   /* -------------------- Settings: preference matrix ------------------------ */
-  /* the personal switch above is the user's own; whether the SITE creates critical-alarm notifications is the
-     server's word and not changeable here, so say which it is, and say "not known" when it is not known */
-  function siteNote(E){
-    const site = N().siteCritical(), state = site === true ? 'on' : site === false ? 'off' : 'unknown';
-    return `<div class="nfpsite" data-state="${state}" role="note">
-      <b>${esc(E.t('nfSiteLbl'))}</b> ${esc(E.t(state === 'on' ? 'nfSiteOn' : state === 'off' ? 'nfSiteOff' : 'nfSiteUnknown'))}
-      ${N().siteAdmin() ? `<button class="btnG btnSm nfsiteset" data-act="nfSiteSet" data-v="${state === 'on' ? 'off' : 'on'}">${esc(E.t(state === 'on' ? 'nfSiteTurnOff' : 'nfSiteTurnOn'))}</button>` : ''}</div>`;
-  }
   function prefsDlg(E){
     const s = st(E);
     if(!s.prefs) return '';
@@ -297,7 +292,7 @@ window.EKO_NF = (function(){
         <button class="nfptgl" data-on="${N().prefOn(t2.type)}" data-act="nfPrefTgl" data-v="${esc(t2.type)}" role="switch" aria-checked="${N().prefOn(t2.type)}"><span></span></button>
         <button class="nfpres tipU" disabled data-tip="${esc(E.t('nfChannelSoon'))}">${esc(E.t('nfEmail'))}</button>
         <button class="nfpres tipU" disabled data-tip="${esc(E.t('nfChannelSoon'))}">${esc(E.t('nfTeams'))}</button>
-      </div>${t2.type === 'alarm.critical' ? siteNote(E) : ''}`).join('')}`).join('');
+      </div>`).join('')}`).join('');
     return `<div class="scrim" data-act="nfPrefsClose"></div>
     <div class="dlg ctldlg nfprefs" role="dialog" aria-label="${esc(E.t('nfPrefsT'))}">
       <div class="dlghead"><h2>${esc(E.t('nfPrefsT'))}</h2>
@@ -339,8 +334,6 @@ window.EKO_NF = (function(){
     /* a dialog above its parent: the panel stays open and is returned to (D67) */
     nfPrefsOpen(){ const E = window.EKO, s = st(E); s.prefs = true; s.menu = false; E.set({}); },
     nfPrefsClose(){ const E = window.EKO; st(E).prefs = false; E.set({}); },
-    nfSiteSet(el){ const E = window.EKO;
-      N().setSiteCritical(el.dataset.v === 'on').then(() => E.set({})); },
     nfPrefTgl(el){ const E = window.EKO;
       N().setPref(el.dataset.v, !N().prefOn(el.dataset.v)); E.set({}); },
     nfRow(el, ev){ const E = window.EKO;

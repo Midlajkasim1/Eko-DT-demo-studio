@@ -11,6 +11,7 @@ import hmac
 import json
 import re
 import secrets
+import threading
 import time
 from datetime import datetime
 from typing import Any, Optional
@@ -528,6 +529,10 @@ def aggregate_and_restructure(data: list[dict]) -> dict:
     return nested
 
 
+# What _fetch calls a read FIN never answered (timeout, no connection, a 5xx): the only failures that can make a poll a failed poll.
+LINK_FAILURES = ("timeout", "network", "server")
+
+
 # ─── SCRAM-SHA-256 Client ────────────────────────────────────────────────────
 
 
@@ -547,6 +552,19 @@ class FinScramClient:
         self.last_alarm_rows: list[dict] = []
         self.last_point_rows: list[dict] = []
         self.last_alarm_read_ok: Optional[bool] = None   # None until the first alarm read of this project
+        # How the FIN link is doing, for the notification layer. last_ok_at (time.monotonic(), None until it happens): FIN last
+        # answered ANY read with HTTP 200, whoever asked (a poll, a user's action), so one failing query does not say the link is down.
+        # last_realtime_failed: the latest realtime poll (its several reads at once) got no answer from FIN to ANY of them: every
+        # read timed out, could not connect or got a 5xx (last_realtime_fail_kind says which); only that poll is a failed poll, never
+        # one query, an alarm-only read or a user's read. A 401/403 ends the session instead (is_authenticated False), and any other
+        # HTTP answer (a 4xx, or an error grid in a 200) is FIN replying, not a link failure.
+        self.last_ok_at: Optional[float] = None
+        self.last_realtime_failed = False
+        self.last_realtime_fail_kind: Optional[str] = None
+        # The alarm list is one snapshot, stamped with when its request was SENT. The realtime poll and the alarm poll both read it, and
+        # an older request can finish after a newer one: an older snapshot never replaces a newer one (_take_alarms).
+        self.last_alarm_started_at: Optional[float] = None
+        self._alarm_lock = threading.Lock()   # _build_realtime runs on a worker thread
 
     async def authenticate(self, username: str, password: str) -> bool:
         """Perform SCRAM-SHA-256 authentication."""
@@ -679,21 +697,35 @@ class FinScramClient:
 
     async def fetch_api(self, endpoint: str, is_text: bool = False) -> Optional[Any]:
         """Fetch a FIN API endpoint. Returns parsed JSON or raw text."""
+        return (await self._fetch(endpoint, is_text))[0]
+
+    async def _fetch(self, endpoint: str, is_text: bool = False) -> tuple[Optional[Any], Optional[str]]:
+        """(result, failure): the result as fetch_api gives it, and why there is none: "auth" (401/403: the session ended),
+        "timeout", "network", "server" (5xx) - FIN did not answer - or "http" (FIN answered with another status), "error" (an
+        answer that could not be read) and "refused" (a request to another host that was never sent). None when it worked."""
         url = self._url(endpoint)
         if url is None:
             print("[FIN] refused a request to another host: FIN credentials stay with the FIN server")
-            return None
+            return None, "refused"
         try:
             resp = await self.client.get(url, headers=self.auth_headers)
             if resp.status_code == 200:
-                return resp.text if is_text else resp.json()
+                self.last_ok_at = time.monotonic()
+                return (resp.text if is_text else resp.json()), None
             if resp.status_code in (401, 403):
                 self.is_authenticated = False
                 print(f"[FIN] Session expired ({resp.status_code})")
-            return None
+                return None, "auth"
+            return None, "server" if resp.status_code >= 500 else "http"
+        except httpx.TimeoutException as e:
+            print(f"[FIN] Fetch error {url}: {e}")
+            return None, "timeout"
+        except httpx.TransportError as e:
+            print(f"[FIN] Fetch error {url}: {e}")
+            return None, "network"
         except Exception as e:
             print(f"[FIN] Fetch error {url}: {e}")
-            return None
+            return None, "error"
 
     async def fetch_probe(self, endpoint: str) -> tuple[Optional[int], Optional[str]]:
         """GET that reports what FIN answered: (status, text), or (None, None) if FIN is unreachable.
@@ -795,35 +827,51 @@ class FinScramClient:
 
     async def refresh_alarms(self, endpoint: str) -> list[dict]:
         """Read only the alarm list, so it is not waiting on equipment or history."""
+        started = time.monotonic()
         text = await self.fetch_api(self._resolve_endpoint(endpoint), is_text=True)
         alarms = await asyncio.to_thread(parse_zinc_csv, text or "")
         await asyncio.to_thread(attach_alarm_details, text or "", alarms)
-        self.last_alarm_rows = alarms
         first = (text or "").lstrip("\ufeff").lstrip().split("\n", 1)[0]
-        self.last_alarm_read_ok = first.startswith("ver:") and not re.search(r"\berr\b", first)
+        self._take_alarms(started, alarms, first.startswith("ver:") and not re.search(r"\berr\b", first))
         return alarms
+
+    def _take_alarms(self, started: float, rows: list, read_ok: bool) -> bool:
+        """Make this alarm read the current snapshot, unless a read SENT later already is: an older request can finish after a newer
+        one (two loops, one slow), and its rows would bring back alarms that cleared and drop ones that were raised. The rows and
+        their read_ok go in together, under the lock. False: it was older and was dropped."""
+        with self._alarm_lock:
+            if self.last_alarm_started_at is not None and started < self.last_alarm_started_at:
+                return False
+            self.last_alarm_started_at = started
+            self.last_alarm_rows = rows
+            self.last_alarm_read_ok = read_ok
+            return True
 
     async def fetch_realtime_data(self, endpoints: dict[str, str]) -> dict:
         """Fetch realtime points, equipment, and alarms. Returns floor-wise structure."""
         resolved = {k: self._resolve_endpoint(v) for k, v in endpoints.items()}
 
-        tasks = [self.fetch_api(v, is_text=True) for v in resolved.values()]
-        results = await asyncio.gather(*tasks)
+        started = time.monotonic()
+        results = await asyncio.gather(*[self._fetch(v, is_text=True) for v in resolved.values()])
+        failures = [kind for _, kind in results if kind in LINK_FAILURES]
+        # a failed poll: not one query, ALL of them got no answer from FIN
+        self.last_realtime_failed = bool(results) and len(failures) == len(results)
+        self.last_realtime_fail_kind = failures[0] if self.last_realtime_failed else None
 
         # CPU-bound zinc parsing — off the event loop so file serving stays responsive
-        return await asyncio.to_thread(self._build_realtime, *results)
+        return await asyncio.to_thread(self._build_realtime, *[text for text, _ in results], started)
 
-    def _build_realtime(self, points_text: str, equip_text: str, alarms_text: str) -> dict:
+    def _build_realtime(self, points_text: str, equip_text: str, alarms_text: str, alarm_started: Optional[float] = None) -> dict:
         points = parse_zinc_csv(points_text)
         equipment = parse_zinc_csv(equip_text)
         alarms = parse_zinc_csv(alarms_text)
         attach_alarm_details(alarms_text or "", alarms)
-        self.last_alarm_rows = alarms
         open_alarms = open_alarm_rows(alarms)   # one per logical alarm, as the alarm list counts them
         # Did FIN answer with a non-error Zinc grid? A failed read also parses to no rows, and must
         # never be taken for "all alarms cleared"
         first = (alarms_text or "").lstrip("\ufeff").lstrip().split("\n", 1)[0]
-        self.last_alarm_read_ok = first.startswith("ver:") and not re.search(r"\berr\b", first)
+        self._take_alarms(time.monotonic() if alarm_started is None else alarm_started, alarms,
+                          first.startswith("ver:") and not re.search(r"\berr\b", first))
         self.last_point_rows = points
 
         # Build floor-wise equipment data

@@ -110,7 +110,7 @@ window.EKO_NOTIF = (function(){
         /* the server already leaves out what this user switched off, so its rows, pages and count agree */
         remote = (page.items || []).map(fromServer).filter(Boolean);
         remoteMore = !!page.next_cursor;                 /* another page exists on the server */
-        /* how this project is set up (critical alarms: not_configured | disabled_project | disabled_site | enabled), so an empty list can say why */
+        /* how this project is set up (severity bands, FIN's last alarm read), so an empty list can say why */
         remoteSetup = page.setup && typeof page.setup === 'object' ? page.setup : null;
         remoteUnread = typeof page.unread_count === 'number' ? page.unread_count : 0;
         remoteError = null; remoteCode = null; remoteState = 'ok'; changed();
@@ -141,22 +141,6 @@ window.EKO_NOTIF = (function(){
     } else if(type in prefs) return !!prefs[type];
     const def = TT().byType[type];
     return def ? def.defaultOn : true;
-  }
-  /* whether the SITE creates critical-alarm notifications (the server's word, read only): true | false, or
-     null when it is not known (no backend, an older one, or the answer is missing): never assumed on */
-  function siteCritical(){
-    const s = REMOTE && remotePrefs && remotePrefs.site;
-    return s && typeof s.critical_alarms === 'boolean' ? s.critical_alarms : null;
-  }
-  /* whether the SERVER lets this user change the site's switch (its own role mapping, never anything sent from here) */
-  function siteAdmin(){
-    const s = REMOTE && remotePrefs && remotePrefs.site;
-    return !!(s && s.can_administer === true);
-  }
-  /* the site's switch for everyone on this project: asked of the server, which decides; then read back, never assumed */
-  function setSiteCritical(on){
-    if(!REMOTE) return Promise.resolve();
-    return api('PUT', '/site-settings', { critical_alarms: !!on }).catch(() => {}).then(() => refresh());
   }
   function setPref(type, on){
     if(REMOTE){
@@ -406,7 +390,7 @@ window.EKO_NOTIF = (function(){
 
   self = { add, list, unread, badge, otherUnread, markRead, markAllRead, archive, unarchive,
            archiveRead, seed, startStream, stopStream, hooks, ME, SITE,
-           prefOn, setPref, siteCritical, siteAdmin, setSiteCritical, REMOTE, refresh, confirmSession, remoteError: () => remoteError,
+           prefOn, setPref, REMOTE, refresh, confirmSession, remoteError: () => remoteError,
            remoteState: () => remoteState, remoteCode: () => remoteCode, setup: () => remoteSetup };
   if(REMOTE){   /* after this file returns, so live() sees this store as window.EKO_NOTIF */
     setTimeout(confirmSession, 0);

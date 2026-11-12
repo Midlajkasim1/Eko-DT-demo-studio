@@ -7466,6 +7466,23 @@
   padding:0 12px 8px
 }
 
+.dashboard-native-container .nfbanner {
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  margin:0 12px 8px;
+  padding:8px 10px;
+  font-size:var(--txCapSz);
+  color:var(--t1);
+  border:1px solid var(--bd1);
+  border-inline-start:3px solid var(--warnB);
+  border-radius:6px
+}
+
+.dashboard-native-container [data-pg="notifs"] > .nfbanner {
+  margin:0 0 10px
+}
+
 .dashboard-native-container .nflist {
   flex:1;
   min-height:0;
@@ -7792,23 +7809,6 @@
 .dashboard-native-container .nfprow {
   padding-block:7px;
   border-block-end:1px solid var(--bd1)
-}
-
-.dashboard-native-container .nfpsite {
-  font-size:var(--txCapSz);
-  color:var(--t2);
-  padding-block:6px 8px;
-  border-block-end:1px solid var(--bd1)
-}
-
-.dashboard-native-container .nfpsite b {
-  color:var(--t1)
-}
-
-.dashboard-native-container .nfpsite[data-state="unknown"] {
-  color:var(--t1);
-  border-inline-start:3px solid var(--bd1);
-  padding-inline-start:8px
 }
 
 .dashboard-native-container .nfpname {

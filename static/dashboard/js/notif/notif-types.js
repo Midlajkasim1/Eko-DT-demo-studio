@@ -2,9 +2,10 @@
    Notification TYPE TABLE (D48 stage 1) — the complete v1 set. Data-driven:
    every type carries its icon, category, default preference, i18n keys and
    deep-link kind. THE LAW: the bell states what happened to WORK, DATA and
-   PEOPLE. An alarm raise belongs to the ribbon and produces ZERO notifications,
-   with ONE client-approved exception: alarm.critical, off unless the site
-   allows it AND the project's toggle is on. Levels are info | attention
+   PEOPLE. A project FIN validated makes its own alarm notifications, graded by the
+   project's severity bands (critical, warning, and when one clears or returns), and
+   says when the FIN connection is lost or restored: no setting turns that on.
+   Levels are info | attention
    (attention renders amber accents only; nothing in the bell is ever red).
    ============================================================================ */
 window.EKO_NOTIF_TYPES = (function(){
@@ -49,11 +50,12 @@ window.EKO_NOTIF_TYPES = (function(){
     T('int.points_stale',       'integration',    'attention', true,  'staleAssets'),
     T('int.sync_failed',        'integration',    'attention', true,  'integration'),
     T('int.model_version',      'integration',    'info',      true,  'model'),
-    /* C. ALARM LIFECYCLE (never raises) */
+    /* C. ALARM LIFECYCLE (made by the backend for the project's alarms; a user's own switch only hides them from that user) */
     T('alarm.ack_recorded',     'alarmLifecycle', 'info',      true,  'alarm'),
     T('alarm.cleared',          'alarmLifecycle', 'info',      true,  'alarm'),
     T('alarm.reraised',         'alarmLifecycle', 'attention', true,  'alarm'),
-    T('alarm.critical',         'alarmLifecycle', 'attention', false, 'alarm'),   /* opt-in; also gated by the site setting */
+    T('alarm.critical',         'alarmLifecycle', 'attention', true,  'alarm'),
+    T('alarm.warning',          'alarmLifecycle', 'attention', true,  'alarm'),
     /* D. ASSIGNMENT AND COLLABORATION */
     T('assign.to_you',          'collaboration',  'info',      true,  'workOrder'),
     T('mention.comment',        'collaboration',  'info',      true,  'asset'),

@@ -134,6 +134,28 @@ export function pointsWithBoards(s: ProjectApiSettings): { live?: JsonObject; hi
   return { live, history }
 }
 
+/** Whether the backend VERIFIED this Eko-DT project as config.json's site and so serves it config.json's standard mappings
+ *  (severity bands included), for the FIN project in the form: schema.standardProject/-Id, never a matching name alone. */
+export function isStandardProject(
+  projectId: string,
+  finProjectName: string | undefined,
+  schema: { standardProject?: string; standardProjectId?: string },
+): boolean {
+  return !!schema.standardProject && schema.standardProjectId === projectId && finProjectName === schema.standardProject
+}
+
+/** Whether the severity bands in the form decide nothing: the backend grades this project with config.json's own bands (it is the
+ *  verified standard site), or that cannot be told yet (connected, the mapping schema not loaded). Offline, or for an ordinary
+ *  project, the bands in the form are what the project will have. */
+export function severityBandsFromBackend(
+  projectId: string,
+  finProjectName: string | undefined,
+  schema: { standardProject?: string; standardProjectId?: string },
+  state: { connected: boolean; schemaLoaded: boolean },
+): boolean {
+  return isStandardProject(projectId, finProjectName, schema) || (state.connected && !state.schemaLoaded)
+}
+
 /** The Data Mapping keys a board can name: the keys the backend serves this project.
  *  config.json's keys only when the backend reports that it VERIFIED this Eko-DT project as
  *  config.json's site on the server it is signed in to (schema.standardProject/-Id), for the FIN
@@ -146,7 +168,7 @@ export function boardKeyOptions(
   own: { live?: JsonObject; history?: JsonObject },
   schema: { finLivePoints?: string[]; finEndpoints?: string[]; standardProject?: string; standardProjectId?: string; standardProfile?: string },
 ): { live: string[]; history: string[]; standard: boolean; unverifiedStandard: boolean } {
-  const standard = !!schema.standardProject && schema.standardProjectId === projectId && finProjectName === schema.standardProject
+  const standard = isStandardProject(projectId, finProjectName, schema)
   const unverifiedStandard = !standard && !!finProjectName && finProjectName === schema.standardProfile
   const catalogLive = MAPPING_CATALOG.filter(e => e.block === 'live').map(e => e.key)
   const catalogHistory = MAPPING_CATALOG.filter(e => e.block === 'history').map(e => e.key)
@@ -341,7 +363,6 @@ export function toBackendSettings(settings: ProjectApiSettings | undefined): Pro
   if (s.finProjectName) out.finProjectName = s.finProjectName
   if (s.finDisplayName) out.finDisplayName = s.finDisplayName
   if (s.finInterval) out.finInterval = s.finInterval
-  if (typeof s.notificationsCriticalAlarmsEnabled === 'boolean') out.notificationsCriticalAlarmsEnabled = s.notificationsCriticalAlarmsEnabled
   if (s.finWorkorderExpr?.trim()) out.finWorkorderExpr = s.finWorkorderExpr
   for (const field of MAPPING_FIELDS) {
     if (s[field]) Object.assign(out, { [field]: s[field] })

@@ -368,8 +368,6 @@ export interface ProjectApiSettings {
   finLivePoints?: Record<string, string>
   finEndpoints?: Record<string, string>
   finWorkorderExpr?: string
-  /** This project's own gate for critical-alarm notifications; absent = not configured (never enabled by default) */
-  notificationsCriticalAlarmsEnabled?: boolean
   finMeterProfile?: FinMeterProfile
   finSeverityBands?: FinSeverityBands
   finEquipmentClasses?: FinEquipmentClasses

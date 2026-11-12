@@ -12,6 +12,7 @@ import {
   SeverityEditor,
   type EditorState,
 } from '@/components/project/FinMappingEditors'
+import { SeverityBandsWarning } from '@/components/project/SeverityBandsWarning'
 import {
   DEFAULT_SITE_TIMEZONE,
   FIN_SETTINGS_VERSION,
@@ -21,6 +22,7 @@ import {
   basisProblem,
   boardKeyOptions,
   powerBoardsProblem,
+  severityBandsFromBackend,
   DEFAULT_CURRENCY,
   isTimeZone,
   mappingProblem,
@@ -676,18 +678,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
               </div>
 
               <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Notifications</h3>
-              <div className="ds-field">
-                <label>Critical-alarm notifications</label>
-                <select
-                  value={settings.notificationsCriticalAlarmsEnabled === undefined ? '' : settings.notificationsCriticalAlarmsEnabled ? 'on' : 'off'}
-                  onChange={e => update('notificationsCriticalAlarmsEnabled', e.target.value === '' ? undefined : e.target.value === 'on')}
-                >
-                  <option value="">Not configured</option>
-                  <option value="on">Enabled for this project</option>
-                  <option value="off">Disabled for this project</option>
-                </select>
-                <p className="ds-hint">Both this setting and the site's alarm.critical switch on the notification database must allow it, and the project needs Severity Configuration so alarms can be graded critical. Nothing is inherited from another project.</p>
-              </div>
+              <p className="ds-hint">Alarm and FIN-connection notifications are made automatically for a connected project. Alarms are graded by this project's Severity Configuration; without it no alarm is notified.</p>
               <div className="ds-field">
                 <label>Work-order query</label>
                 <input type="text" value={settings.finWorkorderExpr || ''} onChange={e => update('finWorkorderExpr', e.target.value || undefined)} placeholder='e.g. sqlQuery(read(sqlConn), "SELECT * FROM <your work-order table>")' />
@@ -907,7 +898,13 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                     ) : field === 'finMeterProfile' ? (
                       <MeterProfileEditor key={editorKey} value={mappings[field].value} onChange={onChange} results={validation?.blocks[field]?.items} suggestedKeys={schema.finMeterProfile} />
                     ) : field === 'finSeverityBands' ? (
-                      <SeverityEditor key={editorKey} value={mappings[field].value} onChange={onChange} />
+                      <>
+                        <SeverityBandsWarning
+                          value={mappings[field].value}
+                          bandsFromBackend={severityBandsFromBackend(currentProject.projectId, selectedFinProject, schema, { connected: finConnected, schemaLoaded })}
+                        />
+                        <SeverityEditor key={editorKey} value={mappings[field].value} onChange={onChange} />
+                      </>
                     ) : (
                       <KeyValueEditor
                         key={editorKey}
