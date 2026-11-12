@@ -729,7 +729,7 @@ window.EKO_C = (function(){
     const db = `<article class="pwwidget">
       <div class="pwwh"><span class="alcardt">${esc(E.t('pwDb'))}</span>
         <span class="alcardm">${esc(dbSub)}</span>${window.EKO_A.chrome(E)}</div>
-      <div class="dblist grow">${boards.map((x,i2) =>
+      <div class="dblist grow"${boards.length >= 4 ? ' data-many="1"' : ''}>${boards.map((x,i2) =>
         `<button class="dbrow" data-act="pwBoard" data-i="${i2}" data-on="${String(E.state.pwBoard)===String(i2)}"><span class="dbid">${esc(x[0])}</span>
           <span class="dbbar"><span style="width:${totalMax?((Math.max(0, Number(x[1])||0)/totalMax*100).toFixed(1)):0}%;background:${hues[i2]}"></span></span>
           <span class="dbkw">${x[1]==null||(dbEmpty&&Number(x[1])===0)?'--':(fmt(Number(x[1]), simKw ? 0 : 1)+(simKw ? ' kW' : ' kWh'))}</span>${icon('chevR',12)}</button>`).join('')}</div></article>`;

@@ -2274,3 +2274,8 @@
 .dashboard-native-container .angrid39 > .col{min-height:100%}
 .dashboard-native-container .angrid39 > .col > .pwwidget:last-child{flex:1 1 auto}
 .dashboard-native-container .pwarea[data-pg="anom"] .angrid39 > .pwwidget{max-height:none; height:100%}
+/* Three rows stay in view. The fourth and the rest scroll. */
+.dashboard-native-container .pwarea .dblist[data-many="1"]{max-height:118px; overflow-x:hidden; overflow-y:auto; flex:none; justify-content:flex-start; scrollbar-width:thin}
+.dashboard-native-container .pwarea .dblist[data-many="1"] .dbrow{flex:none; height:38px; min-height:38px; max-height:38px}
+.dashboard-native-container .dbrow{border-block-end:0}
+.dashboard-native-container .pmurows{flex:1 1 auto; min-height:0; overflow-x:hidden; overflow-y:auto}
