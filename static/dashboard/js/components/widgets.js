@@ -626,22 +626,30 @@ window.EKO_C = (function(){
       const vals = series.map(z => z && z[i]);
       return sumArr(vals);
     };
+    const boardIdx = E.state.pwBoard == null || E.state.pwBoard === '' ? -1 : Number(E.state.pwBoard);
+    const pickedName = boardIdx >= 0 && p.zones && p.zones[boardIdx] ? p.zones[boardIdx] : '';
+    const scopeSeries = (series) => (pickedName && Array.isArray(series) && boardIdx < series.length) ? [series[boardIdx]] : series;
     let heroNow = null, heroPrev = null;
-    if (tr === 'hourly' && p.zoneLast24 && p.zoneLast24[0] && p.zoneLast24[0].length) {
-      const hi = p.zoneLast24[0].length - 1;
-      heroNow = colAt(p.zoneLast24, hi);
-      heroPrev = hi > 0 ? colAt(p.zoneLast24, hi - 1) : null;
+    const hourlySeries = scopeSeries(p.zoneLast24);
+    const todayHours = scopeSeries(p.zoneHourly);
+    if (tr === 'hourly' && hourlySeries && hourlySeries[0] && hourlySeries[0].length) {
+      const hi = hourlySeries[0].length - 1;
+      heroNow = colAt(hourlySeries, hi);
+      // The hourly chart keeps only the latest hour. The hour before it is on today's clock.
+      const prevAt = todayHours && todayHours[0] && todayHours[0].length >= 2 ? todayHours[0].length - 2 : -1;
+      heroPrev = prevAt >= 0 ? colAt(todayHours, prevAt) : null;
     } else if (tr === 'weekly') {
-      heroNow = sumArr(p.zoneWTD);
-      heroPrev = sumArr(p.zonePrevWeek);
+      heroNow = sumArr(scopeSeries(p.zoneWTD));
+      heroPrev = sumArr(scopeSeries(p.zonePrevWeek));
     } else if (tr === 'monthly') {
-      heroNow = sumArr(p.zoneMTD);
-      heroPrev = sumArr(p.zonePrevMonth);
+      heroNow = sumArr(scopeSeries(p.zoneMTD));
+      heroPrev = sumArr(scopeSeries(p.zonePrevMonth));
     } else {
-      heroNow = (p.zoneHourly && p.zoneHourly[0] && p.zoneHourly[0].length)
-        ? sumArr(p.zoneHourly.map(z => (z || []).reduce((a, v) => a + (Number(v) || 0), 0)))
+      const todaySeries = scopeSeries(p.zoneHourly);
+      heroNow = (todaySeries && todaySeries[0] && todaySeries[0].length)
+        ? sumArr(todaySeries.map(z => (z || []).reduce((a, v) => a + (Number(v) || 0), 0)))
         : null;
-      heroPrev = sumArr(p.zoneYesterday);
+      heroPrev = sumArr(scopeSeries(p.zoneYesterday));
     }
     /* Sample sites with a month-to-date and a previous month (the medical engine) use that
        page: MW peak and the two months. A live FIN site keeps today and yesterday in kWh. */
@@ -670,8 +678,8 @@ window.EKO_C = (function(){
       ${hero(E.t('pwPeak'), peakUnit === 'MW' && peakPctMw != null ? E.t('pwPctLimit',{p:peakPctMw}) : '', peakUnit === 'MW' && peakPctMw != null ? 'crit' : '', nd(peakUnit === 'MW' ? peakMw : peakKw, 1), (peakUnit === 'MW' ? peakMw : peakKw) != null ? peakUnit : '', peakUnit === 'MW' && limMw != null ? E.t('pwContractedMwCap',{v:fmt(limMw,limDp)}) : '', peakUnit === 'MW' && simPeakChart ? bullet(simPeakChart,'P') : '')}
     </div>` : `<div class="pwhero">
       ${hero(E.t('pwCurrentCons'), loadShown != null ? E.t('pwAboveChip') : '', loadShown != null ? 'warn' : '', nd(loadShown,1), loadShown != null ? loadUnit : '', E.t('pwBaselineKwCap',{v:fmt(el.baselineKw,1)}), el.currentKw != null ? bullet(p.heroCharts.current,'L') : '')}
-      ${hero(E.t('pwHeroNow.'+tr), '', '', nd(heroNow, 1), heroNow != null ? 'kWh' : '', E.t('pwHeroNowCap.'+tr))}
-      ${hero(E.t('pwHeroPrev.'+tr), '', '', nd(heroPrev, 1), heroPrev != null ? 'kWh' : '', E.t('pwHeroPrevCap.'+tr))}
+      ${hero(E.t('pwHeroNow.'+tr), '', '', nd(heroNow, 1), heroNow != null ? 'kWh' : '', (pickedName ? pickedName + ' · ' : '') + E.t('pwHeroNowCap.'+tr))}
+      ${hero(E.t('pwHeroPrev.'+tr), '', '', nd(heroPrev, 1), heroPrev != null ? 'kWh' : '', (pickedName ? pickedName + ' · ' : '') + E.t('pwHeroPrevCap.'+tr))}
       ${hero(E.t('pwCarbon'), '', '', nd(carbonKgH,1), carbonKgH != null ? 'kg/h' : '', '')}
       ${hero(E.t('pwPeak'), peakPct != null ? E.t('pwPctLimit',{p:peakPct}) : '', peakPct != null ? 'crit' : '', nd(peakUnit === 'MW' ? peakMw : peakKw, 1), (peakUnit === 'MW' ? peakMw : peakKw) != null ? peakUnit : '', E.t('pwContractedLine',{v:fmt(contractedKw,0)}), peakKw != null ? bullet(p.heroCharts.peak,'P') : '')}
     </div>`;
@@ -730,7 +738,6 @@ window.EKO_C = (function(){
     let zh = (zhAll[tr] && zhAll[tr][0]) ? zhAll[tr] : [[]];
     let zhHues = hues;
     let zhNames = boardNames;
-    const boardIdx = E.state.pwBoard == null || E.state.pwBoard === '' ? -1 : Number(E.state.pwBoard);
     if (boardIdx >= 0 && zh[boardIdx]) {
       zh = [zh[boardIdx]];
       zhHues = [hues[boardIdx] || '#4EA3E8'];
