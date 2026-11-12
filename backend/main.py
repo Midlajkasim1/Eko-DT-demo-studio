@@ -150,6 +150,36 @@ _BOARD_HISTORY = re.compile(
     r"^/api/\{project\}/eval\?expr=hisRead\(@p:\{project\}:r:[\w.-]+,\d{4}-\d{2}-\d{2}\.\.today\(\)%2C%7B-limit%7D\)$")
 
 
+def _meter_history_key(name: str) -> str:
+    """Same key the dashboard looks up: meter_<name>_his, letters and digits only."""
+    slug = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_") or "unnamed"
+    return f"meter_{slug}_his"
+
+
+def meter_points(settings: Optional[dict]) -> dict:
+    """History queries for meters that name their own energy point. The dashboard reads them as meter_<name>_his."""
+    history: dict = {}
+    meters = settings.get("finMeters") if isinstance(settings, dict) else None
+    for meter in meters if isinstance(meters, list) else []:
+        if not isinstance(meter, dict):
+            continue
+        name = meter.get("name")
+        expr = meter.get("history")
+        point = meter.get("point")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if not isinstance(expr, str) or not _BOARD_HISTORY.match(expr):
+            if isinstance(point, str) and _BOARD_POINT.match(point):
+                start = (datetime.now().replace(day=1) - timedelta(days=150)).replace(day=1)
+                expr = f"/api/{{project}}/eval?expr=hisRead(@{point},{start:%Y-%m-%d}..today()%2C%7B-limit%7D)"
+            else:
+                continue
+        elif isinstance(point, str) and "@" + point + "," not in expr:
+            continue
+        history[_meter_history_key(name)] = expr
+    return history
+
+
 def board_points(settings: Optional[dict]) -> tuple:
     """The live points and history queries of the boards that name their own FIN point."""
     live: dict = {}
@@ -191,6 +221,7 @@ def merge_project_settings(base: dict, settings: Optional[dict], isolated: bool 
         else:
             merged[key] = copy.deepcopy(value)
     live, history = board_points(settings)
+    history = {**history, **meter_points(settings)}
     if live:
         merged["live_point_ids"] = {**(merged.get("live_point_ids") or {}), **live}
     if history:

@@ -1004,7 +1004,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
 
               <MappingSection
                 title="Meters"
-                hint="The meters on Energy › Anomalies, in this order. From FIN offers equipment that matches a Meter Profile prefix or has voltage, current and energy points. A meter's energy point gives its chart when FIN keeps its history."
+                hint="The meters on Energy › Anomalies, in this order. From FIN offers electrical meters and hourly energy points such as HourlyHvacEnergy. Add one, then Save Settings. The chart reads that point's history."
                 hasValue={!!settings.finMeters?.length}
                 unsetText="No meters set. Anomalies lists every meter FIN reports. It leads with the meters named in Power Boards (Meter), or with all of them when no board names one."
                 onLoad={() => { update('finMeters', undefined); setMetersRev(r => r + 1) }}
