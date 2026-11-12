@@ -976,7 +976,7 @@
     sys.sort(function (a, b) { return Object.keys(SYSTEMS).indexOf(a) - Object.keys(SYSTEMS).indexOf(b); });
     return '<h3 class="twsub">' + esc(tr(E, 'twinNets')) + '</h3><ul class="twnets">' + sys.map(function (k) {
       return '<li><i class="twkey" style="background:' + SYSTEMS[k][0] + '"></i>' + esc(tr(E, 'twinSys.' + k)) + '</li>';
-    }).join('') + '</ul><p class="twnote">' + esc(tr(E, 'twinNetsNote')) + '</p>';
+    }).join('') + '</ul>';
   }
 
   /* the 3D view controls, on the stage: turn, tilt, drag-to-turn, reset (they sit at the top, clear of the notification toast and the Ask button at the bottom) */
