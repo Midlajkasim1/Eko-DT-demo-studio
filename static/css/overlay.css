@@ -547,10 +547,12 @@ body:has([data-wall="1"]) .viewer-toolbar {
 }
 .dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="1"]) #vbottom { bottom: 104px; }
 .dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="2"]) #vbottom { bottom: 116px; }
-/* The work-order tab was wrapping onto its own line and reading as an empty section. */
+/* A single scrolling row hid Work orders once the drawer narrowed, and the scrollbar is not shown. */
 .dashboard-native-container #assetpanel .aptabs {
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  overflow: visible;
+  row-gap: 2px;
+  border-block-end: 1px solid var(--bd1);
 }
 .dashboard-native-container #vpmain[data-tl="1"]:has(> .scrubbar[data-cap="1"]) > #ovp:not([data-min="1"]) .ovpad {
   padding-block-end: calc(var(--ovFade) - 16px);

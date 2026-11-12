@@ -252,6 +252,29 @@
     if (usable(data)) apply(data);
   }
 
+  // Names and markers first. pointsReady stays false until the points grid is joined, and this
+  // poll is not held behind history, so the page can ask again as soon as the readings land.
+  let equipBusy = false;
+  async function pollEquipment() {
+    if (equipBusy) return;
+    equipBusy = true;
+    const generation = state.generation;
+    try {
+      const data = await state.provider.getEquipment();
+      takeOne(generation, data, function (equipment) {
+        if (!equipment.timestamp && state.equipment) return;
+        state.equipment = equipment;
+        emit('equipment', equipment);
+      });
+    } finally {
+      equipBusy = false;
+    }
+  }
+
+  function equipmentSettled() {
+    return !!(state.equipment && state.equipment.timestamp && state.equipment.pointsReady !== false);
+  }
+
   // The backend's cached reads; alarm history is a FIN query on every call, so it waits for the slower cycle
   async function pollCached() {
     if (cachedBusy) return;
@@ -259,14 +282,6 @@
     const generation = state.generation;
     const provider = state.provider;
     const jobs = [
-      provider.getEquipment().then(function (data) {
-        takeOne(generation, data, function (equipment) {
-          // An answer without a timestamp is the backend before its first FIN read
-          if (!equipment.timestamp && state.equipment) return;
-          state.equipment = equipment;
-          emit('equipment', equipment);
-        });
-      }),
       provider.getMeters().then(function (data) {
         takeOne(generation, data, function (meters) { state.meters = meters; emit('meters', meters); });
       }),
@@ -295,7 +310,7 @@
   }
 
   async function pollRealtime() {
-    await Promise.all([pollCached(), pollSlow()]);
+    await Promise.all([pollCached(), pollSlow(), pollEquipment()]);
   }
 
   async function pollSlow() {
@@ -331,7 +346,7 @@
         return;
       }
       const ready = state.power && state.power.timestamp && state.alarms && state.alarms.timestamp
-        && state.equipment && state.equipment.timestamp && state.powerHistory;
+        && equipmentSettled() && state.powerHistory;
       if (ready) {
         clearInterval(firstFill);
         firstFill = null;
@@ -339,7 +354,8 @@
       }
       if (!state.power || !state.power.timestamp) pollLive();
       if (!state.alarms || !state.alarms.timestamp) pollAlarms();
-      if (!state.equipment || !state.equipment.timestamp || !state.powerHistory) pollCached();
+      if (!equipmentSettled()) pollEquipment();
+      if (!state.powerHistory) pollCached();
     }, 1000);
   }
 
@@ -370,7 +386,6 @@
 
   function holdWatch() {
     if (watchTimer) return;
-    beatWatch();
     watchTimer = setInterval(beatWatch, 5000);
     window.addEventListener('pagehide', onPageHide);
   }
@@ -389,6 +404,10 @@
     state.config = await resolveConfig();
     if (generation !== state.generation) return;
     state.provider = state.config && state.config.directMode ? new DirectProvider(state.config) : new BackendProvider(state.config && state.config.projectId);
+    // The watch is what starts the FIN reads. Wait for it so the first equipment and alarm
+    // requests find those reads already running and can be held until the lists are filled.
+    await beatWatch();
+    if (generation !== state.generation) return;
     holdWatch();
     armFirstFill(generation);
     await Promise.all([pollRealtime(), pollLive(), pollAlarms()]);

@@ -83,10 +83,10 @@ window.EKO_SURF = (function(){
       const newest = opened[opened.length - 1];
       if(byId[newest].kind !== 'dialog' && !byId[newest].sticky){
         /* one transient surface: everything else that is open closes now (a sticky companion, D132, stays).
-           Levels, Layers, and Style sit over the selection card, so the card stays open behind them. */
+           Levels, Layers, Style, and the right-click tool wheel sit over the marker card, so the card stays. */
         DEFS.forEach(d => {
           if(d.id === newest || d.sticky || !now.has(d.id)) return;
-          if(newest === 'fly' && d.id === 'mkpop') return;
+          if((newest === 'fly' || newest === 'radial') && d.id === 'mkpop') return;
           if(newest === 'elmenu' && (d.id === 'mkpop' || d.id === 'asset')) return;
           d.close();
         });
