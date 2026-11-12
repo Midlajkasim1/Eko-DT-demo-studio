@@ -817,7 +817,7 @@
           return '<li>' + goBtn(e.id, '<b>' + esc(e.label) + '</b><span class="twchip" data-fin="' + st + '">' + esc(tr(E, 'twinFin.' + st)) + '</span>' +
             (MAP.RUNPTS[e.type] ? '<span class="twchip" data-run="' + (s.run[e.id] || 'unknown') + '">' + esc(tr(E, 'twinRun.' + (s.run[e.id] || 'unknown'))) + '</span>' : '') +
             (al ? '<span class="twchip" data-al="1">' + esc(tr(E, 'twinAlarms', { n: String(al) })) + '</span>' : '')) + '</li>';
-        }).join('') + '</ul>' : '') + '</section>';
+        }).join('').replace(/data-tw="go"/g, 'data-tw="go" data-focus="1"') + '</ul>' : '') + '</section>';
     }).join('') + '</div>';
   }
   /* the systems, flow and layout key, from SYSTEMS / LAYERS; opened from the Legend button on the drawing */
@@ -1033,7 +1033,7 @@
       else if (b.dataset.tw === 'layer') setLayer(host, b.dataset.layer, b.getAttribute('aria-pressed') !== 'true');
       else if (b.dataset.tw === 'trace') { trace(host, s.sel, b.dataset.dir); refocus('[data-tw="trace"][data-dir="' + b.dataset.dir + '"]'); }
       else if (b.dataset.tw === 'untrace') { trace(host, null); refocus(s.sel ? '[data-tw="trace"]' : null); }
-      else if (b.dataset.tw === 'go') goTo(host, b.dataset.id);
+      else if (b.dataset.tw === 'go') { goTo(host, b.dataset.id); if (b.dataset.focus) focusOn(host, b.dataset.id); }
       else if (b.dataset.tw === 'bim') showInModel(host, s.sel);
       else if (b.dataset.tw === 'legend') setLegend(host);
       else if (b.dataset.tw === 'floor') { s.flr = s.flr === b.dataset.lv ? null : b.dataset.lv; update(host, s.E); refocus('[data-tw="floor"][data-lv="' + b.dataset.lv + '"]'); }
@@ -1223,6 +1223,7 @@
     frame(s);
     function toW(cx, cy) { var r = svg.getBoundingClientRect(); return { x: s.vb.x + (cx - r.left) / r.width * s.vb.w, y: s.vb.y + (cy - r.top) / r.height * s.vb.h }; }
     function zoomAt(p, f) {
+      s.animId = (s.animId || 0) + 1;   /* the person's own zoom ends a camera move in progress */
       var nw = Math.max(160, Math.min(s.vb.w * f, s.home.w * 2.2)); f = nw / s.vb.w;
       s.vb = { x: p.x - (p.x - s.vb.x) * f, y: p.y - (p.y - s.vb.y) * f, w: s.vb.w * f, h: s.vb.h * f };
       s.cam = 'free';
@@ -1231,7 +1232,7 @@
     svg.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     svg.addEventListener('wheel', function (e) { e.preventDefault(); zoomAt(toW(e.clientX, e.clientY), Math.exp(e.deltaY * 0.0015)); }, { passive: false });
     svg.addEventListener('pointerdown', function (e) {
-      pts[e.pointerId] = { x: e.clientX, y: e.clientY }; n++;
+      pts[e.pointerId] = { x: e.clientX, y: e.clientY }; n++; s.animId = (s.animId || 0) + 1;
       if (n === 1) { var q = e.target.closest && e.target.closest('.equip'); moved = 0; downId = q ? q.getAttribute('data-id') : null; turning = !!(s.turnMode || e.button === 2 || e.shiftKey || e.altKey); }
       try { svg.setPointerCapture(e.pointerId); } catch (x) {}
     });
@@ -1305,6 +1306,34 @@
     setLevel(host, EQ[id].level === 'EXT' ? 'L1' : EQ[id].level);
     select(host, id);
     var g = s.eqs[id]; if (g && g.focus) try { g.focus({ preventScroll: true }); } catch (e) {}
+  }
+  /* Bring the camera to one machine (from the Equipment list): its drawn box, projected as the view is turned, centred and framed at about five times its size
+     (never closer than the wheel allows, never wider than about half the building), eased like turnAnim; the view stays free so the floor buttons and Reset
+     view still frame as before. The person's own drag or wheel stops it. */
+  function equipBounds(e) {
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    [e.x, e.x + e.w].forEach(function (x) { [e.y, e.y + e.d].forEach(function (y) { [e.z, e.z + e.h].forEach(function (z) {
+      var p = P(x, y, z); x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]);
+    }); }); });
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+  function focusOn(host, id, ms) {
+    var s = host && STATE && STATE.get(host), e = EQ[id]; if (!s || !e || !s.vb) return;
+    var a = aspect(s), b = equipBounds(e), cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    var w = clamp(Math.max(b.w, b.h / a) * 5, 200, (s.home ? s.home.w : 1200) * 0.45), to = { x: cx - w / 2, y: cy - w * a / 2, w: w, h: w * a };
+    var from = { x: s.vb.x, y: s.vb.y, w: s.vb.w, h: s.vb.h }, run = s.animId = (s.animId || 0) + 1;
+    s.cam = 'free';
+    ms = ms == null ? 520 : ms;
+    if (reducedMotion() || !ms || typeof requestAnimationFrame !== 'function') { s.vb = to; applyVB(s); return; }
+    var st = null;
+    (function step(now) {
+      if (s.animId !== run) return;
+      if (st === null) st = now;
+      var k = Math.min(1, (now - st) / ms), q = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      s.vb = { x: from.x + (to.x - from.x) * q, y: from.y + (to.y - from.y) * q, w: from.w + (to.w - from.w) * q, h: from.h + (to.h - from.h) * q };
+      applyVB(s);
+      if (k < 1) requestAnimationFrame(step);
+    })(typeof performance !== 'undefined' ? performance.now() : 0);
   }
   /* Trace the reference relationships from a machine, upstream or downstream, over all four floors (the whole building is shown when the trace leaves the
      floor in view). Only classes change: machines, tags and pipes in the trace stand out, the rest step back. dir null clears. */
@@ -1439,7 +1468,7 @@
     return { found: found, total: fin };
   }
 
-  return { LZ: LZ, LEVELS: LEVELS, EQUIP: EQUIP, PIPES: PIPES, SYSTEMS: SYSTEMS, LAYERS: LAYERS, P: P, worldBounds: worldBounds, levelBounds: levelBounds, fit: fit, RISERS: RISERS, create: create, update: update, setLevel: setLevel, setLayer: setLayer, select: select, trace: trace, goTo: goTo,
+  return { LZ: LZ, LEVELS: LEVELS, EQUIP: EQUIP, PIPES: PIPES, SYSTEMS: SYSTEMS, LAYERS: LAYERS, P: P, worldBounds: worldBounds, levelBounds: levelBounds, fit: fit, RISERS: RISERS, create: create, update: update, setLevel: setLevel, setLayer: setLayer, select: select, trace: trace, goTo: goTo, focusOn: focusOn,
     showInModel: showInModel, release: release, machineForBim: machineForBim,
     setView: setView, view: function (host, yaw, tilt) { turn(host, yaw, tilt); }, getView: function () { return { yaw: VIEW.yaw, tilt: VIEW.tilt }; }, resetView: resetView, tagLayout: function (host) { var s = host && STATE && STATE.get(host); if (s) tagLayout(s); },
     YAW: [YAW_MIN, YAW_MAX], TILT: [TILT_MIN, TILT_MAX] };
