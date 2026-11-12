@@ -1120,7 +1120,14 @@
     }
     else run(p.src);
     if (t && TRIPPTS[t]) by.push([p.src, t]);
-    return { measure: M, run: R, by: by };
+    var rule = { measure: M, run: R, by: by };
+    /* condenser water: the live feed has no Pump0xRunStatus on the CW pumps, so a pump speed above 0 is the evidence that they circulate (speed: read only
+       when no run status is). The two pipes that touch the tower also need its fan not reported off (gate). */
+    if ((p.sys === 'cws' || p.sys === 'cwr') && t === 'PUMPSET') {
+      rule.speed = [[p.src, 'Pump01Speed'], [p.src, 'Pump02Speed']];
+      if (p.id === 'cws_ct_cwp' || p.id === 'cwr_ch_ct') rule.gate = [['COOLING_TOWER_01', 'FanRunStatus']];
+    }
+    return rule;
   }
   /* a point of a confirmed (mapped, not stale) machine, read live; else null */
   function liveReading(r, name) {
@@ -1169,10 +1176,14 @@
     if (connected === false) return 'offline';
     var by = rule.by || [], i, d;
     for (i = 0; i < by.length; i++) { d = driveOf(res[by[i][0]], by[i][1], RUNPTS[by[i][1]] || [], TRIPPTS[by[i][1]] || []); if (d === 'tripped') return 'tripped'; }
+    var g = (rule.gate || []).map(function (q) { return liveReading(res[q[0]], q[1]); }).filter(function (x) { return x && x.type === 'bool'; });
+    if (g.length && !g.some(function (x) { return x.value; })) return 'stopped';
     var m = rule.measure.map(function (q) { return liveReading(res[q[0]], q[1]); }).filter(function (x) { return x && x.type === 'number'; });
     if (m.length) return m.some(function (x) { return x.value > 0; }) ? 'measured' : 'stopped';
     var rr = rule.run.map(function (q) { return liveReading(res[q[0]], q[1]); }).filter(function (x) { return x && x.type === 'bool'; });
     if (rr.length) return rr.some(function (x) { return x.value; }) ? 'running' : rr.length === rule.run.length && !rule.partial ? 'stopped' : 'unknown';
+    var sp = (rule.speed || []).map(function (q) { return liveReading(res[q[0]], q[1]); }).filter(function (x) { return x && x.type === 'number'; });
+    if (sp.length) return sp.some(function (x) { return x.value > 0; }) ? 'running' : 'stopped';
     var involved = rule.measure.concat(rule.run).map(function (q) { return res[q[0]]; });
     return involved.some(function (r) { return r && r.state === 'stale'; }) ? 'stale' : 'unknown';
   }
