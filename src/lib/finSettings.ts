@@ -120,7 +120,7 @@ export function powerBoardRows(boards: PowerBoard[] | undefined): PowerBoardRow[
 export const meterEquipNames = (s: ProjectApiSettings): string[] => (s.finMeters ?? []).map(m => m.equip.trim()).filter(Boolean)
 
 /** Live points and history queries with each board's own point added, for whatever polls FIN with them */
-export function pointsWithBoards(s: ProjectApiSettings): { live?: JsonObject; history?: JsonObject } {
+export function pointsWithBoards(s: ProjectApiSettings): { live?: Record<string, string>; history?: Record<string, string> } {
   let live = s.finLivePoints
   let history = s.finEndpoints
   for (const b of s.finPowerBoards ?? []) {

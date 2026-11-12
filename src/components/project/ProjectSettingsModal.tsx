@@ -436,6 +436,7 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
     setMappings(mappingStatesFrom(savedSettings))
     setRevs(prev => Object.fromEntries(MAPPING_FIELDS.map(f => [f, prev[f] + 1])) as typeof prev)
     setBoardsRev(r => r + 1)
+    setMetersRev(r => r + 1)
     setDocsRev(r => r + 1)
     setDocsError(null)
     setDocsLoadedFor(currentProject.projectId)
