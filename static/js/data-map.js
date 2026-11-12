@@ -387,6 +387,7 @@
     if (!list || !list.length) return null;
     return list.filter(function (b) { return b && b.name && b.liveKey; }).map(function (b, i) {
       return { name: String(b.name), live: String(b.liveKey), his: b.historyKey ? String(b.historyKey) : null,
+        point: b.point ? String(b.point) : '',
         pmu: b.meter ? String(b.meter) : null, hue: HUES[i % HUES.length] };
     });
   })();
@@ -397,7 +398,8 @@
     var list = cfg && Array.isArray(cfg.meters) ? cfg.meters : null;
     if (!list || !list.length) return null;
     return list.filter(function (m) { return m && m.name; }).map(function (m) {
-      return { name: String(m.name), equip: String(m.equip || ""), his: m.his ? String(m.his) : null, main: m.main === true };
+      return { name: String(m.name), equip: String(m.equip || ""), his: m.his ? String(m.his) : null,
+        point: m.point ? String(m.point) : '', main: m.main === true };
     });
   }
   /* Whose board ↔ meter links to trust: the project's configured ones, else Marsa Al Arab's own */
@@ -514,6 +516,7 @@
   function applyPower(p) {
     var site = window.EKO_DATA && window.EKO_DATA.marsa;
     if (!site || !p || !site.metrics) return;
+    lastPower = p;
     showConfiguredMeters();
     var m = site.metrics;
     var el = site.energyLanding;
@@ -1194,13 +1197,19 @@
         ZONE_FIELDS.forEach(function (k) { if (k in site.power) sampleBoards[k] = site.power[k]; });
       }
       if (site.power) {
-        var flats = fromHourly ? [buildingFlat] : boardList.map(function (b) { return flattenHist(p.power_history[b.his]); });
+        var flats = fromHourly ? [buildingFlat] : boardList.map(function (b) {
+          var rows = b.his ? flattenHist(p.power_history[b.his]) : [];
+          if (!rows.length && b.point) rows = savedPointSeries(b.point, flattenHist) || [];
+          return rows;
+        });
         site.power.pmuFlats = {};
         if (boardMeterLinks) {
           boardList.forEach(function (b, i) { if (b.pmu) site.power.pmuFlats[meterKey(b.pmu)] = flats[i]; });
         }
         (configuredMeters() || []).forEach(function (m) {
-          if (m.his && historyHas(p, m.his)) site.power.pmuFlats[m.name] = hourlyUse(flattenHist(p.power_history[m.his]));
+          var meterFlat = m.his && historyHas(p, m.his) ? flattenHist(p.power_history[m.his]) : [];
+          if (!meterFlat.length && m.point) meterFlat = savedPointSeries(m.point, flattenHist) || [];
+          if (meterFlat.length) site.power.pmuFlats[m.name] = hourlyUse(meterFlat);
         });
         var peakFlat = flattenHist(p.power_history.Peak_Demand_his);
         var allFlats = flats.concat([peakFlat]);
@@ -1717,6 +1726,41 @@
   var historyCache = {};
   var HIST_DAYS = 31;
   var HIST_RETRY_MS = 60000;   // a failed history read is tried again after this long
+  /* A board or meter whose history is not in the power poll. Keyed by the FIN point id. */
+  var pointHist = {};
+  var lastPower = null;
+  function finPointId(ref) {
+    var proj = (siteInfo() && siteInfo().finProject) || '';
+    var id = String(ref || '').trim().replace(/^@/, '');
+    if (proj) id = id.split('{project}').join(proj);
+    return /^p:[A-Za-z0-9_.-]+:r:[A-Za-z0-9_.-]+$/.test(id) ? id : '';
+  }
+  function requestPointHistory(id) {
+    var slot = pointHist[id];
+    if (slot && (slot.pending || (slot.at && Date.now() - slot.at < HIST_RETRY_MS))) return;
+    var api = window.DashboardData;
+    if (!api || !api.getPointHistory) return;
+    pointHist[id] = { pending: true, at: Date.now() };
+    api.getPointHistory(id, HIST_DAYS).then(function (res) {
+      if (!current()) return;
+      pointHist[id] = { history: (res && res.history) || {}, at: Date.now() };
+      if (lastPower) applyPower(lastPower);
+    }).catch(function () {
+      if (!current()) return;
+      pointHist[id] = { history: {}, at: Date.now() };
+    });
+  }
+  function savedPointSeries(point, flatten) {
+    var id = finPointId(point);
+    if (!id) return null;
+    var slot = pointHist[id];
+    if (slot && slot.history) {
+      var rows = flatten(slot.history);
+      if (rows.length) return rows;
+    }
+    requestPointHistory(id);
+    return null;
+  }
   /* none: no historized point to trend; loading; failed: FIN or the backend did not answer; empty: answered, no samples; ok */
   function histStateOf(primary, cached) {
     if (!primary || (!primary.actHis && !primary.spHis)) return "none";
