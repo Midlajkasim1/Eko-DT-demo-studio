@@ -9,7 +9,8 @@
 }
 
 /* from the pack's css/components.css */
-.dashboard-native-container #assetpanel .aprow{border-block-end:none; padding-block:6px; align-items:baseline}
+.dashboard-native-container #assetpanel .aprow{border-block-end:none; padding-block:6px; align-items:baseline; min-width:0}
+.dashboard-native-container .aprow dd,.dashboard-native-container .alreft,.dashboard-native-container .alreftech,.dashboard-native-container .mktech,.dashboard-native-container .mkwhat,.dashboard-native-container .alhm,.dashboard-native-container .mkbox,.dashboard-native-container .alref{min-width:0; overflow-wrap:anywhere}
 .dashboard-native-container .hmgrad[data-mode="energy"]{background:linear-gradient(90deg, var(--s3), var(--btnP))}
 .dashboard-native-container .tlaxis i[data-edge="s"]{transform:none}
 .dashboard-native-container .tlaxis i[data-edge="e"]{transform:translateX(-100%)}
@@ -221,9 +222,11 @@
 .dashboard-native-container .pboxt{flex:none; font-size:var(--txCapSz); color:var(--t3)}
 .dashboard-native-container .pboxti{font-size:var(--txBodySz); line-height:1.4; color:var(--t1)}
 .dashboard-native-container .pboxd{font-size:var(--txSubSz); line-height:1.4; color:var(--t3)}
-.dashboard-native-container .pboxv{display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-block-start:2px; font-size:var(--txBodySz)}
-.dashboard-native-container .pboxvn{color:var(--t2)}
-.dashboard-native-container .pboxv b{font-size:var(--txValueSz); font-weight:var(--txValueW); color:var(--t1)}
+.dashboard-native-container .pboxv{display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-block-start:2px; font-size:var(--txBodySz); min-width:0; max-width:100%}
+.dashboard-native-container .pbox,.dashboard-native-container .pboxh{min-width:0; max-width:100%}
+.dashboard-native-container .pboxvn{color:var(--t2); flex:none}
+.dashboard-native-container .pboxti,.dashboard-native-container .pboxd,.dashboard-native-container .pboxk,.dashboard-native-container .pboxv b{min-width:0; overflow-wrap:anywhere}
+.dashboard-native-container .pboxv b{flex:1 1 8em; font-size:var(--txValueSz); font-weight:var(--txValueW); color:var(--t1); text-align:end}
 .dashboard-native-container .pboxa{display:flex; flex-wrap:wrap; gap:6px; margin-block-start:6px}
 .dashboard-native-container .pbox[data-sev]{border-inline-start-width:3px}
 .dashboard-native-container .pbox[data-sev="critical"]{border-color:var(--critB); border-inline-start-color:var(--crit); background:var(--critT)}
