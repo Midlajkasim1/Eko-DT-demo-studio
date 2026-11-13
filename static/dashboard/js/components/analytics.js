@@ -300,11 +300,11 @@ window.EKO_A = (function(){
         keys.push({ id: dt.getFullYear()+'-'+(dt.getMonth()+1)+'-'+dt.getDate(), lab, title: dt.getDate()+' '+MON[dt.getMonth()] });
       }
     } else if(range === '6M' || range === '1Y'){
-      const n = range === '6M' ? 6 : 12;
-      for(let i=n-1;i>=0;i--){
-        let m = now.m - i, y = now.y;
-        while(m<0){ m+=12; y-=1; }
-        keys.push({ id: y+'-'+(m+1), lab: MON[m], title: MON[m]+' '+y });
+      const start = new Date(now.y, now.m - (range === '6M' ? 6 : 12), now.d);
+      const end = new Date(now.y, now.m, now.d);
+      for(let t = new Date(start); t.getTime() <= end.getTime(); t = new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1)){
+        const lab = t.getDate() === 1 || t.getTime() === end.getTime() ? MON[t.getMonth()] : '';
+        keys.push({ id: t.getFullYear()+'-'+(t.getMonth()+1)+'-'+t.getDate(), lab, title: t.getDate()+' '+MON[t.getMonth()]+' '+t.getFullYear() });
       }
     } else {
       const end = new Date(now.y, now.m, now.d, now.h);
@@ -326,8 +326,7 @@ window.EKO_A = (function(){
       (flat||[]).forEach(p => {
         if(daySet && daySet.indexOf(wd(p))<0) return;
         let kid;
-        if(range === '6M' || range === '1Y') kid = p.y+'-'+(p.m+1);
-        else if(range === '7d' || range === '30d') kid = p.y+'-'+(p.m+1)+'-'+p.d;
+        if(range === '7d' || range === '30d' || range === '6M' || range === '1Y') kid = p.y+'-'+(p.m+1)+'-'+p.d;
         else kid = p.y+'-'+(p.m+1)+'-'+p.d+'-'+p.h;
         const i2 = idx[kid];
         if(i2 == null) return;
@@ -347,10 +346,11 @@ window.EKO_A = (function(){
     const vals = keys.map((_, i2) => {
       let s = 0, c = 0;
       per.forEach(row => { if(row.vals[i2] != null){ s += row.vals[i2]; c += 1; } });
-      return c ? s : 0;
+      return c ? s : null;
     });
     const any = per.some(row => row.vals.some(v => v != null));
-    const rawMax = any ? Math.max.apply(null, vals) : 0;
+    const reported = vals.filter(v => v != null);
+    const rawMax = reported.length ? Math.max.apply(null, reported) : 0;
     const yMax = rawMax > 0 ? Math.max(1, Math.ceil(rawMax)) : 1;
     return { vals, labels: keys.map(k => k.lab), titles: keys.map(k => k.title), per, yMax, any };
   }
@@ -492,9 +492,16 @@ window.EKO_A = (function(){
     const daySel = E.state.anomDays || [];
     const pmuSel = E.state.anomPmus || [];
     const evSeries = anomEvidenceSeries(E.data.power, range, daySel, pmuSel, boards.length ? boards : pmus);
-    const evPts = evSeries.vals.length > 1
-      ? evSeries.vals.map((v,i2) => `${(i2/(evSeries.vals.length-1)*100).toFixed(2)},${(100 - v/evSeries.yMax*100).toFixed(2)}`).join(' ')
-      : (evSeries.vals.length === 1 ? `50,${(100 - evSeries.vals[0]/evSeries.yMax*100).toFixed(2)}` : '');
+    const evX = i2 => evSeries.vals.length < 2 ? 50 : i2 / (evSeries.vals.length - 1) * 100;
+    const evSegs = [];
+    let evSeg = [];
+    evSeries.vals.forEach((v, i2) => {
+      if(v == null){ if(evSeg.length > 1) evSegs.push(evSeg.join(' ')); evSeg = []; return; }
+      evSeg.push(`${evX(i2).toFixed(2)},${(100 - v / evSeries.yMax * 100).toFixed(2)}`);
+    });
+    if(evSeg.length > 1) evSegs.push(evSeg.join(' '));
+    const evDot = evSeries.vals.length === 1 && evSeries.vals[0] != null
+      ? `50,${(100 - evSeries.vals[0] / evSeries.yMax * 100).toFixed(2)}` : '';
     const evCap = pmuSel.length
       ? pmuSel.map(id => {
           const u = pmus.find(x => x.id === id);
@@ -511,8 +518,8 @@ window.EKO_A = (function(){
         <div class="chplot39">
           <svg viewBox="0 0 100 100" preserveAspectRatio="none">
             <line x1="0" x2="100" y1="50" y2="50" stroke="var(--bd1)" stroke-width="1" stroke-dasharray="2 3" vector-effect="non-scaling-stroke"/>
-            ${evPts ? `<polyline points="${evPts}" fill="none" stroke="#F0A93B" stroke-width="2" vector-effect="non-scaling-stroke"/>` : ''}
-            ${evSeries.vals.length===1 && evPts ? `<circle cx="50" cy="${(100 - evSeries.vals[0]/evSeries.yMax*100).toFixed(2)}" r="1.6" fill="#F0A93B"/>` : ''}
+            ${evSegs.map(seg => `<polyline points="${seg}" fill="none" stroke="#F0A93B" stroke-width="2" vector-effect="non-scaling-stroke"/>`).join('')}
+            ${evDot ? `<circle cx="50" cy="${evDot.split(',')[1]}" r="1.6" fill="#F0A93B"/>` : ''}
           </svg>
           ${evSeries.vals.length ? `<div class="chhits39">${evSeries.vals.map((_,i2) => {
             const rows = evSeries.per.map(row => ({
@@ -520,7 +527,7 @@ window.EKO_A = (function(){
               v: row.vals[i2] == null ? '--' : fmt(row.vals[i2], 1)
             }));
             const tot = evSeries.vals[i2];
-            const totTxt = fmt(tot, 1);
+            const totTxt = tot == null ? '--' : fmt(tot, 1);
             if (rows.length > 1) rows.unshift({ c: '#F0A93B', n: 'Total', v: totTxt });
             return `<span class="chhit39" data-chtip="${encodeURIComponent(JSON.stringify({ t: evSeries.titles[i2], u: 'kWh', rows }))}"></span>`;
           }).join('')}</div>` : ''}
