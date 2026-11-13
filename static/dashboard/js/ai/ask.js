@@ -356,7 +356,8 @@ window.EKO_AI = (function(){
     if(x.status === 'failed') return t('ai.tool.failed', { name, reason: tOr('ai.reason.' + x.reason, x.reason || '') }) + missingText(x.missing);
     return t(x.status === 'completed' ? 'ai.tool.completed' : 'ai.tool.running', { name });
   }
-  function toolsHtml(a){ return a.tools && a.tools.length ? `<div class="aitools tCap">${a.tools.map(x => `<div data-status="${esc(x.status)}">${esc(toolText(x))}</div>`).join('')}</div>` : ''; }
+  /* a read that worked is not a thing to show (no tool log in an answer); one that is running, or failed and says what is not mapped, is */
+  function toolsHtml(a){ const shown = (a.tools || []).filter(x => x.status !== 'completed'); return shown.length ? `<div class="aitools tCap">${shown.map(x => `<div data-status="${esc(x.status)}">${esc(toolText(x))}</div>`).join('')}</div>` : ''; }
   function errText(a){ return a.errCode ? tOr('ai.err.' + a.errCode, t('ai.error')) : t('ai.error'); }
   /* ---- safe Markdown (Eko-Chat answers) ----
      The model's text is DATA. It is HTML-escaped first, whole, with the dashboard's own esc(); only then are the few Markdown shapes below turned into a
