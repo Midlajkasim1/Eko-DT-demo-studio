@@ -9,7 +9,8 @@
 }
 
 /* from the pack's css/components.css */
-.dashboard-native-container #assetpanel .aprow{border-block-end:none; padding-block:6px; align-items:baseline}
+.dashboard-native-container #assetpanel .aprow{border-block-end:none; padding-block:6px; align-items:baseline; min-width:0}
+.dashboard-native-container .aprow dd,.dashboard-native-container .alreft,.dashboard-native-container .alreftech,.dashboard-native-container .mktech,.dashboard-native-container .mkwhat,.dashboard-native-container .alhm,.dashboard-native-container .mkbox,.dashboard-native-container .alref{min-width:0; overflow-wrap:anywhere}
 .dashboard-native-container .hmgrad[data-mode="energy"]{background:linear-gradient(90deg, var(--s3), var(--btnP))}
 .dashboard-native-container .tlaxis i[data-edge="s"]{transform:none}
 .dashboard-native-container .tlaxis i[data-edge="e"]{transform:translateX(-100%)}
@@ -206,6 +207,7 @@
 .dashboard-native-container #assetpanel .alldisc{margin:0}
 .dashboard-native-container .cbadge[data-sev="none"]{background:var(--s3); border:1px solid var(--bd1); color:var(--t3)}
 .dashboard-native-container .pboxes{display:flex; flex-direction:column; gap:8px}
+.dashboard-native-container .apalarm{display:flex; flex-direction:column; gap:6px}
 .dashboard-native-container .pbox{position:relative; display:flex; flex-direction:column; gap:3px; width:100%; box-sizing:border-box; margin:0;
   padding:9px 12px 10px; border:1px solid var(--bd1); border-radius:8px; background:var(--s2);
   text-align:start; font-family:var(--fB),sans-serif; color:var(--t1)}
@@ -220,9 +222,11 @@
 .dashboard-native-container .pboxt{flex:none; font-size:var(--txCapSz); color:var(--t3)}
 .dashboard-native-container .pboxti{font-size:var(--txBodySz); line-height:1.4; color:var(--t1)}
 .dashboard-native-container .pboxd{font-size:var(--txSubSz); line-height:1.4; color:var(--t3)}
-.dashboard-native-container .pboxv{display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-block-start:2px; font-size:var(--txBodySz)}
-.dashboard-native-container .pboxvn{color:var(--t2)}
-.dashboard-native-container .pboxv b{font-size:var(--txValueSz); font-weight:var(--txValueW); color:var(--t1)}
+.dashboard-native-container .pboxv{display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-block-start:2px; font-size:var(--txBodySz); min-width:0; max-width:100%}
+.dashboard-native-container .pbox,.dashboard-native-container .pboxh{min-width:0; max-width:100%}
+.dashboard-native-container .pboxvn{color:var(--t2); flex:none}
+.dashboard-native-container .pboxti,.dashboard-native-container .pboxd,.dashboard-native-container .pboxk,.dashboard-native-container .pboxv b{min-width:0; overflow-wrap:anywhere}
+.dashboard-native-container .pboxv b{flex:1 1 8em; font-size:var(--txValueSz); font-weight:var(--txValueW); color:var(--t1); text-align:end}
 .dashboard-native-container .pboxa{display:flex; flex-wrap:wrap; gap:6px; margin-block-start:6px}
 .dashboard-native-container .pbox[data-sev]{border-inline-start-width:3px}
 .dashboard-native-container .pbox[data-sev="critical"]{border-color:var(--critB); border-inline-start-color:var(--crit); background:var(--critT)}
@@ -249,7 +253,8 @@
 .dashboard-native-container .pcardb{margin:0; font-size:var(--txSubSz); color:var(--t3)}
 .dashboard-native-container #assetpanel .ctlrow{border-block-end:0; padding:6px 4px}
 .dashboard-native-container #assetpanel .ctlname{color:var(--t2); font-size:var(--txBodySz)}
-.dashboard-native-container #assetpanel .aptab{padding-inline:4px}
+.dashboard-native-container #assetpanel .aptabs{flex-wrap:wrap}
+.dashboard-native-container #assetpanel .aptab{padding-inline:4px; flex:none; white-space:nowrap}
 .dashboard-native-container #assetpanel .aptab .cbadge{margin-inline-start:4px}
 .dashboard-native-container .dgwrap[data-grid="assets"],.dashboard-native-container .dgwrap[data-grid="assets"] .dgscroll,.dashboard-native-container .dgwrap[data-grid="assets"] .dgfoot{background:var(--s0)}
 .dashboard-native-container .dgwrap[data-grid="assets"] table.dg th,.dashboard-native-container .dgwrap[data-grid="assets"] table.dg th.dgsel,.dashboard-native-container .dgwrap[data-grid="assets"] table.dg th.dgpinh{background:var(--s0)}
@@ -1024,9 +1029,13 @@
 .dashboard-native-container .e3dcanvas{position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none}
 .dashboard-native-container [data-e3d="3d"] > .e3dplan{visibility:hidden}
 .dashboard-native-container [data-e3d="plan"] > .e3dcanvas{display:none}
-.dashboard-native-container .e3dsw{position:absolute; z-index:6; top:56px; inset-inline-end:12px; display:flex; align-items:center; gap:2px; padding:3px; border-radius:8px; background:var(--elevChip); border:1px solid var(--bd1)}
+.dashboard-native-container .e3dsw{position:absolute; z-index:6; top:52px; inset-inline-end:66px; display:flex; align-items:center; gap:2px; padding:3px; border-radius:8px; background:var(--elev); border:1px solid var(--elevBd); box-shadow:var(--shadow)}
+.dashboard-native-container[data-stacked="1"] .e3dsw,.dashboard-native-container .regmodelwrap .e3dsw{inset-inline-end:12px}
 .dashboard-native-container .e3dsw .seg{padding:3px 10px; font-size:var(--txCapSz)}
-.dashboard-native-container .secloc{position:absolute; z-index:6; top:56px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:8px; padding:3px 3px 3px 12px; border-radius:8px; background:var(--elevChip); border:1px solid var(--bd1); font-size:var(--txCapSz); white-space:nowrap}
+.dashboard-native-container .secloc{position:absolute; z-index:57; top:92px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:8px; padding:3px 3px 3px 12px; border-radius:8px; background:var(--elev); border:1px solid var(--elevBd); box-shadow:var(--shadow); color:var(--t1); font-size:var(--txCapSz); white-space:nowrap; pointer-events:auto; max-width:min(440px, calc(100% - 24px))}
+.dashboard-native-container .secloc > span:first-child{min-width:0; overflow:hidden; text-overflow:ellipsis}
+.dashboard-native-container .secloc > button{flex:none}
+.dashboard-native-container[data-stacked="1"] .secloc{top:108px}
 .dashboard-native-container .e3dnote{padding:0 8px; font-size:var(--txCapSz); color:var(--t2); white-space:nowrap}
 .dashboard-native-container #scnbarhost{position:fixed; z-index:60; inset-inline:0; top:58px; display:flex; justify-content:center; pointer-events:none}
 .dashboard-native-container .scnbar{pointer-events:auto; display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:8px; background:var(--s1); border:1px solid var(--bd2); box-shadow:var(--shadowPop, 0 6px 24px rgba(0,0,0,.3)); max-width:calc(100vw - 32px); flex-wrap:wrap}

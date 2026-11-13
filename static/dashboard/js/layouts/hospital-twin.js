@@ -1384,7 +1384,7 @@
     var lv = s.res[id] && s.res[id].floor ? MAP.modelLevel(s.res[id].floor, call3d('listLevels')) : null;
     E.go(E.overviewId ? E.overviewId() : 'marsa-overview', 'overview', null);
     /* the way back is stored here, not guessed: the model's "Back to Schematic" (app.js bimBack) returns to this page, whose view is kept */
-    E.state.bimBack = { from: from, labelKey: 'twinBackSchematic' };
+    E.state.bimBack = { from: from, labelKey: 'twinBackSchematic', label: id };
     if (E.stacked && E.stacked()) E.state.modelFs = true;
     if (lv && E.state.dock) E.state.dock.level = lv.id;
     E.set({});

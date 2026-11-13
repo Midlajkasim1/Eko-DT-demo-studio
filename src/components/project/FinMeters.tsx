@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { FinResource } from '@/lib/finProjects'
 import { newRowId } from '@/lib/mappingRows'
-import { historyExpression, meterSuggestions, pointRefOf, pointTitle, pointViews, type PointView } from '@/lib/finMappingCatalog'
+import { boardSuggestions, historyExpression, meterSuggestions, pointRefOf, pointTitle, pointViews, type PointView } from '@/lib/finMappingCatalog'
 import { Chips, PointPicker } from '@/components/project/FinPointMapping'
 import type { MeterLink } from '@/types'
 
@@ -47,13 +47,17 @@ export function MetersEditor({ value, points, prefix, onChange }: MetersEditorPr
   const edit = (id: number, patch: Partial<Row>) => commit(rows.map(r => (r.id === id ? { ...r, ...patch } : r)))
   const pointPatch = (text: string): Partial<Row> => {
     const ref = pointRefOf(text) ?? text.trim()
-    return { point: ref, history: byRef.get(ref)?.his ? historyExpression(ref) : '' }
+    return { point: ref, history: ref.startsWith('p:') ? historyExpression(ref) : '' }
   }
   const fromFin = (m: { equip: string; point?: PointView }): Row =>
     ({ ...blank(), name: m.equip, equip: m.equip, ...(m.point ? pointPatch(m.point.ref) : {}) })
+  const fromEnergy = (name: string, view: PointView): Row =>
+    ({ ...blank(), name, equip: view.equip, ...pointPatch(view.ref) })
 
   const listed = new Set(rows.map(r => fold(r.equip)).filter(Boolean))
+  const usedPoints = new Set(rows.map(r => pointRefOf(r.point)).filter(Boolean))
   const offered = found.filter(m => !listed.has(fold(m.equip)))
+  const energy = boardSuggestions(views).filter(s => !usedPoints.has(s.view.ref))
   const names = rows.map(r => fold(r.name || r.equip)).filter(Boolean)
   const twice = new Set(names.filter((n, i) => names.indexOf(n) !== i))
 
@@ -117,20 +121,28 @@ export function MetersEditor({ value, points, prefix, onChange }: MetersEditorPr
       {rows.length === 0 && <p className="fpm-note">No meters yet. Add the ones FIN has below, or add an empty row and fill it in.</p>}
       {rows.map(row)}
       {!points && <p className="fpm-note">Load the FIN project's points (FIN Config) to find its meters.</p>}
-      {points && !found.length && (
+      {points && !found.length && !energy.length && (
         <p className="fpm-note">No FIN equipment starts with {prefix} or has voltage, current and energy points. Add prefixes in Meter Profile (e.g. PMU, EM), or add meters by hand.</p>
       )}
-      {offered.length > 0 && (
+      {(offered.length > 0 || energy.length > 0) && (
         <div className="fpm-suggest" data-testid="meter-suggestions">
           From FIN:
-          <button type="button" className="fpm-use" onClick={() => commit([...rows, ...offered.map(fromFin)])}>
-            + All {offered.length}
+          {offered.length + energy.length > 1 && (
+          <button type="button" className="fpm-use" onClick={() => commit([...rows, ...offered.map(fromFin), ...energy.map(s => fromEnergy(s.name, s.view))])}>
+            + All {offered.length + energy.length}
           </button>
+          )}
           {offered.map(m => (
             <button key={m.equip} type="button" className="fpm-use"
               title={`${m.byName ? 'Name matches the Meter Profile prefix' : 'Has voltage, current and energy points'}. ${m.point ? pointTitle(m.point) : 'No energy point with history.'}`}
               onClick={() => commit([...rows, fromFin(m)])}>
               + {m.equip}
+            </button>
+          ))}
+          {energy.map(s => (
+            <button key={s.view.ref} type="button" className="fpm-use" title={pointTitle(s.view)}
+              onClick={() => commit([...rows, fromEnergy(s.name, s.view)])}>
+              + {s.name}
             </button>
           ))}
         </div>

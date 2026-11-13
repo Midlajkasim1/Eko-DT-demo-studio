@@ -120,7 +120,7 @@ export function powerBoardRows(boards: PowerBoard[] | undefined): PowerBoardRow[
 export const meterEquipNames = (s: ProjectApiSettings): string[] => (s.finMeters ?? []).map(m => m.equip.trim()).filter(Boolean)
 
 /** Live points and history queries with each board's own point added, for whatever polls FIN with them */
-export function pointsWithBoards(s: ProjectApiSettings): { live?: JsonObject; history?: JsonObject } {
+export function pointsWithBoards(s: ProjectApiSettings): { live?: Record<string, string>; history?: Record<string, string> } {
   let live = s.finLivePoints
   let history = s.finEndpoints
   for (const b of s.finPowerBoards ?? []) {
@@ -129,7 +129,8 @@ export function pointsWithBoards(s: ProjectApiSettings): { live?: JsonObject; hi
     if (b.history && b.historyKey) history = { ...(history ?? {}), [b.historyKey]: b.history }
   }
   for (const m of s.finMeters ?? []) {
-    if (m.name && m.history) history = { ...(history ?? {}), [meterHistoryKey(m.name)]: m.history }
+    const expr = m.history || (m.point ? historyExpression(m.point) : '')
+    if (m.name && expr) history = { ...(history ?? {}), [meterHistoryKey(m.name)]: expr }
   }
   return { live, history }
 }
@@ -254,7 +255,7 @@ export function dashboardProjectInfo(meta: { projectId: string; name: string; ap
     powerBoards: Array.isArray(s.finPowerBoards) && s.finPowerBoards.length ? s.finPowerBoards : null,
     /* the project's own meters; null = every meter FIN reports */
     meters: Array.isArray(s.finMeters) && s.finMeters.length
-      ? s.finMeters.map(m => ({ name: m.name, equip: m.equip, his: m.history ? meterHistoryKey(m.name) : null, main: m.main === true }))
+      ? s.finMeters.map(m => ({ name: m.name, equip: m.equip, his: (m.history || m.point) ? meterHistoryKey(m.name) : null, point: m.point || '', main: m.main === true }))
       : null,
     anomalyAllMeters: s.anomalyAllMeters === true,
     energyFromHourly: s.energyFromHourly === true,
@@ -372,6 +373,12 @@ export function toBackendSettings(settings: ProjectApiSettings | undefined): Pro
   if (energyRef && !historyRef) {
     out.finEndpoints = { ...(out.finEndpoints || {}), Hourly_Energy_Consumption_his: historyExpression(energyRef) }
   }
+  // Boards and meters name their own FIN points. The backend only polls history that is in these maps.
+  const polled = pointsWithBoards({ ...s, finLivePoints: out.finLivePoints, finEndpoints: out.finEndpoints })
+  if (polled.live) out.finLivePoints = polled.live
+  if (polled.history) out.finEndpoints = polled.history
+  if (Array.isArray(s.finPowerBoards) && s.finPowerBoards.length) out.finPowerBoards = s.finPowerBoards
+  if (Array.isArray(s.finMeters) && s.finMeters.length) out.finMeters = s.finMeters
   if (Array.isArray(s.finDocuments)) out.finDocuments = s.finDocuments
   if (s.pointControl && typeof s.pointControl === 'object') out.pointControl = s.pointControl
   return out

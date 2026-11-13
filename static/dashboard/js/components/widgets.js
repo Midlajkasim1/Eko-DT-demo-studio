@@ -448,7 +448,7 @@ window.EKO_C = (function(){
     });
     const rowHtml = (a, grouped) => {
       const l = E.alarmLines(a);   /* D105: wording from the role; the technical line beneath for plain-wording roles */
-      return `<div class="alr ${grouped?'alrind':''}" data-act="openAsset" data-asset="${esc(a.asset)}" role="button" tabindex="0">
+      return `<div class="alr ${grouped?'alrind':''}" data-act="openAsset" data-asset="${esc(a.asset)}" data-tab="alarms" role="button" tabindex="0">
         <span class="alrsev" data-tip="${esc(sevTipFor(E, a))}">${sevGlyph(a.sev, !!a.ack, 13)}</span>
         <div class="alrbody">
           ${grouped?'':`<span class="alrid" ${a.ack?'data-ack="1"':''}>${esc(a.asset)}</span>`}
@@ -458,7 +458,7 @@ window.EKO_C = (function(){
         </div>
         <span class="alract hst">
           ${a.ack?'':`<button class="alghost" data-act="ackAlarm" data-alarm="${a.id}">${esc(E.t('acknowledge'))}</button>`}
-          <button class="alprim" data-act="openAsset" data-asset="${esc(a.asset)}">${esc(E.t('details'))}</button>
+          <button class="alprim" data-act="openAsset" data-asset="${esc(a.asset)}" data-tab="alarms">${esc(E.t('details'))}</button>
         </span>
         <span class="alrage">${esc(a.ageH != null ? E.fmtAge(a.ageH) : (a.age || ''))}</span>
         <span class="alractw" data-tip="${esc(actTip(E, a.sev))}">${esc(sevAction(E,a.sev))}</span>
@@ -626,22 +626,30 @@ window.EKO_C = (function(){
       const vals = series.map(z => z && z[i]);
       return sumArr(vals);
     };
+    const boardIdx = E.state.pwBoard == null || E.state.pwBoard === '' ? -1 : Number(E.state.pwBoard);
+    const pickedName = boardIdx >= 0 && p.zones && p.zones[boardIdx] ? p.zones[boardIdx] : '';
+    const scopeSeries = (series) => (pickedName && Array.isArray(series) && boardIdx < series.length) ? [series[boardIdx]] : series;
     let heroNow = null, heroPrev = null;
-    if (tr === 'hourly' && p.zoneLast24 && p.zoneLast24[0] && p.zoneLast24[0].length) {
-      const hi = p.zoneLast24[0].length - 1;
-      heroNow = colAt(p.zoneLast24, hi);
-      heroPrev = hi > 0 ? colAt(p.zoneLast24, hi - 1) : null;
+    const hourlySeries = scopeSeries(p.zoneLast24);
+    const todayHours = scopeSeries(p.zoneHourly);
+    if (tr === 'hourly' && hourlySeries && hourlySeries[0] && hourlySeries[0].length) {
+      const hi = hourlySeries[0].length - 1;
+      heroNow = colAt(hourlySeries, hi);
+      // The hourly chart keeps only the latest hour. The hour before it is on today's clock.
+      const prevAt = todayHours && todayHours[0] && todayHours[0].length >= 2 ? todayHours[0].length - 2 : -1;
+      heroPrev = prevAt >= 0 ? colAt(todayHours, prevAt) : null;
     } else if (tr === 'weekly') {
-      heroNow = sumArr(p.zoneWTD);
-      heroPrev = sumArr(p.zonePrevWeek);
+      heroNow = sumArr(scopeSeries(p.zoneWTD));
+      heroPrev = sumArr(scopeSeries(p.zonePrevWeek));
     } else if (tr === 'monthly') {
-      heroNow = sumArr(p.zoneMTD);
-      heroPrev = sumArr(p.zonePrevMonth);
+      heroNow = sumArr(scopeSeries(p.zoneMTD));
+      heroPrev = sumArr(scopeSeries(p.zonePrevMonth));
     } else {
-      heroNow = (p.zoneHourly && p.zoneHourly[0] && p.zoneHourly[0].length)
-        ? sumArr(p.zoneHourly.map(z => (z || []).reduce((a, v) => a + (Number(v) || 0), 0)))
+      const todaySeries = scopeSeries(p.zoneHourly);
+      heroNow = (todaySeries && todaySeries[0] && todaySeries[0].length)
+        ? sumArr(todaySeries.map(z => (z || []).reduce((a, v) => a + (Number(v) || 0), 0)))
         : null;
-      heroPrev = sumArr(p.zoneYesterday);
+      heroPrev = sumArr(scopeSeries(p.zoneYesterday));
     }
     /* Sample sites with a month-to-date and a previous month (the medical engine) use that
        page: MW peak and the two months. A live FIN site keeps today and yesterday in kWh. */
@@ -670,8 +678,8 @@ window.EKO_C = (function(){
       ${hero(E.t('pwPeak'), peakUnit === 'MW' && peakPctMw != null ? E.t('pwPctLimit',{p:peakPctMw}) : '', peakUnit === 'MW' && peakPctMw != null ? 'crit' : '', nd(peakUnit === 'MW' ? peakMw : peakKw, 1), (peakUnit === 'MW' ? peakMw : peakKw) != null ? peakUnit : '', peakUnit === 'MW' && limMw != null ? E.t('pwContractedMwCap',{v:fmt(limMw,limDp)}) : '', peakUnit === 'MW' && simPeakChart ? bullet(simPeakChart,'P') : '')}
     </div>` : `<div class="pwhero">
       ${hero(E.t('pwCurrentCons'), loadShown != null ? E.t('pwAboveChip') : '', loadShown != null ? 'warn' : '', nd(loadShown,1), loadShown != null ? loadUnit : '', E.t('pwBaselineKwCap',{v:fmt(el.baselineKw,1)}), el.currentKw != null ? bullet(p.heroCharts.current,'L') : '')}
-      ${hero(E.t('pwHeroNow.'+tr), '', '', nd(heroNow, 1), heroNow != null ? 'kWh' : '', E.t('pwHeroNowCap.'+tr))}
-      ${hero(E.t('pwHeroPrev.'+tr), '', '', nd(heroPrev, 1), heroPrev != null ? 'kWh' : '', E.t('pwHeroPrevCap.'+tr))}
+      ${hero(E.t('pwHeroNow.'+tr), '', '', nd(heroNow, 1), heroNow != null ? 'kWh' : '', (pickedName ? pickedName + ' · ' : '') + E.t('pwHeroNowCap.'+tr))}
+      ${hero(E.t('pwHeroPrev.'+tr), '', '', nd(heroPrev, 1), heroPrev != null ? 'kWh' : '', (pickedName ? pickedName + ' · ' : '') + E.t('pwHeroPrevCap.'+tr))}
       ${hero(E.t('pwCarbon'), '', '', nd(carbonKgH,1), carbonKgH != null ? 'kg/h' : '', '')}
       ${hero(E.t('pwPeak'), peakPct != null ? E.t('pwPctLimit',{p:peakPct}) : '', peakPct != null ? 'crit' : '', nd(peakUnit === 'MW' ? peakMw : peakKw, 1), (peakUnit === 'MW' ? peakMw : peakKw) != null ? peakUnit : '', E.t('pwContractedLine',{v:fmt(contractedKw,0)}), peakKw != null ? bullet(p.heroCharts.peak,'P') : '')}
     </div>`;
@@ -730,7 +738,6 @@ window.EKO_C = (function(){
     let zh = (zhAll[tr] && zhAll[tr][0]) ? zhAll[tr] : [[]];
     let zhHues = hues;
     let zhNames = boardNames;
-    const boardIdx = E.state.pwBoard == null || E.state.pwBoard === '' ? -1 : Number(E.state.pwBoard);
     if (boardIdx >= 0 && zh[boardIdx]) {
       zh = [zh[boardIdx]];
       zhHues = [hues[boardIdx] || '#4EA3E8'];
@@ -1080,6 +1087,13 @@ window.EKO_C = (function(){
     const s = String(value).trim();
     if (!s || s === '—' || s === '--' || s === 'N/A' || /^null$/i.test(s)) return null;
     return s;
+  }
+  function alarmWorded(E, asset) {
+    const norm = s => String(s == null ? '' : s).toLowerCase().replace(/\s+/g, ' ').trim();
+    const texts = ((asset && asset.alarms) || []).map(id => E.alarm(id)).filter(Boolean)
+      .reduce((all, a) => all.concat(a.plainEn, a.techEn), []).map(norm).filter(Boolean);
+    return value => { const s = norm(value);
+      return s.length >= 16 && texts.some(x => x.indexOf(s.slice(0, 48)) !== -1 || (x.length >= 16 && s.indexOf(x.slice(0, 48)) !== -1)); };
   }
   function fcuNumber(raw) {
     const m = String(raw).replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
@@ -1675,21 +1689,14 @@ window.EKO_C = (function(){
     const ctx = [arL ? (r.levelAr || r.level) : r.level, arL ? (r.typeAr || r.typeEn) : r.typeEn].filter(Boolean).join(' \u00b7 ');
     const ctl = window.EKO_CTL && window.EKO_CTL.showsControl(E, r);
     let tab = E.state.apTab;
-    if (tab === 'workorder') tab = 'activity';   /* E15: the FIN work orders are the Activity tab */
-    if(!['alarms','activity','analytics','om','warranty','control'].includes(tab)) tab = 'alarms';
+    if(!['alarms','activity','analytics','om','warranty','workorder','control'].includes(tab)) tab = 'alarms';
     if(tab === 'control' && !ctl) tab = 'alarms';
     const trP = x => E.ph(x);
     const foldNav = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const wtySlot = n => { const f = foldNav(n); if (f.indexOf('warrant') === -1) return null; if (f.indexOf('start') !== -1) return 'start'; if (f.indexOf('end') !== -1) return 'end'; return null; };
-    const alsText = als.map(a => String((a && (a.plainEn || a.techEn)) || '').toLowerCase());
-    const fddRows = (r.params || []).filter(p => {
-      if (!isFddNav(p[0]) || wtySlot(p[0])) return false;
-      const msg = String(p[2] || '').toLowerCase();
-      if (!msg) return false;
-      if (msg.length < 16) return true;   // a state word (FAULT), not a message
-      return !alsText.some(t => t && (t.indexOf(msg.slice(0, 48)) !== -1 || msg.indexOf(t.slice(0, 48)) !== -1));
-    });
-    const alarmPtRows = (r.alarmPts || []).filter(p => fcuClean(p[2])).map(p => [p[0], fcuClean(p[2])]);
+    const worded = alarmWorded(E, r);
+    const fddRows = (r.params || []).filter(p => isFddNav(p[0]) && !wtySlot(p[0]) && p[2] && !worded(p[2]));
+    const alarmPtRows = (r.alarmPts || []).filter(p => fcuClean(p[2]) && !worded(p[2])).map(p => [p[0], fcuClean(p[2])]);
     const analogRows = analogPointRows(E, r);
     /* MAHU and ECO list every FIN point they draw, a missing one as "—"; the rest use the generic analog rows */
     const typeRows = mauPointRows(E, r) || ecoPointRows(r);
@@ -1791,20 +1798,27 @@ window.EKO_C = (function(){
     const rows = html => html ? `<dl class="aprows">${html}</dl>` : '';
     const sec = label => `<h3 class="apsec">${esc(label)}</h3>`;
     const empty = key => `<p class="apempty">${esc(t(key))}</p>`;
-    const recOf = a => a.recEn ? `<div class="alrec"><span class="alrecl">${esc(t('apRecommended'))}</span><div class="alrect">${esc(E.lang === 'ar' ? (a.recAr || a.recEn) : a.recEn)}</div>${a.basisEn ? `<div class="alrecb"><span class="alrecl">${esc(t('apRecBasis'))}</span> ${esc(E.lang === 'ar' ? (a.basisAr || a.basisEn) : a.basisEn)}</div>` : ''}</div>` : '';
+    const recBox = (text, basis) => text ? pbox({ kind: t('apRecommended'), title: text, detail: basis ? t('apRecBasis') + ' ' + basis : '' }) : '';
+    const recOf = (a, own) => recBox(a.recEn && (arL ? (a.recAr || a.recEn) : a.recEn), a.basisEn && (arL ? (a.basisAr || a.basisEn) : a.basisEn)) + recBox(own);
     let body = '';
     if(tab === 'alarms'){
-      const boxes = als.map(a => { const L = E.alarmLines(a);   /* the technical line stays visible, as before */
+      const boxes = als.map(a => { const L = E.alarmParts(a);   /* the technical line stays visible, as before */
         return `<div class="apalarm">${pbox({ kind: t('ap.alarmKind.' + a.sev), time: a.ageH != null ? E.fmtAge(a.ageH) : (a.age || ''),
           title: (arL ? (a.plainAr || a.plainEn) : a.plainEn) || L.main,
           detail: a.ack ? t('ackShort', { time: a.ack.time, who: E.person(a.ack.who) }) : t('apUnack'),
           value: L.sub ? [t('ap.reading'), L.sub] : null, sev: a.sev, acked: !!a.ack, hend: histBtn(a),
-          actions: a.ack ? [] : [{ act: 'ackAlarm', data: { alarm: a.id }, label: t('acknowledge') }] })}${recOf(a)}${histPanel(a)}</div>`; }).join('');
-      const fdd = fddRows.map(p => row(trP(p[0]), esc(E.clip2 ? E.clip2(p[2]) : p[2]))).join('');
+          actions: a.ack ? [] : [{ act: 'ackAlarm', data: { alarm: a.id }, label: t('acknowledge') }] })}${recOf(a, L.rec)}${histPanel(a)}</div>`; }).join('');
+      const fdd = fddRows.map(p => { const v = String(E.clip2(p[2]));
+        const healthy = /^(normal|ok|false|off|0|healthy)$/i.test(v.trim()) || /[-–:]\s*normal\s*$/i.test(v);
+        const rule = foldNav(p[0]), own = rule ? als.find(a => foldNav(a.state).indexOf(rule) !== -1) : null;
+        return pbox({ kind: t('apFdd'), title: trP(p[0]), value: [t(v.length < 16 ? 'dgc.status' : 'ap.reading'), v], sev: healthy ? '' : (own || worst || { sev: 'critical' }).sev }); }).join('');
       const pts = alarmPtRows.map(p => row(trP(p[0]), esc(p[1]))).join('');
-      body = (als.length ? `<div class="pboxes">${boxes}</div>` : empty('ap.noAlarms'))
-        + (fdd ? sec(t('apFdd')) + rows(fdd) : '') + (pts ? sec(t('ap.readings')) + rows(pts) : '');
+      const wo = (r.workOrders || []).length ? sec(t('apWoTab')) + workOrderBody(E, r) : '';
+      body = (als.length ? '' : empty('ap.noAlarms')) + (boxes || fdd ? `<div class="pboxes">${boxes}${fdd}</div>` : '')
+        + (pts ? sec(t('ap.readings')) + rows(pts) : '') + wo;
     } else if(tab === 'activity'){
+      body = window.EKO_ACT ? window.EKO_ACT.tab(E, r, als, finAsset(E, id)) : empty('ap.noActivity');
+    } else if(tab === 'workorder'){
       body = workOrderBody(E, r);
     } else if(tab === 'analytics'){
       const live = typeRows || (fahuRows ? fahuRows + (analogRows || '') : analogRows);
@@ -1838,7 +1852,7 @@ window.EKO_C = (function(){
         <button class="iconbtn icon26" data-act="closeAsset" aria-label="${esc(t('close'))}">${icon('x',12)}</button>
       </div>
       <div class="apctx" data-tip="${esc(ctx)}" data-tipif="trunc">${esc(ctx)}</div>
-      <div class="aptabs">${tabBtn('alarms', t('apAlarms'), badge)}${tabBtn('activity', t('apActivityTab'), woBadge)}${tabBtn('analytics', t('apFullT'))}${tabBtn('om', t('apOmTab'))}${tabBtn('warranty', t('apWtyTab'))}${ctl?tabBtn('control', t('apControlTab')):''}</div>
+      <div class="aptabs">${tabBtn('alarms', t('apAlarms'), badge)}${tabBtn('activity', t('apActivityTab'))}${tabBtn('analytics', t('apFullT'))}${tabBtn('om', t('apOmTab'))}${tabBtn('warranty', t('apWtyTab'))}${tabBtn('workorder', t('apWoTab'), woBadge)}${ctl?tabBtn('control', t('apControlTab')):''}</div>
       <div class="apbody">${body}</div>
       <div class="apfoot apfootmob">
         ${E.state.woRaised[id] || (E.state.woPhase||{})[id]
@@ -1884,7 +1898,7 @@ window.EKO_C = (function(){
   }
   const kwhBasis = (E, kwh, tb) => E.t('basisKwh', { kwh: fmt(kwh, kwh < 100 ? 2 : 0), basis: tb.text });
 
-  return { esc, fmt, icon, dicon, tariffBasis, emissionBasis, kwhBasis, pbox, spine, aiBtn, ctl, sevGlyph, sevAction, sevTipFor, actTip, sparkPath, ribbon, woBtn, brandLogo, utilitiesSummary, mkEye,
+  return { esc, fmt, icon, dicon, tariffBasis, emissionBasis, kwhBasis, pbox, spine, alarmWorded, aiBtn, ctl, sevGlyph, sevAction, sevTipFor, actTip, sparkPath, ribbon, woBtn, brandLogo, utilitiesSummary, mkEye,
            execSummary, energySummary, alarmModPanel, energyModPanel,
            powerPage, consModelPanel, utilitiesPanel, registerTable, assetPanel, summaryShell, treeShell, modShell };
 })();

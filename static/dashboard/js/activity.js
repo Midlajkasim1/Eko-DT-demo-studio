@@ -20,13 +20,23 @@ window.EKO_ACT = (function(){
   const L = (E, en, ar) => E.lang === 'ar' ? (ar || en) : en;
   const cap1 = x => x ? x[0].toUpperCase() + x.slice(1) : x;
 
-  function rows(E, r, als){
+  function rows(E, r, als, live){
     const t = E.t.bind(E), id = r.id, out = [];
     /* 1. FIN alarm history */
     als.forEach(a => {
       out.push({ h: a.ageH || 0, src: 'fin', kind: 'raised', alarm: a, title: E.alarmLines(a, true).main, detail: t('rpSev.' + a.sev) });
       if(a.ack && a.ack.ageH != null) out.push({ h: a.ack.ageH, src: 'fin', kind: 'acked', title: E.alarmLines(a, true).main, detail: t('act.ackBy', { who: E.person(a.ack.who) }) });
     });
+    const seen = new Set();
+    als.forEach(a => (a.hist || []).forEach(rec => { const key = rec.id || rec.at + ' ' + rec.msg;
+      if(seen.has(key)) return;
+      seen.add(key);
+      const l = E.alarmParts({ plainEn: rec.msg, plainAr: rec.msg, techEn: rec.tech, techAr: rec.tech });
+      out.push({ h: rec.at == null ? (a.ageH || 0) : Math.max(0, (E.nowMs() - rec.at) / 36e5), src: 'fin', kind: 'past', title: l.main, tech: l.sub, detail: rec.open ? t('alHistOpen').toLowerCase() : t('act.cleared') }); }));
+    if(live) (r.workOrders || []).forEach(w => { const due = w.dueIso ? new Date(w.dueIso + 'T00:00:00') : null, dated = !!due && !isNaN(due.getTime());
+      const today = new Date(E.nowMs()); today.setHours(0, 0, 0, 0);
+      out.push({ h: dated ? Math.round((today - due) / 864e5) * 24 : 0, undated: !dated, src: 'wo', kind: 'wo', title: w.description || w.type || '', wo: w.id,
+        detail: t(w.status === 'over' ? 'woOver' : w.status === 'due' ? 'woDue' : 'woSched') + (w.dueDate ? ' · ' + w.dueDate : '') }); });
     const types = ((E.data.alarmHistory || {}).types) || {};
     ((E.data.alarmHistory || {}).events || []).filter(e => e.asset === id).forEach(e => { const ty = types[e.type];
       out.push({ h: e.agoH, src: 'fin', kind: 'past', title: ty ? cap1((k => E.t(k) !== k ? E.t(k) : L(E, ty.en, ty.ar))('alt.' + e.type)) : e.type, detail: t('act.cleared') }); });
@@ -69,19 +79,20 @@ window.EKO_ACT = (function(){
       : `<p class="tCap">${esc(t('act.prevNone'))}</p>`;
     return `<div class="acthist"><ol class="actlc">${lc}</ol>${prev.length ? `<p class="tLbl">${esc(t('act.prevT', { n: prev.length }))}</p>` : ''}${prevHtml}</div>`;
   }
-  function tab(E, r, als){
-    const t = E.t.bind(E), list = rows(E, r, als), open = E.state.actOpen || {};
-    if(!list.length) return `<p class="apempty">${esc(t('act.empty'))}</p><p class="tCap actfoot">${esc(t('act.foot'))}</p>`;
+  function tab(E, r, als, live){
+    const t = E.t.bind(E), list = rows(E, r, als, live), open = E.state.actOpen || {};
+    const foot = live ? '' : `<p class="tCap actfoot">${esc(t('act.foot'))}</p>`;
+    if(!list.length) return `<p class="apempty">${esc(t(live ? 'act.emptyLive' : 'act.empty'))}</p>${foot}`;
     const li = x => `<li class="actrow" data-src="${x.src}">
-        <span class="tMonoS actwhen">${esc(x.h < 0 ? t('act.ahead') : x.h < 0.02 ? t('whenToday') : E.fmtAge(x.h))}</span>
-        <span class="actbody"><span class="actkind">${esc(t('act.k.' + x.kind, { id: x.wo || '' }))}</span><span class="acttitle">${esc(x.title)}</span>
+        <span class="tMonoS actwhen">${esc(x.undated ? t('emptyDash') : x.h < 0 ? t('act.ahead') : x.h < 0.02 ? t('whenToday') : E.fmtAge(x.h))}</span>
+        <span class="actbody"><span class="actkind">${esc(t('act.k.' + x.kind, { id: x.wo || '' }))}</span><span class="acttitle">${esc(x.title)}</span>${x.tech ? `<span class="alreftech">${esc(x.tech)}</span>` : ''}
           <span class="actmeta"><span class="actsrc">${esc(t('act.src.' + x.src))}</span>${x.detail ? ' · ' + esc(x.detail) : ''}</span>
           ${x.fix ? `<span class="actfix mntcheck" data-k="${esc(x.fixK || '')}">${esc(t('act.fixAt', { s: x.fix }))}</span>` : ''}
-          ${x.kind === 'raised' && open[x.alarm.id] ? history(E, r, x.alarm) : ''}</span>
-        ${x.kind === 'raised' ? `<button class="iconbtn icon26 actplus" data-act="actPlus" data-v="${esc(x.alarm.id)}" aria-expanded="${!!open[x.alarm.id]}"
+          ${x.kind === 'raised' && !live && open[x.alarm.id] ? history(E, r, x.alarm) : ''}</span>
+        ${x.kind === 'raised' && !live ? `<button class="iconbtn icon26 actplus" data-act="actPlus" data-v="${esc(x.alarm.id)}" aria-expanded="${!!open[x.alarm.id]}"
             data-tip="${esc(t(open[x.alarm.id] ? 'act.minus' : 'act.plus'))}" aria-label="${esc(t(open[x.alarm.id] ? 'act.minus' : 'act.plus'))}">${icon(open[x.alarm.id] ? 'chevU' : 'plus', 13)}</button>`
           : x.src === 'cmms' ? `<span class="actcafm" data-tip="${esc(t('apCafmOpen'))}">${icon('external', 12)}</span>` : ''}</li>`;
-    return `<ol class="actlist">${list.map(li).join('')}</ol><p class="tCap actfoot">${esc(t('act.foot'))}</p>`;
+    return `<ol class="actlist">${list.map(li).join('')}</ol>${foot}`;
   }
   const ACTS = {
     actPlus(el, ev){ if(ev) ev.stopPropagation(); const E = window.EKO, o = Object.assign({}, E.state.actOpen || {}); o[el.dataset.v] = !o[el.dataset.v]; E.set({ actOpen: o }); }

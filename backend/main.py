@@ -15,7 +15,7 @@ import re
 import secrets
 import sqlite3
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from urllib.parse import quote, unquote
@@ -43,6 +43,7 @@ from fin_client import (
     parse_fin_projects,
     parse_zinc_csv,
     safe_get,
+    zinc_grid_ok,
 )
 from fdd_recommendations import recommend as fdd_recommend
 from point_control import control_for, encode_value, equipment_class, merge_point_control, number_of
@@ -143,6 +144,36 @@ _BOARD_HISTORY = re.compile(
     r"^/api/\{project\}/eval\?expr=hisRead\(@p:\{project\}:r:[\w.-]+,\d{4}-\d{2}-\d{2}\.\.today\(\)%2C%7B-limit%7D\)$")
 
 
+def _meter_history_key(name: str) -> str:
+    """Same key the dashboard looks up: meter_<name>_his, letters and digits only."""
+    slug = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_") or "unnamed"
+    return f"meter_{slug}_his"
+
+
+def meter_points(settings: Optional[dict]) -> dict:
+    """History queries for meters that name their own energy point. The dashboard reads them as meter_<name>_his."""
+    history: dict = {}
+    meters = settings.get("finMeters") if isinstance(settings, dict) else None
+    for meter in meters if isinstance(meters, list) else []:
+        if not isinstance(meter, dict):
+            continue
+        name = meter.get("name")
+        expr = meter.get("history")
+        point = meter.get("point")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if not isinstance(expr, str) or not _BOARD_HISTORY.match(expr):
+            if isinstance(point, str) and _BOARD_POINT.match(point):
+                start = (datetime.now().replace(day=1) - timedelta(days=150)).replace(day=1)
+                expr = f"/api/{{project}}/eval?expr=hisRead(@{point},{start:%Y-%m-%d}..today()%2C%7B-limit%7D)"
+            else:
+                continue
+        elif isinstance(point, str) and "@" + point + "," not in expr:
+            continue
+        history[_meter_history_key(name)] = expr
+    return history
+
+
 def board_points(settings: Optional[dict]) -> tuple:
     """The live points and history queries of the boards that name their own FIN point."""
     live: dict = {}
@@ -184,6 +215,7 @@ def merge_project_settings(base: dict, settings: Optional[dict], isolated: bool 
         else:
             merged[key] = copy.deepcopy(value)
     live, history = board_points(settings)
+    history = {**history, **meter_points(settings)}
     if live:
         merged["live_point_ids"] = {**(merged.get("live_point_ids") or {}), **live}
     if history:
@@ -427,14 +459,51 @@ cached_meter_data: dict = {}
 cached_alarm_data: dict = {}
 cached_facility: dict = {}
 cached_workorders: dict = {}
+cached_realtime_tree: dict = {}
+# Set when the first equipment shell, or the first alarm list, is ready to serve
+_equip_ready = asyncio.Event()
+_alarm_ready = asyncio.Event()
 
 
 # ─── Background Polling ─────────────────────────────────────────────────────
 
+def _publish_equipment(realtime: dict, *, points_ready: bool) -> None:
+    """Cache the floor tree and the flat list the dashboard reads. A new timestamp is what tells the page the list changed."""
+    global cached_equip_data, cached_realtime_tree
+    if realtime is None:
+        return
+    cached_realtime_tree = realtime
+    excluded: list = []
+    cached_equip_data = {
+        "timestamp": datetime.now().isoformat(),
+        # False until the points grid is joined, so the page can show names first and keep asking for readings
+        "pointsReady": points_ready,
+        "equipment": _flatten_equip(realtime, excluded),
+        # what the name rule leaves out (energy meters, KPI calculations), kept apart so no existing reader sees it.
+        # The Hospital Live Twin reads it to show its energy meters as unverified candidates.
+        "excluded": excluded,
+    }
+    _equip_ready.set()
+
+
+def _stamp_equipment_alarms() -> None:
+    """The alarm loop owns the alarm rows. Fold them onto the equipment already cached, without another equipment read."""
+    tree = cached_realtime_tree
+    if not tree or not client:
+        return
+    ready = bool((cached_equip_data or {}).get("pointsReady"))
+    _publish_equipment(client.apply_cached_alarms(tree), points_ready=ready)
+
+
 async def realtime_loop():
-    """Fetch equipment, alarms, histories, and derived summaries."""
-    global cached_equip_data, cached_building_data, cached_power_history, cached_power_history_at
-    global cached_fdd_summary, cached_meter_data, cached_alarm_data, cached_facility
+    """Fetch equipment and points, then histories and the derived summaries.
+
+    The equipment names go out as soon as that grid is back, on the first pass only. Points and
+    history follow. Alarms are not read here: that grid is slow, and the alarm loop publishes it
+    on its own, so the Brief and the markers are not held behind every point.
+    """
+    global cached_building_data, cached_power_history, cached_power_history_at
+    global cached_fdd_summary, cached_meter_data, cached_facility
 
     rt_endpoints = CONFIG.get("realtime_endpoints", {})
     pw_endpoints = CONFIG.get("power_endpoints", {})
@@ -443,43 +512,69 @@ async def realtime_loop():
     while client and client.is_authenticated:
         if not _polling_wanted():
             return
+        points_task = None
         try:
-            realtime = await client.fetch_realtime_data(rt_endpoints)
-            excluded: list = []
-            cached_equip_data = {
-                "timestamp": datetime.now().isoformat(),
-                "equipment": _flatten_equip(realtime, excluded),
-                # what the name rule below leaves out (energy meters, KPI calculations), kept apart so no existing reader sees it.
-                # The Hospital Live Twin reads it to show its energy meters as unverified candidates.
-                "excluded": excluded,
-            }
-            await refresh_workorders()
-            _compute_sensor_averages(realtime)
-            cached_fdd_summary = _build_fdd_summary(realtime)
-            cached_meter_data = _extract_meters(realtime, CONFIG.get("meter_profile", {}))
-            cached_alarm_data = _flatten_alarms(client.last_alarm_rows, CONFIG.get("severity_bands", {}))
-            _note_fin_read(client.project_name, realtime=True)
-            cached_facility = _compute_facility_services(realtime)
-            cached_power_history, hist_units = await client.fetch_power_histories(pw_endpoints)
-            cached_power_history_at = datetime.now().isoformat()
-            for key, unit in hist_units.items():
-                if unit:
-                    cached_point_units[key] = unit
-            if cached_power_data is not None:
-                cached_power_data["units"] = dict(cached_point_units)
-            cached_building_data = {
-                "status": "success",
-                "Building_Info": {
-                    "timestamp": datetime.now().isoformat(),
-                    "Equipments": realtime,
-                    "buildingPowerUsageHistory": cached_power_history,
-                    "facilityServices": cached_facility,
-                },
-            }
+            first = not (cached_equip_data or {}).get("timestamp")
+            if first:
+                _equip_ready.clear()
+            points_ep = rt_endpoints.get("points") or ""
+            kinds: list = []   # how each read of this poll ended, for the connection tracking
+            points_task = asyncio.create_task(client.fetch_text(points_ep, kinds))
+            equip_text = await client.fetch_text(rt_endpoints.get("equipment") or "", kinds)
+            realtime: dict = cached_realtime_tree or {}
+            if zinc_grid_ok(equip_text):
+                if first:
+                    shell = await asyncio.to_thread(client._build_realtime, "", equip_text, None)
+                    _publish_equipment(shell, points_ready=False)
+                    realtime = shell
+                points_text = await points_task
+                if zinc_grid_ok(points_text):
+                    realtime = await asyncio.to_thread(client._build_realtime, points_text, equip_text, None)
+                    _publish_equipment(realtime, points_ready=True)
+                elif not isinstance(points_ep, str) or not points_ep.startswith("/"):
+                    _publish_equipment(realtime, points_ready=True)
+            else:
+                points_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await points_task
+                if first:
+                    _note_realtime_poll(kinds)
+                    if not await _sleep_while_watched(10):
+                        return
+                    continue
+            _note_realtime_poll(kinds)
+            if realtime:
+                await refresh_workorders()
+                _compute_sensor_averages(realtime)
+                cached_fdd_summary = _build_fdd_summary(realtime)
+                cached_meter_data = _extract_meters(realtime, CONFIG.get("meter_profile", {}))
+                cached_facility = _compute_facility_services(realtime)
+                cached_power_history, hist_units = await client.fetch_power_histories(pw_endpoints)
+                cached_power_history_at = datetime.now().isoformat()
+                for key, unit in hist_units.items():
+                    if unit:
+                        cached_point_units[key] = unit
+                if cached_power_data is not None:
+                    cached_power_data["units"] = dict(cached_point_units)
+                cached_building_data = {
+                    "status": "success",
+                    "Building_Info": {
+                        "timestamp": datetime.now().isoformat(),
+                        "Equipments": realtime,
+                        "buildingPowerUsageHistory": cached_power_history,
+                        "facilityServices": cached_facility,
+                    },
+                }
             if not await _sleep_while_watched(interval):
                 return
         except Exception as e:
             print(f"[FIN] realtime loop error: {e}")
+            if points_task and not points_task.done():
+                points_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await points_task
+            if (cached_equip_data or {}).get("timestamp"):
+                _equip_ready.set()
             if not await _sleep_while_watched(10):
                 return
 
@@ -494,15 +589,23 @@ async def alarm_loop():
         if not _polling_wanted():
             return
         try:
-            await client.refresh_alarms(alarm_ep)
-            cached_alarm_data = _flatten_alarms(
-                client.last_alarm_rows, CONFIG.get("severity_bands", {})
-            )
-            _note_fin_read(client.project_name)
+            if not (cached_alarm_data or {}).get("timestamp"):
+                _alarm_ready.clear()
+            rows = await client.refresh_alarms(alarm_ep)
+            if getattr(client, "last_alarm_read_ok", False):
+                # Flattening a day's alarm grid is CPU work, so the equipment response can go out while it runs.
+                cached_alarm_data = await asyncio.to_thread(
+                    _flatten_alarms, rows or [], CONFIG.get("severity_bands", {})
+                )
+                _alarm_ready.set()
+                _stamp_equipment_alarms()
+            _note_fin_read(client.project_name)   # also when the read failed: the connection is tracked either way
             if not await _sleep_while_watched(15):
                 return
         except Exception as e:
             print(f"[FIN] alarm poll error: {e}")
+            if (cached_alarm_data or {}).get("timestamp"):
+                _alarm_ready.set()
             if not await _sleep_while_watched(15):
                 return
 
@@ -1034,7 +1137,8 @@ def _reset_caches():
     """Drop data polled under the previous configuration so it is never served for the next."""
     global cached_equip_data, cached_power_data, cached_building_data, cached_sensor_avg
     global cached_power_history, cached_power_history_at, cached_point_units, cached_fdd_summary, cached_meter_data, cached_alarm_data
-    global cached_facility, cached_workorders
+    global cached_facility, cached_workorders, cached_realtime_tree
+    global _equip_ready, _alarm_ready
     cached_equip_data = {}
     cached_power_data = {}
     cached_building_data = {}
@@ -1048,6 +1152,25 @@ def _reset_caches():
     cached_facility = {}
     cached_workorders = {}
     _reset_link()
+    cached_realtime_tree = {}
+    # Wake anyone still waiting on the old fill, then make the next fill wait again
+    old_equip, old_alarm = _equip_ready, _alarm_ready
+    _equip_ready = asyncio.Event()
+    _alarm_ready = asyncio.Event()
+    old_equip.set()
+    old_alarm.set()
+
+
+async def _wait_for_fill(event: asyncio.Event, ready) -> None:
+    """Hold the dashboard's first read until this cache has a timestamp, instead of handing back an empty list to retry."""
+    if ready():
+        return
+    if not _polling_wanted() and not _polling_alive():
+        return
+    try:
+        await asyncio.wait_for(event.wait(), timeout=20)
+    except asyncio.TimeoutError:
+        return
 
 
 def _bundled_project() -> tuple[Optional[dict], Optional[str]]:
@@ -2023,6 +2146,12 @@ def _note_fin_read(site: str, realtime: bool = False) -> None:
     _note_alarms(site, (cached_alarm_data or {}).get("alarms") or [], bool(getattr(client, "last_alarm_read_ok", None)))
 
 
+def _note_realtime_poll(kinds: list) -> None:
+    """The realtime loop's reads are done (kinds: how each ended): record how the poll went, then note the connection."""
+    client.note_poll(kinds)
+    _note_fin_read(client.project_name, realtime=True)
+
+
 def _note_workorder_sync(error: str) -> None:
     """Contract trigger "integration sync failed": one row while the FIN work-order read fails,
     resolved by the next good read. The site is the FIN project this session reads."""
@@ -2222,6 +2351,7 @@ async def get_equip_live(request: Request, response: Response):
     """Get live equipment data (floor-wise with points and alarms)."""
     _require_user(request)
     _stamp(response)
+    await _wait_for_fill(_equip_ready, lambda: bool((cached_equip_data or {}).get("timestamp")))
     if cached_equip_data:
         _attach_workorders()
     return cached_equip_data or {"timestamp": None, "equipment": []}
@@ -2260,6 +2390,7 @@ async def get_alarms(request: Request, response: Response):
     """Get the flat active-alarm list with counts by severity."""
     _require_user(request)
     _stamp(response)
+    await _wait_for_fill(_alarm_ready, lambda: bool((cached_alarm_data or {}).get("timestamp")))
     return cached_alarm_data or {
         "timestamp": None,
         "alarms": [],

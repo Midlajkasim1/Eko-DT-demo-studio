@@ -54,14 +54,15 @@ window.EKO_SURF = (function(){
     { id:'conn',     kind:'overlay', isOpen:()=>E.state.dlg==='conn',                           close:()=>{ E.state.dlg=null; } },
     { id:'more',     kind:'menu',    isOpen:()=>!!E.state.mobMore,                              close:()=>{ E.state.mobMore=false; E.state.rlAsk=false; } },
     { id:'fly',      kind:'flyout',  isOpen:()=>!!E.state.dock.bloom,                           close:()=>{ E.state.dock.bloom=null; } },
-    { id:'radial',   kind:'menu',    isOpen:()=>!!E.state.radial,                               close:()=>{ E.state.radial=null; } }
+    { id:'radial',   kind:'menu',    isOpen:()=>!!E.state.radial,                               close:()=>{ E.state.radial=null; } },
+    { id:'elmenu',   kind:'menu',    isOpen:()=>!!E.state.elMenu,                               close:()=>{ E.state.elMenu=null; } }
   ];
   const byId = {}; DEFS.forEach(d => byId[d.id] = d);
   const openSet = () => new Set(DEFS.filter(d => { try{ return d.isOpen(); }catch(e){ return false; } }).map(d => d.id));
 
   let last = new Set(), order = [], lastClick = null, openers = {}, pendingFocus = null, pendingEnter = null;
   /* where each surface's first focusable control lives (D121) */
-  const ROOTS = { mkpop:'.mkpop', conn:'.connpop', settings:'.dlgsettings', signout:'.dlgsignout', menu:'.accmenu', display:'.dispmenu', switcher:'.dlg[role="menu"]', more:'.dlg', notif:'.nfpanel, .nfpop', alerts:'.dlg', report:'.dlg', help:'.dlghelp', wallcfg:'.wcfg', pfcov:'.dlg', rpconfirm:'.dlg', teaser:'.dlg', ai:'#aipanel', prefs:'.dlg', esg:'.esgdlg', sec:'.secdlg', ops:'.opsdlg', esgfp:'.esgfpop' };
+  const ROOTS = { elmenu:'.velm', mkpop:'.mkpop', conn:'.connpop', settings:'.dlgsettings', signout:'.dlgsignout', menu:'.accmenu', display:'.dispmenu', switcher:'.dlg[role="menu"]', more:'.dlg', notif:'.nfpanel, .nfpop', alerts:'.dlg', report:'.dlg', help:'.dlghelp', wallcfg:'.wcfg', pfcov:'.dlg', rpconfirm:'.dlg', teaser:'.dlg', ai:'#aipanel', prefs:'.dlg', esg:'.esgdlg', sec:'.secdlg', ops:'.opsdlg', esgfp:'.esgfpop' };
   function enterSurface(id){
     const sel = ROOTS[id]; if(!sel) return;
     const root = [...document.querySelectorAll(sel)].find(x => x.getClientRects().length); if(!root) return;   /* fixed-positioned surfaces have no offsetParent */
@@ -82,10 +83,11 @@ window.EKO_SURF = (function(){
       const newest = opened[opened.length - 1];
       if(byId[newest].kind !== 'dialog' && !byId[newest].sticky){
         /* one transient surface: everything else that is open closes now (a sticky companion, D132, stays).
-           Levels, Layers, and Style sit over the selection card, so the card stays open behind them. */
+           Levels, Layers, Style, and the right-click tool wheel sit over the marker card, so the card stays. */
         DEFS.forEach(d => {
           if(d.id === newest || d.sticky || !now.has(d.id)) return;
-          if(newest === 'fly' && d.id === 'mkpop') return;
+          if((newest === 'fly' || newest === 'radial') && d.id === 'mkpop') return;
+          if(newest === 'elmenu' && (d.id === 'mkpop' || d.id === 'asset')) return;
           d.close();
         });
       }
@@ -137,7 +139,7 @@ window.EKO_SURF = (function(){
     const top = topmost();
     /* Locate in 3D keeps the asset panel open, so the panel is the topmost surface: Escape leaves the focus
        first (the table comes back, the panel stays). Any surface opened since still closes before that. */
-    if(top === 'asset' && E.state.locFocus && E.locExit){ E.locExit(); return 'locate'; }
+    if(top === 'asset' && E.state.locFocus && E.back.go()) return 'locate';
     if(top){
       if(top === 'pal' && E.state.palQ){ E.state.palQ = ''; E.state.palSel = 0; E.set({}); return 'cleared'; }
       byId[top].close(); E.set({}); return top;
@@ -148,9 +150,7 @@ window.EKO_SURF = (function(){
       if(E.state.dock.tool === 'slice' && E.engine && E.engine.stopSlice) E.engine.stopSlice();
       if(E.state.dock.tool === 'select' && E.dropSelection) E.dropSelection();
       E.state.dock.tool = null; E.set({}); return 'tool'; }
-    if(E.state.locFocus && E.locExit){ E.locExit(); return 'locate'; }     /* Locate-in-3D focus: a mode too */
-    if(E.state.bimBack && E.bimBack){ E.bimBack(); return 'bim-back'; }
-    if(E.state.secLocated && window.EKO_SEC){ window.EKO_SEC.ACTS.secLocatedBack(); return 'locate'; }
+    if(E.back.go()) return 'locate';
     if(E.state.modelFs){ E.set({ modelFs:false }); return 'model'; }       /* D94: a mode, not a surface */
     if(PAGES.includes(E.state.pageId)){ back(); return 'back'; }
     if(E.state.histAge != null){ E.set({ histAge:null }); return 'live'; }   /* a mode, not a surface */
@@ -173,6 +173,7 @@ window.EKO_SURF = (function(){
       if(!(t instanceof Element)) return;
       if(E.state.dock.bloom && !t.closest('.mzfly, #vbar, .vsheet, .vfab')){ E.state.dock.bloom = null; E.set({}); }
       else if(E.state.radial && !t.closest('.vradial')){ E.state.radial = null; E.set({}); }
+      else if(E.state.elMenu && !t.closest('.velm')){ E.state.elMenu = null; E.set({}); }
     }, true);
   }
 

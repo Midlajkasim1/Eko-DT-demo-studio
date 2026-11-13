@@ -58,6 +58,7 @@
       ? { esg: 'active', maintenance: 'active', security: 'active', 'systems.life': 'hidden', 'systems.security': 'hidden' }
       : { esg: 'available', maintenance: 'available', security: 'available' };
     ['systems.other', 'systems.data', 'spaces.occ', 'security.evac', 'security.nurse'].forEach(v => { states[v] = extended ? 'active' : 'hidden'; });
+    if(cfg.hospitalHvac === true) states['spaces.occ'] = 'hidden';
     if(window.INJECTED_PROJECT_CONFIG) states['energy.anom'] = 'active';   /* every Studio project: its meters, the sample's, or none yet */
     states['systems.twin'] = cfg.hospitalHvac === true ? 'active' : 'hidden';   /* Systems > Live Twin (layouts/hospital-twin.js): the Eko Hospital project only, as the roof schematic */
     /* Ask EKO asks the backend's Eko-Chat for every Studio and exported project, whatever sample data it shows */
@@ -153,7 +154,7 @@
       assetSel: null, apTab: 'alarms',
       dock: { tool: null, slice: false, bloom: null, style: window.EKO_LAYOUTS.tools.defaultStyle, tone: 'blue',
               level: 'ALL', layer: 'all', floorAlone: false, alerts: 'all', minimap: false },
-      mkPop: null, mkPopN: 0, mkPulse: null, paint: null, radial: null, vbarMin: ls.get('eko-vbar') === 'min',   /* D73 */
+      mkPop: null, mkPopN: 0, mkPulse: null, paint: null, radial: null, elMenu: null, elHidden: false, vbarMin: ls.get('eko-vbar') === 'min',   /* D73 */
       treeOpen: false, sumScroll: 0, sumScrollBack: null,   /* the model tree replaces the summary panel's body while open */
       ovpMin: ls.get('eko-ovp') === 'min', panMin: ls.get('eko-pan') === 'min', regMin: ls.get('eko-reg') === 'min',   /* D128: the register's model strip */
       /* `born` marks the element a state change just opened, so entry
@@ -165,6 +166,7 @@
       regQ: '', regStF: null, regSysF: null, regSevF: null, regSort: null, regSortDir: 'asc',
       markersOn: ss.get('eko-mk') !== '0', eqLabelsOn: ss.get('eko-eql') !== '0', showAcked: true, tlMetric: 'kwh', tlRange: 'day',   /* D70: per session */
       hmMode: 'temp', hmFloor: 'All', hmSel: null, hmRange: 'today', hmPlay: false, hmStep: null, hmStepLabel: '', hmOutline: false,
+      hmList: 'sensors', hmOpen: {}, hmRoomView: null,
       hmLayers: { sensors: false, labels: true, values: true },
       woRaised: {}, dlg: null, palQ: '', palSel: 0,
       mobMore: false,
@@ -268,6 +270,10 @@
     alarmLines(a, compact){ const tech = this.clip2(this.lang === 'ar' ? (a.techAr || a.techEn) : a.techEn); const plain = this.clip2(this.loc(a, 'plain'));
       if(this.wording() === 'technical') return { main: tech, sub: '' };
       return { main: plain, sub: (compact && !this.disclose('tech')) ? '' : tech }; },
+    alarmParts(a, compact){ const l = this.alarmLines(a, compact);
+      const cut = s => { const m = /^([\s\S]*?)[\s,.;]*\bRecommendations?\s*:\s*([\s\S]+)$/i.exec(s || ''); return m && m[1].trim() ? [m[1].trim(), m[2].trim()] : [s || '', '']; };
+      const main = cut(l.main), sub = cut(l.sub);
+      return { main: main[0], sub: sub[0], rec: sub[1] || main[1] }; },
     loc(a, kind){
       const ar = this.lang === 'ar';
       return kind === 'plain' ? (ar ? a.plainAr : a.plainEn) : (ar ? a.locAr : a.locEn);
@@ -348,6 +354,7 @@
       this.state.locFocus = null;   /* any navigation (the logo, a module, search, Back) ends Locate-in-3D focus */
       this.state.navCollapsed = null;
       if(pageId !== 'sec') this.state.secLocated = null;
+      if(pageId !== 'sec' && window.EKO_SECW && !(window.EKO_SCN && window.EKO_SCN.on(this))) window.EKO_SECW.leave(this);
       if(this.state.roofView) closeRoofView();   /* ...and the Hospital roof schematic, which stands in the content area */
       if(window.EKO_SURF) window.EKO_SURF.closeAll();          /* R4 (D67) */
       const targetModule = module ?? this.state.module;
@@ -382,6 +389,9 @@
         if (look) this.state._heatViewed = true;
         applyHeatView(this, look);
       } else if (leavingHeat) {
+        this.state.hmRoomView = null;
+        this.state.hmSel = null;
+        if (this.engine && this.engine.highlightGid) this.engine.highlightGid(null);
         if (this.state.dock) { this.state.dock.level = 'ALL'; this.state.dock.floorAlone = false; this.state.dock.layer = 'all'; this.state.dock.layerContext = false; }
         if (this.engine && this.engine.isolateLevel) this.engine.isolateLevel('ALL', true);
         if (this.engine && this.engine.setLayerVisibility) this.engine.setLayerVisibility('all');
@@ -493,6 +503,50 @@
         return row; });
     });
   })();
+
+  const ALARM_SOUNDS = [
+    { id: 'chime', key: 'alarmChime', file: 'alarm-chime.wav' },
+    { id: 'two', key: 'alarmTwo', file: 'alarm-two-tone.wav' },
+    { id: 'triple', key: 'alarmTriple', file: 'alarm-triple.wav' },
+    { id: 'bell', key: 'alarmBell', file: 'alarm-bell.wav' },
+    { id: 'pulse', key: 'alarmPulse', file: 'alarm-pulse.wav' },
+  ];
+  const alarmAudio = new Audio();
+  let heardAlarms = null;   /* the open list is remembered first, so alarms already on screen do not sound */
+  const alarmSoundId = () => {
+    const id = ls.get('eko-alarm-snd') || 'chime';
+    return ALARM_SOUNDS.some(s => s.id === id) ? id : 'chime';
+  };
+  const alarmSoundOn = () => ls.get('eko-alarm-snd-on') !== '0';
+  const playAlarmSound = () => {
+    const sound = ALARM_SOUNDS.find(s => s.id === alarmSoundId()) || ALARM_SOUNDS[0];
+    const url = '/static/dashboard/assets/sounds/' + sound.file;
+    if (alarmAudio.getAttribute('src') !== url) alarmAudio.src = url;
+    alarmAudio.volume = 1;
+    alarmAudio.currentTime = 0;
+    const played = alarmAudio.play();
+    if (played && typeof played.catch === 'function') played.catch(() => {});
+  };
+  document.addEventListener('pointerdown', function unlockAlarm(ev) {
+    if (ev.target.closest && ev.target.closest('.acsnd')) return;
+    const url = '/static/dashboard/assets/sounds/' + (ALARM_SOUNDS.find(s => s.id === alarmSoundId()) || ALARM_SOUNDS[0]).file;
+    if (alarmAudio.getAttribute('src') !== url) alarmAudio.src = url;
+    alarmAudio.volume = 0;
+    const played = alarmAudio.play();
+    const restore = () => { alarmAudio.pause(); alarmAudio.currentTime = 0; alarmAudio.volume = 1; };
+    if (played && typeof played.then === 'function') played.then(restore, restore);
+    else restore();
+    document.removeEventListener('pointerdown', unlockAlarm, true);
+  }, true);
+  E.noteAlarms = list => {
+    const ids = new Set((list || []).map(a => a && a.id).filter(Boolean));
+    if (heardAlarms) {
+      let fresh = false;
+      ids.forEach(id => { if (!heardAlarms.has(id)) fresh = true; });
+      if (fresh && alarmSoundOn()) playAlarmSound();
+    }
+    heardAlarms = ids;
+  };
 
   E.engine = window.EKO_VIEWER.create(E.data.viewer.engine || 'static');
   E.engine.onCameraChange(() => window.EKO_V.position(E));
@@ -908,7 +962,16 @@
       <div class="dlg dlgdrop dropMid dlgalerts" data-born="${E.state.born==='dlg'?1:0}" role="dialog" aria-label="${esc(E.t('alertCentre'))}">
         <div class="draghandle"></div>
         <div class="dlghead achead"><h2>${esc(E.t('alertCentre'))}</h2><span class="acmeta" data-tip="${esc(E.t('alarmsMetaTip'))}">${esc(E.t('acActiveN',{n:counts.active}) + (counts.acknowledged ? ' \u00b7 ' + E.t('acAckN',{n:counts.acknowledged}) : ''))}</span>
-          <button class="iconbtn msA" data-act="closeDlg" aria-label="${esc(E.t('close'))}">${icon('x',14)}</button></div>
+          <button class="iconbtn msA" data-act="closeDlg" aria-label="${esc(E.t('close'))}">${icon('x',14)}</button>
+          <div class="acsnd">
+            <label class="acsnd-on" data-tip="${esc(E.t('alarmSndTip'))}">
+              <input type="checkbox" data-chg="alarmSnd" ${alarmSoundOn() ? 'checked' : ''} aria-label="${esc(E.t('alarmSnd'))}">
+              <span>${esc(E.t('alarmSnd'))}</span>
+            </label>
+            <select class="acsnd-pick" data-chg="alarmSndPick" aria-label="${esc(E.t('alarmSndPick'))}">
+              ${ALARM_SOUNDS.map(s => `<option value="${s.id}"${s.id === alarmSoundId() ? ' selected' : ''}>${esc(E.t(s.key))}</option>`).join('')}
+            </select>
+          </div></div>
         <div class="acfilters" role="group" aria-label="${esc(E.t('acSevT'))}" data-model="${E.state.markersOn}">
           <button class="acchip acmaster" data-on="${E.state.markersOn}" data-act="mkToggle" aria-pressed="${E.state.markersOn}"
             data-tip="${esc(E.t(E.state.markersOn ? 'mkHideTip' : 'mkShowTip'))}">${icon(E.state.markersOn ? 'eye' : 'eyeOff', 13)}<span>${esc(E.t('acOnModel'))}</span></button>
@@ -976,11 +1039,12 @@
   }
   let keptHost = null;   /* live #enginehost, re-adopted across renders so the
                             scene never re-mounts (no image flash on clicks) */
+  let lastMountHtml = '';   /* a poll that does not change the page must not rebuild it */
   /* D86: markup is rebuilt on every state change, which would reset every
      scroller to the top (the alarms panel jumped when the account menu
      opened). Positions are captured before the rebuild and restored after,
      matched by selector and order. */
-  const SCROLLERS = ['#modcontent', '.ovpad', '.apbody', '.nflist', '.regscroll', '.dgscroll', '.dlg', '.aclist', '.vplist', '#ekonav', '.rpwrap', '.rphub', '.pagepad', '.pwarea', '.scrollY', '.pmurows'];
+  const SCROLLERS = ['#modcontent', '.ovpad', '.apbody', '.nflist', '.regscroll', '.dgscroll', '.dlg', '.aclist', '.vplist', '#ekonav', '.rpwrap', '.rphub', '.pagepad', '.pwarea', '.pfbody', '.pfvisual', '#mount', '.scrollY', '.pmurows', '.hmrooms', '.cufeed', '.btable', '.br14col', '.br14tl', '.br14body', '.br14main', '.br14fullb', '.ho14left', '.ho14right', '.bfcard'];
   /* The model tree's host sits outside the markup render() rebuilds. render() puts it back in the panel,
      and keepTree() carries its scroll position and focus across the rebuild. */
   let treeScrollTop = 0;
@@ -1035,6 +1099,7 @@
     if(E.state.wall && window.EKO_WALL){   /* D106: a display context — no rail, no ask bar, no overlays, no pointer */
       (document.querySelector('.dashboard-native-container') || window.DASHBOARD_ROOT || document.documentElement).setAttribute('data-wall', '1');
       const liveW = document.getElementById('enginehost'); if(liveW && liveW.dataset.live === '1') keptHost = liveW;
+      lastMountHtml = '';
       $('mount').innerHTML = window.EKO_WALL.render(E);
       const freshW = document.getElementById('enginehost'); if(freshW && keptHost) freshW.replaceWith(keptHost);
       $('topbar').innerHTML = ''; $('ekonav').innerHTML = ''; $('mobtabs').innerHTML = ''; $('overlays').innerHTML = '';
@@ -1076,10 +1141,12 @@
     if(twinHost && E.state.pageId !== 'live-twin' && window.EKO_TWIN) window.EKO_TWIN.release(twinHost);   /* the Live Twin's highlight in the model is its own page's */
     if(E.state.roofView && roofHost){
       const m = $('mount');
+      lastMountHtml = '';
       if(m.firstElementChild !== roofHost || m.childElementCount !== 1) m.replaceChildren(roofHost);   /* only when it is not already there: moving it restarts what is turning */
       window.EKO_ROOF.update(roofHost, E);
     } else if(E.state.pageId === 'live-twin' && window.EKO_TWIN && window.EKO_TWIN_MAP){   /* the mapping is published only for the Hospital project (hospital-twin-map.js) */
       /* the Live Twin is built once and kept, like the roof: render() only puts it back and updates it. A new language builds it again. */
+      lastMountHtml = '';
       if(!twinHost || twinHost.dataset.lang !== E.lang){ twinHost = window.EKO_TWIN.create(E); twinHost.dataset.lang = E.lang; }
       const m = $('mount');
       if(m.lastElementChild !== twinHost) m.replaceChildren(twinHost);
@@ -1089,12 +1156,16 @@
     } else {
       /* E15 port: the page frame (headline, how-to-read line, tiles, tabs) on every page of a project on the extended module set (the Hospital). A project on the standard module set, Marsa Al Arab included, keeps its own page layouts. */
       const framed = window.EKO_FRAME && window.EKO_MODULES === 'extended';
-      $('mount').innerHTML = NB((stacked ? pagehead() : '') + (framed ? window.EKO_FRAME.apply(E, P.renderPage(E)) : P.renderPage(E)));
+      const pageHtml = NB((stacked ? pagehead() : '') + (framed ? window.EKO_FRAME.apply(E, P.renderPage(E)) : P.renderPage(E)));
+      if(pageHtml !== lastMountHtml){
+        lastMountHtml = pageHtml;
+        $('mount').innerHTML = pageHtml;
       /* E17: on a phone or a tablet the page's active sub-tab is scrolled into view when the page changes */
       if(stacked){ const k = E.state.pageId + '/' + (E.state.sub || ''); if(render._phOn !== k){ render._phOn = k;
         const on = $('mount').querySelector('#pagehead .phsub[data-on="1"]'), strip = on && on.parentElement;
         if(on && strip && strip.scrollWidth > strip.clientWidth){ const sr = strip.getBoundingClientRect(), r = on.getBoundingClientRect();
           if(r.left < sr.left) strip.scrollLeft -= sr.left - r.left + 24; else if(r.right > sr.right) strip.scrollLeft += r.right - sr.right + 24; } } }
+      }
     }
     const fresh = document.getElementById('enginehost');
     if(fresh && keptHost) fresh.replaceWith(keptHost);
@@ -1167,7 +1238,8 @@
     if(window.EKO_SHEET && window.EKO_SHEET.sync) window.EKO_SHEET.sync();
     adoptTree();
     restoreScroll();                                             /* D86: after layout so flex overflow does not snap to top */
-    requestAnimationFrame(() => { restoreScroll(); requestAnimationFrame(restoreScroll); });
+    if(window.EKO_A && window.EKO_A.fillHeatRooms) window.EKO_A.fillHeatRooms(E);
+    requestAnimationFrame(() => { restoreScroll(); if(window.EKO_A && window.EKO_A.fillHeatRooms) window.EKO_A.fillHeatRooms(E); requestAnimationFrame(() => { restoreScroll(); if(window.EKO_A && window.EKO_A.fillHeatRooms) window.EKO_A.fillHeatRooms(E); }); });
     if(E.state.sumScrollBack != null){   /* closing the tree: the summary comes back where it was */
       const back = E.state.sumScrollBack, pad = document.querySelector('#ovp:not([data-tree]) .ovpad');
       E.state.sumScrollBack = null;
@@ -1219,11 +1291,39 @@
   /* select + fly to it; or, when it is already selected, deselect + home */
   function selectEquipment(assetId, patch, still){   /* still: select without moving the camera (the model tree) */
     if(still && E.state.paint === assetId) return false;
-    if(E.state.paint && E.state.paint === assetId){ E.set({ mkPop: null, mkPopN: 0, paint: null }); goHome(); return false; }
-    E.set(Object.assign({}, patch, { paint: assetId }));
+    if(E.state.paint && E.state.paint === assetId){ leaveSelection(); return false; }
+    E.set(Object.assign({}, patch, { paint: assetId, mkFrom: wayBack(assetId, still) }));
     if(!still && typeof E.engine.flyTo === 'function') E.engine.flyTo(assetId);
     return true;
   }
+  function wayBack(id, still){
+    const prev = E.state.mkFrom;
+    return { for: id, view: prev && prev.for === E.state.paint ? prev.view : (still ? null : E.back.save()) };
+  }
+  function leaveSelection(){
+    const id = E.state.paint, from = E.state.mkFrom;
+    E.set({ mkPop: null, mkPopN: 0, paint: null, mkFrom: null });
+    if(!E.back.fly(from && from.for === id ? from.view : null)) goHome();
+  }
+  /* One Back for the model: each entry names what is located and how to leave it. The chip, its button and Escape all read this list, first match first. */
+  const located = () => { const el = E.state.pickEl, id = E.state.paint || (E.state.locFocus || {}).assetSel; return el && el.bimId === id && el.name ? el.name : id; };
+  const BACKS = [
+    { on(){ const ev = E.state.secEv && window.EKO_SECW ? window.EKO_SECW.events(E).find(x => x.id === E.state.secEv) : null; return ev ? { text: ev.device || ev.title } : null; },
+      leave(){ window.EKO_SECW.leave(E); E.set({}); } },
+    { on(){ const b = E.state.secLocated; return b && window.EKO_SEC ? { text: b.id } : null; }, leave(){ window.EKO_SEC.ACTS.secLocatedBack(); } },
+    { on(){ const v = E.state.hmRoomView, room = v && ((E.data.heat || {}).rooms || []).find(r => r.guid === v.guid); return room ? { text: room.name || room.guid } : null; }, leave(){ endRoomFly(); } },
+    { on(){ const lf = E.state.locFocus; return lf ? { text: located(), key: lf.back ? 'backToAssets' : 'back' } : null; }, leave(){ ACTS.locBack(); } },
+    { on(){ return E.state.paint ? { text: located() } : null; }, leave: leaveSelection },
+    { on(){ const b = E.state.bimBack; return b ? { text: b.label || '', key: b.labelKey } : null; }, leave(){ ACTS.bimBack(); } }
+  ];
+  E.back = {
+    cur(){ for(let i = 0; i < BACKS.length; i++){ const v = BACKS[i].on(); if(v) return { v, leave: BACKS[i].leave }; } return null; },
+    go(){ const c = this.cur(); if(c) c.leave(); return !!c; },
+    save(){ return E.engine && E.engine.saveViewpoint ? E.engine.saveViewpoint() : null; },
+    fly(view){ return !!(view && E.engine && E.engine.flyToViewpoint) && E.engine.flyToViewpoint(view) !== false; },
+    chip(){ const c = this.cur(); if(!c) return '';
+      return `<div class="secloc" role="status">${c.v.text ? `<span>${C.esc(E.t('sec.located', { c: c.v.text }))}</span>` : ''}<button class="btnG btnSm" data-act="viewBack">${C.icon('chevL', 12)} ${C.esc(E.t(c.v.key || 'back'))}</button></div>`; }
+  };
   function goHome(){ if(E.engine && typeof E.engine.resetView === 'function') E.engine.resetView(); }
   const apHistAt = () => { const nav = document.querySelector('.aphnav'); return nav ? +nav.getAttribute('aria-valuenow') : 0; };
   function apHistGo(i, focus){
@@ -1235,7 +1335,7 @@
   function leavePanel(pageId){ if(pageId === E.state.pageId) return; Object.assign(E.state, { paint: null, mkPulse: null }); goHome(); }
   /* Nothing selected: no popup, no equipment colour, no asset panel, no locate
      pulse. Reset uses it, and so does the host's orientation-cube home button. */
-  const NO_SEL = { mkPop: null, mkPopN: 0, mkPulse: null, paint: null, assetSel: null, pickEl: null };
+  const NO_SEL = { mkPop: null, mkPopN: 0, mkPulse: null, paint: null, assetSel: null, pickEl: null, elMenu: null, mkFrom: null };
   E.clearSelection = () => E.set(NO_SEL);
   /* Mutate only. The caller renders once, after the tool change. */
   E.dropSelection = () => Object.assign(E.state, NO_SEL);
@@ -1297,6 +1397,9 @@
     E.state.dock.floorAlone = false;   /* Reset goes back to how the viewer opens: the floor filter is cumulative again */
     E.state.dock.layerContext = E.state.pageId === 'heatmap' || !!mepLayer;   /* the layers Reset restores are views, not picks */
     if(E.state.pageId === 'heatmap'){
+      E.state.hmRoomView = null;
+      E.state.hmSel = null;
+      if(E.engine && E.engine.highlightGid) E.engine.highlightGid(null);
       applyHeatView(E, true);
     } else if(E.engine.resetView){
       E.engine.resetView();
@@ -1309,6 +1412,8 @@
     if(E.engine.clearMeasure) E.engine.clearMeasure();
     if(E.engine.clearSection) E.engine.clearSection();
     window.dispatchEvent(new Event('eko-tree-reset'));   /* what the model tree hid comes back with the floors and layers */
+    if(E.engine.showAllElements) E.engine.showAllElements();
+    E.state.elHidden = false;
     const heat = E.state.pageId === 'heatmap';
     E.set(Object.assign({
       dock: heat
@@ -1370,6 +1475,13 @@
     E.set({ roofView: true, assetSel: null, dlg: null, mobMore: false });
   }
   function closeRoofView(){ roofHost = null; E.state.roofView = false; }
+  /* The first room click keeps the heatmap camera. Back, Escape, and leaving Rooms restore it. */
+  function endRoomFly(patch){
+    const view = E.state.hmRoomView && E.state.hmRoomView.view;
+    if(E.engine && E.engine.highlightGid) E.engine.highlightGid(null);
+    E.set(Object.assign({ hmSel: null, hmRoomView: null }, patch || {}));
+    if(!E.back.fly(view) && E.state.pageId === 'heatmap') applyHeatView(E, true);
+  }
   const ACTS = {
     goMod(el){ const m = E.nav.modules.find(x=>x.id===el.dataset.mod);
       /* the module's own page is already open with its items showing: a second click folds them away (the chevron does the same) */
@@ -1550,6 +1662,8 @@
     none(){},
 
     /* Alarm filters change the display only, never the ribbon. */
+    alarmSnd(el){ ls.set('eko-alarm-snd-on', el.checked ? '1' : '0'); if (el.checked) playAlarmSound(); E.set({}); },
+    alarmSndPick(el){ if (ALARM_SOUNDS.some(s => s.id === el.value)) ls.set('eko-alarm-snd', el.value); playAlarmSound(); E.set({}); },
     fltSev(el){ const s = E.state.alarmF.sev, v = el.dataset.v;
       s.has(v) ? s.delete(v) : s.add(v); render(); },
     ackTgl(){ E.set({ showAcked: !E.state.showAcked }); },
@@ -1611,6 +1725,7 @@
       } else if(onStrip){
         E.state.locFocus = { assetSel: id, back: null }; E.state.assetSel = id; E.state.mkPop = null;
       }
+      E.state.mkFrom = wayBack(id);
       E.state.mkPulse = a ? a.id : null; E.state.paint = id; render();   /* located equipment is coloured like a marker tap */
       E.engine.flyTo(id);
       setTimeout(() => { E.state.mkPulse = null; render(); }, 2200); },
@@ -1619,8 +1734,8 @@
     /* Back from the model to the view that opened it (Live Twin: Back to Schematic), stored in state.bimBack by that view */
     bimBack(){ const b = E.state.bimBack; if(!b) return; E.state.bimBack = null; E.state.modelFs = false; E.go(b.from.pageId, b.from.module, b.from.sub); },
     locBack(){ const lf = E.state.locFocus; if(!lf) return;
-      if(lf.back){ E.go(lf.back.pageId, lf.back.module, lf.back.sub); E.set({ assetSel: lf.assetSel, paint: lf.assetSel }); }
-      else E.set({ locFocus: null, modelFs: false, assetSel: lf.assetSel || E.state.assetSel, paint: lf.assetSel || E.state.paint }); },
+      if(lf.back){ E.go(lf.back.pageId, lf.back.module, lf.back.sub); E.set({ assetSel: lf.assetSel, mkFrom: null }); }
+      else { Object.assign(E.state, { locFocus: null, modelFs: false, assetSel: lf.assetSel || E.state.assetSel }); leaveSelection(); } },
 
     /* One handler for the bar, the sheet, the radial, and the shortcut keys.
        Select and Measure share the click. Slice stays on until it is clicked off or Reset. */
@@ -1680,6 +1795,10 @@
       else if(def.kind === 'bloom'){ d.bloom = d.bloom === k ? null : k; }
       if(d.bloom && d.bloom !== prev) E.state.born = 'bloom';
       render(); },
+    elHide(){ const id = E.state.paint; if(!id) return; E.engine.hideElement(id); E.state.elHidden = true; E.clearSelection(); },
+    elIsolate(){ const id = E.state.paint; if(!id) return; E.engine.isolateElement(id); E.set({ elHidden: true, elMenu: null }); },
+    elShowAll(){ E.engine.showAllElements(); E.set({ elHidden: false, elMenu: null }); },
+    elClear(){ E.clearSelection(); },
     setLevel(el){ showLevel(el.dataset.v, true); },
     /* Isolate floor: the picked floor alone instead of that floor and everything below it. The picker stays open. */
     floorAlone(){ const d = E.state.dock; d.floorAlone = !d.floorAlone;
@@ -1794,8 +1913,7 @@
       E.set({ histAge: newer.length ? newer.sort((a,b)=>b.ageH-a.ageH)[0].ageH : null }); },
     mkClu(el){ const al = (el && el.dataset.alarm && E.alarm(el.dataset.alarm)) || E.data.alarms.find(x=>x.sev==='critical') || E.data.alarms[0];
       selectEquipment(al.asset, { born:'pop', mkPop: al.id, mkPopN: +((el && el.dataset.n) || 0) }); },
-    /* the visible Back for a selected equipment dot: the very action of tapping that dot again (selectEquipment's second tap) */
-    mkBack(){ if(E.state.paint) selectEquipment(E.state.paint, {}); },
+    viewBack(){ E.back.go(); },
     mkClose(){ E.set({ mkPop: null, mkPopN: 0 }); },
 
     /* Timeline. */
@@ -1845,7 +1963,36 @@
       E._hmTimer = setInterval(run, 1000);
     },
     hmFloor(el){ E.set({ hmFloor: el.dataset.v }); },
-    hmSel(el){ E.set({ hmSel: E.state.hmSel === el.dataset.v ? null : el.dataset.v }); },
+    hmList(el){
+      const next = el.dataset.v === 'rooms' ? 'rooms' : 'sensors';
+      if(next !== 'rooms' && E.state.hmRoomView){ endRoomFly({ hmList: next }); return; }
+      E.set({ hmList: next, hmSel: null });
+    },
+    hmLevel(el){
+      const key = el.dataset.v || '';
+      const open = { ...(E.state.hmOpen || {}) };
+      open[key] = !open[key];
+      E.set({ hmOpen: open });
+    },
+    hmSel(el){
+      const v = el.dataset.v || '';
+      const room = ((E.data.heat && E.data.heat.rooms) || []).find(r => r.guid === v);
+      if(room){
+        if(E.state.hmRoomView && E.state.hmRoomView.guid === v) return;
+        const eng = E.engine;
+        const kept = E.state.hmRoomView && E.state.hmRoomView.view;
+        const view = kept || E.back.save();
+        E.set({ hmSel: v, hmRoomView: { guid: v, view: view } });
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          if(!E.state.hmRoomView || E.state.hmRoomView.guid !== v || !eng) return;
+          if(eng.flyToGid) eng.flyToGid(v);
+          if(eng.highlightGid) eng.highlightGid(v);
+        }));
+        return;
+      }
+      if(E.state.hmRoomView){ endRoomFly({ hmSel: E.state.hmSel === v ? null : v }); return; }
+      E.set({ hmSel: E.state.hmSel === v ? null : v });
+    },
     hmOutline(){ E.set({ hmOutline: !E.state.hmOutline }); },
     hmStill(){
       const heat = (window.INJECTED_PROJECT_CONFIG || {}).heatmap || {};
@@ -1865,8 +2012,6 @@
     if(window.EKO_NOTIF && window.EKO_NOTIF.setViewer) window.EKO_NOTIF.setViewer(p.name);
     E.state.dlg = null; if(window.EKO_BRIEF) window.EKO_BRIEF.reset(); E.set({}); };
   E.runAct = (name, data) => { const f = ACTS[name]; if(f) f({ dataset: data || {}, value: (data || {}).v }); };   /* E15: an action by name (js/e14.js) */
-  E.bimBack = ACTS.bimBack;
-  E.locExit = ACTS.locBack;   /* Escape leaves Locate-in-3D focus the way Back to Assets does (surfaces.js) */
 
   /* E15 port: the click and change handlers of the ported ESG, Security, Evacuation, Maintenance and scenario modules, looked up
      after ours in the pack's order (a name already in ACTS or an earlier module keeps winning) */
@@ -1926,6 +2071,13 @@
     const stf = ev.target.closest('[data-act="regStF"]');
     if(stf){ E.state.regStF = E.state.regStF === stf.dataset.v ? null : stf.dataset.v; render(); }
   });
+  let hmRoomFrame = 0;
+  document.addEventListener('scroll', ev => {
+    const t = ev.target;
+    if(!t || !t.classList || !t.classList.contains('hmrooms') || window.EKO !== E) return;
+    if(hmRoomFrame) return;
+    hmRoomFrame = requestAnimationFrame(() => { hmRoomFrame = 0; if(window.EKO_A && window.EKO_A.fillHeatRooms) window.EKO_A.fillHeatRooms(E); });
+  }, true);
   document.addEventListener('keydown', ev => {
     if (window.EKO !== E) return;
     if(E.state.wall){ if(window.EKO_WALL) window.EKO_WALL.onKey(ev); return; }   /* D108: Escape exits; any other key only raises the exit hint */

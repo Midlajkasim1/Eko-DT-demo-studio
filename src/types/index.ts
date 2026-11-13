@@ -224,6 +224,8 @@ export interface AssetLink {
   level?: string
   /** A camera's demo clip (V1–V7) or 'none'; absent: the clip in order */
   clip?: string
+  /** Where Locate in 3D puts the studio camera for this CCTV. Absent frames the camera body. */
+  view?: ProjectCamera
 }
 
 /** Everything the project list renders, so opening it never parses project.json */
@@ -278,8 +280,10 @@ export interface HeatmapSetup {
    * Marsa has no space links, so its rooms are never filled. A real FIN reading is kept.
    */
   sampleSpaces?: boolean
-  /** People drawn on the occupancy tab. Absent is 80. Capped at 400. */
+  /** People drawn on the occupancy tab. Absent is 80. Shared across levels. Capped at 400. */
   people?: number
+  /** A level's own people count, keyed by the toolbar floor id. A missing level keeps its share of `people`. */
+  peopleByLevel?: Record<string, number>
   /** How fast those people walk. 1 is a stroll. Absent is 1. */
   speed?: number
   /**
@@ -293,6 +297,12 @@ export interface HeatmapSetup {
    * An empty list means nobody walks while stillRooms is on.
    */
   walkRooms?: string[]
+  /**
+   * What the heatmap's right panel lists. Absent is sensors, the zone ranking.
+   * rooms lists each linked room, grouped by level and collapsed.
+   * both puts a Sensors / Rooms switch on that panel.
+   */
+  panel?: 'sensors' | 'rooms' | 'both'
 }
 
 /** One O&M or warranty PDF. `ref` is the FIN record, "@p:project:r:id". */

@@ -66,7 +66,7 @@ export function PointControlEditor({
         </p>
         <details style={{ margin: '8px 0 12px', fontSize: 13 }}>
           <summary style={{ cursor: 'pointer' }}>Standard names already allowed</summary>
-          <p className="ds-hint">Setpoints need no list. On/off: Start/Stop, FanCmd, SA Fan Cmd, RA Fan Cmd, SF_VFD_Cmd, EF_VFD_Cmd, Enable_Cmd, Status, Effective_Occupancy.</p>
+          <p className="ds-hint">Setpoints need no list. On/off: Start/Stop, FanCmd, FanRunStatus, SA Fan Cmd, RA Fan Cmd, SF_VFD_Cmd, EF_VFD_Cmd, Enable_Cmd, Status, Effective_Occupancy.</p>
           <p className="ds-hint">Valve, damper, speed: CoolingCoil, Cooling_Valve_Cmd, OA Damper, MA Damper, EA Damper, SF VFD, RF VFD, and the fan speed commands.</p>
           <p className="ds-hint">Mode: Fan_Speed_Mode, FanSpeed. The point must list its choices in FIN.</p>
         </details>

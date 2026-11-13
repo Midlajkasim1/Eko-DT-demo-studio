@@ -865,14 +865,6 @@
   }
 }
 
-.dashboard-native-container .vpback {
-  position:absolute;
-  top:10px;
-  inset-inline-start:12px;
-  z-index:58;
-  min-height:34px
-}
-
 /* The Assets Overview shown over the register's model strip (Locate in 3D) sizes to the strip: 70% of it, between its
    own 220px floor and its normal width, instead of a fixed width that overflows a 270-400px strip */
 .dashboard-native-container .regmodelwrap #ovp {
@@ -3758,6 +3750,83 @@
   color:var(--t1)
 }
 
+.dashboard-native-container .hmlevel {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  width:100%;
+  margin-top:4px;
+  padding:6px 8px;
+  border-radius:6px;
+  background:var(--s2);
+  color:var(--t1);
+  font-size:var(--txCapSz);
+  font-weight:600;
+  text-align:start
+}
+
+.dashboard-native-container .hmlevel:hover {
+  background:var(--s3)
+}
+
+.dashboard-native-container .hmlevel[data-on="true"] {
+  position:relative;
+  background:color-mix(in srgb, var(--acc) 16%, var(--s2))
+}
+
+.dashboard-native-container .hmlevel[data-on="true"]::before {
+  content:"";
+  position:absolute;
+  inset-inline-start:0;
+  inset-block:6px;
+  width:3px;
+  border-radius:2px;
+  background:var(--acc)
+}
+
+.dashboard-native-container .hmhere {
+  flex:none;
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:var(--acc)
+}
+
+.dashboard-native-container .hmroom {
+  padding-inline-start:22px
+}
+
+.dashboard-native-container .hmrooms {
+  max-height:min(52vh, 520px);
+  overflow:auto
+}
+
+.dashboard-native-container .hmrooms > .hmlevel,
+.dashboard-native-container .hmrooms > .hmwin {
+  flex:0 0 auto
+}
+
+.dashboard-native-container .hmwin {
+  position:relative;
+  overflow:hidden
+}
+
+.dashboard-native-container .hmwin .hmroom {
+  position:absolute;
+  inset-inline:0;
+  height:32px;
+  min-height:0;
+  white-space:nowrap
+}
+
+.dashboard-native-container .hmwin .hmroom .grow {
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+
 .dashboard-native-container .hmrbar {
   flex:0 0 64px;
   height:5px;
@@ -4065,7 +4134,8 @@
 }
 
 .dashboard-native-container .hmwrap .alcardh {
-  margin-block-end:2px
+  margin-block-end:2px;
+  flex-wrap:wrap
 }
 
 .dashboard-native-container .hmzone {
@@ -6660,30 +6730,6 @@
 .dashboard-native-container[data-density="compact"] .alhist {
   margin-block-start:4px;
   padding-block-start:4px
-}
-
-.dashboard-native-container .alrec {
-  display:flex;
-  flex-direction:column;
-  gap:2px;
-  margin-block-start:4px;
-  padding-inline-start:8px;
-  border-inline-start:2px solid var(--bd1)
-}
-
-.dashboard-native-container .alrecl {
-  font-size:var(--txCapSz);
-  color:var(--t3)
-}
-
-.dashboard-native-container .alrect {
-  font-size:var(--txValueSz);
-  color:var(--t1)
-}
-
-.dashboard-native-container .alrecb {
-  font-size:var(--txCapSz);
-  color:var(--t2)
 }
 
 .dashboard-native-container .actref {
@@ -9281,6 +9327,29 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   height:0
 }
 
+.dashboard-native-container .velm {
+  position:absolute;
+  z-index:30;
+  min-width:176px;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  padding:6px;
+  background:var(--elev);
+  border:1px solid var(--elevBd);
+  border-radius:var(--radPop);
+  box-shadow:var(--shadowPop)
+}
+
+.dashboard-native-container .velm .dgvgo {
+  flex:none
+}
+
+.dashboard-native-container .velm .dgvgo:disabled {
+  opacity:.45;
+  cursor:default
+}
+
 .dashboard-native-container .vrc {
   position:absolute;
   left:0;
@@ -9907,9 +9976,43 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container .dlgalerts > .achead {
   position:static;
   flex:none;
+  flex-wrap:wrap;
   margin:0;
   padding:14px 18px 10px;
   border-block-end:1px solid var(--bd1)
+}
+
+.dashboard-native-container .acsnd {
+  flex:1 0 100%;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-top:8px
+}
+
+.dashboard-native-container .acsnd-on {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  color:var(--t2);
+  font-size:var(--txCapSz);
+  cursor:pointer
+}
+
+.dashboard-native-container .acsnd-on input {
+  width:auto;
+  margin:0
+}
+
+.dashboard-native-container .acsnd-pick {
+  height:28px;
+  border-radius:8px;
+  border:1px solid var(--bd1);
+  background:var(--s2);
+  color:var(--t1);
+  font-family:var(--fB),sans-serif;
+  font-size:var(--txCapSz);
+  padding:0 8px
 }
 
 .dashboard-native-container .acmeta {
@@ -15409,6 +15512,23 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   color:var(--t2)
 }
 
+.dashboard-native-container .mkpop .mkbox {
+  padding:8px 10px;
+  border:1px solid var(--bd1);
+  border-radius:8px;
+  background:var(--s2)
+}
+
+.dashboard-native-container .mkpop .mkbox[data-sev="critical"] {
+  border-color:var(--critB);
+  background:var(--critT)
+}
+
+.dashboard-native-container .mkpop .mkbox[data-sev="high"] {
+  border-color:var(--warnB);
+  background:var(--warnT)
+}
+
 .dashboard-native-container .mkpop .mkimpact {
   color:var(--warnTx)
 }
@@ -17145,6 +17265,37 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   min-height:36px
 }
 
+.dashboard-native-container .dlgpoint .pcmenu {
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  gap:6px;
+  padding:0;
+  overflow:visible;
+  border-radius:0;
+  background:transparent;
+  border:0
+}
+
+.dashboard-native-container .dlgpoint .pcmenu .seg {
+  justify-content:flex-start;
+  padding:8px 12px;
+  border:1px solid var(--bd2);
+  border-radius:8px;
+  background:var(--s2);
+  color:var(--t1)
+}
+
+.dashboard-native-container .dlgpoint .pcmenu .seg+.seg {
+  border-inline-start:0
+}
+
+.dashboard-native-container .dlgpoint .pcmenu .seg[data-on="true"] {
+  background:var(--accT);
+  color:var(--acc);
+  border-color:var(--acc)
+}
+
 .dashboard-native-container .pcresult {
   padding:8px 10px;
   border-radius:8px;
@@ -17729,15 +17880,3 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container[data-nav="min"] #ekonav > div { position:relative }
 .dashboard-native-container[data-nav="min"] .nsubs { position:fixed; inset-inline-start:calc(var(--navw) + 4px); z-index:50; min-width:190px; padding:6px; gap:1px;
   background:var(--chrome-bg); border:1px solid var(--chrome-edge); border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.25) }
-
-/* Back from the model to the view that opened it: solid, readable on a light or a dark model, top-centre, clear of the Overview panel (left), the model tools and the close button (right) */
-.dashboard-native-container .vpbim { pointer-events:auto; position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:58; white-space:nowrap; min-height:36px; display:inline-flex; align-items:center; gap:6px; padding:0 14px; border-radius:8px; border:1px solid #4b5f78; background:#0f1a28; color:#fff; font:inherit; font-weight:600; font-size:13px; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.4) }
-.dashboard-native-container .vpbim:hover { background:#16263a }
-.dashboard-native-container .vpbim:focus-visible { outline:2px solid var(--acc); outline-offset:2px }
-
-/* Back for a selected equipment dot in the model: same look as vpbim, below it when both show */
-.dashboard-native-container .vpmkback { pointer-events:auto; position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:57; min-height:36px; display:inline-flex; align-items:center; gap:6px; padding:0 14px; border-radius:8px; border:1px solid #4b5f78; background:#0f1a28; color:#fff; font:inherit; font-weight:600; font-size:13px; white-space:nowrap; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.4) }
-.dashboard-native-container .vpbim ~ .vpmkback { top:54px }
-.dashboard-native-container .vpmkback:hover { background:#16263a }
-.dashboard-native-container .vpmkback:focus-visible { outline:2px solid var(--acc); outline-offset:2px }
-

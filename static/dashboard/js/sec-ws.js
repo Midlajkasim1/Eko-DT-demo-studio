@@ -34,7 +34,12 @@ window.EKO_SECW = (function(){
       if(e.src === 'alarm'){ const as = (E.data.assets || []).find(a => a.id === e.asset) || {}; room = L(E, as.level, as.levelAr) || ''; storey = storey || as.floor; gid = gid || as.gid; x = e.a.x; y = e.a.y; state = e.a.ack ? 'acked' : 'unacked';
         const door = (d.doors || []).find(r => r.id === e.asset); if(door){ storey = door.storey; } }
       if(e.src === 'access'){ const door = (d.doors || []).find(r => r.id === e.door) || {}; room = door.en ? L(E, door.en, door.ar).replace(/^[^,]*, /, '') : ''; storey = door.storey; gid = door.gid; x = door.x; y = door.y; state = e.srcState || 'unacked'; }
-      if(e.src === 'fire' && !room){ const fe = ((d.fire || {}).events || []).find(q => q.id === e.id) || e; room = L(E, fe.room, fe.roomAr) || ''; state = e.scenario ? 'unacked' : (fe.srcState || 'unacked'); }
+      if(e.src === 'fire'){ const fe = ((d.fire || {}).events || []).find(q => q.id === e.id) || e;
+        const dev = ((d.fire || {}).detectors || []).find(q => q.id === (e.device || fe.device)) || {};
+        if(!room) room = L(E, fe.room || dev.roomEn, fe.roomAr || dev.roomAr) || '';
+        storey = storey || fe.storey || dev.storey; gid = gid || fe.room || dev.room || fe.gid || dev.gid;
+        if(x == null && dev.x != null){ x = dev.x; y = dev.y; }
+        state = e.scenario ? 'unacked' : (fe.srcState || 'unacked'); }
       if(e.src === 'intrusion') room = X.zoneName(e.zone);
       room = String(room || '').replace(/^(Level|المستوى) \d+ · /, '');   /* the level is shown on its own */
       if(!room && storey) room = X.storeyName(storey);
@@ -222,10 +227,24 @@ window.EKO_SECW = (function(){
       if(e.gid && E.engine.setLabels && E.engine.roomsNear){ const near = E.engine.roomsNear(e.gid, 9);
         E.engine.setLabels([{ gid: e.gid, text: e.device || e.title, tone: 'sel', lift: 1.6 }].concat(near.map((r, i) => ({ gid: 'space:' + r.gid, text: r.name, tone: i ? 'room' : 'roomOn', lift: 0.4 })))); } });
   }
+  function leave(E){
+    const from = E.state.secEvFrom, eng = E.engine;
+    if(!E.state.secEv && !from) return;
+    E.state.secEv = null; E.state.secEvFrom = null;
+    if(!eng) return;
+    if(eng.highlightGid) eng.highlightGid(null);
+    if(eng.setLabels) eng.setLabels(null);
+    if(from && E.state.dock){ E.state.dock.level = from.level; if(eng.isolateLevel) eng.isolateLevel(from.level); }
+    if(!E.back.fly(from && from.view) && eng.resetView) eng.resetView();
+  }
   /* the pulse ring at the selected event, drawn in the marker layer */
   function pulse(E){
     const e = E.state.secEv && events(E).find(x => x.id === E.state.secEv);
-    return e && e.x != null ? `<span class="mk swpulse" data-x="${e.x}" data-y="${e.y}" aria-hidden="true"></span>` : '';
+    if(!e) return '';
+    if(e.gid){ const gear = (((E.data.security || {}).fire || {}).detectors || []).find(q => q.id === e.device) || {};
+      const alt = gear.gid && gear.gid !== e.gid ? gear.gid : '';
+      return `<span class="mk swpulse" data-x="${e.x != null ? e.x : 0}" data-y="${e.y != null ? e.y : 0}" data-bimid="${esc(e.gid)}"${alt ? ` data-alt="${esc(alt)}"` : ''} data-pin="room" aria-hidden="true"></span>`; }
+    return e.x != null ? `<span class="mk swpulse" data-x="${e.x}" data-y="${e.y}" aria-hidden="true"></span>` : '';
   }
 
   /* -------------------------------- drills -------------------------------- */
@@ -244,12 +263,13 @@ window.EKO_SECW = (function(){
   setTimeout(regDrills, 0);
 
   const ACTS = {
-    secFilter(el){ const E = window.EKO, v = el.dataset.v || null; E.set({ secFilter: E.state.secFilter === v ? null : v, secEv: null }); },
+    secFilter(el){ const E = window.EKO, v = el.dataset.v || null; leave(E); E.set({ secFilter: E.state.secFilter === v ? null : v, secEv: null }); },
     secEv(el){ const E = window.EKO, id = el.dataset.v, e = events(E).find(x => x.id === id);
       E.state.dlg = null; E.state.opsDrill = null; E.state.secSel = null;
       if(E.state.pageId !== 'sec') E.go('sec', 'security', null);
+      if(!E.state.secEvFrom) E.state.secEvFrom = { level: E.state.dock.level, view: E.back.save() };
       focus(E, e); E.set({ secEv: id }); },
-    secBack(){ const E = window.EKO; if(E.engine && E.engine.highlightGid) E.engine.highlightGid(null); if(E.engine && E.engine.setLabels) E.engine.setLabels(null); E.set({ secEv: null }); }
+    secBack(){ const E = window.EKO; leave(E); E.set({}); }
   };
-  return { events, tiles, kpis, summary, panel, workspace, pulse, focus, clipOf, clipSrc, clipsFor, videoEl, seeing, areasNow, ACTS };
+  return { events, tiles, kpis, summary, panel, workspace, pulse, focus, leave, clipOf, clipSrc, clipsFor, videoEl, seeing, areasNow, ACTS };
 })();

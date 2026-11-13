@@ -148,24 +148,40 @@ window.EKO_SEC = (function(){
         <span class="alcardm">${esc(t('sec.evMeta', { n: ev.length }))}</span></div>${body}
         <div class="alfoot">${esc(t('sec.evFoot'))}</div></div>`);
   }
-  /* the markers of the security landing: cameras, doors and fire devices that carry a position */
+  /* the markers of the security landing: cameras, doors and fire devices that carry a position.
+     A card reader is access equipment, not a marker on this model. */
+  const cardReader = c => /^CR[-_]/.test(String(c.id || '')) || /card reader/i.test(c.en || '') || /قارئ البطاقات|قارئ بطاقات/.test(c.ar || '');
+  /* a fire device from the site catalog: its room GlobalId is where the Fire tile's marker sits */
+  function fireGear(id){
+    const f = ((D() || {}).fire) || {}, lists = [f.detectors, f.devices, f.deviceTests];
+    for(let i = 0; i < lists.length; i++){ const hit = (lists[i] || []).find(q => q.id === id); if(hit) return hit; }
+    return null;
+  }
   function markers(E2){
     use(E2);
     const d = D(); if(!d) return '';
     const sel = E.state.secSel;
     const pts = [];
     cams().forEach(c => { if(c.gid || (isFinite(+c.x) && isFinite(+c.y) && c.x !== undefined)) pts.push({ id: c.id, gid: c.gid, x: +c.x || 0, y: +c.y || 0, k: 'cam', bad: c.online === false, tip: c.id + ' · ' + L(c.en, c.ar) }); });
-    doors().forEach(c => { if(isFinite(+c.x) && isFinite(+c.y) && c.x !== undefined) pts.push({ id: c.id, x: +c.x, y: +c.y, k: 'door', bad: accessEvents().some(e => e.door === c.id && FLAG.includes(e.kind) && e.open !== false), tip: c.id + ' · ' + L(c.en, c.ar) }); });
+    doors().forEach(c => { if(cardReader(c) || !(isFinite(+c.x) && isFinite(+c.y) && c.x !== undefined)) return; pts.push({ id: c.id, x: +c.x, y: +c.y, k: 'door', bad: accessEvents().some(e => e.door === c.id && FLAG.includes(e.kind) && e.open !== false), tip: c.id + ' · ' + L(c.en, c.ar) }); });
     /* D180: fire devices in alarm (the demo scenario) are marked; a site with many devices shows only what needs a look:
        flagged doors, offline cameras, the selection, and every camera only with the view cones on */
     fireEvents().filter(e => e.active !== false && e.kind !== 'fault' && isFinite(+e.x) && e.x !== undefined).forEach(e => pts.push({ id: e.device, ev: e.id, x: +e.x, y: +e.y, k: 'fire', bad: true, tip: L(e.en, e.ar) }));
+    /* Fire Attention: one flame marker on each open fire event's room, including a fault */
+    if(E.state.secFilter === 'fire') fireEvents().filter(e => e.active !== false).forEach(e => {
+      const dev = fireGear(e.device) || {};
+      const room = dev.room || e.room;
+      if(!room && !dev.gid && !e.gid) return;
+      const where = L(dev.roomEn, dev.roomAr);
+      pts.push({ id: 'room:' + (e.device || e.id), ev: e.id, gid: room || dev.gid || e.gid, alt: room && dev.gid && dev.gid !== room ? dev.gid : '', x: isFinite(+dev.x) ? +dev.x : (+e.x || 0), y: isFinite(+dev.y) ? +dev.y : (+e.y || 0), k: 'fire', bad: true, force: true, pin: 'room', tip: [where, L(e.en, e.ar) || e.device].filter(Boolean).join(' · ') });
+    });
     const fk = E.state.secFilter, fOk = p => !fk || (fk === 'cctv' && p.k === 'cam') || (fk === 'access' && p.k === 'door') || (fk === 'fire' && p.k === 'fire');   /* D182: a tile filters the model */
     for(let q = pts.length - 1; q >= 0; q--) if(!fOk(pts[q])) pts.splice(q, 1);
     const crowded = { cam: cams().length > 60, door: doors().length > 60 };
     const off = !!E.state.secMarksOff;
-    const keep = p => p.id === sel || (!off && (!crowded[p.k] || p.bad || (p.k === 'cam' && (E.state.secCones || fk === 'cctv'))));
+    const keep = p => p.force || p.id === sel || (!off && (!crowded[p.k] || p.bad || (p.k === 'cam' && (E.state.secCones || fk === 'cctv'))));
     for(let q = pts.length - 1; q >= 0; q--) if(!keep(pts[q])) pts.splice(q, 1);
-    return `<div class="mklayer secmklayer">${pts.map(p => `<button class="mk secmk" data-x="${p.x}" data-y="${p.y}"${p.gid ? ` data-bimid="${esc(p.gid)}"` : ''} data-k="${p.k}" data-bad="${p.bad ? 1 : 0}" data-sel="${sel === p.id ? 1 : 0}"
+    return `<div class="mklayer secmklayer">${pts.map(p => `<button class="mk secmk" data-x="${p.x}" data-y="${p.y}"${p.gid ? ` data-bimid="${esc(p.gid)}"` : ''}${p.alt ? ` data-alt="${esc(p.alt)}"` : ''}${p.pin ? ` data-pin="${esc(p.pin)}"` : ''} data-k="${p.k}" data-bad="${p.bad ? 1 : 0}" data-sel="${sel === p.id ? 1 : 0}"
         data-act="${p.k === 'cam' ? 'secCam' : p.k === 'fire' ? 'secEv' : 'secDoor'}" data-v="${esc(p.ev || p.id)}" data-tip="${esc(p.tip)}" aria-label="${esc(p.tip)}">${icon(p.k === 'cam' ? 'eye' : p.k === 'fire' ? 'flame' : 'lock', 11)}</button>`).join('')}${window.EKO_SECW ? window.EKO_SECW.pulse(E) : ''}${!off && window.EKO_SCN3 ? window.EKO_SCN3.markers(E) : ''}${!off && window.EKO_EVAC && window.EKO_EVAC.markers ? window.EKO_EVAC.markers(E) : ''}</div>`;
   }
   /* the landing: the summary over the model, the open events in the panel */
@@ -173,19 +189,13 @@ window.EKO_SEC = (function(){
     use(E2);
     const model = (doc.widgets || []).find(w => w.type === 'viewer3d') || {};
     const cfg = Object.assign({}, model.config || {}, { markers: false, markToggle: true });
-    return window.EKO_V.viewer(E, cfg, located(E) + markers(E) + summary(E)) + (E.state.assetSel ? C().assetPanel(E) : panel(E));
-  }
-  function located(E2){
-    const b = E2.state.secLocated;
-    if(!b) return '';
-    return `<div class="secloc" role="status"><span>${esc(t('sec.located', { c: b.id }))}</span>
-      <button class="btnG btnSm" data-act="secLocatedBack">${icon('chevL', 12)} ${esc(t('back'))}</button></div>`;
+    return window.EKO_V.viewer(E, cfg, markers(E) + summary(E)) + (E.state.assetSel ? C().assetPanel(E) : panel(E));
   }
   /* A second locate keeps the first one's way back */
   function locatedFrom(E2, id){
     const prev = E2.state.secLocated, eng = E2.engine;
     if(prev) return Object.assign({}, prev, { id });
-    return { id, from: { pageId: E2.state.pageId, module: E2.state.module, sub: E2.state.sub }, view: eng && eng.saveViewpoint ? eng.saveViewpoint() : null };
+    return { id, from: { pageId: E2.state.pageId, module: E2.state.module, sub: E2.state.sub }, view: E2.back.save() };
   }
 
   const widget = (...a) => A().widget(E, ...a), hero = (...a) => A().heroTile(E, ...a);
@@ -400,9 +410,9 @@ window.EKO_SEC = (function(){
     secMarksShow(){ const E2 = window.EKO; E2.set({ secMarksOff: !E2.state.secMarksOff }); },
     secLocatedBack(){ const E2 = window.EKO, b = E2.state.secLocated, eng = E2.engine; if(!b) return;
       if(eng && eng.highlightGid) eng.highlightGid(null);
-      E2.state.secLocated = null; E2.state.secSel = null;
+      E2.state.cctvFeed = null; E2.state.secLocated = null; E2.state.secSel = null;
       if(b.from.pageId !== E2.state.pageId){ E2.go(b.from.pageId, b.from.module, b.from.sub); return; }
-      if(b.view && eng && eng.flyToViewpoint) eng.flyToViewpoint(b.view); else if(eng && eng.resetView) eng.resetView();
+      if(!E2.back.fly(b.view) && eng && eng.resetView) eng.resetView();
       E2.set({}); }
   };
   /* D182: the internals the overview and event workspace build on (js/sec-ws.js) */

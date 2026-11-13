@@ -362,7 +362,7 @@ export async function initFragmentsEngine(
   let studioActive = false
   let studioEpoch = 0
   const studioPainted = new Map<string, number[]>()
-  const studioPainting = new Set<string>()
+  const studioJobs = new Map<string, { epoch: number; done: Promise<void> }>()
   let templateSky: THREE.Texture | null = null
   let templateEnv: THREE.Texture | null = null
   /** How the item materials arrived, so a template can be taken back off them */
@@ -700,7 +700,6 @@ export async function initFragmentsEngine(
     if (!studioActive && studioPainted.size === 0) return
     studioActive = false
     studioEpoch += 1
-    studioPainting.clear()
     const jobs = [...studioPainted]
     studioPainted.clear()
     for (const [id, localIds] of jobs) {
@@ -714,22 +713,24 @@ export async function initFragmentsEngine(
   const paintStudio = (model: any) => {
     const epoch = studioEpoch
     const modelId = model?.modelId as string | undefined
-    if (!modelId || studioPainting.has(modelId) || typeof model.getItemsOfCategories !== 'function') return
-    studioPainting.add(modelId)
-    void (async () => {
-      try {
-        const localIds = await paintStudioModel(model, () => epoch !== studioEpoch || !studioActive)
-        if (!localIds.length || epoch !== studioEpoch || !studioActive) return
-        const prev = studioPainted.get(modelId) ?? []
-        studioPainted.set(modelId, prev.concat(localIds))
-        void fragments.update(true)
-        requestFrame()
-      } catch (err) {
-        console.warn('Studio palette could not be applied', err)
-      } finally {
-        studioPainting.delete(modelId)
-      }
-    })()
+    if (!modelId || typeof model.getItemsOfCategories !== 'function') return
+    const earlier = studioJobs.get(modelId)
+    if (earlier?.epoch === epoch) return
+    const cancelled = () => epoch !== studioEpoch || !studioActive
+    const run = async () => {
+      // A cancelled paint resets its colours first, or that reset would wipe this paint
+      await earlier?.done
+      if (cancelled()) return
+      const localIds = await paintStudioModel(model, cancelled)
+      if (!localIds.length || cancelled()) return
+      const prev = studioPainted.get(modelId) ?? []
+      studioPainted.set(modelId, prev.concat(localIds))
+      void fragments.update(true)
+      requestFrame()
+    }
+    const job = { epoch, done: run().catch(err => { console.warn('Studio palette could not be applied', err) }) }
+    studioJobs.set(modelId, job)
+    void job.done.then(() => { if (studioJobs.get(modelId) === job) studioJobs.delete(modelId) })
   }
 
   /** Takes the template back off the scene, so another mode can set up its own. */

@@ -43,11 +43,8 @@ window.EKO_POINT_CONTROL = (function(){
     const status = ctl.role === 'status', choice = ctl.role === 'choice', off = edit.busy ? ' disabled' : '';
     const picked = status || choice;
     const many = choice && ctl.options.length > 2;
-    const input = many
-      ? `<select id="pointEditChoice" aria-label="${esc(p.navName)}"${off}>${ctl.options.map(o =>
-          `<option value="${esc(o.value)}"${edit.draft === o.value ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`
-      : picked
-      ? `<div class="segbox row pcchoice" role="radiogroup" aria-label="${esc(p.navName)}">${ctl.options.map(o =>
+    const input = picked
+      ? `<div class="segbox ${many ? 'pcmenu' : 'row'} pcchoice" role="radiogroup" aria-label="${esc(p.navName)}">${ctl.options.map(o =>
           `<button type="button" class="seg" role="radio" data-act="pointEditChoose" data-v="${esc(o.value)}" data-on="${edit.draft === o.value}" aria-checked="${edit.draft === o.value}"${off}>${esc(o.label)}</button>`).join('')}</div>`
       : `<div class="pcnum">
           <button type="button" class="iconbtn" data-act="pointEditStep" data-v="-1" aria-label="${esc(t('pcLower'))}"${off}>−</button>
@@ -155,10 +152,6 @@ window.EKO_POINT_CONTROL = (function(){
   document.addEventListener('input', ev => {
     const E = window.EKO;
     if(ev.target.id === 'pointEditValue' && E && E.state.pointEdit){ E.state.pointEdit.draft = numberOf(ev.target.value) ?? E.state.pointEdit.draft; }
-  });
-  document.addEventListener('change', ev => {
-    const E = window.EKO;
-    if(ev.target.id === 'pointEditChoice' && E && E.state.pointEdit){ E.state.pointEdit.draft = ev.target.value; E.state.pointEdit.result = null; }
   });
   document.addEventListener('keydown', ev => {
     if(ev.key === 'Enter' && ev.target.id === 'pointEditValue'){ ev.preventDefault(); ACTS.pointEditApply(); }
