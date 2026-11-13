@@ -723,8 +723,6 @@ export function ProjectSettingsModal({ visible, onClose }: ProjectSettingsModalP
                 <p className="ds-hint">IANA name, e.g. Asia/Dubai. Sets where "today" starts in the dashboard and reports.</p>
               </div>
 
-              <h3 className="ds-section-title" style={{ marginTop: '24px' }}>Notifications</h3>
-              <p className="ds-hint">Alarm and FIN-connection notifications are made automatically for a connected project. Alarms are graded by this project's Severity Configuration; without it no alarm is notified.</p>
               <div className="ds-field">
                 <label>Work-order query</label>
                 <input type="text" value={settings.finWorkorderExpr || ''} onChange={e => update('finWorkorderExpr', e.target.value || undefined)} placeholder='e.g. sqlQuery(read(sqlConn), "SELECT * FROM <your work-order table>")' />
