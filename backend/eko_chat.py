@@ -441,8 +441,18 @@ def get_alarms(args: dict, view: DataView) -> dict:
         key = _fold(args["equipment"])
         # the equipment list counts an alarm by the id of the record it is on; match the same way, and by name as before
         on_equipment = [e for e in equipment if isinstance(e, dict) and key and (_fold(e.get("name")) == key or _loose(_fold(e.get("name"))) == _loose(key))]
+        if not on_equipment and key:
+            # not one item's exact name: the equipment whose name holds the words, or whose type is the word ("cooling tower", "ahu")
+            word = str(args["equipment"]).strip().lower()
+            on_equipment = [e for e in equipment if isinstance(e, dict) and (key in _fold(e.get("name")) or _kind_match(e, word) or _kind_match(e, word.rstrip("s")))]
+            matched = sorted({str(e.get("name")) for e in on_equipment})
+            if len(matched) > 1:     # never pick one of several: the user is asked which
+                return {"available": False, "reason": "ambiguous", "project": _project(view), "candidates": matched[:10],
+                        "message": f"More than one equipment item matches \"{args['equipment']}\": {', '.join(matched[:10])}. Which one do you mean?"}
         ids = {e["finId"] for e in on_equipment if e.get("finId")}
         rows = [a for a in rows if key and (key == _fold(a.get("source")) or key in _fold(a.get("source")) or (a.get("source_id") and a["source_id"] in ids))]
+        if not on_equipment and not rows and not any(key in _fold(a.get("source")) for a in source if isinstance(a, dict)):
+            return _unavailable("not_found", f"No equipment named \"{args['equipment']}\" was found in this project's data.", view)
     if args.get("severity"):
         rows = [a for a in rows if a.get("severity") == args["severity"]]
     if args.get("state"):
@@ -723,6 +733,11 @@ def get_energy(args: dict, view: DataView) -> dict:
         return problem
     period, by = args.get("period", "today"), args.get("by", "building")
     breakdown, lo, hi = args.get("breakdown"), args.get("from_hour"), args.get("to_hour")
+    if args.get("last_hours") and lo is None and period == "today":    # the last N completed hours of the site's day, as an hour range
+        hi = _site_now(view).hour
+        lo = max(0, hi - args["last_hours"])
+        if hi == 0:
+            return _unavailable("period_not_supported", "No hour of today has completed yet in the site's time, so there is nothing to total for the last hours.", view)
     shape = _energy_shape_problem(period, by, breakdown, lo, hi)
     if shape == "invalid":
         return {"available": False, "reason": "invalid_arguments", "details": ["from_hour and to_hour go together, with from_hour before to_hour"]}
@@ -1269,7 +1284,8 @@ TOOLS: dict[str, dict] = {
             "period": {"type": "string", "enum": PERIODS}, "by": {"type": "string", "enum": ["building", "board"]},
             "breakdown": {"type": "string", "enum": BREAKDOWNS, "description": "hour: today or yesterday; day: this week or month; week: this month."},
             "from_hour": {"type": "integer", "minimum": 0, "maximum": 23, "description": "First clock hour (0-23) of a range, with to_hour."},
-            "to_hour": {"type": "integer", "minimum": 1, "maximum": 24, "description": "End of the range: the hour it stops before."}}},
+            "to_hour": {"type": "integer", "minimum": 1, "maximum": 24, "description": "End of the range: the hour it stops before."},
+            "last_hours": {"type": "integer", "minimum": 1, "maximum": 23, "description": "The last N completed hours of today (period today), instead of from_hour and to_hour."}}},
     },
     "get_capabilities": {
         "fn": get_capabilities,
@@ -1507,6 +1523,15 @@ def build_card(tool: str, args: Optional[dict], result: dict) -> Optional[dict]:
                 headline=_text("energy", "Energy consumption {period}: {value} {unit}", period=when,
                                value=result.get("value"), unit=result.get("unit")),
                 columns=["metric", "value", "unit", "hours"], rows=rows, total=1)
+        if result.get("period") != "now" and result.get("boards") is None and result.get("value") is not None:
+            # the summary the chat shows: the average is worked out here, over the entries that have a value, never by the browser or the model
+            series = result.get("entries") if result.get("entries") is not None else result.get("hourly")
+            valid = [e for e in series or [] if e.get("value") is not None]
+            card["summary"] = {"period": result.get("period"), "total": result.get("value"), "unit": result.get("unit"),
+                               "from_hour": result.get("from_hour"), "to_hour": result.get("to_hour"),
+                               "average": round(result["value"] / len(valid), 1) if len(valid) > 1 else None,
+                               "average_per": (result.get("breakdown") if result.get("entries") is not None else "hour") if len(valid) > 1 else None,
+                               "readings": result.get("hours_reported"), "expected": result.get("hours_expected")}
         card["interpreted_as"] = _text("energy", "Energy over the period, from FIN readings{f}", f=_filters_text(filters))
     elif tool == "get_hvac_status":
         filters = _filters(args, ["type"])
@@ -1576,6 +1601,8 @@ def build_card(tool: str, args: Optional[dict], result: dict) -> Optional[dict]:
             interpreted_as=_text("alarmHistory", "Alarm records of FIN's latest read, open and cleared; not an archive{f}", f=_filters_text(filters)),
             columns=["date", "total"], rows=rows[:MAX_CARD_ROWS], total=len(rows))
     elif tool == "get_capabilities":
+        if result.get("about"):       # one capability: the sentence says it; its raw status and id are internal, not a card
+            return None
         filters = _filters(args, ["about"])
         if result.get("show") == "unavailable":
             counts = result.get("counts") or {}
@@ -2566,12 +2593,8 @@ def try_multi(message: str, view_fn: Callable[[], DataView], info: Optional[dict
 
 
 RULES_PROVIDER = "rules"   # chat.provider: answer from the rules and the backend's data only; no language model is ever called
-HELP_TEXT = ("I can answer these questions from this project's live FIN data: "
-             "equipment (list it, count it, the status of one item by name, how many systems are online), "
-             "alarms and alerts (open, critical or warning, latest, on one item by name), and "
-             "notifications (recent, unread, acknowledgements). "
-             "Ask one thing at a time and name the equipment, for example \"status of <equipment name>\". "
-             "Ask \"what can you do\" to see what is available for this project.")
+HELP_TEXT = ("Try asking about alarms, equipment, energy, live readings or notifications, for example \"show critical alarms\" or "
+             "\"status of <equipment name>\", or ask \"what can you do\".")
 
 
 NOT_VERIFIED = "The answer could not be checked against the data, so it was not shown. Please try again."
@@ -2634,7 +2657,7 @@ def _trace_direct(trace: chat_trace.ChatTrace, direct: dict, info: dict, rules_o
     """The summary line for an answer the endpoint already holds (rules, a clarification, a topic reply, or the hybrid model's intent)."""
     route, calls = direct.get("route"), direct.get("tool_calls") or []
     tool = calls[0].get("name") if calls and isinstance(calls[0], dict) else None
-    handler = {"direct": "rules", "multi": "multi", "llm_intent": "llm_intent", "llm_planner": "planner", "clarification": "clarification",
+    handler = {"direct": "rules", "multi": "multi", "llm_intent": "llm_intent", "llm_planner": "planner", "general": "general", "clarification": "clarification",
                "timeout": "timeout"}.get(route) or ("topic" if calls else "help")
     why = info.get("reason")
     skipped = "provider_rules" if rules_only else ("unsafe_or_empty_question" if why in ("unsafe_content", "empty") else "rules_matched")
@@ -2684,8 +2707,9 @@ def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
         _debug("question", question)
         fallback: dict = {}
         # the deployment's environment (LLM_ENABLED, OLLAMA_MODEL, ...) is applied on top of config.json's chat block
-        from eko_chat_llm import DEFAULT_MODEL, PROVIDER as HYBRID, effective, hybrid   # imported here: that module imports this one
+        from eko_chat_llm import DEFAULT_MODEL, GENERAL_RULES_ONLY, PROVIDER as HYBRID, effective, general_reply, hybrid   # imported here: that module imports this one
         import eko_chat_planner as chat_planner                                          # (so does the planner)
+        from eko_chat_router import general_question
         cfg = effective(cfg)
         planning = chat_planner.settings(cfg) is not None       # the ollama provider plans with tools (Phase 3) unless chat.planner is false
         trace = chat_trace.ChatTrace.for_config(cfg, DEFAULT_MODEL, t0)     # which provider and model this request would use; no text, key or address
@@ -2712,6 +2736,10 @@ def build_router(view_fn: Callable[[], DataView], config_fn: Callable[[], dict],
                 direct = try_multi(question, vf, fallback, deadline, allow_unresolved=rules_only or (cfg.get("provider") == HYBRID and not planning))
             if direct is None and rules_on:
                 direct = topic_reply(question, vf, PRE_MODEL_TOPICS)      # outdoor / supply-air: decided by code, before a model could answer with the indoor value
+            if direct is None and general_question(question) and (rules_only or cfg.get("provider") == HYBRID):
+                # "what is an FCU": a general explanation by the model with no tool; with no model, said so in one line
+                direct = (await general_reply(cfg, question, bool(req.stream), t0, trace, deadline) if not rules_only else
+                          {"answer": GENERAL_RULES_ONLY, "answer_source": "code", "route": "unsupported", "grounded": True, "tool_calls": [], "card": None, "model": None})
             if direct is None and rules_only:
                 direct = topic_reply(question, vf) or unsupported(fallback.get("reason"))
             if direct is None and planning:

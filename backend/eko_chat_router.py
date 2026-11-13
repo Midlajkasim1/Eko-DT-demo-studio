@@ -55,6 +55,8 @@ POLITE_SUFFIX = re.compile(r"(?: please| thanks| thank you)+$")
 NOW = r"(?: (?:right now|now|currently|at the moment|at present))?"
 SEV = r"(?:(?P<sev>critical|warnings?|info) )?"
 SHOW = r"(?:what are |what is |what's |which are |show(?: me)? |list |get |give me |display |check )?"
+ALARM1 = r"(?:alarms?|alerts?)"
+NOT_A_NAME = r"(?:this|that|these|those|our|my|your|all|every|any|each|today|yesterday|now|building|site|project|floor|level|last|latest|recent|week|month)\b"
 ALARMS = r"(?:alarms|alerts)"                       # "alerts" is the everyday word for FIN alarms
 # "latest alarms" are the newest alarm RECORDS (open or cleared); only "latest open/active alarms" is the open list
 OPEN = r"(?:(?:current|currently|active|open|live|ongoing|(?:latest|recent|newest)(?= (?:open|active)\b)) )*"
@@ -97,7 +99,10 @@ RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat +
      r"how many " + OPEN + SEV + ALARMS + r"(?: (?:are there|are open|are active|do we have|are raised))?" + NOW),
     # alarms on one explicit equipment item
     ("alarms.equipment", "get_alarms",
-     SHOW + r"(?:any |the )?" + OPEN + ALARMS + r" (?:on|for|of) <eq>" + NOW),
+     SHOW + r"(?:any |the )?" + OPEN + SEV + ALARM1 + r" (?:on|for|of|in) <eq>" + NOW),
+    # ... or on equipment named only by words or type ("alarms for cooling tower"): the tool matches it against the equipment list, and asks which when several fit
+    ("alarms.named", "get_alarms",
+     SHOW + r"(?:any |the )?" + OPEN + SEV + ALARM1 + r" (?:on|for|of) (?:the )?(?!" + NOT_A_NAME + r")(?P<name>[a-z][a-z0-9 ]{1,40}?)" + NOW),
     ("alarms.equipment.has", "get_alarms",
      r"(?:does|has) <eq> (?:have |got )?(?:any )?" + OPEN + ALARMS + NOW),
     # building snapshot / status
@@ -268,6 +273,9 @@ CLARIFICATIONS: list[tuple[re.Pattern, str]] = [(re.compile(pat), ask) for pat, 
     (r"^(?:(?:what is|what's|show|get|check|tell me|read)(?: me)? )?(?:the )?(?:current |present |live )?(?:temperature|temp)(?: reading| level)?" + NOW + "$",
      "Which temperature do you mean? I can read this project's average indoor (zone) temperature: ask \"what is the indoor temperature\". "
      "Outdoor and supply-air temperatures are not read."),
+    (r"^(?:is (?:the |a )?)?(?:(?:what is|what's|show|get|check|tell me|read)(?: me)? )?(?:the )?(?:(?:current|present|live|latest) )?(?:readings?|values?)(?: available)?" + NOW + "$",
+     "Which reading do you mean? For example the current power (\"what is the current power\"), the indoor temperature, humidity or CO2, or one piece of equipment "
+     "(\"status of <equipment name>\")."),
     (r"^compare (?:the )?(?:(?:current|live|latest) )?(?:(?:status|state|readings) )?(?:of )?(?:the )?(?:two|2|both|several|some|all) (?:[a-z]{2,8}?)s?$",
      "Name the two units to compare, exactly as they are written in the equipment list, for example \"compare AHU-01 and AHU-02\"."),
 ]]
@@ -282,6 +290,25 @@ def clarification_for(question: Any) -> Optional[str]:
         if pattern.match(text):
             return ask
     return None
+
+
+# A question about what a building-systems term IS or how it works, not about this building's data: the language model explains it, with no tool.
+# Decided by code: an explanatory opener, a term of the trade, and no word that asks for live data or names one item.
+GENERAL_OPENER = re.compile(r"^(?:what(?:'s| is| are| does| do)|explain|define|describe|tell me about|how (?:does|do|is|are)|difference(?:s)? between|meaning of)\b")
+GENERAL_TERMS = re.compile(r"\b(?:ahus?|fcus?|vavs?|fahus?|hvac|chillers?|cooling towers?|boilers?|vfds?|vsds?|bms|dampers?|economi[sz]ers?|air handling units?|"
+                           r"fan coil units?|fan coils?|heat exchangers?|chilled water|set ?points?|thermostats?|compressors?|refrigerants?|digital twins?)\b")
+LIVE_WORDS = re.compile(r"\b(?:current|currently|now|today|yesterday|latest|our|my|this (?:building|project|site)|status|state of|alarms?|alerts?|readings?|how many|"
+                        r"which|show|list|count|in alarm|running|online|offline)\b")
+
+
+def general_question(question: Any) -> bool:
+    """True for an explanatory question about a building-systems term ("what is an FCU"), which needs no tool and no building data."""
+    if not isinstance(question, str) or not question.strip() or len(question) > MAX_MESSAGE_CHARS or UNSAFE.search(question):
+        return False
+    if any(re.search(r"\d", m.group(1)) for m in EQUIPMENT_ID.finditer(question)):
+        return False
+    text = _normalize(question)
+    return bool(GENERAL_OPENER.match(text) and GENERAL_TERMS.search(text) and not LIVE_WORDS.search(text))
 
 
 def unsupported_topic(question: Any, only: Optional[set] = None) -> Optional[str]:
@@ -311,6 +338,8 @@ LOADS = r"(?:power(?: consumption| usage| demand| draw)?|electrical load|electri
 NOW_REQ = r" (?:right now|now|currently|at the moment|at present)"
 CLOCK = r"(?P<h{n}>\d{{1,2}})(?::00)? ?(?P<a{n}>[ap]\.?m\.?)?"
 RANGE = r"between " + CLOCK.format(n=1) + r" and " + CLOCK.format(n=2) + r"(?: (?:on )?(?P<p>today|yesterday))?"
+# "for the last 3 hours": the question text has already been through _normalize, which writes "last 3" as "latest 3"
+LASTH = r"(?:for |in |over |during |within )?(?:the )?(?:last|latest|past) (?:(?P<lh>\d{1,2}|one|two|three|four|five|ten) hours?|(?P<lh1>hour))"
 BD_WORD = {"hourly": "hour", "hour": "hour", "daily": "day", "day": "day", "weekly": "week", "week": "week", "day by day": "day", "day-by-day": "day"}
 CONSUMING = r"(?:equipment|system|systems|asset|assets|board|boards|load|loads|unit|units|panel|panels)"
 ONLINE = r"(?:running|online|on|operating|working|active)"
@@ -339,6 +368,9 @@ METRIC_RULES: list[tuple[str, str, dict, re.Pattern]] = [(rid, intent, fixed, re
     ("energy.range.howmuch", "get_energy", {},
      r"how much " + ONLY + r" (?:was|were|did we|did the building|have we|has the building|is) (?:consumed|used|consume|use)(?: so far)? " + RANGE),
     ("energy.range", "get_energy", {}, LEAD_C + r"(?:total )?" + ONLY + " " + USE + " " + RANGE),
+    ("energy.lasthours", "get_energy", {"period": "today"}, LEAD_C + r"(?:total )?" + ONLY + r"(?: " + USE + r")? " + LASTH),
+    ("energy.lasthours.howmuch", "get_energy", {"period": "today"},
+     r"how much " + ONLY + r" (?:was|were|did we|did the building|have we|has the building)(?: consumed| used| consume| use)? " + LASTH),
     ("energy.period", "get_energy", {}, LEAD + r"(?:total )?" + EN + " " + USE + " " + AFTER),
     ("energy.period.short", "get_energy", {}, LEAD + r"(?:total )?" + ONLY + " " + AFTER),
     ("energy.period.poss", "get_energy", {}, LEAD + POSS + r" (?:total )?" + EN + " " + USE),
@@ -386,6 +418,9 @@ def _metric(text: str) -> Optional[dict]:
             if not bd:
                 continue                     # no hour/day/week named: the plain period rules answer it
             params["breakdown"] = bd
+        if rid.startswith("energy.lasthours"):
+            n = gd.get("lh")
+            params["last_hours"] = NUMBER_WORDS.get(n) or int(n) if n else 1
         if rid.startswith("energy.range"):
             if (gd["a1"] is None) != (gd["a2"] is None):
                 return _fallback("unsupported_or_ambiguous")       # "between 10 and 2 pm": which 10, which 2?
@@ -560,6 +595,8 @@ def route(question: Any) -> dict:
         params: dict = {}
         if "<eq>" in pattern.pattern:
             params["equipment"] = equipment
+        if gd.get("name"):
+            params["equipment"] = gd["name"].strip()
         if kind:
             params["type"] = kind
         sev = gd.get("sev")

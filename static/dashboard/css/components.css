@@ -16601,6 +16601,207 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   text-align:start
 }
 
+/* Eko-Chat response cards: alarm table with severity badges, energy summary, reading tiles and compact equipment cards. Scoped to the chat panel; colours
+   are the dashboard's own tokens. A table scrolls sideways inside its own box, so nothing leaves the bubble. */
+.dashboard-native-container #aipanel .aia .aibubble {
+  gap:10px;
+  line-height:1.5
+}
+
+.dashboard-native-container #aipanel .aicard {
+  display:flex;
+  flex-direction:column;
+  gap:8px
+}
+
+.dashboard-native-container #aipanel .aicardh {
+  margin:0
+}
+
+.dashboard-native-container #aipanel .aiscroll {
+  max-width:100%;
+  overflow-x:auto;
+  border:1px solid var(--bd1);
+  border-radius:8px
+}
+
+.dashboard-native-container #aipanel .aiscroll .aitbl {
+  min-width:100%
+}
+
+.dashboard-native-container #aipanel .aiscroll .aitbl th {
+  padding:6px 10px;
+  text-align:start;
+  white-space:nowrap;
+  background:var(--s3);
+  color:var(--t2);
+  font-weight:600
+}
+
+.dashboard-native-container #aipanel .aiscroll .aitbl td {
+  padding:6px 10px;
+  border-block-end:1px solid var(--bd1)
+}
+
+.dashboard-native-container #aipanel .aialarms {
+  min-width:420px
+}
+
+.dashboard-native-container #aipanel .aialarms td:first-child {
+  font-weight:600;
+  overflow-wrap:anywhere
+}
+
+.dashboard-native-container #aipanel .aialarms td:nth-child(2) {
+  white-space:nowrap
+}
+
+.dashboard-native-container .aichips {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px
+}
+
+.dashboard-native-container .aichip,.dashboard-native-container .aisev,.dashboard-native-container .aistate {
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  padding:2px 8px;
+  border:1px solid var(--bd2);
+  border-radius:999px;
+  background:var(--s3);
+  color:var(--t2);
+  font-size:var(--txChipSz);
+  font-weight:var(--txChipW);
+  line-height:1.4;
+  white-space:nowrap
+}
+
+.dashboard-native-container .aichip b {
+  color:var(--t1)
+}
+
+.dashboard-native-container .aichip[data-sev="critical"],.dashboard-native-container .aisev[data-sev="critical"] {
+  background:var(--critF2);
+  border-color:var(--critB2);
+  color:var(--critTx)
+}
+
+.dashboard-native-container .aichip[data-sev="warning"],.dashboard-native-container .aisev[data-sev="warning"] {
+  background:var(--warnF2);
+  border-color:var(--warnB2);
+  color:var(--warnTx)
+}
+
+.dashboard-native-container .aichip[data-sev="info"],.dashboard-native-container .aisev[data-sev="info"] {
+  background:var(--accT);
+  border-color:color-mix(in srgb, var(--acc) 40%, transparent);
+  color:var(--infTx)
+}
+
+.dashboard-native-container .aistate[data-st="online"] {
+  background:var(--posT);
+  border-color:var(--posB);
+  color:var(--posTx)
+}
+
+.dashboard-native-container .aistate[data-st="offline"] {
+  background:var(--warnF2);
+  border-color:var(--warnB2);
+  color:var(--warnTx)
+}
+
+.dashboard-native-container .aitiles {
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(120px, 1fr));
+  gap:8px
+}
+
+.dashboard-native-container .aitile {
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:0;
+  padding:8px 10px;
+  border:1px solid var(--bd1);
+  border-radius:8px;
+  background:var(--s1)
+}
+
+.dashboard-native-container .aitilel,.dashboard-native-container .aitilesub {
+  color:var(--t3);
+  font-size:var(--txCapSz)
+}
+
+.dashboard-native-container .aitilev {
+  color:var(--t1);
+  font-size:var(--txH2Sz);
+  font-weight:600;
+  overflow-wrap:anywhere
+}
+
+.dashboard-native-container .aitilev small {
+  color:var(--t2);
+  font-size:var(--txCapSz);
+  font-weight:500
+}
+
+.dashboard-native-container .aieqs {
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));
+  gap:8px
+}
+
+.dashboard-native-container .aieq {
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  min-width:0;
+  padding:8px 10px;
+  border:1px solid var(--bd1);
+  border-radius:8px;
+  background:var(--s1)
+}
+
+.dashboard-native-container .aieqh {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px
+}
+
+.dashboard-native-container .aieqn {
+  overflow-wrap:anywhere
+}
+
+.dashboard-native-container .aigeneral {
+  align-self:flex-start;
+  padding:1px 8px;
+  border:1px solid var(--bd2);
+  border-radius:999px;
+  color:var(--t3);
+  font-size:var(--txCapSz)
+}
+
+.dashboard-native-container .aitext .aimdh {
+  margin:4px 0 6px;
+  font-weight:600;
+  color:var(--t1)
+}
+
+.dashboard-native-container .aitext ul.aimdl {
+  margin:0 0 6px;
+  padding-inline-start:18px;
+  list-style:disc
+}
+
+.dashboard-native-container .aitext ol.aimdl {
+  margin:0 0 6px;
+  padding-inline-start:20px;
+  list-style:decimal
+}
+
+
 .dashboard-native-container .aimeta {
   color:var(--t3)
 }

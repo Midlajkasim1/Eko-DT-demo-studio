@@ -187,6 +187,7 @@ window.EKO_AI = (function(){
         turn.a.card = d.card || null; turn.a.model = d.model || turn.a.model || '';
         turn.a.parts = Array.isArray(d.parts) && d.parts.length ? d.parts : null;     /* several questions: one section each, in the order asked */
         turn.a.project = (d.project && d.project.name) || '';
+        turn.a.route = d.route || '';
         turn.a.sources = d.card ? t('ai.srcLive', { project: d.card.project || (d.project && d.project.name) || '', t: hhmm(d.card.as_of) }) : '';
       },
       error(d){ if(!live()) return; turn.a.status = 'error'; turn.a.errCode = d.code || 'error'; }
@@ -329,13 +330,64 @@ window.EKO_AI = (function(){
   }
   function cardHeadline(c){ return c && c.headline ? cardText(c.headline, 'h') : ''; }
   function cardInterpreted(c){ return c && c.interpreted_as ? t('ai.interpreted', { text: cardText(c.interpreted_as, 'i', { f: filtersText(c.filters) }) }) : ''; }
+  /* ---- Eko-Chat cards: one renderer per kind of result, from the card the backend built (nothing here reads or computes building data) ----
+     Alarms: counts, then a table (Equipment | Severity | Alarm message | Status). Energy: a summary of the period, then its table when there are several
+     entries. Readings: one tile each. Equipment: a compact card each. Anything else: the plain table. Every value is escaped; the only attribute values that
+     come from data (a severity) are checked against a fixed list first. */
+  const SEV_KEYS = ['critical', 'warning', 'info'];
+  const sevOf = s => SEV_KEYS.includes(s) ? s : 'info';
+  const num = n => typeof n === 'number' ? n.toLocaleString('en-US', { maximumFractionDigits: 2 }) : String(n);
+  const sevBadge = s => `<span class="aisev" data-sev="${sevOf(s)}">${esc(tOr('ai.card.sev.' + sevOf(s), String(s)))}</span>`;
+  const tile = (label, value, sub) => `<div class="aitile"><span class="aitilel">${esc(label)}</span><b class="aitilev">${value}</b>${sub ? `<span class="aitilesub">${esc(sub)}</span>` : ''}</div>`;
+  function plainTable(cols, rows){
+    if(!rows.length) return '';
+    return `<div class="aiscroll"><table class="aitbl"><thead><tr>${cols.map(k => `<th class="tCap">${esc(tOr('ai.card.c.' + k, k))}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(r => `<tr>${cols.map((k, j) => `<td>${esc(cardCell(r[j], k))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  }
+  function alarmCardHtml(c, cols, rows){
+    const p = (c.headline && c.headline.params) || {}, at = k => cols.indexOf(k);
+    const chips = [['total', p.total, '']].concat(SEV_KEYS.map(k => [k, p[k], k])).filter(x => x[1] != null)
+      .map(([k, n, sev]) => `<span class="aichip"${sev ? ` data-sev="${sev}"` : ''}><b>${esc(num(n))}</b> ${esc(k === 'total' ? t('ai.alarmTbl.total') : tOr('ai.card.sev.' + k, k))}</span>`).join('');
+    const status = r => at('open') >= 0 && r[at('open')] != null ? (r[at('open')] ? 'open' : 'cleared') : String(r[at('state')] == null ? '' : r[at('state')]);
+    const body = rows.map(r => `<tr><td class="aieqn">${esc(cardCell(r[at('source')], 'source'))}</td><td>${sevBadge(r[at('severity')])}</td>
+      <td>${esc(cardCell(r[at('message')], 'message'))}</td><td>${esc(status(r) ? tOr('ai.card.st.' + status(r).toLowerCase(), status(r)) : '—')}</td></tr>`).join('');
+    return `<div class="aichips">${chips}</div>${rows.length ? `<div class="aiscroll"><table class="aitbl aialarms"><thead><tr><th class="tCap">${esc(t('ai.alarmTbl.equipment'))}</th><th class="tCap">${esc(t('ai.alarmTbl.severity'))}</th><th class="tCap">${esc(t('ai.alarmTbl.message'))}</th><th class="tCap">${esc(t('ai.alarmTbl.status'))}</th></tr></thead><tbody>${body}</tbody></table></div>` : ''}`;
+  }
+  function energyCardHtml(c, cols, rows){
+    const s = c.summary;
+    const when = s.from_hour ? `${s.from_hour}–${s.to_hour}` : tOr('ai.card.p.' + s.period, String(s.period));
+    const tiles = [tile(t('ai.energy.period'), esc(s.from_hour ? `${tOr('ai.card.p.' + s.period, String(s.period))}, ${when}` : when)),
+      tile(t('ai.energy.total'), `${esc(num(s.total))} <small>${esc(s.unit || '')}</small>`)];
+    if(s.average != null) tiles.push(tile(t('ai.energy.average'), `${esc(num(s.average))} <small>${esc(s.unit || '')}</small>`, tOr('ai.card.per.' + s.average_per, '')));
+    if(s.readings != null && s.expected != null) tiles.push(tile(t('ai.energy.readings'), esc(t('ai.energy.readingsOf', { n: s.readings, total: s.expected }))));
+    return `<div class="aitiles">${tiles.join('')}</div>${rows.length > 1 ? plainTable(cols, rows) : ''}`;
+  }
+  function readingCardHtml(rows){
+    return `<div class="aitiles">${rows.map(r => tile(tOr('ai.card.m.' + r[0], String(r[0])), `${esc(r[1] == null ? '—' : num(r[1]))}${r[2] ? ` <small>${esc(r[2])}</small>` : ''}`)).join('')}</div>`;
+  }
+  /* equipment: only what the result holds. HVAC online/offline is "at least one point reporting and none faulted": run/stop is not read, so it is not claimed */
+  function equipmentCardsHtml(c, cols, rows){
+    const at = k => cols.indexOf(k);
+    return `<div class="aieqs">${rows.map(r => {
+      const name = r[at('name')], alarms = at('open_alarms') >= 0 ? r[at('open_alarms')] : null, state = at('status') >= 0 ? r[at('status')] : null;
+      const sub = [at('floor') >= 0 ? r[at('floor')] : '', at('type') >= 0 ? r[at('type')] : ''].filter(x => x != null && x !== '' && x !== 'other').map(String).join(' · ');
+      const st = state === 'online' || state === 'offline' ? `<span class="aistate" data-st="${state}">${esc(t('ai.state.' + state))}</span>` : '';
+      const al = alarms == null ? '' : alarms > 0 ? `<span class="aisev" data-sev="critical">${esc(t('ai.eq.alarmsN', { n: alarms }))}</span>` : `<span class="aistate" data-st="none">${esc(t('ai.eq.noAlarms'))}</span>`;
+      return `<div class="aieq"><div class="aieqh"><b class="aieqn">${esc(name)}</b>${st}${al}</div>${sub ? `<span class="aieqs2 tCap">${esc(sub)}</span>` : ''}</div>`;
+    }).join('')}</div>`;
+  }
   function cardHtml(c){
     if(!c || !c.headline) return '';
-    const cols = c.columns || [], rows = c.rows || [];
-    const table = rows.length ? `<table class="aitbl"><thead><tr>${cols.map(k => `<th class="tCap">${esc(tOr('ai.card.c.' + k, k))}</th>`).join('')}</tr></thead>
-      <tbody>${rows.map(r => `<tr>${cols.map((k, j) => `<td>${esc(cardCell(r[j], k))}</td>`).join('')}</tr>`).join('')}</tbody></table>` : '';
+    const cols = c.columns || [], rows = c.rows || [], key = cols.join();
+    let body;
+    if(c.tool === 'get_alarms') body = alarmCardHtml(c, cols, rows);
+    else if(c.tool === 'get_energy' && c.summary) body = energyCardHtml(c, cols, rows);
+    else if(key === 'metric,value,unit' && rows.length && rows.length <= 12) body = readingCardHtml(rows);
+    else if((c.tool === 'find_equipment' || c.tool === 'get_hvac_status') && rows.length && rows.length <= 8) body = equipmentCardsHtml(c, cols, rows);
+    else body = `<p class="aicardh"><b>${esc(cardHeadline(c))}</b></p>${plainTable(cols, rows)}`;
     const more = c.truncated ? `<p class="tCap">${esc(t('ai.card.more', { n: rows.length, total: c.total }))}</p>` : '';
-    return `<div class="aicard"><p><b>${esc(cardHeadline(c))}</b></p>${table}${more}${c.interpreted_as ? `<p class="aisrc">${esc(cardInterpreted(c))}</p>` : ''}</div>`;
+    /* how the question was read is a detail: a tooltip, not a line of text under every answer */
+    return `<div class="aicard" data-tool="${esc(c.tool || '')}"${c.interpreted_as ? ` title="${esc(cardInterpreted(c))}"` : ''}>${body}${more}</div>`;
   }
   /* " · not mapped: Live Points: avg_zone_temp, avg_zone_temp_sp": the Data Mapping names a failed read needs (names only, grouped by block) */
   function missingText(list){
@@ -433,9 +485,8 @@ window.EKO_AI = (function(){
       if(!p || typeof p !== 'object') return '';
       const st = PART_STATUS.includes(p.status) ? p.status : 'failed';
       const label = st === 'answered' ? '' : `<span class="aipartst" data-status="${st}">${esc(t('ai.part.' + st))}</span>`;
-      const src = st === 'answered' && p.as_of ? `<p class="aisrc">${esc(t('ai.srcLive', { project: project || '', t: hhmm(p.as_of) }))}</p>` : '';
       return `<section class="aipart" data-status="${st}"><h5 class="aiparth" dir="auto"><span class="aipartn">${n + 1}</span><span class="aipartq">${esc(String(p.question == null ? '' : p.question))}</span>${label}</h5>
-        <div class="aipartbody aitext">${mdHtml(p.answer)}</div>${st === 'answered' ? cardHtml(p.card) : ''}${src}</section>`;
+        <div class="aipartbody aitext">${mdHtml(p.answer)}</div>${st === 'answered' ? cardHtml(p.card) : ''}</section>`;
     }).join('')}</div>`;
   }
   /* ---- end multi-question parts ---- */
@@ -450,11 +501,10 @@ window.EKO_AI = (function(){
         <div class="aibubble">
           ${a.status === 'pending' ? `<div class="aityping" aria-label="${esc(t('ai.typing'))}"><span></span><span></span><span></span></div>` : ''}
           ${toolsHtml(a)}
-          ${a.status === 'error' ? `<p class="aierr">${esc(errText(a))}</p><button class="btnG btnSm" data-act="aiRetry" data-i="${i}">${esc(t('ai.retry'))}</button>` : `<div class="aitext">${a.parts && !streaming ? partsHtml(a.parts, a.project) : paras}${streaming ? '<span class="aicaret"></span>' : ''}</div>`}
+          ${a.status === 'error' ? `<p class="aierr">${esc(errText(a))}</p><button class="btnG btnSm" data-act="aiRetry" data-i="${i}">${esc(t('ai.retry'))}</button>` : `${a.route === 'general' && !streaming ? `<span class="aigeneral">${esc(t('ai.generalNote'))}</span>` : ''}<div class="aitext">${a.parts && !streaming ? partsHtml(a.parts, a.project) : paras}${streaming ? '<span class="aicaret"></span>' : ''}</div>`}
           ${!streaming && a.status !== 'pending' && a.status !== 'error' ? `${cardHtml(a.card)}${evidenceHtml(a.evidence)}${figsHtml(a.figures)}
-            ${a.sources ? `<p class="aisrc">${esc(a.sources)}</p>` : ''}
             ${a.actions && a.actions.length ? `<div class="aiacts2">${a.actions.map(x => `<button class="btnG btnSm" data-act="${esc(x.act)}" data-asset="${esc(x.asset)}">${esc(t(x.key))}</button>`).join('')}</div>` : ''}
-            <div class="aimeta tCap"><span class="tMonoS">${esc(hhmm(a.at || tr.q.at))}</span>${a.window ? ` · ${esc(a.window)}` : ''}${note ? ` · <span class="ainote">${esc(note)}</span>` : ''}</div>` : ''}
+            <div class="aimeta tCap"${a.sources ? ` title="${esc(a.sources)}"` : ''}><span class="tMonoS">${esc(hhmm(a.at || tr.q.at))}</span>${a.window ? ` · ${esc(a.window)}` : ''}${note ? ` · <span class="ainote">${esc(note)}</span>` : ''}</div>` : ''}
         </div>
         ${!streaming && a.status !== 'pending' && a.status !== 'error' ? `<div class="aiturnacts hst" role="group" aria-label="${esc(t('ai.turnActs'))}">
           <button class="wcb tipU" data-act="aiCopy" data-i="${i}" data-tip="${esc(t('ai.copy'))}" aria-label="${esc(t('ai.copy'))}">${icon('copy', 13)}</button>
