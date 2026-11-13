@@ -50,7 +50,7 @@ export const MAPPING_CATALOG: CatalogEntry[] = [
     ['hourlyenergyconsumption', 'hourlyenergy', 'activepower', 'totalpower'], ['kWh', 'kW', 'MW']),
   live('current_month', ENERGY, 'Energy this month', 'Energy · month to date, kWh or MWh', ['currentmonth', 'monthtodate', 'monthlyenergy', 'mtdenergy'], ['kWh', 'MWh']),
   live('carbon', ENERGY, 'Carbon', 'Energy · kg CO₂/h', ['carbonemissions', 'carbonemission', 'carbon', 'co2emissions'], ['kg', 'kgCO2', 'kgCO₂']),
-  live('energy_performance', ENERGY, 'Energy performance', 'Energy · %', ['energyperformance'], ['%']),
+  live('energy_performance', ENERGY, 'Energy performance', 'Energy › Summary · %, status', ['energyperformance'], ['%']),
   live('energy_deviation', ENERGY, 'Energy deviation', 'Energy · %', ['energydeviation'], ['%']),
   live('after_hours_deviation', ENERGY, 'Overnight load', 'Energy · %', ['afterhoursdeviation', 'overnightdeviation'], ['%']),
   live('kpi_after_hours_ratio', ENERGY, 'Overnight status', 'Energy', ['kpiafterhoursratio', 'afterhoursratio'], undefined, 'Str'),
@@ -78,6 +78,7 @@ export const MAPPING_CATALOG: CatalogEntry[] = [
 
   hist('Hourly_Energy_Consumption_his', ENERGY, 'Energy by hour', 'Energy · kWh or MWh',
     ['hourlyenergyconsumption', 'energyconsumption', 'hourlyenergy'], ['kWh', 'MWh']),
+  hist('Energy_Performance_his', ENERGY, 'Energy performance history', 'Energy › Summary · last 7 days chart, 7-day average', ['energyperformance'], ['%']),
   hist('Peak_Demand_his', POWER, 'Peak demand', 'Power · kW or MW', ['peakdemand'], ['kW', 'MW']),
   hist('Total_Water_Consumption_his', WATER, 'Water meter', 'Water · m³', ['waterconsumption', 'totalwaterconsumption'], ['m³', 'm3']),
   hist('Total_Gas_Consumption_his', GAS, 'Gas meter', 'Gas · m³', ['gasconsumption', 'totalgasconsumption'], ['m³', 'm3']),

@@ -482,7 +482,7 @@
     own(['total_gas'], site.metrics, ['gasTodayM3']);
     own(['current_month'], el, ['mtdKwh']);
     own(['energy_performance'], el, ['performancePct']);
-    own(['after_hours_deviation', 'energy_performance'], el, ['overnightDeviationPct']);
+    own(['after_hours_deviation'], el, ['overnightDeviationPct']);
     own(['kpi_after_hours_ratio'], el, ['overnightWordEn', 'overnightWordAr']);
     hold(el, ['overnightTone'], mapsKey(p, 'kpi_after_hours_ratio'));
     hold(site.metrics, ['energyTodayKwh', 'energyTodayMwh'], todayLive);
@@ -602,13 +602,24 @@
     var perf = asNum(p.energy_performance);
     if (perf != null && perf >= 0 && perf <= 500) {
       set(el, "performancePct", trunc1(perf));
-    } else {
+    } else if (el) {
       el.performancePct = null;
+    }
+    /* The card's status word comes from the latest FIN reading alone (EKO_ENERGY_PERF.status); no reading, no status */
+    var perfStatus = el && window.EKO_ENERGY_PERF ? window.EKO_ENERGY_PERF.status(el.performancePct) : null;
+    if (el) {
+      var perfState = !mapsKey(p, 'energy_performance') ? 'unmapped' : el.performancePct == null ? 'unavailable' : 'ok';
+      if (el.perfState !== perfState || el.perfWordEn !== (perfStatus ? perfStatus.en : null)) changed = true;
+      el.perfState = perfState;
+      el.perfWordEn = perfStatus ? perfStatus.en : null;
+      el.perfWordAr = perfStatus ? perfStatus.ar : null;
+      el.perfStatus = perfStatus;
     }
 
     // Wire live endpoints to Energy Landing summary cards
     if (el) {
-      var rawOvernight = asNum(p.after_hours_deviation != null ? p.after_hours_deviation : p.energy_performance);
+      // only its own point: Energy Performance is a different KPI and must not stand in for it
+      var rawOvernight = asNum(p.after_hours_deviation);
       var rawEnDev = asNum(p.energy_deviation);
       var overnight = rawOvernight;
       var enDev = (rawEnDev != null && rawEnDev >= -100 && rawEnDev <= 100) ? rawEnDev : null;
@@ -782,29 +793,10 @@
         }
       }
 
-      var enSpark = extractDaily("Hourly_Energy_Consumption_his");
       var wtSpark = extractDaily("Total_Water_Consumption_his");
       if (site.summary) { applySparkAndDelta(summaryRow(site, "water"), wtSpark); changed = true; }
       var gsSpark = extractDaily("Total_Gas_Consumption_his");
       if (site.summary) { applySparkAndDelta(summaryRow(site, "gas"), gsSpark); changed = true; }
-
-      if (el && enSpark.length > 0) {
-        set(el, "perfSpark", enSpark);
-        if (enSpark.length >= 2) {
-          var last = enSpark[enSpark.length - 1];
-          var prevSum = 0;
-          for (var i = 0; i < enSpark.length - 1; i++) prevSum += enSpark[i];
-          var typical = prevSum / (enSpark.length - 1);
-          if (typical > 0) {
-            var pct = Math.round(((last - typical) / typical) * 100);
-            var sign = pct > 0 ? "+" : "";
-            set(el, "perfDeltaEn", sign + pct + "% vs 7d avg");
-            set(el, "perfDeltaAr", sign + pct + "% عن متوسط 7 أيام");
-            set(el, "perfWordEn", pct <= 5 ? "Excellent" : "Check Load");
-            set(el, "perfWordAr", pct <= 5 ? "ممتاز" : "فحص الحمل");
-          }
-        }
-      }
 
       var MONTH_I = {
         january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
@@ -827,6 +819,27 @@
         }
       })();
       var MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+      /* Energy Performance: the previous 7 days from its own FIN history point (Energy_Performance_his), compared with the live reading.
+         Never the energy-consumption history, and nothing is filled in: a project that maps no history gets no comparison. */
+      if (el && window.EKO_ENERGY_PERF) {
+        var EP = window.EKO_ENERGY_PERF;
+        var epNow = EP.localNow(siteTimezone());
+        var epMapped = historyHas(p, 'Energy_Performance_his');
+        var epH = EP.history(flattenHist(p.power_history.Energy_Performance_his).map(function (r) {
+          return { t: Date.UTC(r.y, r.m, r.d, r.h), v: r.val };
+        }), epNow);
+        var epCmp = EP.compare(el.performancePct, epH);
+        var epSig = [epMapped, epH.state, epH.points.length, epH.points.length ? epH.points[epH.points.length - 1].t : '', epCmp && epCmp.avg, el.performancePct].join("|");
+        if (el.perfSig !== epSig) changed = true;
+        el.perfSig = epSig;
+        el.perfHistState = epMapped ? epH.state : 'unmapped';
+        el.perfSeries = epMapped ? epH : null;
+        el.perfCmp = epCmp;
+        el.perfDeltaEn = epCmp ? (epCmp.diff > 0 ? "+" : "") + epCmp.diff.toFixed(1) + " pts vs 7d avg" : null;
+        el.perfDeltaAr = epCmp ? (epCmp.diff > 0 ? "+" : "") + epCmp.diff.toFixed(1) + " نقطة عن متوسط 7 أيام" : null;
+        el.perfSpark = [];   // the old mini line (it plotted energy consumption): the card draws the Energy Performance chart instead
+      }
 
       function flattenHist(hist) {
         var out = [];
