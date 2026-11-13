@@ -358,11 +358,116 @@ window.EKO_A = (function(){
   /* ------------------------------ ANOMALIES -------------------------------- */
   /* for a site with no time-of-day block of its own */
   const TOD_PARTS = [
-    { en: 'Early Morning', ar: '\u0627\u0644\u0635\u0628\u0627\u062d \u0627\u0644\u0628\u0627\u0643\u0631', range: '00:00-06:00' },
-    { en: 'Morning', ar: '\u0627\u0644\u0635\u0628\u0627\u062d', range: '06:00-11:00' },
-    { en: 'Afternoon', ar: '\u0628\u0639\u062f \u0627\u0644\u0638\u0647\u0631', range: '11:00-15:00' },
-    { en: 'Evening', ar: '\u0627\u0644\u0645\u0633\u0627\u0621', range: '15:00-19:00' },
-    { en: 'Night', ar: '\u0627\u0644\u0644\u064a\u0644', range: '19:00-24:00' } ];
+    { en: 'Early Morning', ar: '\u0627\u0644\u0635\u0628\u0627\u062d \u0627\u0644\u0628\u0627\u0643\u0631', range: '00:00-06:00', from: 0, to: 6 },
+    { en: 'Morning', ar: '\u0627\u0644\u0635\u0628\u0627\u062d', range: '06:00-11:00', from: 6, to: 11 },
+    { en: 'Afternoon', ar: '\u0628\u0639\u062f \u0627\u0644\u0638\u0647\u0631', range: '11:00-15:00', from: 11, to: 15 },
+    { en: 'Evening', ar: '\u0627\u0644\u0645\u0633\u0627\u0621', range: '15:00-19:00', from: 15, to: 19 },
+    { en: 'Night', ar: '\u0627\u0644\u0644\u064a\u0644', range: '19:00-24:00', from: 19, to: 24 } ];
+  function anomTodBands(power, range, daySel, pmuIds, pmus){
+    const ids = (pmus || []).map(u => u.id);
+    const want = pmuIds && pmuIds.length ? pmuIds : ids;
+    const all = (power && power.pmuFlats) || {};
+    const flats = [];
+    want.forEach(id => {
+      const meter = (pmus || []).find(x => x.id === id);
+      const flat = all[id] || (meter && meter.boardMeter && all[meter.boardMeter]) || [];
+      (flat || []).forEach(p => flats.push(p));
+    });
+    const now = anomNow();
+    const end = new Date(now.y, now.m, now.d, now.h);
+    let cur0, cur1;
+    if(range === '7d'){
+      cur1 = new Date(now.y, now.m, now.d, 23);
+      cur0 = new Date(now.y, now.m, now.d - 6, 0);
+    } else if(range === '30d'){
+      cur1 = new Date(now.y, now.m, now.d, 23);
+      cur0 = new Date(now.y, now.m, now.d - 29, 0);
+    } else if(range === '6M' || range === '1Y'){
+      const n = range === '6M' ? 6 : 12;
+      cur1 = new Date(now.y, now.m + 1, 0, 23);
+      cur0 = new Date(now.y, now.m - (n - 1), 1, 0);
+    } else {
+      cur1 = end;
+      cur0 = new Date(end.getTime() - 23 * 36e5);
+    }
+    const span = cur1.getTime() - cur0.getTime();
+    const prev1 = new Date(cur0.getTime() - 36e5);
+    const prev0 = new Date(prev1.getTime() - span);
+    const daySet = daySel && daySel.length ? daySel : null;
+    const wd = p => { const d = new Date(p.y, p.m, p.d).getDay(); return d === 0 ? 7 : d; };
+    const inWin = (p, a, b) => {
+      const t = new Date(p.y, p.m, p.d, p.h || 0).getTime();
+      return t >= a.getTime() && t <= b.getTime();
+    };
+    const avg = (from, to, a, b) => {
+      let s = 0, n = 0;
+      flats.forEach(p => {
+        if(p.h == null || p.h < from || p.h >= to) return;
+        if(daySet && daySet.indexOf(wd(p)) < 0) return;
+        if(!inWin(p, a, b)) return;
+        if(p.val == null || !isFinite(Number(p.val))) return;
+        s += Number(p.val);
+        n += 1;
+      });
+      return n ? s / n : null;
+    };
+    const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const slotList = (a, b) => {
+      const out = [];
+      if(range === '6M' || range === '1Y'){
+        let y = a.getFullYear(), m = a.getMonth();
+        const endY = b.getFullYear(), endM = b.getMonth();
+        while(y < endY || (y === endY && m <= endM)){
+          out.push({ y, m, lab: MON[m] });
+          m += 1;
+          if(m > 11){ m = 0; y += 1; }
+        }
+      } else if(range === '7d' || range === '30d'){
+        for(let t = new Date(a.getFullYear(), a.getMonth(), a.getDate()); t.getTime() <= b.getTime(); t = new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1)){
+          out.push({ y: t.getFullYear(), m: t.getMonth(), d: t.getDate(), lab: String(t.getDate()) });
+        }
+      } else {
+        for(let t = new Date(a.getTime()); t.getTime() <= b.getTime(); t = new Date(t.getTime() + 36e5)){
+          out.push({ y: t.getFullYear(), m: t.getMonth(), d: t.getDate(), h: t.getHours(), lab: String(t.getHours()).padStart(2,'0') });
+        }
+      }
+      return out;
+    };
+    const slotAvg = (slot, from, to) => {
+      let s = 0, n = 0;
+      flats.forEach(p => {
+        if(daySet && daySet.indexOf(wd(p)) < 0) return;
+        if(p.h == null || p.h < from || p.h >= to) return;
+        if(slot.h != null){
+          if(p.y !== slot.y || p.m !== slot.m || p.d !== slot.d || p.h !== slot.h) return;
+        } else if(slot.d != null){
+          if(p.y !== slot.y || p.m !== slot.m || p.d !== slot.d) return;
+        } else if(p.y !== slot.y || p.m !== slot.m) return;
+        if(p.val == null || !isFinite(Number(p.val))) return;
+        s += Number(p.val);
+        n += 1;
+      });
+      return n ? s / n : null;
+    };
+    const curSlots = slotList(cur0, cur1);
+    const prevSlots = slotList(prev0, prev1);
+    const hourly = !(range === '7d' || range === '30d' || range === '6M' || range === '1Y');
+    const rows = TOD_PARTS.map(b => {
+      const nowAvg = avg(b.from, b.to, cur0, cur1);
+      const prevAvg = avg(b.from, b.to, prev0, prev1);
+      const pct = (nowAvg != null && prevAvg) ? (nowAvg - prevAvg) / prevAvg * 100 : null;
+      const slots = curSlots.map((slot, i2) => {
+        const inBand = slot.h == null || (slot.h >= b.from && slot.h < b.to);
+        const slotNow = inBand ? slotAvg(slot, b.from, b.to) : null;
+        const prev = prevSlots[i2];
+        const slotPrev = inBand && prev ? slotAvg(prev, b.from, b.to) : null;
+        const slotPct = (slotNow != null && slotPrev) ? (slotNow - slotPrev) / slotPrev * 100 : null;
+        return { lab: slot.lab, avg: slotNow, pct: slotPct };
+      });
+      return { en: b.en, ar: b.ar, range: b.range, pct, slots };
+    });
+    return { rows, any: rows.some(r => r.pct != null || (r.slots || []).some(s => s.avg != null)) };
+  }
   function anomPage(E){
     const d = E.data.anom || {}, ar = E.lang === 'ar';
     const pmus = E.data.power.pmus || [];
@@ -422,16 +527,30 @@ window.EKO_A = (function(){
         </div></div>
       <div class="chx39" style="display:grid;grid-template-columns:repeat(${Math.max(evSeries.labels.length,1)},minmax(0,1fr));padding-inline-start:28px">${evSeries.labels.map(t2=>`<span>${esc(t2)}</span>`).join('')}</div>
       <span class="ovkcap">${esc(evSeries.any ? E.t('anomEvidenceLive') : E.t('anomEvidenceEmpty'))}</span></article>`;
-    const todNow = new Date();
-    const todDate = [String(todNow.getDate()).padStart(2,'0'), String(todNow.getMonth()+1).padStart(2,'0'), todNow.getFullYear()].join('/');
+    const todLive = anomTodBands(E.data.power, range, daySel, pmuSel, boards.length ? boards : pmus);
+    const todRows = todLive.any ? todLive.rows : (d.todParts || TOD_PARTS);
+    const pctTxt = v => (v == null || !isFinite(Number(v))) ? '--' : ((Number(v) > 0 ? '+' : '') + fmt(Number(v), 0) + '%');
     const tod = `<article class="pwwidget">
       <div class="pwwh"><span class="alcardt">${esc(E.t('anomTod'))}</span>
-        <span class="alcardm msA">${esc(E.t('anomTodCap'))}</span>${chrome2}</div>
-      <span class="todate39 tMonoS">${esc(todDate)}</span>
-      ${(d.todParts || TOD_PARTS).map(pp => `<div class="todrow39">
+        <span class="todate39 tMonoS">${esc(range)}</span>
+        <span class="alcardm msA">${esc(todLive.any ? E.t('anomTodCapLive') : E.t('anomTodCap'))}</span>${chrome2}</div>
+      ${todRows[0] && todRows[0].slots && todRows[0].slots.length ? `<div class="todsheet">
+        <div class="todsheet-names">
+          <div class="todlab39 todlab39-gap"></div>
+          ${todRows.map(pp => `<div class="todrow39">
+            <div class="todlab39"><span>${esc(ar?pp.ar:pp.en)}</span><i class="tMonoS">${esc(pp.range)}</i></div>
+            <span class="todcell39" data-hot="${Number(pp.pct) > 20 ? 1 : 0}">${pctTxt(pp.pct)}</span>
+          </div>`).join('')}
+        </div>
+        <div class="todsheet-scroll">
+          <div class="todhead">${todRows[0].slots.map(s => `<span class="tMonoS">${esc(s.lab)}</span>`).join('')}</div>
+          ${todRows.map(pp => `<div class="todvals">${(pp.slots || []).map(s => `<span class="tMonoS">${s.avg == null ? '--' : fmt(s.avg, 1)}</span>`).join('')}</div>`).join('')}
+        </div>
+      </div>` : todRows.map(pp => `<div class="todrow39">
         <div class="todlab39"><span>${esc(ar?pp.ar:pp.en)}</span><i class="tMonoS">${esc(pp.range)}</i></div>
-        <span class="todcell39">--</span></div>`).join('')}
-      <span class="ovkcap">${esc(E.t('anomTodEmpty'))}</span></article>`;
+        <span class="todcell39" data-hot="${Number(pp.pct) > 20 ? 1 : 0}">${pctTxt(pp.pct)}</span>
+      </div>`).join('')}
+      <span class="ovkcap">${esc(todLive.any ? E.t('anomTodLive') : E.t('anomTodEmpty'))}</span></article>`;
     const rail = `<article class="pwwidget">
       <div class="pwwh"><span class="alcardt">${esc(E.t('anomPmuT'))}</span>
         <span class="alcardm msA">${esc(E.t('anomPmuCap',{n:pmus.length}))}</span>${chrome2}</div>
