@@ -1378,6 +1378,8 @@ window.EKO_I18N.en = {
   "detectedW": "detected window",
   "anomTod": "TIME-OF-DAY DEVIATION",
   "anomTodCap": "today vs expected · %",
+  "anomTodCapLive": "average vs previous period · %",
+  "anomTodLive": "each band is its average kWh against the same band in the previous period",
   "anomTodFoot": "shade encodes deviation size; cells more than 20% above expected carry an amber outline",
   "fcstPeakDay": "FORECAST PEAK DAY",
   "fcstPeakCap": "{v} kWh ±{p}%",

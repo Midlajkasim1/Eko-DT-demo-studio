@@ -2279,3 +2279,13 @@
 .dashboard-native-container .pwarea .dblist .dbrow{flex:none; height:38px; min-height:38px; max-height:38px}
 .dashboard-native-container .dbrow{border-block-end:0}
 .dashboard-native-container .pmurows{flex:1 1 auto; min-height:0; overflow-x:hidden; overflow-y:auto}
+.dashboard-native-container .todsheet{display:flex; align-items:flex-start; gap:8px; margin-block-start:8px}
+.dashboard-native-container .todsheet-names{flex:none}
+.dashboard-native-container .todsheet-names .todrow39{min-height:42px}
+.dashboard-native-container .todlab39-gap{height:22px}
+.dashboard-native-container .todsheet-scroll{flex:1 1 auto; min-width:0; overflow-x:auto; scrollbar-width:thin}
+.dashboard-native-container .todhead,.dashboard-native-container .todvals{display:flex; gap:8px}
+.dashboard-native-container .todhead span,.dashboard-native-container .todvals span{flex:0 0 52px; text-align:center; font-size:var(--txCapSz)}
+.dashboard-native-container .todhead span{color:var(--t3); height:22px}
+.dashboard-native-container .todvals{min-height:42px; align-items:center}
+.dashboard-native-container .todvals span{color:var(--t1)}
