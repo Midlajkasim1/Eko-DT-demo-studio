@@ -17914,13 +17914,6 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
 .dashboard-native-container[data-nav="min"] .nsubs { position:fixed; inset-inline-start:calc(var(--navw) + 4px); z-index:50; min-width:190px; padding:6px; gap:1px;
   background:var(--chrome-bg); border:1px solid var(--chrome-edge); border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.25) }
 
-/* Energy Performance card: status word, 7-day comparison and chart. Long labels wrap inside the card; the chart scales to its width. */
+/* Energy Performance card: status word and comparison; long labels wrap inside the card. */
 .dashboard-native-container .scrow.epw { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 10px; min-width:0 }
 .dashboard-native-container .ovkcap.epword { max-width:100%; overflow-wrap:anywhere }
-.dashboard-native-container .epchart { margin-block-start:6px; min-width:0; max-width:100% }
-.dashboard-native-container .epsvg { display:block; width:100%; height:auto; max-width:100%; overflow:visible }
-.dashboard-native-container .eplegend { display:flex; flex-wrap:wrap; gap:2px 12px; margin-block-start:2px; font-size:var(--txCapSz); color:var(--t2) }
-.dashboard-native-container .epk { display:inline-block; vertical-align:middle; margin-inline-end:4px }
-.dashboard-native-container .epk.epcur { width:8px; height:8px; border-radius:50%; background:var(--t1); box-shadow:0 0 0 1.5px var(--domEnergy) }
-.dashboard-native-container .epk.epavg { width:12px; height:0; border-top:1.5px dashed var(--t2) }
-.dashboard-native-container .epk.epln { width:12px; height:0; border-top:1.5px solid var(--domEnergy) }

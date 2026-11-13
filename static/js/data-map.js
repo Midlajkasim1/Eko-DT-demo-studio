@@ -820,7 +820,8 @@
       })();
       var MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-      /* Energy Performance: the previous 7 days from its own FIN history point (Energy_Performance_his), compared with the live reading.
+      /* Energy Performance: the previous 7 days from its own FIN history point (Energy_Performance_his), compared with the live reading
+         (EKO_ENERGY_PERF.compare falls back from 7 days to the previous day to the latest reading).
          Never the energy-consumption history, and nothing is filled in: a project that maps no history gets no comparison. */
       if (el && window.EKO_ENERGY_PERF) {
         var EP = window.EKO_ENERGY_PERF;
@@ -830,15 +831,12 @@
           return { t: Date.UTC(r.y, r.m, r.d, r.h), v: r.val };
         }), epNow);
         var epCmp = EP.compare(el.performancePct, epH);
-        var epSig = [epMapped, epH.state, epH.points.length, epH.points.length ? epH.points[epH.points.length - 1].t : '', epCmp && epCmp.avg, el.performancePct].join("|");
+        var epSig = [epMapped, epH.points.length, epH.points.length ? epH.points[epH.points.length - 1].t : '', epCmp && epCmp.mode, epCmp && epCmp.base, el.performancePct].join("|");
         if (el.perfSig !== epSig) changed = true;
         el.perfSig = epSig;
-        el.perfHistState = epMapped ? epH.state : 'unmapped';
-        el.perfSeries = epMapped ? epH : null;
-        el.perfCmp = epCmp;
-        el.perfDeltaEn = epCmp ? (epCmp.diff > 0 ? "+" : "") + epCmp.diff.toFixed(1) + " pts vs 7d avg" : null;
-        el.perfDeltaAr = epCmp ? (epCmp.diff > 0 ? "+" : "") + epCmp.diff.toFixed(1) + " نقطة عن متوسط 7 أيام" : null;
-        el.perfSpark = [];   // the old mini line (it plotted energy consumption): the card draws the Energy Performance chart instead
+        el.perfCmp = epMapped ? epCmp : null;
+        /* the card's mini line: the Energy Performance readings of the window, then the current one (it used to plot energy consumption) */
+        el.perfSpark = epMapped && epH.points.length && el.performancePct != null ? epH.points.map(function (q) { return q.v; }).concat(el.performancePct) : [];
       }
 
       function flattenHist(hist) {

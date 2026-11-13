@@ -1,4 +1,4 @@
-/* Energy Performance KPI (FIN point EnergyPerformance, a % Number): the status bands, the 7-day comparison and the chart geometry.
+/* Energy Performance KPI (FIN point EnergyPerformance, a % Number): the status bands, the 7-day comparison.
    Pure functions, no DOM and no FIN access: data-map.js feeds it the FIN readings, widgets.js draws what it returns. Loaded in the browser as
    window.EKO_ENERGY_PERF and by the unit tests as a module.
 
@@ -41,8 +41,6 @@
 
   var HOUR = 3600000, DAY = 86400000;
   var WINDOW_DAYS = 7;
-  /* fewer distinct days than this is not a 7-day comparison */
-  var MIN_DAYS = 2;
 
   /* The site's wall-clock now as a number (its fields read as UTC), the same scale as a history reading's time */
   function localNow(timeZone, date) {
@@ -59,7 +57,7 @@
 
   /* readings: [{t, v}] (t = site wall-clock time, see localNow). The previous 7 days: from now - 7 days up to the start of the current hour
      (that hour is still being recorded, and the live reading stands for it). Chronological, one reading per time, nothing in the future,
-     nothing made up. state: 'none' no reading in the window, 'few' too few days for an average, 'ok'. */
+     nothing made up. state: 'none' no reading in the window, else 'ok'. days = distinct site days with a reading; avg = mean of the readings. */
   function history(readings, now) {
     var end = Math.floor(now / HOUR) * HOUR, start = now - WINDOW_DAYS * DAY, seen = {}, pts = [];
     (readings || []).forEach(function (r) {
@@ -71,43 +69,31 @@
     var days = {}, sum = 0;
     pts.forEach(function (p) { days[Math.floor(p.t / DAY)] = 1; sum += p.v; });
     var nDays = Object.keys(days).length;
-    var state = !pts.length ? 'none' : nDays < MIN_DAYS ? 'few' : 'ok';
-    return { points: pts, days: nDays, avg: state === 'ok' ? sum / pts.length : null, state: state, start: start, end: now };
+    return { points: pts, days: nDays, avg: pts.length ? sum / pts.length : null, state: pts.length ? 'ok' : 'none', start: start, end: now };
   }
 
   var round1 = function (x) { return Math.round(x * 10) / 10; };
 
-  /* The comparison of the current reading with the 7-day average: the difference is in percentage points. null when there is no average. */
+  /* The comparison of the current reading with the best reference the history allows, in this order:
+       week: 7 or more days with readings -> the average of the window
+       day:  the reading 24 hours earlier (same hour yesterday, a reading within an hour of it)
+       last: the latest reading before now
+     Returns {mode, base, t (the reference reading's time; null for week), diff (percentage points), pct (change relative to base, null when base is 0), trend},
+     or null with no valid current reading or no history: the card then shows the value alone. */
   function compare(current, h) {
-    if (!isReading(current) || h.avg == null) return null;
-    var diff = round1(current - h.avg);
-    return { avg: round1(h.avg), diff: diff, trend: diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat' };
+    if (!isReading(current) || !h || !h.points.length) return null;
+    var mode = 'week', base = h.avg, t = null;
+    if (h.days < WINDOW_DAYS) {
+      var want = Math.floor(h.end / HOUR) * HOUR - DAY, near = null;
+      h.points.forEach(function (p) { if (Math.abs(p.t - want) <= HOUR && (!near || Math.abs(p.t - want) < Math.abs(near.t - want))) near = p; });
+      mode = near ? 'day' : 'last';
+      var ref = near || h.points[h.points.length - 1];
+      base = ref.v; t = ref.t;
+    }
+    var diff = round1(current - base);
+    return { mode: mode, base: round1(base), t: t, diff: diff, pct: base === 0 ? null : round1((current - base) / Math.abs(base) * 100), trend: diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat' };
   }
 
-  /* Chart geometry in a w x h box with margins: x is time over the 7-day window (history then the current reading at its right edge), y is %.
-     Returns scaled points, the average line, the current marker and the axis ticks (a tick at each site midnight), or null with no history. */
-  function chart(h, current, w, ht, m) {
-    if (!h || !h.points.length) return null;
-    m = m || { l: 30, r: 8, t: 8, b: 18 };
-    var vals = h.points.map(function (p) { return p.v; });
-    if (isReading(current)) vals.push(current);
-    if (h.avg != null) vals.push(h.avg);
-    var lo = Math.floor((Math.min.apply(null, vals) - 1) / 5) * 5, hi = Math.ceil((Math.max.apply(null, vals) + 1) / 5) * 5;
-    if (hi <= lo) hi = lo + 5;
-    var pw = w - m.l - m.r, ph = ht - m.t - m.b;
-    var x = function (t) { return round1(m.l + (t - h.start) / (h.end - h.start) * pw); };
-    var y = function (v) { return round1(m.t + (hi - v) / (hi - lo) * ph); };
-    var xt = [];
-    for (var d = Math.ceil(h.start / DAY) * DAY; d <= h.end; d += DAY) xt.push({ t: d, x: x(d) });
-    return {
-      w: w, h: ht, m: m, lo: lo, hi: hi,
-      points: h.points.map(function (p) { return { t: p.t, v: p.v, x: x(p.t), y: y(p.v) }; }),
-      avg: h.avg == null ? null : { v: h.avg, y: y(h.avg) },
-      now: isReading(current) ? { t: h.end, v: current, x: x(h.end), y: y(current) } : null,
-      xTicks: xt, yTicks: [lo, hi].map(function (v) { return { v: v, y: y(v) }; })
-    };
-  }
-
-  return { STATUS: STATUS, BANDS: BANDS, OVER: OVER, MIN_DAYS: MIN_DAYS, status: status, isReading: isReading, localNow: localNow,
-    history: history, compare: compare, chart: chart };
+  return { STATUS: STATUS, BANDS: BANDS, OVER: OVER, status: status, isReading: isReading, localNow: localNow,
+    history: history, compare: compare };
 });

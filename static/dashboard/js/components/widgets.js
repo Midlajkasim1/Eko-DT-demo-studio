@@ -294,31 +294,6 @@ window.EKO_C = (function(){
     return summaryShell(E, E.t('ov.siteSummary'), `<div class="ovklist">${rows}</div>`);
   }
 
-  /* Energy Performance 7-day chart: the FIN history readings (time on x, % on y), their 7-day average, and the current reading as its own marker.
-     Geometry comes from EKO_ENERGY_PERF.chart; times are the site's wall clock, so the formatters read them as UTC. */
-  function perfChart(E, d){
-    const EP = window.EKO_ENERGY_PERF;
-    const c = EP && d.perfSeries ? EP.chart(d.perfSeries, d.performancePct, 300, 104) : null;
-    if(!c) return '';
-    const loc = E.lang==='ar' ? 'ar-u-nu-latn' : 'en-GB';
-    const dayF = new Intl.DateTimeFormat(loc, { timeZone:'UTC', day:'numeric', month:'short' });
-    const whenF = new Intl.DateTimeFormat(loc, { timeZone:'UTC', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit', hourCycle:'h23' });
-    const pct = v => fmt(v,1) + '%';
-    const grid = c.yTicks.map(t => `<line x1="${c.m.l}" x2="${c.w-c.m.r}" y1="${t.y}" y2="${t.y}" stroke="var(--t3)" stroke-opacity=".25" stroke-width="1"/>
-      <text x="${c.m.l-3}" y="${t.y+3}" text-anchor="end" font-size="8" fill="var(--t3)">${t.v}%</text>`).join('');
-    const xs = c.xTicks.map(t => `<text x="${t.x}" y="${c.h-5}" text-anchor="middle" font-size="8" fill="var(--t3)">${esc(dayF.format(t.t))}</text>`).join('');
-    const line = c.points.length > 1 ? `<polyline points="${c.points.map(p => p.x+','+p.y).join(' ')}" fill="none" stroke="var(--domEnergy)" stroke-width="1.5" stroke-linejoin="round"/>` : '';
-    const hits = c.points.map(p => `<circle cx="${p.x}" cy="${p.y}" r="${c.points.length > 1 ? 2.5 : 3}" fill="${c.points.length > 1 ? 'transparent' : 'var(--domEnergy)'}" data-tip="${esc(whenF.format(p.t) + ' · ' + pct(p.v))}"/>`).join('');
-    const avg = c.avg ? `<line x1="${c.m.l}" x2="${c.w-c.m.r}" y1="${c.avg.y}" y2="${c.avg.y}" stroke="var(--t2)" stroke-width="1" stroke-dasharray="3 3"/>` : '';
-    const now = c.now ? `<circle cx="${c.now.x}" cy="${c.now.y}" r="3.5" fill="var(--t1)" stroke="var(--domEnergy)" stroke-width="1.5"/>
-      <circle cx="${c.now.x}" cy="${c.now.y}" r="7" fill="transparent" data-tip="${esc(E.t('enPerfNow') + ' · ' + pct(c.now.v) + ' · ' + whenF.format(c.now.t))}"/>` : '';
-    const days = d.perfSeries.days < 7 ? `<span>${esc(E.t('enPerfDays', { n: d.perfSeries.days }))}</span>` : '';
-    return `<div class="epchart"><svg viewBox="0 0 ${c.w} ${c.h}" role="img" aria-label="${esc(E.t('enPerfChartAria'))}" class="epsvg">${grid}${xs}${avg}${line}${hits}${now}</svg>
-      <div class="eplegend"><span><i class="epk epcur"></i>${esc(E.t('enPerfNow'))} ${esc(pct(d.performancePct))}</span>
-        ${d.perfCmp ? `<span><i class="epk epavg"></i>${esc(E.t('enPerfAvg'))} ${esc(pct(d.perfCmp.avg))}</span>` : ''}
-        <span><i class="epk epln"></i>${esc(E.t('enPerfHist'))}</span>${days}</div></div>`;
-  }
-
   /* Energy landing summary (ENERGY SUMMARY): perf, current, MTD, overnight
      gauge (ekoGauge, its own min/max), waste & risk list. Derived AED at
      render from basis.aedPerKwh. */
@@ -345,20 +320,23 @@ window.EKO_C = (function(){
     const pts = hasSpark ? d.perfSpark.map((v,i2) => `${(i2/(d.perfSpark.length-1)*90).toFixed(1)},${(18-(v-mn)/span*14).toFixed(1)}`).join(' ') : '';
     const perfDelta = ar ? d.perfDeltaAr : d.perfDeltaEn;
     const perfWord  = ar ? d.perfWordAr  : d.perfWordEn;
-    /* Energy Performance, as data-map.js fills it from FIN (perfState set): the status word, the 7-day comparison and the 7-day chart.
+    /* Energy Performance, as data-map.js fills it from FIN (perfState set): the status word, the comparison and the mini line.
        Without perfState (the sample data sets) the card keeps its mini line and word. */
     const live = d.perfState != null, hasVal = d.performancePct != null;
     const perfCard = () => {
       const st = d.perfStatus, cmp = d.perfCmp;
       const note = (txt, tone) => `<span class="ovkcap msA epword" data-tone="${tone || 't3'}">${esc(txt)}</span>`;
-      const histMsg = d.perfHistState == null ? E.t('enPerfHistLoading') : d.perfHistState === 'unmapped' ? E.t('enPerfHistUnmapped')
-        : d.perfHistState === 'none' ? E.t('enPerfHistNone') : d.perfHistState === 'few' ? E.t('enPerfHistFew') : '';
+      /* the comparison, hidden when there is none: the difference in points and in %, then which period it is against */
+      const sg = v => (v > 0 ? '+' : '') + v.toFixed(1);
+      const deltaTxt = cmp ? E.t('enPerfDelta', { d: sg(cmp.diff) }) + (cmp.pct != null ? ` (${sg(cmp.pct)}%)` : '') : '';
+      /* the original mini line (the readings, then the current one) with the difference beside it; the status word and the period under it */
       return `<div class="ovk ovkDark"><div class="ovkhead"><span class="scdot" data-tone="${hasVal && st ? st.dot : 'mute'}"></span><span class="ovklbl">${esc(E.t('enPerf'))}</span>${ctl(E, E.t('enPerf'), '')}</div>
           <div class="ovkval"><span class="ovknum">${hasVal ? fmt(d.performancePct,1) : '--'}</span>${hasVal ? '<span class="ovkunit">%</span>' : ''}</div>
+          ${hasVal && hasSpark ? `<div class="scrow"><svg viewBox="0 0 90 20" width="90" height="20" aria-hidden="true">
+            <polyline points="${pts}" fill="none" stroke="var(--domEnergy)" stroke-width="1.5"/></svg>
+          ${cmp ? note(deltaTxt) : ''}</div>` : ''}
           <div class="scrow epw">${hasVal ? (st ? note(ar ? st.ar : st.en, st.tone) : '') : note(E.t(d.perfState === 'unmapped' ? 'sumNotConf' : 'enPerfUnavail'))}
-            ${hasVal && cmp ? note(perfDelta) : ''}</div>
-          ${hasVal ? perfChart(E, d) : ''}
-          ${hasVal && histMsg ? `<div class="scrow">${note(histMsg)}</div>` : ''}</div>`;
+            ${hasVal && cmp ? note(E.t('enPerfVs_' + cmp.mode)) : ''}</div></div>`;
     };
     return summaryShell(E, E.t('energySummary'), '<div class="ovklist">'
       + (live ? perfCard() : `<div class="ovk ovkDark"><div class="ovkhead"><span class="scdot" data-tone="ok"></span><span class="ovklbl">${esc(E.t('enPerf'))}</span>${ctl(E, E.t('enPerf'), '')}</div>
