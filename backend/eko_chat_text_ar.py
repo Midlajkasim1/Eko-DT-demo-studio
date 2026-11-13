@@ -26,7 +26,7 @@ METRIC = {"temperature": "درجة الحرارة", "humidity": "الرطوبة"
           "comfort": "مؤشر الراحة"}
 OP = {"average": "المتوسط", "min": "الأدنى", "max": "الأعلى", "sum": "المجموع", "count": "عدد القراءات"}
 SEVERITY = {"critical": "حرج", "warning": "تحذير", "info": "معلومة"}
-WHEN = {"today": "اليوم", "yesterday": "أمس", "month": "هذا الشهر"}
+WHEN = {"now": "الآن", "today": "اليوم", "yesterday": "أمس", "week": "هذا الأسبوع", "month": "هذا الشهر"}
 STATUS = {"available": "متاحة", "partial": "متاحة جزئيًا", "unmapped": "غير مربوطة", "not_supported": "غير مدعومة"}
 NOTE = {"stale": "آخر قراءة لهذه البيانات قديمة جدًا ولا تُعرض كبيانات حالية.", "no_data_yet": "لم تُقرأ هذه البيانات من FIN بعد.",
         "fin_not_connected": "لا توجد جلسة FIN مصادَق عليها.", "no_active_project": "لا يوجد مشروع FIN نشط.",
@@ -128,6 +128,15 @@ def _environment(p: dict, r: dict) -> str:
 
 def _energy(p: dict, r: dict) -> str:
     when = WHEN.get(r.get("period"), "")
+    if r.get("period") == "now":
+        if r.get("quantity") == "power":
+            return f"القدرة الحالية: {_g(r['value'])} {r['unit']}. آخر قراءة من FIN في {r.get('as_of')}."
+        if r.get("quantity") == "energy":
+            return f"لا توجد قراءة حية للقدرة (kW) لهذا المشروع. نقطة الاستهلاك الحية تُبلّغ عن طاقة الساعة الحالية: {_g(r['value'])} {r['unit']}. آخر قراءة من FIN في {r.get('as_of')}."
+        return f"أعادت نقطة الاستهلاك الحية القيمة {_g(r['value'])} لكن FIN لم ترسل وحدة لها، لذا لا يمكن اعتبارها قدرة (kW) أو طاقة (kWh). آخر قراءة من FIN في {r.get('as_of')}."
+    if r.get("entries") is not None:
+        return (f"استهلاك الطاقة {when} ({r['from']} إلى {r['to']}): {_g(r['value'])} {r['unit']}، "
+                f"{r['hours_reported']} من {r['hours_expected']} ساعات مُبلَّغة.")
     if r.get("boards") is not None:
         top = r["boards"][0]
         return f"أعلى استهلاك للطاقة {when} بحسب لوحة التوزيع: {top['name']} ({_g(top['value'])} {r['unit']})."

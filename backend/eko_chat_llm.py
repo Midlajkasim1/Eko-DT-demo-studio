@@ -29,8 +29,8 @@ import eko_chat
 import eko_chat_capabilities as caps
 import eko_chat_trace as chat_trace
 import eko_chat_context as chat_ctx
-from eko_chat import (ENV_METRICS, HELP_TEXT, LLM_GATE, MAX_LIMIT, NOT_VERIFIED, PERIODS, SEVERITIES, THINK_BLOCK, TOOLS, DataView,
-                      LLMError, LLMRun, _fold, _limit_from, _project, _ungrounded, _validate)
+from eko_chat import (ENV_METRICS, HELP_TEXT, LLM_GATE, MAX_LIMIT, NOT_VERIFIED, PERIODS, SEVERITIES, TOOLS, DataView,
+                      LLMError, LLMRun, _fold, _limit_from, _project, _ungrounded, _validate, strip_reasoning)
 
 PROVIDER = "ollama"
 DEFAULT_BASE_URL = "http://localhost:11434"
@@ -186,7 +186,7 @@ INTENT_SCHEMA = {
 INTENT_SYSTEM = (
     "You turn one building-operations question into one JSON object and reply with JSON only. intent is one of: "
     "get_environment (metric: iaq, co2, temperature, humidity or comfort); "
-    "get_energy (period: today, yesterday or month; by: building, or board for which equipment uses the most); "
+    "get_energy (period: now for the current power reading, or today, yesterday, week or month for energy; by: building, or board for which equipment uses the most); "
     "get_hvac_status (type: an equipment class such as ahu or fcu, if one is named); "
     "list_equipment (type, floor, in_alarm, limit); "
     "get_equipment_status (equipment: the exact name written in the question); "
@@ -204,7 +204,7 @@ INTENT_SYSTEM = (
 
 def parse_json(content: str) -> Any:
     """The model's reply as JSON, or raises ValueError. Thinking blocks and a code fence are tolerated; nothing else."""
-    text = THINK_BLOCK.sub("", content or "").strip()
+    text = strip_reasoning(content)
     fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.S)
     return json.loads(fence.group(1) if fence else text)
 
@@ -401,7 +401,7 @@ async def hybrid(cfg: dict, message: str, view_fn: Callable[[], DataView], reaso
         try:
             told = await chat_ctx.within(deadline, narrate())
             run.usage(told["usage"])
-            summary = THINK_BLOCK.sub("", told["content"]).strip()
+            summary = strip_reasoning(told["content"])
             # a summary is used only if every number in it is one of the facts (or the question's); else the code's text stands
             if summary and len(summary) <= 600 and not _ungrounded(summary, [facts, message]):
                 text, source = summary, "llm"

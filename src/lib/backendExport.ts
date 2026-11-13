@@ -10,6 +10,7 @@ export const BACKEND_EXPORT_FILES = [
   'eko_chat_analytics.py',
   'eko_chat_planner.py',
   'eko_chat_text_ar.py',
+  'eko_chat_spelling.py',
   'workorders.py',
   'point_control.py',
   'notifications.py',

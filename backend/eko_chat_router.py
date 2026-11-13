@@ -87,6 +87,8 @@ RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat +
      SHOW + r"(?:the )?" + LATEST + N + SEV + r"(?P<noun>alarms?|alerts?)" + NOW),
     ("alarms.list", "get_alarms",
      SHOW + r"(?:all )?(?:the )?" + OPEN + SEV + ALARMS + r"(?: (?:that are |which are )?(?:open|active))?" + NOW),
+    ("alarms.list.singular", "get_alarms",
+     SHOW + r"(?:the )?" + OPEN + SEV + r"(?:alarm|alert)" + NOW),                 # "show alarm": the same question, one alarm word
     ("alarms.any", "get_alarms",
      r"(?:are there |is there |do we have |do i have )?any " + OPEN + SEV + ALARMS + r"(?: (?:open|active))?" + NOW),
     ("alarms.which", "get_alarms",
@@ -103,11 +105,7 @@ RULES: list[tuple[str, str, re.Pattern]] = [(rid, intent, re.compile("^" + pat +
      SHOW + r"(?:the )?(?:(?:current|overall|live) )*(?:building|site) (?:status|overview|snapshot|summary|state)" + NOW),
     ("snapshot.status_of", "get_building_snapshot",
      SHOW + r"(?:the )?(?:current |overall )?(?:status|overview|snapshot|summary|state) of the (?:building|site)" + NOW),
-    # current power / load: answered by the snapshot's configured live points
-    ("snapshot.power", "get_building_snapshot",
-     SHOW + r"(?:the )?(?:(?:current|live|present) )+(?:building |site )?(?:power(?: consumption| usage| demand| draw)?|electrical load|load|demand)" + NOW),
-    ("snapshot.power_now", "get_building_snapshot",
-     SHOW + r"(?:the )?(?:building |site )?(?:power(?: consumption| usage| demand| draw)?|electrical load) (?:right now|now|currently|at the moment)"),
+    # current power / load is get_energy period=now (METRIC_RULES): one live point with its unit, not every live point of the snapshot
     # equipment currently in alarm / the equipment list
     ("equipment.in_alarm", "find_equipment",
      r"(?:what|which) equipment (?:is|are) (?:currently )?in alarm" + NOW),
@@ -304,12 +302,21 @@ LEAD = r"(?:(?:what is|what's|what are|what was|show(?: me)?|get|give me|tell me
 CUR = r"(?:(?:current|latest|live|present|actual) )?"
 EN = r"(?:energy|electricity|electrical energy|power)"
 USE = r"(?:consumption|usage|use|consumed|used)"
-AFTER = r"(?:for |so far )?(?P<p>today|yesterday|this month|the month so far|month to date|month-to-date)(?: so far)?"
-POSS = r"(?P<p>today's|yesterday's|this month's)"
+AFTER = r"(?:for |so far )?(?P<p>today|yesterday|this week|the week so far|week to date|this month|the month so far|month to date|month-to-date)(?: so far)?"
+POSS = r"(?P<p>today's|yesterday's|this week's|this month's)"
+ONLY = r"(?:energy|electricity|electrical energy)"      # not "power": "the power today" does not ask for a day's energy
+LEAD_C = r"(?:(?:what is|what's|what are|show(?: me)?|get|give me|tell me|check|display|compare|how is) )?(?:the )?"
+LIVE_ADJ = r"(?:(?:current|live|present|latest|real[- ]time|actual) )+"
+LOADS = r"(?:power(?: consumption| usage| demand| draw)?|electrical load|electricity(?: consumption| usage)?|energy(?: consumption| usage)?|load|demand)"
+NOW_REQ = r" (?:right now|now|currently|at the moment|at present)"
+CLOCK = r"(?P<h{n}>\d{{1,2}})(?::00)? ?(?P<a{n}>[ap]\.?m\.?)?"
+RANGE = r"between " + CLOCK.format(n=1) + r" and " + CLOCK.format(n=2) + r"(?: (?:on )?(?P<p>today|yesterday))?"
+BD_WORD = {"hourly": "hour", "hour": "hour", "daily": "day", "day": "day", "weekly": "week", "week": "week", "day by day": "day", "day-by-day": "day"}
 CONSUMING = r"(?:equipment|system|systems|asset|assets|board|boards|load|loads|unit|units|panel|panels)"
 ONLINE = r"(?:running|online|on|operating|working|active)"
 PERIOD = {"today": "today", "today's": "today", "yesterday": "yesterday", "yesterday's": "yesterday", "this month": "month",
-          "this month's": "month", "the month so far": "month", "month to date": "month", "month-to-date": "month"}
+          "this month's": "month", "the month so far": "month", "month to date": "month", "month-to-date": "month",
+          "this week": "week", "this week's": "week", "the week so far": "week", "week to date": "week"}
 METRIC_RULES: list[tuple[str, str, dict, re.Pattern]] = [(rid, intent, fixed, re.compile("^" + pat + "$")) for rid, intent, fixed, pat in [
     ("env.iaq", "get_environment", {"metric": "iaq"},
      LEAD + CUR + r"(?:iaq(?: index| level| score| value| reading)?|indoor air quality(?: index| level| score)?|air quality(?: index)?)" + NOW),
@@ -321,11 +328,24 @@ METRIC_RULES: list[tuple[str, str, dict, re.Pattern]] = [(rid, intent, fixed, re
      LEAD + CUR + r"(?:indoor |average |building |room |relative )?humidity(?: level| reading| value)?" + NOW),
     ("env.comfort", "get_environment", {"metric": "comfort"},
      LEAD + CUR + r"comfort(?: index| compliance| level| score)" + NOW),
+    # the current power reading (kW): its own live point, never today's total
+    ("energy.live", "get_energy", {"period": "now"}, LEAD + LIVE_ADJ + r"(?:building |site |total )?" + LOADS + r"(?: readings?| values?| levels?)?" + NOW),
+    ("energy.live.now", "get_energy", {"period": "now"}, LEAD + r"(?:building |site )?" + LOADS + r"(?: readings?| values?| levels?)?" + NOW_REQ),
+    ("energy.live.using", "get_energy", {"period": "now"}, r"how much (?:power|electricity|energy) (?:are we|is the building|is the site) (?:using|consuming|drawing)" + NOW),
+    # energy over a period (kWh): today and yesterday, this week, this month; by hour, day or week; between two clock hours
+    ("energy.breakdown", "get_energy", {},
+     LEAD_C + r"(?:(?P<bd1>hourly|daily|weekly|day[- ]by[- ]day) )?" + ONLY + r"(?: " + USE + r")?(?: (?:by|per|for each|each) (?P<bd2>hour|day|week))?"
+     r"(?: (?:in|during|over|of))? " + AFTER),
+    ("energy.range.howmuch", "get_energy", {},
+     r"how much " + ONLY + r" (?:was|were|did we|did the building|have we|has the building|is) (?:consumed|used|consume|use)(?: so far)? " + RANGE),
+    ("energy.range", "get_energy", {}, LEAD_C + r"(?:total )?" + ONLY + " " + USE + " " + RANGE),
     ("energy.period", "get_energy", {}, LEAD + r"(?:total )?" + EN + " " + USE + " " + AFTER),
+    ("energy.period.short", "get_energy", {}, LEAD + r"(?:total )?" + ONLY + " " + AFTER),
     ("energy.period.poss", "get_energy", {}, LEAD + POSS + r" (?:total )?" + EN + " " + USE),
+    ("energy.period.poss.short", "get_energy", {}, LEAD + POSS + r" (?:total )?" + ONLY),
     ("energy.period.howmuch", "get_energy", {},
-     r"how much " + EN + r" (?:have we|did we|has the building|did the building|has the site|have we all|has been|was|is) "
-     r"(?:used|use|consumed|consume)(?: so far)? " + AFTER),
+     r"how much " + EN + r" (?:have we|did we|are we|has the building|did the building|has the site|have we all|has been|was|is) "
+     r"(?:used|use|consumed|consume|using|consuming)(?: so far)? " + AFTER),
     ("energy.top", "get_energy", {"by": "board", "period": "today"},
      r"(?:which|what)(?: " + CONSUMING + r")? (?:is|are) (?:consuming|using) the most (?:energy|power|electricity)(?: today)?"),
     ("energy.top.uses", "get_energy", {"by": "board", "period": "today"},
@@ -345,6 +365,12 @@ METRIC_RULES: list[tuple[str, str, dict, re.Pattern]] = [(rid, intent, fixed, re
 NOT_HVAC_KIND = NOT_A_TYPE | {"hvac", "system", "unit"}
 
 
+def _clock(hour: str, ap: Optional[str]) -> int:
+    """A clock hour as 0-23 ("2 pm" is 14, "12 am" is 0); without am/pm the number is the 24-hour clock."""
+    n = int(hour)
+    return n % 12 + (12 if ap[0] == "p" else 0) if ap else n
+
+
 def _metric(text: str) -> Optional[dict]:
     """The decision for a metric question, or None."""
     for rid, intent, fixed, pattern in METRIC_RULES:
@@ -355,6 +381,18 @@ def _metric(text: str) -> Optional[dict]:
         params = dict(fixed)
         if gd.get("p"):
             params["period"] = PERIOD[gd["p"]]
+        if rid == "energy.breakdown":
+            bd = BD_WORD.get(gd.get("bd1") or gd.get("bd2") or "")
+            if not bd:
+                continue                     # no hour/day/week named: the plain period rules answer it
+            params["breakdown"] = bd
+        if rid.startswith("energy.range"):
+            if (gd["a1"] is None) != (gd["a2"] is None):
+                return _fallback("unsupported_or_ambiguous")       # "between 10 and 2 pm": which 10, which 2?
+            lo, hi = _clock(gd["h1"], gd["a1"]), _clock(gd["h2"], gd["a2"]) or 24
+            if not 0 <= lo < hi <= 24:
+                return _fallback("invalid_parameters")
+            params.update(period=params.get("period", "today"), from_hour=lo, to_hour=hi)
         kind = (gd.get("kind") or "").lower()
         if kind in NOT_HVAC_KIND:
             kind = ""
@@ -963,6 +1001,61 @@ def _phase2_text(intent: str, r: dict, params: dict) -> str:
     return text
 
 
+def _gaps(r: dict) -> str:
+    """The data-quality warning of an hourly-energy result, in one or two sentences ("" when every hour expected was read)."""
+    out = []
+    if r.get("complete") is False or r.get("missing_hours") or r.get("invalid_hours"):
+        miss = r.get("missing_hours") or []
+        out.append("Data is incomplete. Some hourly readings are missing" + (f" ({', '.join(miss)})" if 0 < len(miss) <= 6 else "") + ".")
+    if r.get("invalid_hours"):
+        out.append(f"A negative sample was not counted ({', '.join(r['invalid_hours'][:6])}).")
+    if r.get("days_without_data"):
+        out.append(f"{r['days_without_data']} of {r['days']} days have no data.")
+    if r.get("history_from"):
+        out.append(f"The hourly history starts on {r['history_from']}, so earlier days cannot be read.")
+    return " ".join(out)
+
+
+def _energy_text(r: dict) -> str:
+    """The energy answers: the figure first, the data-quality warning after it, no metadata the user did not ask for. Every number is a field of the result."""
+    period = r.get("period")
+    when = {"now": "now", "today": "today", "yesterday": "yesterday", "week": "this week", "month": "this month"}[period]
+    if period == "now":
+        if r.get("quantity") == "power":
+            what = f"Current power is {_g(r['value'])} {r['unit']}."
+        elif r.get("quantity") == "energy":
+            what = (f"No live power (kW) reading is available for this project. Its live consumption point reports the energy of the current hour: "
+                    f"{_g(r['value'])} {r['unit']}.")
+        else:
+            what = (f"The live consumption point returned {_g(r['value'])}, but FIN sent no unit for it, so it cannot be called power (kW) or energy (kWh).")
+        return f"{what}\n\nLast read from FIN at {r.get('as_of')}."
+    if r.get("boards") is not None:
+        top = r["boards"][0]
+        ranked = "; ".join(f"{b['name']} {_g(b['value'])} {r['unit']}" for b in r["boards"][:3])
+        gap = f" No data: {', '.join(r['boards_without_data'])}." if r.get("boards_without_data") else ""
+        return (f"Highest energy {when} by distribution board: {top['name']} ({_g(top['value'])} {r['unit']}). Top boards: {ranked}.{gap} "
+                f"{r['note']} Updated {r.get('as_of')}.")
+    if period == "month" and r.get("entries") is None:
+        return f"This month's energy consumption is {_g(r['value'])} {r['unit']} so far (FIN's month-to-date reading)."
+    gaps = _gaps(r)
+    if r.get("entries") is not None:
+        label = lambda e: e["from"] if e["from"] == e["to"] else f"{e['from']} to {e['to']}"      # noqa: E731
+        rows = [f"- {label(e)}: " + (f"{_g(e['value'])} {r['unit']}" if e["value"] is not None else "no data")
+                + (f" (incomplete: {e['hours_reported']} of {e['hours_expected']} hours)" if e["value"] is not None and not e["complete"] else "") for e in r["entries"]]
+        by = {"day": "day", "week": "week"}.get(r.get("breakdown"), "day")
+        head = f"{'This week' if period == 'week' else 'This month'}'s energy consumption ({r['from']} to {r['to']}) is {_g(r['value'])} {r['unit']}, by {by}:"
+        return head + "\n" + "\n".join(rows) + (f"\n\n{gaps}" if gaps else "")
+    if r.get("hourly") is not None:
+        rows = [f"- {h['hour']}: " + (f"{_g(h['value'])} {r['unit']}" if h["value"] is not None else "no reading" if h["status"] == "missing" else "negative sample, not counted")
+                for h in r["hourly"]]
+        return f"Hourly energy consumption {when} totals {_g(r['value'])} {r['unit']}:\n" + "\n".join(rows) + (f"\n\n{gaps}" if gaps else "")
+    if r.get("from_hour"):
+        head = f"Energy consumed {when} between {r['from_hour']} and {r['to_hour']} is {_g(r['value'])} {r['unit']}."
+    else:
+        head = f"{'Today' if period == 'today' else 'Yesterday'}'s energy consumption is {_g(r['value'])} {r['unit']}."
+    return head + (f"\n\n{gaps}" if gaps else "")
+
+
 def direct_text(out: dict, rule: str = "") -> str:
     """The answer sentence for an execute() result."""
     intent, params, r = out.get("intent"), out.get("parameters") or {}, out.get("result") or {}
@@ -1033,24 +1126,7 @@ def direct_text(out: dict, rule: str = "") -> str:
             text += " " + r["status_note"]
         return text
     if intent == "get_energy":
-        when = {"today": "today", "yesterday": "yesterday", "month": "this month"}[r.get("period")]
-        if r.get("boards") is not None:
-            top = r["boards"][0]
-            ranked = "; ".join(f"{b['name']} {_g(b['value'])} {r['unit']}" for b in r["boards"][:3])
-            gap = f" No data: {', '.join(r['boards_without_data'])}." if r.get("boards_without_data") else ""
-            return (f"Highest energy {when} by distribution board: {top['name']} ({_g(top['value'])} {r['unit']}). Top boards: {ranked}.{gap} "
-                    f"{r['note']} Updated {r.get('as_of')}.")
-        if r.get("period") == "month":
-            return f"Energy consumption {when} ({r['month']}): {_g(r['value'])} {r['unit']}, FIN's month-to-date reading. Updated {r.get('as_of')}."
-        text = f"Energy consumption {when} ({r['date']}): {_g(r['value'])} {r['unit']}, {r['hours_reported']} of {r['hours_expected']} hours reported"
-        if r.get("period") == "today":
-            text += f", through {r['latest_hour']}" + (" including the current hour" if r.get("includes_open_hour") else "")
-        text += f". Site time {r['site_time']}. Updated {r.get('as_of')}."
-        if r.get("missing_hours"):
-            text += f" Not counted, no reading: {', '.join(r['missing_hours'])}."
-        if r.get("invalid_hours"):
-            text += f" Not counted, negative sample: {', '.join(r['invalid_hours'])}."
-        return text
+        return _energy_text(r)
     if intent == "get_hvac_status":
         kind = f" {params['type']}" if params.get("type") else ""
         if not r.get("total"):
@@ -1082,10 +1158,6 @@ def direct_text(out: dict, rule: str = "") -> str:
     live = ((r.get("power") or {}).get("live_points")) or {}
     unit = (r.get("power") or {}).get("unit_hint") or ""
     readings = "; ".join(f"{k} {v}{(' ' + unit) if unit else ''}" for k, v in live.items() if v is not None)
-    if rule.startswith("snapshot.power"):
-        if "power" in (r.get("sections_unavailable") or {}):
-            return "Live power data is not available right now."
-        return f"Current live readings: {readings}." if readings else "No live power readings are configured for this project."
     parts = []
     counts = (r.get("alarms") or {}).get("counts")
     if counts:
@@ -1097,6 +1169,15 @@ def direct_text(out: dict, rule: str = "") -> str:
         parts.append(f"live readings {readings}")
     name = (r.get("project") or {}).get("name") or "the building"
     return f"Building overview for {name}: " + ("; ".join(parts) if parts else "no current data sections are available") + "."
+
+
+def rules_answer(text: str) -> bool:
+    """True when the fixed rules answer this text: one rule matches it, or every part of a compound message has a rule. (eko_chat_spelling asks this
+    before it lets a corrected word stand.)"""
+    if route(text)["route"] == "direct" or clarification_for(text):
+        return True
+    plan = plan_parts(text)
+    return bool(plan) and all(p["decision"] for p in plan["parts"])
 
 
 # ─── Route counters ──────────────────────────────────────────────────────────

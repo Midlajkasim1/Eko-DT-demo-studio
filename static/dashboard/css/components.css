@@ -16568,6 +16568,39 @@ body.spdrag #modpanel,body.spdrag #assetpanel,body.spdrag #ekonav,body.spdrag .r
   gap:6px
 }
 
+/* Eko-Chat: nothing leaves its bubble. Long names and identifiers wrap (a tag span and a table's first column are nowrap elsewhere in the dashboard),
+   numbers keep their digits together, and a card or table too wide for the bubble scrolls sideways inside its own box. Scoped to the chat panel. */
+.dashboard-native-container #aipanel .aibubble {
+  overflow-wrap:anywhere;
+  min-width:0
+}
+
+.dashboard-native-container #aipanel .aibubble .tagnb {
+  white-space:normal;
+  overflow-wrap:anywhere
+}
+
+.dashboard-native-container #aipanel .aicard {
+  min-width:0;
+  max-width:100%;
+  overflow-x:auto
+}
+
+.dashboard-native-container #aipanel .aicard td,.dashboard-native-container #aipanel .aicard th,.dashboard-native-container #aipanel .aimdtbl td,.dashboard-native-container #aipanel .aimdtbl th {
+  overflow-wrap:break-word
+}
+
+.dashboard-native-container #aipanel .aitbl td:first-child {
+  white-space:normal
+}
+
+.dashboard-native-container #aipanel .aiacts2 .btnG {
+  max-width:100%;
+  height:auto;
+  white-space:normal;
+  text-align:start
+}
+
 .dashboard-native-container .aimeta {
   color:var(--t3)
 }

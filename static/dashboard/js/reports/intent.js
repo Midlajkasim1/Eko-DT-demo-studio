@@ -25,7 +25,7 @@ window.EKO_RI = (function(){
   ];
   const ALARM_RE = /\balarms?\b|\balerts?\b|تنبيه|تنبيهات|إنذار/i;
   const ASSET_RE = /\b([A-Z]{2,5}-[A-Z0-9]+(?:-[A-Z0-9]+)*)\b/;
-  const REPORT_RE = /\breport\b|\bhandover\b|\bsummary\b|تقرير|ملخص/i;
+  const REPORT_RE = /\breports?\b|تقرير|تقارير/i;
 
   function parsePeriod(t){
     let m;
@@ -54,14 +54,14 @@ window.EKO_RI = (function(){
     return { text:t, templateId, period, params, matched:hits, ambiguous: ambiguous || !templateId };
   }
   const sevRank = s => s === 'critical' ? 3 : s === 'high' ? 2 : 1;
-  /* An Ask EKO question is a report ask when it names a report, or when it
-     names a subject AND a window AND asks for usage/status rather than a
-     why-question ("water usage last month with the leak status"). Anything
-     else stays a question for Ask EKO (js/ai/ask.js, D132). */
-  const USAGE_RE = /\busage\b|\bconsumption\b|\bstatus\b|\boverview\b|\bfigures\b|\btotals?\b|استهلاك|حالة|إجمالي/i;
-  const isReportRequest = text => { const t = String(text || '');
-    if(REPORT_RE.test(t)) return true;
-    return !!parsePeriod(t) && RULES.some(r => r.re.test(t)) && USAGE_RE.test(t) && !/^\s*(why|how come|what is causing|لماذا)/i.test(t); };
+  /* An Ask EKO question is a report ask only when it asks for a report: the word "report" (تقرير) is in it and it is not itself a question
+     about reports. A subject and a window ("energy consumption today", "alarm summary") are an ordinary question, answered by Ask EKO
+     (js/ai/ask.js, D132), never the New report dialog. */
+  /* a question about reports ("what is the energy report?", "explain what a report is") is a question; so is any "how/why/when ..." */
+  const QUESTION_LEAD = /^\s*(?:(?:what|what's|whats|why|how|when|where|who|which|is|are|does|do|did|explain|describe|define|tell me (?:about|what))\b|(?:ما|ماذا|لماذا|كيف|متى|اشرح|وضح|هل)(?=\s))/i;
+  const POLITE_LEAD = /^\s*(?:please|kindly|can you|could you|would you)\s+/i;
+  const isReportRequest = text => { const t = String(text || '').replace(POLITE_LEAD, '').replace(POLITE_LEAD, '');
+    return REPORT_RE.test(t) && !QUESTION_LEAD.test(t); };
 
   /* the context suggestion */
   function suggest(E){
